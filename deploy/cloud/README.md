@@ -27,6 +27,7 @@ deploy/cloud/status-workbench.sh
 deploy/cloud/logs-workbench.sh
 deploy/cloud/publish-workbench.sh
 deploy/cloud/rollback-workbench.sh
+deploy/cloud/backup-workbench.sh
 ```
 
 发布前建议先查看状态；发布失败时脚本会自动回退，手动回退使用：
@@ -39,6 +40,9 @@ deploy/cloud/logs-workbench.sh
 ```
 
 `publish-workbench.sh` 会构建排除数据和密钥的发布包，上传到 ECS 的新 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。
+
+`backup-workbench.sh` 会在 ECS 创建一致性快照，打包数据库和附件，下载到 Mac 的
+`~/Library/Application Support/trosa/backups/`，核对 SHA-256 后保留最近 14 天的归档。
 
 数据库仍是单写入源。不要在 Mac 上重新启动旧的正式应用并通过同一个域名使用；当前 Mac 的三个旧 LaunchAgent 已禁用但文件保留。如需回退到 Mac，先停止 ECS Tunnel，再执行：
 

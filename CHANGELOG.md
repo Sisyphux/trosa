@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-21 — 增加 trosa Server Manager 与本地滚动备份
+
+- 用户可见变化：新增可双击运行的 Mac 原生 `trosa Server Manager.app`，集中提供 ECS 状态、服务重启、系统更新、服务器终端、远程文件浏览/上传/下载/回收站、代码发布/回滚和 GitHub 同步入口。
+- 数据变化：新增 ECS 一致性快照下载脚本；备份包含数据库、附件、manifest 和校验信息，下载到 Mac 后核对 SHA-256，并自动清理超过 14 天的本地归档。新增每日 03:30 的 Mac LaunchAgent 安装脚本。
+- 依赖影响：管理器使用 macOS Cocoa 和现有 Workbench CLI，不新增 Python/Node 运行时依赖；新增 `tools/trosa-manager/` 和 `deploy/macos/install-trosa-backup.sh`。
+- 验证：Swift 原生 App 编译并启动成功；备份归档实际下载 31 MB，SHA-256 与 ECS 输出一致，内容包含四个数据库和附件目录；现有 58 项 Python 测试、浏览器扩展 smoke test、Shell 语法检查通过。
+
 ## 2026-08-21 — 完成 ECS 正式切换与公网验收
 
 - 部署变化：Trade OS 已从 Mac 正式运行目录切换到阿里云 ECS；`trade-os` 与 Cloudflare Tunnel 均已配置为 systemd 自启，域名 `https://app.trosa.space` 已由 ECS 提供服务。

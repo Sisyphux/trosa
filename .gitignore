@@ -44,6 +44,9 @@ tmp/
 # Business-data import material; keep outside Git history
 2026展会客户/
 
+# Built local Mac application
+tools/trosa-manager/build/
+
 # OS
 .DS_Store
 Desktop.ini
