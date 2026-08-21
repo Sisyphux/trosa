@@ -1,16 +1,20 @@
 @echo off
-title ¿Í»§¸ú½øÌáĞÑÏµÍ³
+chcp 65001 >nul
+title CRM Reminder System
 cd /d "%~dp0"
+
+rem API å¯†é’¥å’Œç™»å½•å¯†ç è¯·ä¿å­˜äº .envï¼›ä¸è¦å†™å…¥å¯åŠ¨è„šæœ¬æˆ–æäº¤åˆ° Gitã€‚
+
 set "PY=%CD%\venv\Scripts\python.exe"
 
 if not exist "%PY%" (
-    echo ÕıÔÚ´´½¨ĞéÄâ»·¾³...
+    echo Creating virtual environment...
     python -m venv venv
-    if %errorlevel% neq 0 (echo ´´½¨Ê§°Ü & pause & exit /b 1)
-    echo ÕıÔÚ°²×°ÒÀÀµ£¨Ê×´ÎÔËĞĞĞèÏÂÔØ°ü£¬ÇëÉÔºò£©...
+    if %errorlevel% neq 0 (echo Failed & pause & exit /b 1)
+    echo Installing dependencies...
     "%CD%\venv\Scripts\python.exe" -m pip install -r requirements.txt
     if %errorlevel% neq 0 (
-        echo ÒÀÀµ°²×°Ê§°Ü£¬ÇëÊÖ¶¯ÔËĞĞ:
+        echo Install failed, please run manually:
         echo   %CD%\venv\Scripts\python.exe -m pip install -r requirements.txt
         pause & exit /b 1
     )
@@ -18,18 +22,16 @@ if not exist "%PY%" (
 
 echo.
 echo ============================
-echo   ¿Í»§¸ú½øÌáĞÑÏµÍ³
+echo   CRM Reminder System
 echo ============================
 echo.
-echo ÕıÔÚÆô¶¯·şÎñ£¬ÇëÉÔºò...
-echo ·şÎñ¾ÍĞ÷ºó½«×Ô¶¯´ò¿ªä¯ÀÀÆ÷
-echo °´ Ctrl+C Í£Ö¹·şÎñ
+echo Starting server...
+echo Browser will open automatically
+echo Press Ctrl+C to stop
 echo.
 
-:: Æô¶¯ Flask ·şÎñ£¨ºóÌ¨ÔËĞĞ£©
 start "" /B "%PY%" app.py > "%TEMP%\crm_server.log" 2>&1
 
-:: µÈ´ı·şÎñ¾ÍĞ÷£¨×î¶àµÈ 15 Ãë£©
 set "READY="
 for /l %%i in (1,1,15) do (
     >nul 2>&1 powershell -NoProfile -Command "try{$c=New-Object System.Net.Sockets.TcpClient;$c.Connect('127.0.0.1',8080);$c.Close();$true}catch{$false}" && set READY=1
@@ -39,12 +41,11 @@ for /l %%i in (1,1,15) do (
 :ready
 
 if defined READY (
-    echo ·şÎñÒÑ¾ÍĞ÷£¬ÕıÔÚ´ò¿ªä¯ÀÀÆ÷...
+    echo Server started, opening browser...
     start http://localhost:8080
 ) else (
-    echo ¾¯¸æ£º·şÎñÆô¶¯½ÏÂı£¬ÇëÊÖ¶¯´ò¿ª http://localhost:8080
+    echo Warning: server may not be ready, please visit http://localhost:8080 manually
     start http://localhost:8080
 )
 
-:: ±£³Ö´°¿Ú´ò¿ª£¬·½±ãÓÃ»§°´ Ctrl+C Í£Ö¹
 "%PY%" -c "import sys; sys.stdin.read()" 2>nul || pause

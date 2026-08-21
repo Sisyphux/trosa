@@ -3,146 +3,280 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>客户跟进提醒系统</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400&amp;family=Lora:ital,wght@0,400;0,500;0,600;1,400&amp;family=Newsreader:ital,opsz,wght@0,18..72,300;0,18..72,400;0,18..72,500;1,18..72,400&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Trade OS · 外贸工作系统</title>
+<!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
+     only when a future text-heavy workspace explicitly needs them. -->
+<link rel="stylesheet" href="style.css?v={{VERSION}}-motion6">
+<link rel="stylesheet" href="visual-v2.css?v={{VERSION}}-grade-input-feedback">
 </head>
 <body>
 
+<!-- Login Overlay -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <div class="login-logo" aria-hidden="true"><span class="ui-icon ui-icon-sparkle"></span></div>
+    <div class="login-title">Trade OS</div>
+    <div class="login-desc" id="loginDesc">选择账号进入</div>
+    <div class="login-users" id="loginUsers"></div>
+    <form class="login-pin-form" id="loginPinForm" hidden>
+      <label class="form-label" id="loginPinLabel" for="loginPin">个人访问码</label>
+      <div class="login-pin-row">
+        <input class="form-control" id="loginPin" type="password" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6 位数字">
+        <button class="btn btn-primary" id="loginPinSubmit" type="submit">进入</button>
+      </div>
+      <div class="login-error" id="loginError" role="alert"></div>
+    </form>
+    <div class="login-network" id="loginNetwork"></div>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div class="toast-container" id="toastContainer"></div>
+<div class="connection-status" id="connectionStatus" role="status" aria-live="polite" hidden><span class="connection-status-spinner" aria-hidden="true"></span><span id="connectionStatusText">正在连接…</span></div>
 
 <!-- Sidebar Toggle (Mobile) -->
-<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">&#9776;</button>
+<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+</button>
 
-<div class="app-layout">
+<div class="app-layout" id="appLayout">
   <!-- Sidebar -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-      <h1>客户跟进</h1>
-      <div class="subtitle">客户提醒系统</div>
+      <h1>Trade OS</h1>
+      <div class="subtitle">Relationship<br>Workspace</div>
     </div>
     <nav class="sidebar-nav">
-      <div class="nav-section">主要</div>
-      <div class="nav-item active" data-page="dashboard" onclick="switchPage('dashboard')">
-        <span class="nav-icon">&#9632;</span><span>总览</span>
+      <div class="nav-personal">
+        <div class="nav-section">工作空间</div>
+        <div class="nav-item active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')">
+          <span class="nav-icon"><span class="ui-icon ui-icon-clock" aria-hidden="true"></span></span><span>今天</span>
+        </div>
+        <div class="nav-item" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')">
+          <span class="nav-icon"><span class="ui-icon ui-icon-mail" aria-hidden="true"></span></span><span>Inbox</span><span class="nav-count" id="inboxNavCount"></span>
+        </div>
+        <div class="nav-item" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')">
+          <span class="nav-icon"><span class="ui-icon ui-icon-users" aria-hidden="true"></span></span><span>客户</span>
+        </div>
+        <div class="nav-item" data-page="overview" data-nav-page="overview" data-module="weekly_overview" onclick="switchPage('overview')">
+          <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
+        </div>
       </div>
-      <div class="nav-item" data-page="customers" onclick="switchPage('customers')">
-        <span class="nav-icon">&#9830;</span><span>现有客户</span>
-      </div>
-      <div class="nav-item" data-page="newpool" onclick="switchPage('newpool')">
-        <span class="nav-icon">&#10022;</span><span>新客户池</span>
-      </div>
-      <div class="nav-section">管理</div>
-      <div class="nav-item" data-page="calendar" onclick="switchPage('calendar')">
-        <span class="nav-icon">&#9998;</span><span>跟进日历</span>
-      </div>
-      <div class="nav-item" data-page="history" onclick="switchPage('history')">
-        <span class="nav-icon">&#9776;</span><span>跟进历史</span>
-      </div>
-      <div class="nav-item" data-page="logs" onclick="switchPage('logs')">
-        <span class="nav-icon">&#9881;</span><span>操作日志</span>
-      </div>
-      <div class="nav-section">系统</div>
-      <div class="nav-item" data-page="settings" onclick="switchPage('settings')">
-        <span class="nav-icon">&#9881;</span><span>设置</span>
+      <div class="nav-overview" style="display:none;">
+        <div class="nav-section">总览</div>
+        <div class="nav-item active" data-page="overview" onclick="switchPage('overview')">
+          <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
+        </div>
       </div>
     </nav>
+    <details class="sidebar-tools">
+      <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
+      <div class="sidebar-tools-menu">
+        <button type="button" onclick="switchPage('newpool')">新客户</button>
+        <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
+        <button type="button" onclick="switchPage('history')">全部记录</button>
+        <button type="button" onclick="switchPage('logs')">操作日志</button>
+      </div>
+    </details>
+    <div class="account-section">
+      <div class="nav-item account-item" onclick="switchPage('settings')">
+        <span class="nav-icon"><span class="ui-icon ui-icon-settings" aria-hidden="true"></span></span><span>设置</span>
+      </div>
+      <div class="nav-item account-item" onclick="showLogin()">
+        <span class="nav-icon"><span class="ui-icon ui-icon-sign-out" aria-hidden="true"></span></span><span>切换账号</span>
+      </div>
+      <div class="sidebar-identity" id="sidebarIdentity">
+        <span class="sidebar-avatar" id="sidebarAvatar">T</span>
+        <span><strong id="sidebarUserName">Trade OS</strong><small id="sidebarUserRole">个人工作区</small></span>
+      </div>
+    </div>
   </aside>
 
   <!-- Main Content -->
   <main class="main-content">
+    <div class="global-page-tools" aria-label="全局搜索与当前页面操作">
+      <form class="global-page-search liquid-option" onsubmit="submitGlobalPageSearch(event)">
+        <button type="button" onclick="document.getElementById('globalPageSearch').focus()" aria-label="打开全局搜索" title="搜索">
+          <span class="ui-icon ui-icon-search" aria-hidden="true"></span>
+        </button>
+        <input id="globalPageSearch" type="search" autocomplete="off" aria-label="搜索客户、联系人或沟通内容" aria-autocomplete="list" aria-controls="globalSearchPreview" aria-expanded="false">
+        <div class="global-search-preview" id="globalSearchPreview" role="listbox" aria-label="搜索结果预览"></div>
+      </form>
+    </div>
 
     <!-- ==================== DASHBOARD ==================== -->
     <div class="page-section active" id="page-dashboard">
-      <div class="page-header">
-        <h2>总览</h2>
-        <div class="page-desc" id="dashDate"></div>
+      <div class="compact-workbar" data-workbar-page="dashboard" aria-hidden="true">
+        <div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>今天</strong><span>今日客户工作</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button><button class="command-primary" type="button" onclick="openTodayPrimaryAction()" aria-label="记录沟通" title="记录沟通"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg></button><button class="command-icon" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div></div>
       </div>
-      <div class="page-body">
-        <div class="stats-grid">
-          <div class="stat-card accent"><div class="stat-icon">&#9998;</div><div class="stat-value" id="statPending">-</div><div class="stat-label">今日待办</div></div>
-          <div class="stat-card danger"><div class="stat-icon">&#9888;</div><div class="stat-value" id="statOverdue">-</div><div class="stat-label">已逾期</div></div>
-          <div class="stat-card info"><div class="stat-icon">&#9776;</div><div class="stat-value" id="statFollowing">-</div><div class="stat-label">跟进中客户</div></div>
+      <div class="page-header today-page-header">
+        <div>
+          <div class="today-date" id="dashDate"></div>
+          <h2>今天</h2>
+          <div class="today-summary"><strong id="statPending">-</strong> 个客户需要跟进 · <span id="statOverdue">-</span> 项逾期</div>
         </div>
-        <div class="dashboard-grid">
-          <div>
-            <div class="card" style="margin-bottom:22px;">
-              <div class="card-header"><h3>今日跟进任务</h3><button class="btn btn-sm btn-success" onclick="batchCompleteToday()">全部完成</button></div>
-              <div class="card-body" id="todayReminders"><div class="empty-state"><div class="empty-icon">&#9998;</div><p>今日暂无待办任务</p></div></div>
+        <div class="command-shelf is-collapsible" aria-label="快捷操作">
+          <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+          </button>
+          <button class="command-primary" type="button" onclick="openTodayPrimaryAction()" aria-label="记录沟通" title="记录沟通">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg>
+          </button>
+          <button class="command-icon" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="page-body today-page-body">
+        <div class="today-fullscreen-shell">
+        <div class="today-workspace">
+          <section class="today-task-section">
+            <div class="today-section-header"><div><h3>今日跟进</h3><div class="section-caption">拖动客户卡片即可调整今天的关注顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
+            <div class="today-task-list" id="todayReminders"><div class="empty-state"><p>今天没有需要处理的客户</p></div></div>
+            <div class="today-dashboard-error" id="todayDashboardError" hidden role="alert"></div>
+            <div class="batch-bar today-batch-bar" id="todayBatchBar">
+              <span class="batch-count" id="todayBatchCount">已选 0 项</span>
+              <button class="btn btn-sm" onclick="batchExportTodayEmails()">导出邮箱</button>
+              <button class="btn btn-sm" onclick="openTodayQuickEdit()">快速编辑</button>
+              <button class="btn btn-sm" onclick="exitTodaySelectionMode()" style="margin-left:auto;">取消</button>
+            </div>
+          </section>
+          <aside class="today-focus-card" id="todayFocus"><div class="empty-state"><p>选择一个客户查看下一步</p></div></aside>
+        </div>
+        <section class="today-wide-detail" id="todayWideDetail" aria-label="客户档案工作区"></section>
+        </div>
+
+        <section class="today-future-section">
+          <div class="today-section-header">
+            <div><h3>接下来</h3><div class="section-caption">未来 14 天</div></div>
+            <div class="today-calendar-actions">
+              <button class="text-action" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
+              <button class="text-action" data-module="calendar_sync" onclick="openCalendarSync()">同步 Apple 日历</button>
             </div>
           </div>
-          <div>
-            <div class="card" style="margin-bottom:22px;">
-              <div class="card-header"><h3>状态分布</h3></div>
-              <div class="card-body" id="statusDist"></div>
-            </div>
-            <div class="card" style="margin-bottom:22px;">
-              <div class="card-header"><h3>快捷操作</h3></div>
-              <div class="card-body">
-                <div class="quick-actions">
-                  <button class="quick-action-btn" onclick="switchPage('newpool');openAddNewCustomerModal()"><span class="qa-icon">+</span> 添加新客户</button>
-                  <button class="quick-action-btn" onclick="switchPage('calendar')"><span class="qa-icon">&#9998;</span> 查看日历</button>
-                  <button class="quick-action-btn" onclick="exportCalendarICS()"><span class="qa-icon">&#8595;</span> 导出日历</button>
-                </div>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header"><h3>最近动态</h3></div>
-              <div class="card-body" id="recentActivity" style="max-height:280px;overflow-y:auto;"><div class="empty-state"><p>No recent activity</p></div></div>
-            </div>
+          <div class="today-schedule-grid" id="todayScheduleGrid"></div>
+          <div class="today-schedule-detail" id="todayScheduleDetail">点击日期查看安排</div>
+        </section>
+
+        <details class="today-more">
+          <summary>本周记录与工作概览</summary>
+          <div class="today-more-grid">
+            <div><h3>本周记录</h3><div id="weeklyFollowList"><div class="empty-state"><p>本周暂无跟进记录</p></div></div></div>
+            <div><h3>最近动态</h3><div id="recentActivity"><div class="empty-state"><p>暂无最近动态</p></div></div></div>
           </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- ==================== INBOX ==================== -->
+    <div class="page-section" id="page-inbox">
+      <div class="compact-workbar" data-workbar-page="inbox" aria-hidden="true"><div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>Inbox</strong><span>需要判断的事项</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="refreshInboxManually()" aria-label="刷新 Inbox" title="刷新 Inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg></button><button class="command-primary" type="button" onclick="openInboxReplyModal()" aria-label="记录客户回复" title="记录客户回复"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg></button></div></div></div>
+      <div class="page-header inbox-page-header">
+        <div><h2>Inbox</h2><div class="page-desc">只放需要判断、且尚未被现有任务覆盖的事项</div></div>
+        <div class="command-shelf is-collapsible inbox-command-shelf" aria-label="快捷操作">
+          <button class="command-icon" type="button" onclick="refreshInboxManually()" aria-label="刷新 Inbox" title="刷新 Inbox">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg>
+          </button>
+          <button class="command-primary" type="button" onclick="openInboxReplyModal()" aria-label="记录客户回复" title="记录客户回复">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg>
+          </button>
         </div>
+      </div>
+      <div class="page-body inbox-page-body">
+        <div class="inbox-overview" id="inboxOverview"></div>
+        <div class="inbox-filters" id="inboxFilters">
+          <button class="inbox-filter active" data-inbox-filter="all" onclick="setInboxFilter('all')">全部</button>
+          <button class="inbox-filter" data-inbox-filter="customer_reply" onclick="setInboxFilter('customer_reply')">客户回复</button>
+          <button class="inbox-filter" data-inbox-filter="uncontacted_follow_up" onclick="setInboxFilter('uncontacted_follow_up')">未联系跟进</button>
+        </div>
+        <div class="inbox-list" id="inboxList"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
       </div>
     </div>
 
     <!-- ==================== EXISTING CUSTOMERS ==================== -->
     <div class="page-section" id="page-customers">
-      <div class="page-header">
-        <h2>现有客户</h2>
-        <div class="page-desc">管理现有客户关系</div>
+      <div class="compact-workbar" data-workbar-page="customers" aria-hidden="true"><div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>客户</strong><span>所有公司与关系</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button><button class="command-icon" type="button" onclick="exportAllContacts()" aria-label="导出联系人" title="导出联系人"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></button><button class="command-icon" type="button" onclick="openBatchAddModal()" aria-label="批量添加" title="批量添加"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg></button><button class="command-primary" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round"><path d="M12 5v14M5 12h14"/></svg></button></div></div></div>
+      <div class="page-header customer-page-workbar">
+        <div><h2>客户</h2><div class="page-desc">所有公司与关系都在这里，不需要维护固定分类</div></div>
+        <div class="command-shelf is-collapsible customer-command-shelf" aria-label="快捷操作">
+          <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+          </button>
+          <button class="command-icon" type="button" onclick="exportAllContacts()" aria-label="导出联系人" title="导出联系人">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          </button>
+          <button class="command-icon" type="button" onclick="openBatchAddModal()" aria-label="批量添加" title="批量添加">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg>
+          </button>
+          <button class="command-primary" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
       </div>
       <div class="page-body">
-        <div class="toolbar">
-          <div class="search-box">          <input type="text" id="customerSearch" placeholder="按名称、公司、国家搜索..." oninput="loadCustomers()"></div>
-          <select class="filter-select" id="customerLevelFilter" onchange="loadCustomers()">
-            <option value="">全部等级</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="C+">C+</option><option value="D">D</option>
-          </select>
-          <select class="filter-select" id="customerStatusFilter" onchange="loadCustomers()">
-            <option value="">全部状态</option><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中">跟进中</option><option value="成交">成交</option><option value="流失">流失</option>
-          </select>
-          <button class="btn btn-primary" onclick="openAddCustomerModal()">+ 添加客户</button>
+        <div class="customer-findbar">
+          <div class="customer-view-chips">
+            <button class="customer-view-chip active" data-view="all" onclick="setCustomerView('all')">全部</button>
+            <button class="customer-view-chip" data-view="priority" onclick="setCustomerView('priority')">手动排序</button>
+            <button class="customer-view-chip" data-view="uncontacted" onclick="setCustomerView('uncontacted')">未获回复</button>
+            <button class="customer-view-chip" data-view="communicated" onclick="setCustomerView('communicated')">已有联系</button>
+            <button class="customer-view-chip" data-view="waiting" onclick="setCustomerView('waiting')">等待回复</button>
+            <button class="customer-view-chip" data-view="silent" onclick="setCustomerView('silent')">长期未联系</button>
+            <button class="customer-view-chip" data-view="no_next" onclick="setCustomerView('no_next')">尚无下一步</button>
+            <button class="customer-view-chip" data-view="archived" onclick="setCustomerView('archived')">已归档</button>
+            <button class="customer-view-chip" type="button" onclick="toggleCustomerFilters()">更多筛选</button>
+            <button class="customer-view-chip save-view" onclick="saveCurrentCustomerView()">+ 保存当前视图</button>
+          </div>
         </div>
+        <div class="customer-advanced-filters" id="customerAdvancedFilters" hidden>
+          <div class="advanced-filter-grid">
+            <label>国家 / 地区<input type="text" id="filterCountry" placeholder="例如：阿联酋"></label>
+            <label>客户类型<select id="filterType"><option value="">全部</option><option value="中间商">中间商</option><option value="终端">终端</option></select></label>
+            <label>行业领域<input type="text" id="filterField" placeholder="可自由填写"></label>
+            <label>客户等级<select id="filterLevel"><option value="">全部</option><option>A</option><option>B</option><option>C</option><option>D</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>C+</option><option>C-</option><option>D+</option><option>D-</option></select></label>
+            <label>当前状态<select id="filterAttention"><option value="">全部</option><option value="waiting_reply">等待回复</option><option value="no_response">跟进后未回复</option><option value="no_near_term_need">近期无需求</option><option value="monitoring">暂时观察</option></select></label>
+            <label>下一步<select id="filterNextState"><option value="">全部</option><option value="scheduled">已有下一步</option><option value="none">尚无下一步</option><option value="overdue">下一步已逾期</option></select></label>
+            <label>至少未联系<input type="number" id="filterDaysMin" min="0" placeholder="天数"></label>
+            <label>最多未联系<input type="number" id="filterDaysMax" min="0" placeholder="天数"></label>
+            <label>联系日期从<input type="date" id="filterLastFrom"></label>
+            <label>联系日期到<input type="date" id="filterLastTo"></label>
+            <label>标签<input type="text" id="filterTag" placeholder="例如：展会客户"></label>
+          </div>
+          <div class="advanced-filter-actions"><button class="btn btn-sm" onclick="clearCustomerFilters()">清空</button><button class="btn btn-sm btn-primary" onclick="applyCustomerFilters()">应用筛选</button></div>
+        </div>
+        <div class="customer-active-filters" id="customerActiveFilters"></div>
+        <div class="saved-customer-views" id="savedCustomerViews"></div>
         <div class="batch-bar" id="customerBatchBar">
           <span class="batch-count" id="customerBatchCount">已选 0 项</span>
-          <button class="btn btn-sm" onclick="batchSetLevel()">设置等级</button>
-          <button class="btn btn-sm" onclick="batchSetStatus()">设置状态</button>
-          <button class="btn btn-sm btn-danger" onclick="batchDeleteCustomers()">删除</button>
+          <button class="btn btn-sm" onclick="batchExportEmails()">导出邮箱</button>
+          <button class="btn btn-sm" onclick="batchDeleteCustomers()">归档</button>
           <button class="btn btn-sm" onclick="clearCustomerSelection()" style="margin-left:auto;">取消</button>
         </div>
-        <div class="table-wrapper">
-          <table>
-            <thead><tr>
-              <th><input type="checkbox" class="table-checkbox" id="customerSelectAll" onchange="toggleAllCustomers(this)"></th>
-              <th>客户</th><th>公司</th><th>国家</th><th>等级</th><th>状态</th><th>下次跟进</th><th>操作</th>
-            </tr></thead>
-            <tbody id="customerTableBody"><tr><td colspan="8"><div class="empty-state"><p>加载中...</p></div></td></tr></tbody>
-          </table>
+        <div class="customer-card-workspace" id="customerCardWorkspace">
+          <div class="customer-card-header" aria-hidden="true">
+            <span><input type="checkbox" class="table-checkbox" id="customerSelectAll" onchange="toggleAllCustomers(this)"></span>
+            <span>公司与联系人</span><span data-customer-column="country">国家</span><span data-customer-column="type">类型</span><span data-customer-column="field">行业</span><span data-customer-column="level">等级</span><span data-customer-column="last_activity">最近发生</span><span data-customer-column="next_step">下一步</span><span data-customer-column="website">网站</span><span>操作</span>
+          </div>
+          <div class="customer-card-list" id="customerTableBody"><div class="empty-state"><p>加载中...</p></div></div>
         </div>
+        <div class="customer-pagination" id="customerPagination"></div>
       </div>
     </div>
 
     <!-- ==================== NEW CLIENT POOL ==================== -->
     <div class="page-section" id="page-newpool">
       <div class="page-header">
-        <h2>新客户池</h2>
-        <div class="page-desc">开发中的潜在客户，自动设置 15/30/60 天跟进提醒</div>
+        <h2>新客户</h2>
+        <div class="page-desc">尚未产生任何有效沟通或开发邮件的潜在客户</div>
       </div>
       <div class="page-body">
         <div class="toolbar">
-          <div class="search-box">          <input type="text" id="newPoolSearch" placeholder="搜索新客户..." oninput="loadNewPool()"></div>
+          <div class="search-box"><input type="text" id="newPoolSearch" placeholder="搜索新客户..." oninput="loadNewPool()"></div>
           <select class="filter-select" id="newPoolLevelFilter" onchange="loadNewPool()">
-            <option value="">全部等级</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="C+">C+</option><option value="D">D</option>
+            <option value="">全部等级</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option>
           </select>
           <select class="filter-select" id="newPoolStatusFilter" onchange="loadNewPool()">
             <option value="">全部状态</option><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中">跟进中</option><option value="成交">成交</option><option value="流失">流失</option>
@@ -154,17 +288,73 @@
           <span class="batch-count" id="newPoolBatchCount">已选 0 项</span>
           <button class="btn btn-sm" onclick="batchSetLevelNew()">设置等级</button>
           <button class="btn btn-sm" onclick="batchSetStatusNew()">设置状态</button>
+          <button class="btn btn-sm" onclick="batchExportEmailsNew()">导出邮箱</button>
           <button class="btn btn-sm btn-danger" onclick="batchDeleteNew()">删除</button>
           <button class="btn btn-sm" onclick="clearNewPoolSelection()" style="margin-left:auto;">取消</button>
         </div>
-        <div class="table-wrapper">
-          <table>
-            <thead><tr>
-              <th><input type="checkbox" class="table-checkbox" id="newPoolSelectAll" onchange="toggleAllNewPool(this)"></th>
-              <th>客户</th><th>公司</th><th>国家</th><th>等级</th><th>状态</th><th>下次跟进</th><th>操作</th>
-            </tr></thead>
-            <tbody id="newPoolTableBody"><tr><td colspan="8"><div class="empty-state"><p>加载中...</p></div></td></tr></tbody>
-          </table>
+
+        <!-- 待二次开发：发过开发信但未回复，且发信满 14 天的新客户 -->
+        <div class="pool-group" id="poolGroupSecondaryDev">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-alert" aria-hidden="true"></span>待二次开发</span>
+            <span class="pool-group-count" id="poolCountSecondaryDev">0</span>
+            <button class="btn btn-sm" onclick="exportSecondaryDevEmails()">导出邮箱</button>
+          </div>
+          <div class="pool-group-body" id="poolBodySecondaryDev"></div>
+        </div>
+
+        <!-- 逾期 -->
+        <div class="pool-group" id="poolGroupOverdue">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-alert" aria-hidden="true"></span>逾期</span>
+            <span class="pool-group-count" id="poolCountOverdue">0</span>
+            <button class="btn btn-sm" onclick="exportGroupEmails('overdue')">导出邮箱</button>
+            <button class="btn btn-sm btn-danger" onclick="batchCompleteGroup('overdue')">全部完成跟进</button>
+          </div>
+          <div class="pool-group-body" id="poolBodyOverdue"></div>
+        </div>
+
+        <!-- 今日 -->
+        <div class="pool-group" id="poolGroupToday">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span>今日</span>
+            <span class="pool-group-count" id="poolCountToday">0</span>
+            <button class="btn btn-sm" onclick="exportGroupEmails('today')">导出邮箱</button>
+            <button class="btn btn-sm btn-primary" onclick="batchCompleteGroup('today')">全部完成跟进</button>
+          </div>
+          <div class="pool-group-body" id="poolBodyToday"></div>
+        </div>
+
+        <!-- 明日 -->
+        <div class="pool-group" id="poolGroupTomorrow">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span>明日</span>
+            <span class="pool-group-count" id="poolCountTomorrow">0</span>
+            <button class="btn btn-sm" onclick="exportGroupEmails('tomorrow')">导出邮箱</button>
+            <button class="btn btn-sm btn-primary" onclick="batchCompleteGroup('tomorrow')">全部完成跟进</button>
+          </div>
+          <div class="pool-group-body" id="poolBodyTomorrow"></div>
+        </div>
+
+        <!-- 本周 -->
+        <div class="pool-group" id="poolGroupWeek">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span>本周</span>
+            <span class="pool-group-count" id="poolCountWeek">0</span>
+            <button class="btn btn-sm" onclick="exportGroupEmails('week')">导出邮箱</button>
+            <button class="btn btn-sm btn-primary" onclick="batchCompleteGroup('week')">全部完成跟进</button>
+          </div>
+          <div class="pool-group-body" id="poolBodyWeek"></div>
+        </div>
+
+        <!-- 无计划 -->
+        <div class="pool-group" id="poolGroupNone">
+          <div class="pool-group-header">
+            <span class="pool-group-title"><span class="ui-icon ui-icon-list" aria-hidden="true"></span>无计划</span>
+            <span class="pool-group-count" id="poolCountNone">0</span>
+            <button class="btn btn-sm" onclick="exportGroupEmails('none')">导出邮箱</button>
+          </div>
+          <div class="pool-group-body" id="poolBodyNone"></div>
         </div>
       </div>
     </div>
@@ -176,18 +366,20 @@
         <div class="page-desc">查看每月跟进任务</div>
       </div>
       <div class="page-body">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">
           <span style="font-size:0.85rem;font-weight:600;color:var(--fg-primary);white-space:nowrap;">日历订阅</span>
           <input type="text" id="icalUrlInput" readonly value="正在获取..." style="flex:1;font-size:0.78rem;padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg-50);color:var(--fg-muted);font-family:monospace;">
           <button class="btn btn-sm" onclick="copyIcalUrl()" style="font-size:0.78rem;">复制链接</button>
           <button class="btn btn-sm" onclick="showIcalHelp()" style="font-size:0.78rem;">使用说明</button>
+          <button class="btn btn-sm btn-primary" onclick="refreshCalendarFeed()" style="font-size:0.78rem;">检查订阅内容</button>
+          <div id="icalSyncStatus" style="flex-basis:100%;font-size:0.76rem;color:var(--fg-muted);">正在核对个人订阅源...</div>
         </div>
         <div class="calendar-header">
           <h3 id="calendarTitle" style="font-family:var(--font-display);font-weight:600;"></h3>
           <div class="calendar-nav">
-            <button class="btn-icon" onclick="changeMonth(-1)">&#8592;</button>
+            <button class="btn-icon" onclick="changeMonth(-1)" aria-label="上个月"><span class="ui-icon ui-icon-left" aria-hidden="true"></span></button>
             <button class="btn btn-sm" onclick="goToday()">今天</button>
-            <button class="btn-icon" onclick="changeMonth(1)">&#8594;</button>
+            <button class="btn-icon" onclick="changeMonth(1)" aria-label="下个月"><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
             <button class="btn btn-sm" onclick="exportCalendarICS()" style="margin-left:12px;">导出日历</button>
           </div>
         </div>
@@ -199,13 +391,15 @@
     <!-- ==================== FOLLOW-UP HISTORY ==================== -->
     <div class="page-section" id="page-history">
       <div class="page-header">
-        <h2>跟进历史</h2>
-        <div class="page-desc">客户跟进活动记录 — 每次通话、邮件、会议等客户互动的详细记录，可编辑和删除</div>
+        <h2>记录</h2>
+        <div class="page-desc">所有通话、邮件和会议记录</div>
       </div>
       <div class="page-body">
         <div class="card"><div class="card-body" id="historyTimeline"><div class="empty-state"><p>Loading...</p></div></div></div>
       </div>
     </div>
+
+
 
     <!-- ==================== ACTIVITY LOGS ==================== -->
     <div class="page-section" id="page-logs">
@@ -218,6 +412,30 @@
       </div>
     </div>
 
+    <!-- ==================== OVERVIEW ==================== -->
+    <div class="page-section" id="page-overview">
+      <div class="ov-hero">
+        <div class="ov-hero-inner">
+          <div class="ov-hero-top">
+            <div>
+              <div class="ov-hero-title">本周工作</div>
+            </div>
+            <div class="ov-hero-date" id="overviewDateLabel"></div>
+          </div>
+          <div class="ov-hero-bottom">
+            <div class="ov-hero-week" aria-label="周报切换">
+              <button class="ov-week-nav" onclick="overviewPrevWeek()" aria-label="上一周"><span class="ui-icon ui-icon-left" aria-hidden="true"></span><span>上一周</span></button>
+              <button class="ov-week-current" onclick="overviewWeekOffset=0;loadOverview()">回到本周</button>
+              <button class="ov-week-nav" onclick="overviewNextWeek()" aria-label="下一周"><span>下一周</span><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ov-body">
+        <div class="ov-reports-wrap" id="ovReports"></div>
+      </div>
+    </div>
+
     <!-- ==================== SETTINGS ==================== -->
     <div class="page-section" id="page-settings">
       <div class="page-header">
@@ -225,6 +443,33 @@
         <div class="page-desc">系统配置与维护</div>
       </div>
       <div class="page-body">
+        <div class="card personalization-card" style="margin-bottom:22px;">
+          <div class="card-header"><div><h3>个人使用设置</h3><p>调整现有界面，只保留当前工作需要的功能。</p></div><button class="btn btn-sm btn-primary" onclick="savePersonalSettings()">保存设置</button></div>
+          <div class="card-body">
+            <div class="settings-group"><h4>固定核心</h4><p class="settings-help">今天、Inbox、客户、沟通记录、待办、搜索和数据安全始终启用。</p></div>
+            <div class="settings-group"><h4>可选功能</h4><div class="module-settings-grid" id="moduleSettingsGrid"></div></div>
+            <div class="settings-group"><h4>主导航顺序</h4><div class="nav-order-settings" id="navOrderSettings"></div><label class="settings-inline-field">默认打开<select id="preferenceDefaultPage"><option value="dashboard">今天</option><option value="inbox">Inbox</option><option value="customers">客户</option><option value="overview">本周工作</option></select></label></div>
+            <div class="settings-group"><h4>客户列表字段</h4><div class="column-settings" id="customerColumnSettings"></div></div>
+            <div class="settings-group"><h4>界面字号</h4><div class="settings-inline-field"><span>字号</span><select id="preferenceFontSize" onchange="applyFontSize(this.value)"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xl">超大</option></select><span class="settings-font-preview">Aa 文字预览</span></div><p class="settings-help">调整整个界面的文字大小，切换即时预览，保存后持久生效。</p></div>
+            <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式会参考设备状态与一次不到一秒的本地帧率测试；不会上传页面内容或客户数据。</p></div>
+            <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
+          </div>
+        </div>
+        <div class="card" id="excelImportSettingsCard" data-module="excel_import" style="margin-bottom:22px;">
+          <div class="card-header"><h3>Excel 导入</h3></div>
+          <div class="card-body">
+            <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">上传客户跟进表格（.xlsx / .xls），系统自动识别列名并导入</p>
+            <form id="excelUploadForm" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="font-size:0.85rem;">
+              <button type="button" class="btn btn-primary btn-sm" onclick="uploadExcel()">上传并导入</button>
+            </form>
+            <div id="excelUploadResult" style="margin-top:10px;font-size:0.82rem;color:var(--text-500);"></div>
+            <div class="excel-recovery-action">
+              <div><strong>恢复旧沟通记录</strong><span>将已保存的历史表格按来源恢复到客户时间线；重复内容会自动跳过。</span></div>
+              <button type="button" class="btn btn-sm" onclick="recoverExcelHistory()">开始恢复</button>
+            </div>
+          </div>
+        </div>
         <div class="card" style="margin-bottom:22px;">
           <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">一键诊断</button></div>
           <div class="card-body" id="healthCheckPanel"><div class="empty-state"><p style="color:var(--fg-muted);">点击「一键诊断」检测系统运行状态</p></div></div>
@@ -243,110 +488,161 @@
 
 <!-- Customer Edit Modal -->
 <div class="modal-overlay" id="customerEditModal">
-  <div class="modal modal-lg">
-    <div class="modal-header">
-      <h3 id="customerEditTitle">编辑客户</h3>
-      <button class="modal-close" onclick="closeModal('customerEditModal')">&times;</button>
+  <div class="modal modal-customer-workspace">
+    <div class="modal-header customer-workspace-header">
+      <div>
+        <div class="workspace-kicker">客户</div>
+        <h3 id="customerEditTitle">客户详情</h3>
+        <div class="workspace-meta" id="customerWorkspaceMeta"></div>
+      </div>
+      <div class="workspace-header-actions">
+      <button class="btn btn-sm" type="button" onclick="exportCurrentCustomerEmails()">导出邮箱</button>
+      <button class="btn btn-sm" type="button" onclick="copyCustomerContext('timeline')">导出全部沟通</button>
+      <button type="button" class="modal-close" onclick="closeModal('customerEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
+      </div>
     </div>
     <div class="modal-body">
+      <div class="customer-workspace-loading" id="customerWorkspaceLoading" hidden role="status" aria-live="polite">
+        <span class="customer-workspace-loading-spinner" aria-hidden="true"></span>
+        <strong id="customerWorkspaceLoadingTitle">正在加载客户资料…</strong>
+        <p id="customerWorkspaceLoadingMessage">正在读取客户资料、沟通记录和联系人。</p>
+        <div class="customer-workspace-loading-progress" aria-hidden="true"><span id="customerWorkspaceLoadingProgress"></span></div>
+        <button class="btn btn-sm" id="customerWorkspaceRetryButton" type="button" onclick="retryCustomerDetail()" hidden>重新加载</button>
+      </div>
       <input type="hidden" id="editCustomerId">
-      <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab(this, 'editTabBasic')">基本信息</button>
-        <button class="tab-btn" onclick="switchTab(this, 'editTabContacts')">联系人</button>
-        <button class="tab-btn" onclick="switchTab(this, 'editTabOutreach')">跟进记录</button>
-        <button class="tab-btn" onclick="switchTab(this, 'editTabResearch')">调研报告</button>
+      <section class="customer-workspace-summary" id="customerWorkspaceSummary" aria-label="客户事实简报"></section>
+      <div class="tabs customer-workspace-tabs">
+        <button class="tab-btn active" data-customer-tab="editTabOutreach" onclick="switchTab(this, 'editTabOutreach')">沟通与时间线</button>
+        <button class="tab-btn" data-customer-tab="editTabBasic" onclick="switchTab(this, 'editTabBasic')">资料</button>
+        <button class="tab-btn" data-customer-tab="editTabContacts" onclick="switchTab(this, 'editTabContacts')">联系人</button>
+        <button class="tab-btn" data-customer-tab="editTabFiles" onclick="switchTab(this, 'editTabFiles')">文件</button>
+        <button class="tab-btn" data-customer-tab="editTabTasks" onclick="switchTab(this, 'editTabTasks')">全部待办</button>
       </div>
-      <div class="tab-content active" id="editTabBasic">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">姓名 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div>
-          <div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">国家（多选）</label>
-          <div class="country-checkboxes" id="editCountryContainer">
-            <label class="country-checkbox"><input type="checkbox" value="中国"> 中国</label>
-            <label class="country-checkbox"><input type="checkbox" value="美国"> 美国</label>
-            <label class="country-checkbox"><input type="checkbox" value="日本"> 日本</label>
-            <label class="country-checkbox"><input type="checkbox" value="韩国"> 韩国</label>
-            <label class="country-checkbox"><input type="checkbox" value="德国"> 德国</label>
-            <label class="country-checkbox"><input type="checkbox" value="英国"> 英国</label>
-            <label class="country-checkbox"><input type="checkbox" value="法国"> 法国</label>
-            <label class="country-checkbox"><input type="checkbox" value="意大利"> 意大利</label>
-            <label class="country-checkbox"><input type="checkbox" value="西班牙"> 西班牙</label>
-            <label class="country-checkbox"><input type="checkbox" value="荷兰"> 荷兰</label>
-            <label class="country-checkbox"><input type="checkbox" value="比利时"> 比利时</label>
-            <label class="country-checkbox"><input type="checkbox" value="瑞士"> 瑞士</label>
-            <label class="country-checkbox"><input type="checkbox" value="澳大利亚"> 澳大利亚</label>
-            <label class="country-checkbox"><input type="checkbox" value="新西兰"> 新西兰</label>
-            <label class="country-checkbox"><input type="checkbox" value="加拿大"> 加拿大</label>
-            <label class="country-checkbox"><input type="checkbox" value="墨西哥"> 墨西哥</label>
-            <label class="country-checkbox"><input type="checkbox" value="巴西"> 巴西</label>
-            <label class="country-checkbox"><input type="checkbox" value="阿根廷"> 阿根廷</label>
-            <label class="country-checkbox"><input type="checkbox" value="新加坡"> 新加坡</label>
-            <label class="country-checkbox"><input type="checkbox" value="马来西亚"> 马来西亚</label>
-            <label class="country-checkbox"><input type="checkbox" value="泰国"> 泰国</label>
-            <label class="country-checkbox"><input type="checkbox" value="越南"> 越南</label>
-            <label class="country-checkbox"><input type="checkbox" value="印度"> 印度</label>
-            <label class="country-checkbox"><input type="checkbox" value="阿联酋"> 阿联酋</label>
-            <label class="country-checkbox"><input type="checkbox" value="沙特阿拉伯"> 沙特阿拉伯</label>
-            <label class="country-checkbox"><input type="checkbox" value="俄罗斯"> 俄罗斯</label>
-            <label class="country-checkbox"><input type="checkbox" value="波兰"> 波兰</label>
-            <label class="country-checkbox"><input type="checkbox" value="罗马尼亚"> 罗马尼亚</label>
-            <label class="country-checkbox"><input type="checkbox" value="其他"> 其他</label>
+
+      <div class="customer-workspace-grid">
+        <div class="customer-workspace-main">
+          <div class="tab-content active" id="editTabOutreach">
+            <div id="outreachList"></div>
+            <div class="customer-timeline-more" id="customerTimelineMore" hidden></div>
+            <details class="workspace-compose workspace-communication-compose" id="followCompose">
+              <summary>记录沟通</summary>
+              <div class="workspace-compose-body">
+                <div class="workspace-compose-switch" role="tablist" aria-label="沟通记录类型">
+                  <button type="button" class="workspace-compose-mode active" data-compose-mode="history" role="tab" aria-selected="true" onclick="switchCustomerCompose('history')">沟通记录</button>
+                  <button type="button" class="workspace-compose-mode" data-compose-mode="outreach" data-module="outreach" role="tab" aria-selected="false" onclick="switchCustomerCompose('outreach')">开发邮件</button>
+                </div>
+                <div class="workspace-compose-panel" data-compose-panel="history">
+                <div class="form-group"><label class="form-label" for="followHistoryType">沟通方式</label><select class="form-control" id="followHistoryType"><option value="WhatsApp">WhatsApp</option><option value="邮件">邮件</option><option value="电话">电话</option><option value="会议">会议</option><option value="报价">报价</option><option value="寄样">寄样</option><option value="展会现场">展会现场</option><option value="微信">微信</option><option value="视频会议">视频会议</option><option value="客户来访">客户来访</option><option value="其他跟进">其他跟进</option></select></div>
+                <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('history')">AI 帮我整理</button></div><div class="rich-text-area" id="followHistoryContent" contenteditable="true" data-placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容" role="textbox" aria-multiline="true" oninput="updateAutoDirectionPreview('history')"></div><div class="auto-direction-row"><span id="historyDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="followHistoryDirectionOverride" onchange="updateAutoDirectionPreview('history')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
+                <div class="quick-reply-analysis" id="followHistoryAnalysis" hidden></div>
+                <div class="form-group"><label class="form-label">结果或判断</label><div class="rich-text-area rich-text-area-compact" id="followHistoryResult" contenteditable="true" data-placeholder="例如：客户接受交期，准备内部确认数量" role="textbox" aria-multiline="true"></div></div>
+                <div class="form-group"><label class="form-label">下一步做什么？</label><input type="text" class="form-control" id="followHistoryNextTask" placeholder="可留空，例如：发送再生料方案报价" oninput="updateFollowHistorySaveLabel()"></div>
+                <div class="form-row">
+                  <div class="form-group"><label class="form-label">任务日期</label><input type="date" class="form-control" id="followHistoryNext" onchange="updateFollowHistorySaveLabel()"></div>
+                  <div class="form-group workspace-report-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
+                </div>
+                <div class="workspace-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
+                <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="直接粘贴邮件即可；系统会自动提取主题、正文和发送时间。&#10;&#10;支持 Outlook、Gmail 的完整邮件内容，也支持只粘贴主题和正文。"></textarea><small class="email-import-hint">默认记录为“待回复”；粘贴退信或客户回复时会自动调整状态。</small></div>
+                <details class="workspace-compose"><summary>需要修正主题、时间或状态？</summary><div class="workspace-compose-body"><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
+                <textarea id="outreachContent" hidden></textarea>
+                <button class="btn btn-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
+                </div>
+              </div>
+            </details>
           </div>
-          <input type="hidden" id="editCountry">
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">等级</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="C+">C+</option><option value="D">D</option></select></div>
-          <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="editType"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField"></div>
-          <div class="form-group"><label class="form-label">下次跟进</label><input type="date" class="form-control" id="editNextFollowUp"></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">状态</label><select class="form-control" id="editStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
-          <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
-        </div>
-        <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
-        <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
-      </div>
-      <div class="tab-content" id="editTabContacts">
-        <div id="contactsList"></div>
-        <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-light);">
-          <h4 style="font-size:0.9rem;font-weight:600;margin-bottom:14px;">添加联系人</h4>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">姓名 <span class="required">*</span></label><input type="text" class="form-control" id="contactName"></div>
-            <div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div>
+
+          <div class="tab-content" id="editTabContacts">
+            <div id="contactsList"></div>
+            <details class="workspace-compose workspace-email-import" data-module="email_validation" open>
+              <summary>批量导入邮箱</summary>
+              <div class="workspace-compose-body"><div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">检查格式、邮件路由、一次性邮箱、免费邮箱、部门邮箱和重复联系人。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button></div>
+            </details>
+            <details class="workspace-compose workspace-contact-compose">
+              <summary>添加联系人</summary>
+              <div class="workspace-compose-body">
+                <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
+                <div class="form-row"><div class="form-group"><label class="form-label">邮箱</label><input type="email" class="form-control" id="contactEmail"></div><div class="form-group"><label class="form-label">电话</label><input type="text" class="form-control" id="contactPhone"></div></div>
+                <div class="form-row"><div class="form-group"><label class="form-label">WhatsApp</label><input type="text" class="form-control" id="contactWhatsapp"></div><div class="form-group"><label class="form-label">领英</label><input type="text" class="form-control" id="contactLinkedin"></div></div>
+                <button class="btn btn-primary btn-sm" onclick="addContact()">添加联系人</button>
+              </div>
+            </details>
           </div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">邮箱</label><input type="email" class="form-control" id="contactEmail"></div>
-            <div class="form-group"><label class="form-label">电话</label><input type="text" class="form-control" id="contactPhone"></div>
+
+          <div class="tab-content" id="editTabFiles">
+            <div class="customer-file-panel-header">
+              <div><h4>客户文件</h4><p>把报价单、合同、样品图片、展会资料等存到客户名下，查阅客户时可以直接打开。</p></div>
+              <button class="btn btn-sm btn-primary" type="button" onclick="openCustomerFilePicker()">添加文件</button>
+            </div>
+            <div id="customerFilesList"></div>
+            <details class="workspace-compose workspace-file-compose" id="customerFileCompose">
+              <summary>上传文件</summary>
+              <div class="workspace-compose-body">
+                <div class="form-group">
+                  <label class="form-label">选择文件（可多选）</label>
+                  <div class="customer-file-dropzone" id="customerFileDropzone" role="button" tabindex="0" onclick="openCustomerFilePicker()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCustomerFilePicker();}" ondrop="handleCustomerFileDrop(event)" ondragover="event.preventDefault();this.classList.add('is-dragover')" ondragleave="this.classList.remove('is-dragover')">
+                    <span>点击选择，或把文件拖到这里</span>
+                    <small>支持 Excel、Word、PPT、PDF、图片、邮件、文本、压缩包等；单个文件不超过 25MB，每次最多 10 个（总量不超过 250MB）</small>
+                  </div>
+                  <input type="file" id="customerFileInput" multiple hidden>
+                  <div class="customer-file-pick-list" id="customerFilePickList"></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">分类（可选）</label>
+                    <input type="text" class="form-control" id="customerFileCategory" list="customerFileCategoryOptions" placeholder="例如：报价单、合同、样品">
+                    <datalist id="customerFileCategoryOptions">
+                      <option value="报价单"></option><option value="合同"></option><option value="样品"></option><option value="展会资料"></option><option value="产品资料"></option><option value="证书"></option>
+                    </datalist>
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="customerFileUploadBtn" type="button" onclick="uploadCustomerFiles()">上传所选文件</button>
+              </div>
+            </details>
           </div>
-          <div class="form-group"><label class="form-label">领英</label><input type="text" class="form-control" id="contactLinkedin"></div>
-          <button class="btn btn-primary btn-sm" onclick="addContact()">添加联系人</button>
-        </div>
-      </div>
-      <div class="tab-content" id="editTabOutreach">
-        <div id="outreachList"></div>
-        <div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border-light);">
-          <h4 style="font-size:0.9rem;font-weight:600;margin-bottom:14px;">添加跟进记录</h4>
-          <div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div>
-          <div class="form-group"><label class="form-label">内容</label><textarea class="form-control" id="outreachContent" rows="4"></textarea></div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div>
-            <div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div>
+
+          <div class="tab-content" id="editTabTasks">
+            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>明确安排的下一步与自动开发节点分开显示。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal()">安排下一步</button></div>
+            <div id="customerTasksList"></div>
+            <details class="customer-automatic-nodes" id="customerAutomaticNodes"><summary>自动 15 / 30 / 60 天节点</summary><div id="customerAutomaticNodesList"></div></details>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="addOutreach()">添加记录</button>
+
+          <div class="tab-content" id="editTabBasic">
+            <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
+            <div class="form-group"><label class="form-label">国家 / 地区</label><div class="country-checkboxes" id="editCountryContainer" hidden>
+              <label class="country-checkbox"><input type="checkbox" value="中国"> 中国</label><label class="country-checkbox"><input type="checkbox" value="美国"> 美国</label><label class="country-checkbox"><input type="checkbox" value="日本"> 日本</label><label class="country-checkbox"><input type="checkbox" value="韩国"> 韩国</label><label class="country-checkbox"><input type="checkbox" value="德国"> 德国</label><label class="country-checkbox"><input type="checkbox" value="英国"> 英国</label><label class="country-checkbox"><input type="checkbox" value="法国"> 法国</label><label class="country-checkbox"><input type="checkbox" value="意大利"> 意大利</label><label class="country-checkbox"><input type="checkbox" value="西班牙"> 西班牙</label><label class="country-checkbox"><input type="checkbox" value="荷兰"> 荷兰</label><label class="country-checkbox"><input type="checkbox" value="比利时"> 比利时</label><label class="country-checkbox"><input type="checkbox" value="瑞士"> 瑞士</label><label class="country-checkbox"><input type="checkbox" value="澳大利亚"> 澳大利亚</label><label class="country-checkbox"><input type="checkbox" value="新西兰"> 新西兰</label><label class="country-checkbox"><input type="checkbox" value="加拿大"> 加拿大</label><label class="country-checkbox"><input type="checkbox" value="墨西哥"> 墨西哥</label><label class="country-checkbox"><input type="checkbox" value="巴西"> 巴西</label><label class="country-checkbox"><input type="checkbox" value="阿根廷"> 阿根廷</label><label class="country-checkbox"><input type="checkbox" value="新加坡"> 新加坡</label><label class="country-checkbox"><input type="checkbox" value="马来西亚"> 马来西亚</label><label class="country-checkbox"><input type="checkbox" value="泰国"> 泰国</label><label class="country-checkbox"><input type="checkbox" value="越南"> 越南</label><label class="country-checkbox"><input type="checkbox" value="印度"> 印度</label><label class="country-checkbox"><input type="checkbox" value="阿联酋"> 阿联酋</label><label class="country-checkbox"><input type="checkbox" value="沙特阿拉伯"> 沙特阿拉伯</label><label class="country-checkbox"><input type="checkbox" value="俄罗斯"> 俄罗斯</label><label class="country-checkbox"><input type="checkbox" value="波兰"> 波兰</label><label class="country-checkbox"><input type="checkbox" value="罗马尼亚"> 罗马尼亚</label><label class="country-checkbox"><input type="checkbox" value="其他"> 其他</label>
+            </div><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
+            <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">类型</label><select class="form-control" id="editType"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group legacy-classification"><label class="form-label">状态（旧数据，可选）</label><select class="form-control" id="editStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
+            <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
+            <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
+            <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
+            <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
+          </div>
+
         </div>
-      </div>
-      <div class="tab-content" id="editTabResearch">
-        <div id="researchContent"></div>
+
+        <aside class="customer-next-panel" aria-label="客户执行动作">
+          <div class="workspace-kicker">执行动作</div>
+          <input type="hidden" id="editNextFollowUp">
+          <div class="customer-next-task" id="customerNextTask" hidden></div>
+          <div class="workspace-action-grid">
+            <button class="btn workspace-action-btn" onclick="openCustomerFollowComposer()">记录沟通</button>
+            <button class="btn workspace-action-btn" onclick="openCustomerTaskModal()">安排下一步</button>
+          </div>
+          <div class="workspace-task-quick-actions" id="customerTaskQuickActions" hidden>
+            <button class="text-action" onclick="completeCustomerNextTask(this)">完成</button>
+            <button class="text-action" onclick="postponeCustomerNextTask(1, this)">明天</button>
+            <button class="text-action" onclick="postponeCustomerNextTask(3, this)">3 天后</button>
+          </div>
+          <div class="customer-other-tasks" id="customerOtherTasks"></div>
+        </aside>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('customerEditModal')">取消</button>
-      <button class="btn btn-primary" onclick="saveCustomer()">保存修改</button>
+      <button type="button" class="btn" onclick="closeModal('customerEditModal')">关闭</button>
+      <button class="btn btn-primary" id="saveCustomerFooterBtn" onclick="saveCustomer()" style="display:none;">保存资料修改</button>
     </div>
   </div>
 </div>
@@ -355,19 +651,81 @@
 <div class="modal-overlay" id="completeModal">
   <div class="modal" style="max-width:520px;">
     <div class="modal-header">
-      <h3>记录跟进并安排下次</h3>
-      <button class="modal-close" onclick="closeModal('completeModal')">&times;</button>
+      <h3>完成这次跟进</h3>
+      <button class="modal-close" onclick="closeModal('completeModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="completeReminderId">
       <div style="margin-bottom:16px;"><div style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:4px;">客户</div><div style="font-weight:600;" id="completeCustomerName"></div></div>
       <div style="margin-bottom:16px;"><div style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:4px;">任务</div><div style="font-size:0.88rem;color:var(--fg-secondary);" id="completeContent"></div></div>
-      <div class="form-group"><label class="form-label">跟进结果</label><textarea class="form-control" id="completeResult" rows="3" placeholder="记录本次沟通的内容和结果..."></textarea></div>
-      <div class="form-group"><label class="form-label">下次跟进日期 <span class="required">*</span></label><input type="date" class="form-control" id="completeNextFollow"></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label">客户怎么回复，或者这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('complete')">AI 帮我整理</button></div><textarea class="form-control" id="completeResult" rows="5" oninput="updateAutoDirectionPreview('complete')" placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容"></textarea><div class="auto-direction-row"><span id="completeDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="completeDirectionOverride" onchange="updateAutoDirectionPreview('complete')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
+      <div class="quick-reply-analysis" id="completeAnalysis" hidden></div>
+      <label class="complete-next-toggle"><input type="checkbox" id="completeHasNext" onchange="toggleCompleteNext()"><span><strong>还需要下一步</strong><small>需要继续推进时再安排动作和日期</small></span></label>
+      <div class="form-group complete-next-section" id="completeNextSection" hidden>
+        <label class="form-label">下一步做什么？</label>
+        <input type="text" class="form-control" id="completeNextTask" placeholder="例如：发送再生料方案报价" oninput="updateCompleteSaveLabel()">
+        <label class="form-label complete-task-date-label">任务日期</label>
+        <div class="next-date-choices" id="completeDateChoices">
+          <button type="button" class="date-choice" onclick="setCompleteNextDate(7, this)">7 天</button>
+          <button type="button" class="date-choice active" onclick="setCompleteNextDate(15, this)">15 天</button>
+          <button type="button" class="date-choice" onclick="setCompleteNextDate(30, this)">30 天</button>
+          <button type="button" class="date-choice" onclick="chooseCompleteCustomDate(this)">选择日期</button>
+        </div>
+        <input type="date" class="form-control complete-date-input" id="completeNextFollow" onchange="updateCompleteSaveLabel()">
+      </div>
+      <details class="complete-more-options">
+        <summary>更多选项</summary>
+        <div class="form-group"><label class="form-label">沟通方式</label><select class="form-control" id="completeActivityType"><option value="whatsapp">WhatsApp</option><option value="email">邮件</option><option value="phone">电话</option><option value="meeting">会议</option><option value="quote">报价</option><option value="sample">寄样</option><option value="follow_up">其他跟进</option></select></div>
+        <div class="form-group"><label class="form-label">补充判断</label><textarea class="form-control" id="completeOutcome" rows="2" placeholder="只有需要与事实分开说明时再填写"></textarea></div>
+        <div class="report-opt">
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+          <input type="checkbox" id="completeIsReported" style="width:16px;height:16px;margin-top:2px;accent-color:var(--brand-500);flex-shrink:0;">
+          <div>
+            <div style="font-size:0.85rem;font-weight:600;color:var(--brand-600);">同步到周报</div>
+            <div style="font-size:0.75rem;color:var(--text-400);margin-top:2px;">勾选后，本次跟进自动汇总到本周周报的重点事项</div>
+          </div>
+        </label>
+        <div id="reportCatSection" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-200);">
+          <div style="font-size:0.75rem;color:var(--text-500);margin-bottom:8px;">归入周报分类</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;" id="reportCatPills">
+            <span class="cat-pill active" data-cat="follow" style="font-size:0.72rem;padding:4px 10px;border-radius:12px;cursor:pointer;transition:all 0.15s;background:var(--brand-500);color:#fff;">重点跟进</span>
+            <span class="cat-pill" data-cat="new" style="font-size:0.72rem;padding:4px 10px;border-radius:12px;border:1px solid var(--border-200);cursor:pointer;transition:all 0.15s;color:var(--text-500);">新客户</span>
+            <span class="cat-pill" data-cat="quote" style="font-size:0.72rem;padding:4px 10px;border-radius:12px;border:1px solid var(--border-200);cursor:pointer;transition:all 0.15s;color:var(--text-500);">报价进展</span>
+            <span class="cat-pill" data-cat="sample" style="font-size:0.72rem;padding:4px 10px;border-radius:12px;border:1px solid var(--border-200);cursor:pointer;transition:all 0.15s;color:var(--text-500);">样品寄送</span>
+            <span class="cat-pill" data-cat="order" style="font-size:0.72rem;padding:4px 10px;border-radius:12px;border:1px solid var(--border-200);cursor:pointer;transition:all 0.15s;color:var(--text-500);">订单签约</span>
+          </div>
+        </div>
+        </div>
+      </details>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('completeModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitComplete()">保存并安排</button>
+      <button class="btn btn-primary" id="completeSubmitBtn" onclick="submitComplete()">只保存记录</button>
+    </div>
+  </div>
+</div>
+
+<!-- Batch Complete Follow-up Modal -->
+<div class="modal-overlay" id="batchCompleteModal">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <h3>批量完成跟进</h3>
+      <button class="modal-close" onclick="closeModal('batchCompleteModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="batchCompleteGroup">
+      <div style="margin-bottom:16px;padding:12px;background:var(--brand-50);border-radius:var(--radius-sm);border:1px solid var(--border-200);">
+        <div style="font-size:0.85rem;color:var(--text-600);font-weight:600;" id="batchCompleteTitle">将完成 0 个客户的跟进</div>
+        <div style="font-size:0.78rem;color:var(--text-400);margin-top:4px;">填写本次跟进结果和新的下次跟进日期</div>
+      </div>
+      <div class="form-group"><label class="form-label">跟进结果</label><textarea class="form-control" id="batchCompleteResult" rows="3" placeholder="记录本次沟通的内容和结果..."></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">下次跟进日期</label><input type="date" class="form-control" id="batchCompleteNext"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('batchCompleteModal')">取消</button>
+      <button class="btn btn-primary" onclick="submitBatchComplete()">确认完成</button>
     </div>
   </div>
 </div>
@@ -377,36 +735,24 @@
   <div class="modal" style="max-width:560px;">
     <div class="modal-header">
       <h3>添加新客户</h3>
-      <button class="modal-close" onclick="closeModal('addNewCustomerModal')">&times;</button>
+      <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <p style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:18px;">新客户将自动收到 15/30/60 天跟进提醒。</p>
+      <p style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:18px;">适合刚发现、还没有沟通记录或开发邮件的潜在客户；系统会自动安排开发节奏。</p>
       <div class="form-group"><label class="form-label">公司 <span class="required">*</span></label><input type="text" class="form-control" id="newCustomerName"></div>
-      <div class="form-row">
+      <div class="form-row add-customer-advanced new-customer-advanced">
         <div class="form-group"><label class="form-label">国家</label><input type="text" class="form-control" id="newCustomerCountry"></div>
-        <div class="form-group"><label class="form-label">行业领域</label>
-          <select class="form-control" id="newCustomerField">
-            <option value="">-- 请选择 --</option>
-            <option value="亚克力分销">亚克力分销</option>
-            <option value="工程塑料分销">工程塑料分销</option>
-            <option value="塑料板材分销">塑料板材分销</option>
-            <option value="标牌制造">标牌制造</option>
-            <option value="建筑建材">建筑建材</option>
-            <option value="家具制造">家具制造</option>
-            <option value="照明灯具">照明灯具</option>
-            <option value="电子电器">电子电器</option>
-            <option value="汽车相关">汽车相关</option>
-            <option value="医疗器械">医疗器械</option>
-            <option value="日用品消费品">日用品消费品</option>
-            <option value="包装印刷">包装印刷</option>
-            <option value="工业制造">工业制造</option>
-            <option value="贸易商/进口商">贸易商/进口商</option>
-            <option value="其他">其他</option>
-          </select>
-        </div>
+        <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="newCustomerType"><option value="">待识别</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
       </div>
-      <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite"></div>
-      <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
+      <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">行业领域</label><input type="text" class="form-control" id="newCustomerField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
+      <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button class="btn btn-sm btn-primary" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="btn btn-sm add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
+      <section class="draft-contacts-section">
+        <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加另一位</button></div>
+        <div id="newDraftContacts"></div>
+        <details class="draft-email-import" open><summary>邮箱可发送性检查与导入</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="粘贴邮箱后自动检查；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、邮件路由、一次性邮箱、免费邮箱、部门邮箱和重复联系人。</small></div></details>
+      </section>
+      <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站智能填充，也可以手动填写"></textarea></div>
+      <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('addNewCustomerModal')">取消</button>
@@ -417,24 +763,32 @@
 
 <!-- Add Existing Customer Modal -->
 <div class="modal-overlay" id="addCustomerModal">
-  <div class="modal modal-lg">
+  <div class="modal modal-lg add-customer-modal">
     <div class="modal-header">
-      <h3>添加现有客户</h3>
-      <button class="modal-close" onclick="closeModal('addCustomerModal')">&times;</button>
+      <h3>添加客户</h3>
+      <button class="modal-close" onclick="closeModal('addCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">公司 / 客户名称 <span class="required">*</span></label>
-        <input type="text" class="form-control" id="addExistName" placeholder="输入公司名称或网站">
-        <button class="btn btn-sm btn-primary" style="margin-top:8px;" onclick="smartFillCustomer('add')">✨ 智能填充</button>
+      <p class="add-customer-intro">粘贴官网后会自动识别资料；补充联系方式后即可保存并复制邮箱。</p>
+      <div class="add-customer-basics">
+        <div class="form-group">
+          <label class="form-label">客户官网 <span class="required">*</span></label>
+          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button class="btn btn-sm btn-primary" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>自动识别</button></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">公司 / 客户名称 <span class="required">*</span></label>
+          <input type="text" class="form-control" id="addExistName" placeholder="识别后自动填入，也可手动修改">
+        </div>
       </div>
-      <div class="form-group">
-        <label class="form-label">网站</label>
-        <input type="text" class="form-control" id="addExistWebsite" placeholder="https://example.com">
+      <div class="smart-fill-review" id="existSmartFillReview" hidden></div>
+      <div class="recognition-summary" id="existRecognitionSummary" hidden></div>
+      <div class="form-group add-customer-advanced exist-customer-advanced">
+        <label class="form-label">标签</label>
+        <input type="text" class="form-control" id="addExistTags" placeholder="可选，用逗号分隔">
       </div>
-      <div class="form-group">
-        <label class="form-label">国家（多选）</label>
-        <div class="country-checkboxes" id="addExistCountryContainer">
+      <div class="form-group add-customer-advanced exist-customer-advanced">
+        <label class="form-label">国家 / 地区</label>
+        <div class="country-checkboxes" id="addExistCountryContainer" hidden>
           <label class="country-checkbox"><input type="checkbox" value="中国"> 中国</label>
           <label class="country-checkbox"><input type="checkbox" value="美国"> 美国</label>
           <label class="country-checkbox"><input type="checkbox" value="日本"> 日本</label>
@@ -465,43 +819,49 @@
           <label class="country-checkbox"><input type="checkbox" value="罗马尼亚"> 罗马尼亚</label>
           <label class="country-checkbox"><input type="checkbox" value="其他"> 其他</label>
         </div>
-        <input type="hidden" id="addExistCountry">
+        <input type="text" class="form-control" id="addExistCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大">
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">等级</label><select class="form-control" id="addExistLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="C+">C+</option><option value="D">D</option></select></div>
+      <div class="form-row add-customer-advanced exist-customer-advanced">
+        <div class="form-group legacy-classification"><label class="form-label">等级</label><select class="form-control" id="addExistLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div>
         <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="addExistType"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">行业领域</label>
-          <select class="form-control" id="addExistField">
-            <option value="">-- 请选择 --</option>
-            <option value="亚克力分销">亚克力分销</option>
-            <option value="工程塑料分销">工程塑料分销</option>
-            <option value="塑料板材分销">塑料板材分销</option>
-            <option value="标牌制造">标牌制造</option>
-            <option value="建筑建材">建筑建材</option>
-            <option value="家具制造">家具制造</option>
-            <option value="照明灯具">照明灯具</option>
-            <option value="电子电器">电子电器</option>
-            <option value="汽车相关">汽车相关</option>
-            <option value="医疗器械">医疗器械</option>
-            <option value="日用品消费品">日用品消费品</option>
-            <option value="包装印刷">包装印刷</option>
-            <option value="工业制造">工业制造</option>
-            <option value="贸易商/进口商">贸易商/进口商</option>
-            <option value="其他">其他</option>
-          </select>
-        </div>
-        <div class="form-group"><label class="form-label">状态</label><select class="form-control" id="addExistStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
+      <div class="form-row add-customer-advanced exist-customer-advanced">
+        <div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="addExistField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
+        <div class="form-group legacy-classification"><label class="form-label">状态</label><select class="form-control" id="addExistStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
       </div>
-      <div class="form-group"><label class="form-label">下次跟进</label><input type="date" class="form-control" id="addExistNextFollow"></div>
-      <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="addExistProfile" rows="2"></textarea></div>
-      <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="addExistNotes" rows="2"></textarea></div>
+      <section class="draft-contacts-section">
+        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴邮箱后自动检查并生成联系人</span></div></div>
+        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('exist')">检查并添加</button><small>粘贴后会自动检查格式、邮件路由和重复联系人。</small></div></details>
+        <details class="manual-contact-entry"><summary>手动填写联系人（可选）</summary><div id="existDraftContacts"></div><button type="button" class="text-action" onclick="addDraftContact('exist')">＋ 再添加一位联系人</button></details>
+      </section>
+      <button type="button" class="btn btn-sm add-more-toggle" onclick="toggleAddCustomerAdvanced('exist')">更多公司资料</button>
+      <div class="form-group add-customer-advanced exist-customer-advanced"><label class="form-label">下次跟进</label><input type="date" class="form-control" id="addExistNextFollow"></div>
+      <div class="form-group add-customer-advanced exist-customer-advanced"><label class="form-label">简介</label><textarea class="form-control" id="addExistProfile" rows="2"></textarea></div>
+      <div class="form-group add-customer-advanced exist-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="addExistNotes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('addCustomerModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitExistCustomer()">添加客户</button>
+      <button class="btn" onclick="submitExistCustomer(false)">仅保存</button>
+      <button class="btn btn-primary" onclick="submitExistCustomer(true)">保存并复制邮箱</button>
     </div>
+  </div>
+</div>
+
+<!-- Smart website import preview -->
+<div class="modal-overlay" id="smartFillPreviewModal">
+  <div class="modal" style="max-width:620px;">
+    <div class="modal-header"><div><h3>确认识别结果</h3><p class="modal-subtitle">以下内容尚未保存，请确认后应用到客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-body" id="smartFillPreviewContent"></div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
+  </div>
+</div>
+
+<!-- Unsaved customer form confirmation -->
+<div class="modal-overlay" id="unsavedChangesModal">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header"><div><h3>还有未保存的修改</h3><p class="modal-subtitle" id="unsavedChangesSubtitle">你刚才填写的内容还没有保存。</p></div></div>
+    <div class="modal-body"><p class="unsaved-message">要先保存这些修改，还是放弃后退出？</p></div>
+    <div class="modal-footer"><button class="btn" onclick="continueEditingCustomerForm()">继续编辑</button><button class="btn btn-danger" onclick="discardCustomerFormChanges()">放弃修改</button><button class="btn btn-primary" id="unsavedSaveButton" onclick="savePendingCustomerForm()">保存并退出</button></div>
   </div>
 </div>
 
@@ -510,7 +870,7 @@
   <div class="modal" style="max-width:600px;">
     <div class="modal-header">
       <h3>批量添加新客户</h3>
-      <button class="modal-close" onclick="closeModal('batchAddModal')">&times;</button>
+      <button class="modal-close" onclick="closeModal('batchAddModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
       <p style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:14px;">每行一个客户。格式：姓名，公司，国家，行业领域，备注</p>
@@ -523,22 +883,87 @@
   </div>
 </div>
 
-<!-- Generate Research Modal -->
-<div class="modal-overlay" id="researchModal">
-  <div class="modal modal-lg">
+<!-- Next Task Modal -->
+<div class="modal-overlay" id="customerTaskModal">
+  <div class="modal task-action-modal">
     <div class="modal-header">
-      <h3>生成调研报告</h3>
-      <button class="modal-close" onclick="closeModal('researchModal')">&times;</button>
+      <div>
+        <div class="workspace-kicker">下一步</div>
+        <h3>安排下一步</h3>
+        <p class="task-modal-customer" id="customerTaskModalCustomer"></p>
+      </div>
+      <button class="modal-close" onclick="closeModal('customerTaskModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <input type="hidden" id="researchCustomerId">
-      <div class="form-group"><label class="form-label">公司名称</label><input type="text" class="form-control" id="researchCompanyName"></div>
-      <div class="form-group"><label class="form-label">调研内容 / 原始数据 <span class="required">*</span></label><textarea class="form-control" id="researchRawInput" rows="12" placeholder="粘贴调研数据、公司信息或任何相关文本..."></textarea></div>
+      <div class="form-group">
+        <label class="form-label" for="customerTaskTitle">具体动作 <span class="required">*</span></label>
+        <textarea class="form-control task-action-textarea" id="customerTaskTitle" rows="4" placeholder="例如：确认样品测试结果，并根据反馈准备报价"></textarea>
+        <p class="form-hint">写清楚自己下一次需要做的事，系统会在当天把它带回 Today。</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="customerTaskDate">什么时候做 <span class="required">*</span></label>
+        <div class="next-date-choices task-date-choices">
+          <button type="button" onclick="setCustomerTaskDate(7, this)">7 天</button>
+          <button type="button" onclick="setCustomerTaskDate(15, this)">15 天</button>
+          <button type="button" onclick="setCustomerTaskDate(30, this)">30 天</button>
+        </div>
+        <input type="date" class="form-control" id="customerTaskDate">
+      </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('researchModal')">取消</button>
-      <button class="btn btn-primary" onclick="generateResearch()">生成报告</button>
+      <button class="btn" onclick="closeModal('customerTaskModal')">取消</button>
+      <button class="btn btn-primary" onclick="createCustomerTask(this)">创建下一步</button>
     </div>
+  </div>
+</div>
+
+<!-- AI suggestion decision modal -->
+<div class="modal-overlay" id="inboxNoFollowModal">
+  <div class="modal inbox-decision-modal">
+    <div class="modal-header">
+      <div><div class="workspace-kicker">下一步计划</div><h3>最近还没有下一步计划</h3><p class="modal-subtitle" id="inboxNoFollowCustomer"></p></div>
+      <button class="modal-close" onclick="closeModal('inboxNoFollowModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="inboxNoFollowKey">
+      <input type="hidden" id="inboxNoFollowCustomerId">
+      <p class="inbox-decision-intro">可以直接确认，也可以选择常见情况或填写实际原因。当前建议会关闭；客户出现新回复、官网变化或新的分析信号时，AI 仍会结合具体情况提醒。</p>
+      <div class="form-label">常见情况（可选）</div>
+      <div class="inbox-decision-options">
+        <label><input type="radio" name="inboxNoFollowReason" value="waiting_reply"><span><strong>等待客户回复</strong><small>已经发出信息，先等待对方回应</small></span></label>
+        <label><input type="radio" name="inboxNoFollowReason" value="no_near_term_need"><span><strong>近期无需求</strong><small>客户当前没有明确采购或项目需求</small></span></label>
+        <label><input type="radio" name="inboxNoFollowReason" value="not_investing_now"><span><strong>当前不投入</strong><small>现阶段把精力放在其他客户上</small></span></label>
+      </div>
+      <div class="form-group"><label class="form-label" for="inboxNoFollowNote">实际情况（可选）</label><textarea class="form-control" id="inboxNoFollowNote" rows="3" placeholder="直接填写真实情况，例如：客户项目预计第四季度重启"></textarea><p class="form-hint">填写后将作为客户判断依据留档。</p></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxNoFollowModal')">取消</button><button class="btn btn-primary" onclick="resolveInboxSuggestion()">确认暂不安排</button></div>
+  </div>
+</div>
+
+<!-- Inbox Reply Modal -->
+<div class="modal-overlay" id="inboxReplyModal">
+  <div class="modal inbox-reply-modal">
+    <div class="modal-header"><div><div class="workspace-kicker">快速记录</div><h3>记录客户回复</h3><p class="modal-subtitle">粘贴内容并关联客户，一次保存到客户时间线。</p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-body">
+      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent">客户说了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true)">AI 帮我整理（可选）</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="7" oninput="clearInboxReplyAnalysis()" placeholder="手动输入或粘贴客户回复；需要时再点击 AI 帮我整理"></textarea></div>
+      <div class="quick-reply-analysis" id="inboxReplyAnalysis" hidden></div>
+      <div class="form-group"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required">*</span></label>
+        <div class="customer-picker" id="inboxReplyCustomerPicker">
+          <input type="hidden" id="inboxReplyCustomer">
+          <input type="search" class="form-control customer-picker-input" id="inboxReplyCustomerSearch" placeholder="搜索公司、联系人、国家或业务领域" autocomplete="off">
+          <div class="customer-picker-results" id="inboxReplyCustomerResults"></div>
+        </div>
+      </div>
+      <div class="quick-reply-row">
+        <div class="form-group"><label class="form-label" for="inboxReplyDate">回复日期</label><input type="date" class="form-control" id="inboxReplyDate"></div>
+        <label class="quick-reply-next-toggle"><input type="checkbox" id="inboxReplyHasNext" onchange="toggleInboxReplyNext()"><span>同时安排下一步</span></label>
+      </div>
+      <div class="quick-reply-next" id="inboxReplyNext" hidden>
+        <div class="form-group"><label class="form-label" for="inboxReplyNextTask">下一步做什么</label><input type="text" class="form-control" id="inboxReplyNextTask" placeholder="例如：根据反馈更新报价"></div>
+        <div class="form-group"><label class="form-label" for="inboxReplyNextDate">什么时候做</label><input type="date" class="form-control" id="inboxReplyNextDate"></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">保存回复</button></div>
   </div>
 </div>
 
@@ -547,7 +972,7 @@
   <div class="modal" style="max-width:400px;">
     <div class="modal-header">
       <h3 id="batchSetTitle">批量更新</h3>
-      <button class="modal-close" onclick="closeModal('batchSetModal')">&times;</button>
+      <button class="modal-close" onclick="closeModal('batchSetModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="batchSetField">
@@ -561,20 +986,87 @@
   </div>
 </div>
 
+<!-- Lightweight in-app dialog: replaces browser prompt / confirm surfaces -->
+<div class="modal-overlay" id="appDialogModal" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
+  <div class="modal modal-app-dialog">
+    <div class="modal-header">
+      <div>
+        <p class="app-dialog-eyebrow" id="appDialogEyebrow">TRADE OS</p>
+        <h3 id="appDialogTitle">输入信息</h3>
+      </div>
+      <button class="modal-close" type="button" onclick="dismissAppDialog()" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
+    </div>
+    <div class="modal-body">
+      <p class="app-dialog-message" id="appDialogMessage"></p>
+      <div class="form-group" id="appDialogInputGroup">
+        <label class="form-label" id="appDialogLabel" for="appDialogInput">内容</label>
+        <input class="form-control" id="appDialogInput" type="text" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" type="button" onclick="dismissAppDialog()">取消</button>
+      <button class="btn btn-primary" type="button" id="appDialogSubmit" onclick="submitAppDialog()">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- Today Quick Edit Modal -->
+<div class="modal-overlay" id="todayQuickEditModal">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <h3>快速编辑选中客户</h3>
+      <button class="modal-close" onclick="closeModal('todayQuickEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:16px;padding:12px;background:var(--brand-50);border-radius:var(--radius-sm);border:1px solid var(--brand-200);">
+        <div style="font-size:0.85rem;color:var(--text-600);font-weight:600;" id="todayQuickEditTitle">将编辑 0 个客户</div>
+        <div style="font-size:0.78rem;color:var(--text-400);margin-top:4px;">留空或选择"不修改"则保留原值</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">等级</label><select class="form-control" id="todayQuickEditLevel"><option value="">不修改</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div>
+        <div class="form-group"><label class="form-label">状态</label><select class="form-control" id="todayQuickEditStatus"><option value="">不修改</option><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中">跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
+      </div>
+      <div class="form-group"><label class="form-label">下次跟进日期</label><input type="date" class="form-control" id="todayQuickEditNextFollowUp"></div>
+      <div style="margin:16px 0 8px;border-top:1px solid var(--border);padding-top:12px;">
+        <div style="font-size:0.8rem;font-weight:600;color:var(--text-600);">批量填写跟进记录（可选）</div>
+        <div style="font-size:0.75rem;color:var(--text-400);margin-top:2px;">填写后会为每个选中客户创建同一条跟进记录，并完成今日待办</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">沟通方式</label><select class="form-control" id="todayQuickEditActivityType"><option value="follow_up">其他跟进</option><option value="whatsapp">WhatsApp</option><option value="email">邮件</option><option value="phone">电话</option><option value="meeting">会议</option><option value="quote">报价</option><option value="sample">寄样</option></select></div>
+        <div class="form-group"><label class="form-label">信息方向</label><select class="form-control" id="todayQuickEditDirection"><option value="unknown">未标记</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></div>
+      </div>
+      <div class="form-group"><label class="form-label">跟进内容 <span style="color:var(--text-400);font-weight:400;font-size:0.78rem;">（填写则创建记录）</span></label><textarea class="form-control" id="todayQuickEditContent" rows="3" placeholder="例如：发送产品目录并确认需求..."></textarea></div>
+      <div class="form-group"><label class="form-label">结果或判断</label><textarea class="form-control" id="todayQuickEditResult" rows="2" placeholder="可留空"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('todayQuickEditModal')">取消</button>
+      <button class="btn btn-primary" onclick="submitTodayQuickEdit()">应用</button>
+    </div>
+  </div>
+</div>
+
 <!-- Follow-up History Edit Modal -->
 <div class="modal-overlay" id="followEditModal">
   <div class="modal" style="max-width:550px;">
     <div class="modal-header">
       <h3>编辑跟进记录</h3>
-      <button class="modal-close" onclick="closeModal('followEditModal')">&times;</button>
+      <button class="modal-close" onclick="closeModal('followEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="followEditId">
       <div class="form-group"><label class="form-label">客户</label><input type="text" class="form-control" id="followEditCustomer" disabled style="background:var(--bg);"></div>
       <div class="form-group"><label class="form-label">跟进日期</label><input type="date" class="form-control" id="followEditDate"></div>
-      <div class="form-group"><label class="form-label">跟进内容</label><textarea class="form-control" id="followEditContent" rows="3"></textarea></div>
-      <div class="form-group"><label class="form-label">结果</label><textarea class="form-control" id="followEditResult" rows="2" placeholder="跟进的结果或客户反馈..."></textarea></div>
-      <div class="form-group"><label class="form-label">下一步计划</label><textarea class="form-control" id="followEditNextPlan" rows="2" placeholder="后续跟进计划..."></textarea></div>
+      <div class="form-group"><label class="form-label" for="followEditType">沟通方式</label><input class="form-control" id="followEditType" list="communicationTypeOptions" placeholder="可自由填写"></div>
+      <div class="form-group"><label class="form-label">信息方向</label><select class="form-control" id="followEditDirection"><option value="unknown">未标记</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></div>
+      <div class="form-group"><label class="form-label">跟进内容</label>
+        <div class="rich-text-area" id="followEditContent" contenteditable="true" data-placeholder="沟通内容..." role="textbox" aria-multiline="true"></div>
+      </div>
+      <div class="form-group"><label class="form-label">结果</label>
+        <div class="rich-text-area" id="followEditResult" contenteditable="true" data-placeholder="跟进的结果或客户反馈..." role="textbox" aria-multiline="true"></div>
+      </div>
+      <div class="form-group"><label class="form-label">下一步计划</label>
+        <div class="rich-text-area" id="followEditNextPlan" contenteditable="true" data-placeholder="后续跟进计划..." role="textbox" aria-multiline="true"></div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('followEditModal')">取消</button>
@@ -583,6 +1075,27 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<!-- 选中文字后出现；可编辑记录会保存，高亮只读客户工作区仅保留当前查看状态。 -->
+<div class="highlight-context-menu" id="highlightContextMenu" role="menu" aria-label="文本高亮" hidden>
+  <span>标色</span>
+  <button type="button" data-color="yellow" role="menuitem" aria-label="黄色高亮"></button>
+  <button type="button" data-color="green" role="menuitem" aria-label="绿色高亮"></button>
+  <button type="button" data-color="pink" role="menuitem" aria-label="粉色高亮"></button>
+  <button type="button" class="highlight-context-clear" data-color="clear" role="menuitem">清除</button>
+</div>
+
+
+<!-- AI Research Section (inside customer edit modal) -->
+
+<datalist id="industryFieldOptions">
+  <option value="亚克力分销"><option value="工程塑料分销"><option value="塑料板材分销"><option value="标牌与广告制作"><option value="展示展览">
+  <option value="建筑建材"><option value="室内设计与装饰"><option value="家具制造"><option value="照明灯具"><option value="电子电器">
+  <option value="汽车与交通"><option value="医疗器械"><option value="日用品消费品"><option value="包装印刷"><option value="工业制造">
+  <option value="机械设备"><option value="酒店与商业空间"><option value="教育与文创"><option value="贸易商/进口商"><option value="其他">
+</datalist>
+<datalist id="communicationTypeOptions">
+  <option value="WhatsApp"><option value="邮件"><option value="电话"><option value="会议"><option value="报价"><option value="寄样"><option value="展会现场"><option value="微信"><option value="视频会议"><option value="客户来访"><option value="其他跟进">
+</datalist>
+  <script src="app.js?v={{VERSION}}-grade-input-feedback"></script>
 </body>
 </html>

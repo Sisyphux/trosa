@@ -1,0 +1,21 @@
+[Unit]
+Description=Trade OS web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradeos
+WorkingDirectory=/opt/trade-os/current
+EnvironmentFile=/etc/trade-os/trade-os.env
+ExecStart=/opt/trade-os/venv/bin/python /opt/trade-os/current/serve.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -8,10 +8,12 @@ __pycache__/
 build/
 
 # Database & Data
+data/
 data/*.db*
 data/*.bak
 data/backups/
 data/Excel_Backups/
+data
 app/data/
 
 # Build output
@@ -24,6 +26,23 @@ dist/
 .idea/
 *.swp
 *.swo
+
+# Secrets - API Key 等敏感配置，切勿提交
+.env
+.env.production
+deploy/macos/cloudflared.yml
+deploy/cloud/workbench.env
+.env.local
+
+# Local runtimes, caches, archives, and temporary working material
+.venv/
+.venv-mac/
+.pytest_cache/
+archive/
+tmp/
+
+# Business-data import material; keep outside Git history
+2026展会客户/
 
 # OS
 .DS_Store
@@ -43,3 +62,4 @@ _sync_logs/
 __pycache__/
 .vs/
 .uploads/
+tmp/

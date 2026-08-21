@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Trade OS 沟通采集",
+  "version": "0.5.0",
+  "description": "从当前网易邮箱或 WhatsApp Web 会话提取沟通，经确认后写入 Trade OS。",
+  "permissions": ["sidePanel", "storage", "activeTab", "scripting", "webNavigation"],
+  "host_permissions": [
+    "https://mail.163.com/*",
+    "https://mail.126.com/*",
+    "https://mail.yeah.net/*",
+    "https://*.qiye.163.com/*",
+    "https://web.whatsapp.com/*",
+    "http://localhost:8080/*",
+    "http://127.0.0.1:8080/*",
+    "https://app.trosa.space/*"
+  ],
+  "action": { "default_title": "采集到 Trade OS" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "content_scripts": [{
+    "matches": [
+      "https://mail.163.com/*", "https://mail.126.com/*", "https://mail.yeah.net/*",
+      "https://*.qiye.163.com/*", "https://web.whatsapp.com/*"
+    ],
+    "js": ["adapters/common.js", "adapters/netease.js", "adapters/whatsapp.js", "content.js"],
+    "run_at": "document_idle",
+    "all_frames": true,
+    "match_about_blank": true,
+    "match_origin_as_fallback": true
+  }],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" }
+}

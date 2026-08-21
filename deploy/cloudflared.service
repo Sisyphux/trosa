@@ -1,0 +1,20 @@
+[Unit]
+Description=Cloudflare Tunnel for Trade OS
+After=network-online.target trade-os.service
+Wants=network-online.target
+Requires=trade-os.service
+
+[Service]
+Type=simple
+User=cloudflared
+Group=cloudflared
+ExecStart=/usr/bin/cloudflared --config /etc/cloudflared/config.yml tunnel run
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ReadOnlyPaths=/etc/cloudflared
+
+[Install]
+WantedBy=multi-user.target

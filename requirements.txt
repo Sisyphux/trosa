@@ -1,4 +1,9 @@
 flask==3.1.0
 flask-cors==6.0.3
+waitress==3.0.2
 APScheduler==3.11.2
-requests
+requests==2.34.2
+openpyxl==3.1.5
+xlrd==2.0.2
+email-validator==2.3.0
+dnspython==2.8.0

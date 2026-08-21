@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trade OS · 今天 · 视觉样板</title>
+  <style>
+    :root {
+      --canvas:#f1eee6; --paper:#faf8f2; --paper-strong:#fffdf8;
+      --ink:#28251f; --ink-soft:#625e55; --ink-muted:#8e887c;
+      --line:rgba(54,48,38,.13); --line-strong:rgba(54,48,38,.2);
+      --clay:#a85f45; --clay-hover:#8f4f39; --clay-soft:#efe1d8;
+      --moss:#66705a; --moss-soft:#e1e7da; --mist:#647b82; --mist-soft:#dfe8e8;
+      --ochre:#a98145; --ochre-soft:#eee4cc; --plum:#806a72; --plum-soft:#eae1e4; --danger:#a94e45;
+      --glass:rgba(250,248,242,.58); --glass-strong:rgba(255,253,248,.7);
+      --shadow:0 22px 60px rgba(66,54,38,.14), inset 0 1px 0 rgba(255,255,255,.92), inset 0 -1px 0 rgba(255,255,255,.28);
+      --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+      --serif:"Songti SC","STSong","Iowan Old Style","Baskerville",Georgia,serif;
+    }
+    * { box-sizing:border-box; }
+    html { background:var(--canvas); color:var(--ink); font-family:var(--sans); }
+    body { margin:0; min-height:100vh; background:
+      radial-gradient(circle at 82% 2%, rgba(202,154,127,.22), transparent 29%),
+      radial-gradient(circle at 13% 92%, rgba(111,132,126,.14), transparent 27%),
+      radial-gradient(circle at 47% 48%, rgba(173,146,103,.07), transparent 31%), var(--canvas); }
+    button { font:inherit; color:inherit; }
+    svg { display:block; }
+    .app { min-height:100vh; padding:20px; display:grid; grid-template-columns:220px minmax(0,1fr); gap:20px; }
+    .glass { background:linear-gradient(145deg,rgba(255,255,255,.62),var(--glass)); border:1px solid rgba(255,255,255,.82); box-shadow:var(--shadow); backdrop-filter:blur(32px) saturate(1.26); -webkit-backdrop-filter:blur(32px) saturate(1.26); }
+    .sidebar { height:calc(100vh - 40px); position:sticky; top:20px; border-radius:24px; padding:24px 14px 14px; display:flex; flex-direction:column; overflow:hidden; }
+    .brand { padding:4px 12px 28px; }
+    .brand-name { font:500 25px/1 var(--serif); letter-spacing:-.02em; }
+    .brand-sub { margin-top:8px; color:var(--ink-muted); font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
+    .nav-label { margin:0 12px 8px; color:var(--ink-muted); font-size:10px; font-weight:650; letter-spacing:.1em; }
+    .nav { display:grid; gap:4px; }
+    .nav button { height:44px; padding:0 12px; border:0; border-radius:11px; background:transparent; display:flex; align-items:center; gap:11px; cursor:pointer; text-align:left; font-size:14px; color:var(--ink-soft); transition:background .18s ease,color .18s ease; }
+    .nav button:hover { background:rgba(255,255,255,.42); color:var(--ink); }
+    .nav button.active { background:var(--paper-strong); color:var(--ink); box-shadow:0 5px 18px rgba(66,54,38,.07); }
+    .nav svg { width:17px; height:17px; stroke-width:1.8; }
+    .count { margin-left:auto; min-width:20px; height:20px; padding:0 6px; border-radius:999px; display:grid; place-items:center; background:var(--clay-soft); color:var(--clay); font-size:10px; font-weight:700; }
+    .sidebar-bottom { margin-top:auto; padding-top:14px; border-top:1px solid var(--line); }
+    .profile { margin-top:8px; padding:12px; display:flex; align-items:center; gap:10px; border-radius:13px; }
+    .avatar { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; color:#fff; background:linear-gradient(145deg,#b27259,#885342); font-size:11px; font-weight:700; }
+    .profile strong { display:block; font-size:12px; font-weight:650; }
+    .profile span { display:block; margin-top:2px; color:var(--ink-muted); font-size:10px; }
+    main { min-width:0; padding:25px 22px 64px; }
+    .topbar { max-width:1200px; margin:auto; display:flex; justify-content:space-between; align-items:flex-start; gap:24px; }
+    .eyebrow { color:var(--ink-muted); font-size:12px; font-weight:620; letter-spacing:.1em; }
+    h1 { margin:7px 0 0; font:500 42px/1.06 var(--serif); letter-spacing:-.035em; }
+    .summary { margin:12px 0 0; color:var(--ink-soft); font-size:14px; }
+    .summary strong { color:var(--ink); font-weight:650; }
+    .top-actions { position:sticky; top:20px; z-index:20; display:flex; align-items:center; gap:5px; padding:5px; border-radius:16px; }
+    .icon-btn,.secondary-btn,.primary-btn,.text-btn { border:0; cursor:pointer; transition:all .18s ease; }
+    .icon-btn { width:40px; height:40px; border-radius:11px; display:grid; place-items:center; background:transparent; border:0; }
+    .icon-btn:hover { background:rgba(255,255,255,.58); }
+    .icon-btn svg { width:17px; height:17px; }
+    .secondary-btn,.primary-btn { min-height:40px; border-radius:11px; padding:0 16px; font-size:12px; font-weight:620; }
+    .secondary-btn { background:transparent; border:0; }
+    .secondary-btn:hover { background:var(--paper-strong); border-color:var(--line-strong); }
+    .primary-btn { background:var(--clay); color:#fff; box-shadow:0 7px 20px rgba(139,73,50,.18); }
+    .primary-btn:hover { background:var(--clay-hover); }
+    .content { max-width:1200px; margin:44px auto 0; }
+    .section-head { min-height:28px; display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:13px; }
+    .section-head h2 { margin:0; font-size:17px; font-weight:680; letter-spacing:-.01em; }
+    .section-head span { color:var(--ink-muted); font-size:12px; }
+    .text-actions { display:flex; gap:18px; }
+    .text-btn { padding:0; background:none; color:var(--ink-soft); font-size:12px; }
+    .text-btn:hover { color:var(--clay); }
+    .workspace { display:grid; grid-template-columns:minmax(480px,1.5fr) minmax(290px,.76fr); gap:30px; align-items:start; }
+    .task-list { border-top:1px solid var(--line); }
+    .task { width:100%; min-height:76px; padding:14px 14px 14px 10px; border:0; border-bottom:1px solid var(--line); background:transparent; display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:12px; text-align:left; cursor:pointer; border-radius:0; transition:background .18s ease,border-radius .18s ease; }
+    .task:hover { background:rgba(255,253,248,.43); }
+    .task.selected { margin-top:7px; margin-bottom:7px; border-bottom-color:transparent; border-radius:14px; background:var(--paper-strong); box-shadow:0 8px 26px rgba(66,54,38,.07); }
+    .task-index { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--line-strong); color:var(--ink-muted); font:600 10px/1 var(--sans); }
+    .task.selected .task-index { border-color:var(--clay); background:var(--clay); color:#fff; }
+    .task-copy { min-width:0; }
+    .task-copy strong { display:block; font-size:14px; font-weight:670; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-copy span { display:block; margin-top:5px; color:var(--ink-soft); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-date { padding-left:12px; color:var(--ink-muted); font-size:11px; white-space:nowrap; }
+    .task-date.overdue { color:var(--danger); }
+    .focus-panel { position:sticky; top:28px; border-radius:24px; padding:26px; overflow:hidden; }
+    .focus-panel::before { content:""; position:absolute; width:170px; height:170px; right:-70px; top:-85px; border-radius:50%; background:rgba(194,151,126,.13); filter:blur(2px); pointer-events:none; }
+    .kicker { color:var(--ink-muted); font-size:10px; font-weight:650; letter-spacing:.1em; }
+    .focus-panel h3 { margin:10px 0 4px; font:500 25px/1.2 var(--serif); letter-spacing:-.025em; }
+    .focus-meta { display:flex; gap:6px; margin-top:9px; color:var(--ink-muted); font-size:11px; }
+    .focus-meta span { padding:5px 8px; border-radius:999px; }
+    .focus-meta span:first-child { background:var(--mist-soft); color:var(--mist); }
+    .focus-meta span:last-child { background:var(--ochre-soft); color:#826835; }
+    .focus-task { margin:23px 0 0; padding:15px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .focus-task span { display:block; color:var(--ink-muted); font-size:10px; }
+    .focus-task strong { display:block; margin-top:7px; font-size:13px; line-height:1.55; font-weight:650; }
+    .context { margin:18px 0 22px; display:grid; gap:14px; }
+    .context-row { display:grid; grid-template-columns:64px 1fr; gap:12px; align-items:start; }
+    .context-row span { color:var(--ink-muted); font-size:10px; }
+    .context-row p { margin:0; color:var(--ink-soft); font-size:12px; line-height:1.65; }
+    .context-row.ai { margin:0 -10px; padding:10px; border-radius:12px; background:rgba(225,231,218,.66); }
+    .context-row.ai p { color:var(--moss); }
+    .panel-primary { width:100%; height:44px; }
+    .panel-links { margin-top:14px; display:flex; justify-content:center; gap:18px; }
+    .future { margin-top:54px; padding-top:30px; border-top:1px solid var(--line); }
+    .future-title { display:flex; align-items:end; gap:10px; }
+    .dates { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-top:17px; }
+    .date { min-height:80px; padding:11px; border:1px solid transparent; border-radius:14px; background:rgba(255,253,248,.38); cursor:pointer; text-align:left; transition:all .18s ease; }
+    .date:hover { background:rgba(255,253,248,.74); }
+    .date.active { background:var(--paper-strong); border-color:rgba(168,95,69,.24); box-shadow:0 7px 22px rgba(66,54,38,.06); }
+    .date small { display:block; color:var(--ink-muted); font-size:9px; }
+    .date strong { display:block; margin-top:5px; font:600 17px/1 var(--serif); }
+    .date i { display:block; width:6px; height:6px; margin-top:15px; border-radius:50%; background:var(--clay); }
+    .date:nth-child(2) i { background:var(--mist); }
+    .date:nth-child(5) i { background:var(--moss); }
+    .date:nth-child(7) i { background:var(--ochre); }
+    .date.no-event i { background:transparent; }
+    .schedule-note { min-height:36px; margin-top:12px; color:var(--ink-muted); font-size:12px; }
+    .schedule-note strong { margin-right:8px; color:var(--ink-soft); font-weight:650; }
+    .more { margin-top:28px; padding-top:18px; border-top:1px solid var(--line); }
+    .more summary { cursor:pointer; color:var(--ink-muted); font-size:11px; }
+    .ai-float { position:fixed; right:30px; bottom:28px; height:48px; padding:0 18px 0 10px; border-radius:999px; display:flex; align-items:center; gap:10px; border:1px solid rgba(255,255,255,.78); cursor:pointer; color:var(--ink-soft); font-size:12px; font-weight:620; }
+    .ai-mark { width:28px; height:28px; display:grid; place-items:center; border-radius:50%; background:var(--ink); color:var(--paper); }
+    .ai-mark svg { width:14px; height:14px; }
+    .mobile-menu { display:none; }
+    @media (max-width:1050px) {
+      .app { grid-template-columns:80px minmax(0,1fr); }
+      .sidebar { padding-left:10px; padding-right:10px; }
+      .brand { padding-left:4px; padding-right:4px; }
+      .brand-name { font-size:20px; }
+      .brand-sub,.nav-label,.nav button span:not(.count),.profile div:not(.avatar) { display:none; }
+      .nav button { justify-content:center; padding:0; }
+      .count { position:absolute; transform:translate(12px,-10px); }
+      .profile { justify-content:center; padding:8px 0; }
+      .workspace { grid-template-columns:1fr; }
+      .focus-panel { position:relative; top:auto; }
+    }
+    @media (max-width:720px) {
+      .app { display:block; padding:0; }
+      .sidebar { display:none; }
+      main { padding:20px 18px 72px; }
+      .mobile-menu { display:grid; }
+      h1 { font-size:35px; }
+      .topbar { align-items:center; }
+      .top-actions { position:fixed; top:auto; left:50%; right:auto; bottom:16px; transform:translateX(-50%); }
+      .content { margin-top:34px; }
+      .workspace { display:block; }
+      .focus-panel { margin-top:28px; }
+      .dates { grid-template-columns:repeat(4,1fr); }
+      .date:nth-child(n+5) { display:none; }
+      .ai-float { display:none; }
+    }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none!important; scroll-behavior:auto!important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar glass">
+      <div class="brand"><div class="brand-name">Trade OS</div><div class="brand-sub">Relationship workspace</div></div>
+      <div class="nav-label">工作空间</div>
+      <nav class="nav" aria-label="主导航">
+        <button class="active"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/></svg><span>今天</span></button>
+        <button><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6.5h16v11H4z"/><path d="m4 8 8 5 8-5"/></svg><span>Inbox</span><b class="count">3</b></button>
+        <button><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 19v-1.5A3.5 3.5 0 0 1 8.5 14h7a3.5 3.5 0 0 1 3.5 3.5V19"/><circle cx="12" cy="8" r="4"/></svg><span>客户</span></button>
+        <button><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5"/></svg><span>本周工作</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <nav class="nav"><button><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg><span>设置</span></button></nav>
+        <div class="profile"><div class="avatar">LX</div><div><strong>Luoxin</strong><span>个人工作区</span></div></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div><div class="eyebrow">2026 年 7 月 15 日 · 星期三</div><h1>今天</h1><p class="summary"><strong>4 个客户</strong>需要跟进，其中 1 项已逾期</p></div>
+        <div class="top-actions glass" aria-label="常用操作">
+          <button class="icon-btn mobile-menu" aria-label="打开导航"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+          <button class="icon-btn" aria-label="搜索"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button>
+          <button class="primary-btn">记录沟通</button>
+          <button class="icon-btn" aria-label="添加客户"><svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="workspace">
+          <section>
+            <div class="section-head"><h2>待跟进</h2><div class="text-actions"><button class="text-btn">记录客户回复</button><button class="text-btn">批量记录</button></div></div>
+            <div class="task-list" id="taskList">
+              <button class="task selected" data-name="Atelier Noma" data-meta="法国 · 家居与生活方式" data-task="确认秋季系列的样品反馈，并讨论下一轮报价" data-recent="7 月 8 日寄出材质样品；Claire 表示本周内部评审。" data-ai="对方已进入评审节点，建议先询问材质反馈，再讨论价格。"><span class="task-index">01</span><span class="task-copy"><strong>Atelier Noma</strong><span>确认样品反馈，并讨论下一轮报价</span></span><span class="task-date overdue">逾期 1 天</span></button>
+              <button class="task" data-name="Kanso Living" data-meta="日本 · 家居零售" data-task="发送更新后的产品目录与最小起订量" data-recent="7 月 12 日询问了新系列的起订量和交付周期。" data-ai="对方问题明确，回复中应同时给出起订量与预计交期。"><span class="task-index">02</span><span class="task-copy"><strong>Kanso Living</strong><span>发送更新后的产品目录与最小起订量</span></span><span class="task-date">今天</span></button>
+              <button class="task" data-name="Forma Studio" data-meta="意大利 · 室内设计" data-task="整理定制色板，确认视频会议时间" data-recent="7 月 10 日提出三个定制颜色，并希望进行一次线上沟通。" data-ai="先提供色板预览，再让客户选择两个可行的会议时段。"><span class="task-index">03</span><span class="task-copy"><strong>Forma Studio</strong><span>整理定制色板，确认视频会议时间</span></span><span class="task-date">今天</span></button>
+              <button class="task" data-name="North &amp; Pine" data-meta="美国 · 精品零售" data-task="跟进首单合同中的包装要求" data-recent="7 月 13 日确认采购数量，包装条款仍待补充。" data-ai="包装是当前唯一未确认项，建议邮件只聚焦这一问题。"><span class="task-index">04</span><span class="task-copy"><strong>North &amp; Pine</strong><span>跟进首单合同中的包装要求</span></span><span class="task-date">今天</span></button>
+            </div>
+          </section>
+
+          <aside class="focus-panel glass" aria-live="polite">
+            <div class="kicker">当前客户</div><h3 id="focusName">Atelier Noma</h3><div class="focus-meta" id="focusMeta"><span>法国</span><span>家居与生活方式</span></div>
+            <div class="focus-task"><span>今天要做</span><strong id="focusTask">确认秋季系列的样品反馈，并讨论下一轮报价</strong></div>
+            <div class="context">
+              <div class="context-row"><span>最近发生</span><p id="focusRecent">7 月 8 日寄出材质样品；Claire 表示本周内部评审。</p></div>
+              <div class="context-row ai"><span>AI 建议</span><p id="focusAi">对方已进入评审节点，建议先询问材质反馈，再讨论价格。</p></div>
+            </div>
+            <button class="primary-btn panel-primary">记录沟通</button>
+            <div class="panel-links"><button class="text-btn">查看客户</button><button class="text-btn">调整日期</button></div>
+          </aside>
+        </div>
+
+        <section class="future">
+          <div class="section-head"><div class="future-title"><h2>接下来</h2><span>未来 14 天</span></div><div class="text-actions"><button class="text-btn">完整日历</button><button class="text-btn">同步 Apple 日历</button></div></div>
+          <div class="dates" id="dates">
+            <button class="date active"><small>星期四</small><strong>16</strong><i></i></button>
+            <button class="date"><small>星期五</small><strong>17</strong><i></i></button>
+            <button class="date no-event"><small>星期六</small><strong>18</strong><i></i></button>
+            <button class="date no-event"><small>星期日</small><strong>19</strong><i></i></button>
+            <button class="date"><small>星期一</small><strong>20</strong><i></i></button>
+            <button class="date no-event"><small>星期二</small><strong>21</strong><i></i></button>
+            <button class="date"><small>星期三</small><strong>22</strong><i></i></button>
+          </div>
+          <div class="schedule-note"><strong>7 月 16 日</strong>2 项安排 · 回复 Havn Atelier · 准备 Forma Studio 色板</div>
+        </section>
+        <details class="more"><summary>本周记录与最近动态</summary></details>
+      </div>
+    </main>
+  </div>
+
+  <button class="ai-float glass"><span class="ai-mark"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/></svg></span>询问 Trade OS</button>
+  <script>
+    const tasks = document.querySelectorAll('.task');
+    tasks.forEach(task => task.addEventListener('click', () => {
+      tasks.forEach(item => item.classList.remove('selected'));
+      task.classList.add('selected');
+      document.querySelector('#focusName').textContent = task.dataset.name;
+      const meta = task.dataset.meta.split(' · ');
+      document.querySelector('#focusMeta').innerHTML = `<span>${meta[0]}</span><span>${meta[1] || ''}</span>`;
+      document.querySelector('#focusTask').textContent = task.dataset.task;
+      document.querySelector('#focusRecent').textContent = task.dataset.recent;
+      document.querySelector('#focusAi').textContent = task.dataset.ai;
+    }));
+    document.querySelectorAll('.date').forEach(date => date.addEventListener('click', () => {
+      document.querySelectorAll('.date').forEach(item => item.classList.remove('active'));
+      date.classList.add('active');
+      document.querySelector('.schedule-note').innerHTML = `<strong>7 月 ${date.querySelector('strong').textContent} 日</strong>${date.classList.contains('no-event') ? '暂时没有安排' : '2 项客户安排'}`;
+    }));
+  </script>
+</body>
+</html>
