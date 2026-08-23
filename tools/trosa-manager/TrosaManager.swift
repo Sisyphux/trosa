@@ -845,6 +845,12 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         runLocal("/bin/zsh", ["-lc", command], completion: completion)
     }
 
+    private func gitPushArguments() -> [String] {
+        // This Mac stores the existing GitHub sign-in in Keychain. Be explicit
+        // so a stale GitHub CLI helper cannot block the simple sync button.
+        ["-c", "credential.helper=osxkeychain", "-c", "http.version=HTTP/1.1", "push", "origin", "main"]
+    }
+
     private func runWorkbench(_ command: String, completion: ((String) -> Void)? = nil) {
         guard let config = config() else { return }
         let arguments = [
@@ -1292,7 +1298,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     private func syncGitHubThenPublish() {
         setActivity("正在同步到 GitHub", detail: "第 2 步：为本机代码保存一份云端版本。", tone: TrosaPalette.mist, symbol: "arrow.up.circle")
-        runLocal("/usr/bin/git", ["push", "origin", "main"]) { [weak self] text in
+        runLocal("/usr/bin/git", gitPushArguments()) { [weak self] text in
             guard let self else { return }
             self.output(text)
             guard self.commandSucceeded(text) else {
@@ -1313,7 +1319,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     @objc private func pushGitHub() {
         setActivity("正在同步到 GitHub", detail: "本次只同步代码，不会更新网站。", tone: TrosaPalette.mist, symbol: "arrow.up.circle")
-        runLocal("/usr/bin/git", ["push", "origin", "main"]) { [weak self] text in
+        runLocal("/usr/bin/git", gitPushArguments()) { [weak self] text in
             guard let self else { return }
             self.output(text)
             let succeeded = self.commandSucceeded(text)

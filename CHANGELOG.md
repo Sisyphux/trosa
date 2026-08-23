@@ -2,9 +2,9 @@
 
 ## 2026-08-23 — 明确服务器工作台与 Trosa 项目的边界
 
-- 用户可见变化：Mac 应用正式更名为“服务器工作台”（v1.2），窗口、应用名与安装包均不再以 Trosa 命名。首页明确标注“当前项目：Trosa”，并把 Trosa 网站、Trosa 应用与服务器安全连接分开呈现；代码发布页明确说明 GitHub 保存的是 Trosa 源码，服务器工作台负责本机与服务器的管理操作。
+- 用户可见变化：Mac 应用正式更名为“服务器工作台”（v1.2.1），窗口、应用名与安装包均不再以 Trosa 命名。首页明确标注“当前项目：Trosa”，并把 Trosa 网站、Trosa 应用与服务器安全连接分开呈现；代码发布页明确说明 GitHub 保存的是 Trosa 源码，服务器工作台负责本机与服务器的管理操作。GitHub 同步按钮现在固定使用本机系统钥匙串和更稳定的 HTTP/1.1 连接，不再依赖未安装的 GitHub CLI。
 - 文件/安装影响：安装新版时，已安装的旧 `trosa Server Manager.app` 会移动到 Mac 回收站，新的 `服务器工作台.app` 安装在“应用程序”目录；不会修改服务器、业务数据库、客户资料、附件或备份。
-- 依赖影响：仍只使用 macOS Cocoa、Swift 与已配置的 Workbench CLI，不新增运行时依赖。
+- 依赖影响：仍只使用 macOS Cocoa、Swift、系统钥匙串与已配置的 Workbench CLI，不新增应用、凭据文件或运行时依赖。
 - 验证：`swiftc -parse-as-library -typecheck`、`plutil -lint`、`bash -n` 与 Git diff 检查通过；新版已安装为 `/Users/luoxin/Applications/服务器工作台.app`，实际窗口验收确认标题为“服务器工作台”、副标题明确“当前项目：Trosa · 管理这台服务器”，并正确显示 Trosa 网站、Trosa 应用、安全连接和当前版本。真实 ECS 状态查询返回 `app=active tunnel=active health=ok`，公网健康接口正常。
 
 ## 2026-08-23 — 将 Mac 管理器升级为面向日常维护的 trosa 工作台
