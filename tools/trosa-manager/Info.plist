@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>trosa Server Manager</string>
+    <string>trosa 工作台</string>
 	<key>CFBundleExecutable</key>
 	<string>trosa-server-manager</string>
 	<key>CFBundleIdentifier</key>
@@ -11,16 +11,20 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>trosa Server Manager</string>
+    <string>trosa 工作台</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+    <string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+    <string>2</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>trosa 工作台需要访问桌面的 Trosa 项目，以及你主动选择上传的客户资料和附件。</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>trosa 工作台只会读取你主动选择上传或下载的文件。</string>
 </dict>
 </plist>

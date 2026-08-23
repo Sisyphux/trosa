@@ -15,6 +15,10 @@ cp "$SCRIPT_DIR/Info.plist" "$CONTENTS/Info.plist"
 
 if [[ "${1:-}" == "--install" ]]; then
   INSTALL_PATH="$HOME/Applications/trosa Server Manager.app"
+  # Replacing an app bundle while an older copy is still running leaves macOS
+  # pointing at the old executable. Close that known local manager first.
+  osascript -e 'tell application id "com.trosa.server-manager" to quit' >/dev/null 2>&1 || true
+  sleep 1
   rm -rf "$INSTALL_PATH"
   mkdir -p "$HOME/Applications"
   ditto "$APP_PATH" "$INSTALL_PATH"

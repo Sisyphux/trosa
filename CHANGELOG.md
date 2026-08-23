@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-08-23 — 将 Mac 管理器升级为面向日常维护的 trosa 工作台
+
+- 用户可见变化：原 `trosa Server Manager` 重构为 `trosa 工作台`（v1.1）。首页先展示“是否需要处理”的结论，并分别显示网站、trosa 应用、安全连接和当前网站版本；新增四个日常入口：上传客户资料、管理服务器文件、更新网站、立即备份。技术记录默认收起，异常时才展开。文件页增加客户资料/应用数据/回收站/服务器根目录快捷入口、上一级导航和更清楚的回收站说明；更新网站页将流程收敛为“保存并同步上线”，严格执行本机 Git 提交 → GitHub 同步 → ECS 发布，GitHub 同步失败时不更新网站。
+- 数据/权限影响：不修改业务数据库、客户资料或服务器文件。首次使用文件页时 macOS 可能请求桌面文件夹访问权限，用于读取本机 Trosa 项目和用户主动选择上传的文件；`Info.plist` 提供明确系统权限说明。服务器删除仍先移入 `/var/lib/trade-os/.trosa-trash`，保留 7 天。
+- 运维变化：`status-workbench.sh` 额外输出稳定的 `TROSA_MANAGER_STATUS` 状态行，工作台据此可靠显示应用、Tunnel、公网健康与当前 release，原有详细诊断输出仍保留在技术记录中。
+- 依赖影响：继续只使用 macOS Cocoa、Swift 与已配置的 Workbench CLI，不新增应用、Python 或 Node 运行时依赖。
+- 验证：Swift 类型检查和原生 App 构建通过；在 Mac 实际打开工作台，验证概览显示 ECS 网站/应用/Tunnel 均正常、当前 release 为 `20260821083700`；验证文件页布局与系统权限提示；`bash -n deploy/cloud/status-workbench.sh` 和真实 ECS 状态查询通过，返回 `app=active tunnel=active health=ok`。
+
 ## 2026-08-21 — 增加 trosa Server Manager 与本地滚动备份
 
 - 用户可见变化：新增可双击运行的 Mac 原生 `trosa Server Manager.app`，集中提供 ECS 状态、服务重启、系统更新、服务器终端、远程文件浏览/上传/下载/回收站、代码发布/回滚和 GitHub 同步入口。
