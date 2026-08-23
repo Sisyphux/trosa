@@ -228,7 +228,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     private func makeHeader() -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        let title = NSTextField(labelWithString: "trosa 工作台")
+        let title = NSTextField(labelWithString: "服务器工作台")
         title.font = NSFont.systemFont(ofSize: 23, weight: .semibold)
         title.textColor = TrosaPalette.ink
         title.translatesAutoresizingMaskIntoConstraints = false
@@ -240,8 +240,8 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 2
-        let choose = button("切换项目位置", #selector(chooseProjectDirectory), compact: true)
-        let site = primaryButton("打开 trosa", #selector(openWebsite))
+        let choose = button("选择项目位置", #selector(chooseProjectDirectory), compact: true)
+        let site = primaryButton("打开 Trosa 网站", #selector(openWebsite))
         let row = NSStackView(views: [text, NSView(), choose, site])
         row.translatesAutoresizingMaskIntoConstraints = false
         row.orientation = .horizontal
@@ -321,7 +321,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         let heading = pageHeading(
             kicker: "服务器状态",
             title: "一眼知道今天要不要处理",
-            description: "系统会检查网站、trosa 应用、安全连接和备份。显示“运行正常”时，你不需要进行任何技术操作。"
+            description: "这台服务器当前运行 Trosa。系统会检查网站、应用、安全连接和备份；显示“运行正常”时，你不需要进行任何技术操作。"
         )
 
         statusLabel.font = NSFont.systemFont(ofSize: 23, weight: .semibold)
@@ -341,8 +341,8 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         statusRow.spacing = 16
 
         let healthItems = NSStackView(views: [
-            statusMetric(title: "网站", detail: "客户可打开的 trosa", symbol: "globe", value: websiteHealthLabel),
-            statusMetric(title: "trosa 应用", detail: "服务器上的主程序", symbol: "checkmark.circle", value: appHealthLabel),
+            statusMetric(title: "Trosa 网站", detail: "客户可访问的服务", symbol: "globe", value: websiteHealthLabel),
+            statusMetric(title: "Trosa 应用", detail: "当前运行的项目", symbol: "checkmark.circle", value: appHealthLabel),
             statusMetric(title: "安全连接", detail: "网站与服务器之间", symbol: "lock.shield", value: tunnelHealthLabel),
             statusMetric(title: "当前版本", detail: "最近一次网站更新", symbol: "arrow.triangle.2.circlepath", value: releaseLabel)
         ])
@@ -371,7 +371,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
         let maintenanceTitle = sectionCaption("遇到异常时再用", "下面的操作会影响服务器运行；日常上传文件、更新网站和备份不需要用到它们。")
         let maintenanceActions = NSStackView(views: [
-            button("重启 trosa 应用", #selector(restartTradeOS)),
+            button("重启 Trosa 应用", #selector(restartTradeOS)),
             button("重启安全连接", #selector(restartTunnel)),
             button("查看运行记录", #selector(showLogs)),
             button("打开服务器终端", #selector(openServerTerminal)),
@@ -394,7 +394,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
             title: "把服务器当成一个清楚的文件柜",
             description: "可直接上传客户资料、Excel 和附件，也可以浏览任意服务器文件。删除的内容会先进入回收站，7 天后才会清理。"
         )
-        let permissionNote = NSTextField(wrappingLabelWithString: "首次使用时，macOS 可能会询问是否允许访问“桌面”文件夹。请选择“允许”即可；这是读取本机 trosa 项目和你主动选择上传文件所必需的一次性系统权限。")
+        let permissionNote = NSTextField(wrappingLabelWithString: "首次使用时，macOS 可能会询问是否允许访问“桌面”文件夹。请选择“允许”即可；这是读取本机 Trosa 项目和你主动选择上传文件所必需的一次性系统权限。")
         permissionNote.font = NSFont.systemFont(ofSize: 11)
         permissionNote.textColor = TrosaPalette.softInk
         permissionNote.maximumNumberOfLines = 2
@@ -476,14 +476,14 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         let heading = pageHeading(
             kicker: "更新网站",
             title: "改完本机项目后，在这里上线",
-            description: "“保存并同步上线”会先把你的本机修改保存到 GitHub，再更新服务器。若 GitHub 没有同步成功，网站不会被改动。"
+            description: "这里管理当前项目 Trosa 的代码：先把本机修改保存到 GitHub，再更新服务器。若 GitHub 没有同步成功，网站不会被改动。"
         )
 
         gitStatusLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
         gitStatusLabel.textColor = TrosaPalette.ink
         releaseLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        let gitPanel = statusMetric(title: "本机项目", detail: "是否有尚未保存的修改", symbol: "doc.badge.gearshape", value: gitStatusLabel)
-        let releasePanel = statusMetric(title: "网站版本", detail: "当前在服务器上运行的版本", symbol: "globe", value: deployReleaseLabel)
+        let gitPanel = statusMetric(title: "Trosa 源码", detail: "是否有尚未保存的修改", symbol: "doc.badge.gearshape", value: gitStatusLabel)
+        let releasePanel = statusMetric(title: "Trosa 网站版本", detail: "当前在服务器上运行的版本", symbol: "globe", value: deployReleaseLabel)
         let stateRow = NSStackView(views: [gitPanel, releasePanel])
         stateRow.orientation = .horizontal
         stateRow.alignment = .top
@@ -716,7 +716,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func updateProjectLabel() {
-        projectLabel.stringValue = "管理这台 Mac 上的 trosa 项目"
+        projectLabel.stringValue = "当前项目：Trosa · 管理这台服务器"
         projectLabel.toolTip = projectRoot.path
     }
 
@@ -733,8 +733,8 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     private func config() -> TrosaConfig? {
         guard let config = TrosaConfig.load(projectRoot: projectRoot) else {
-            output("找不到服务器配置。请先选择包含 deploy/cloud/workbench.env 的 trosa 项目目录。")
-            setActivity("没有找到 trosa 项目", detail: "请点击右上角“切换项目位置”重新选择。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle")
+            output("找不到 Trosa 的服务器配置。请先选择包含 deploy/cloud/workbench.env 的 Trosa 项目目录。")
+            setActivity("没有找到当前项目", detail: "请点击右上角“选择项目位置”重新选择 Trosa 项目。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle")
             return nil
         }
         return config
@@ -864,12 +864,12 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "选择 trosa 项目目录"
+        panel.prompt = "选择 Trosa 项目目录"
         if panel.runModal() == .OK, let url = panel.url {
             projectRoot = url
             UserDefaults.standard.set(url.path, forKey: "trosa.projectRoot")
             updateProjectLabel()
-            setActivity("已切换 trosa 项目", detail: "正在重新读取服务器与文件状态。", tone: TrosaPalette.mist, symbol: "folder")
+            setActivity("已切换当前项目", detail: "正在重新读取 Trosa 的服务器与文件状态。", tone: TrosaPalette.mist, symbol: "folder")
             refreshOverview()
             refreshFiles()
             refreshGitStatus(showOutput: false)
@@ -880,7 +880,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         let url = config()?.publicURL ?? "https://app.trosa.space"
         if let target = URL(string: url) {
             NSWorkspace.shared.open(target)
-            setActivity("已在浏览器打开 trosa", detail: "这是客户日常使用的网站。", tone: TrosaPalette.moss, symbol: "globe")
+            setActivity("已在浏览器打开 Trosa", detail: "这是客户日常使用的网站。", tone: TrosaPalette.moss, symbol: "globe")
         }
     }
 
@@ -915,13 +915,13 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
                 if healthy {
                     self.statusLabel.stringValue = "服务器运行正常"
                     self.statusLabel.textColor = TrosaPalette.moss
-                    self.statusDetailLabel.stringValue = "网站、trosa 应用和安全连接都可以正常使用。"
+                    self.statusDetailLabel.stringValue = "Trosa 网站、应用和安全连接都可以正常使用。"
                     self.setActivity("一切正常", detail: "网站可以使用，今天无需处理服务器。", tone: TrosaPalette.moss, symbol: "checkmark.circle.fill")
                 } else {
                     self.statusLabel.stringValue = "有一项需要检查"
                     self.statusLabel.textColor = TrosaPalette.danger
                     self.statusDetailLabel.stringValue = "请看下方哪一项显示“需要检查”；必要时打开运行记录。"
-                    self.setActivity("服务器需要检查", detail: "已保留技术记录；可先尝试重启 trosa 应用。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle.fill")
+                    self.setActivity("服务器需要检查", detail: "已保留技术记录；可先尝试重启 Trosa 应用。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle.fill")
                 }
             }
         }
@@ -943,12 +943,12 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     @objc private func restartTradeOS() {
-        setActivity("正在重启 trosa 应用", detail: "网站可能有几秒钟暂时不可用。", tone: TrosaPalette.ochre, symbol: "arrow.triangle.2.circlepath")
+        setActivity("正在重启 Trosa 应用", detail: "网站可能有几秒钟暂时不可用。", tone: TrosaPalette.ochre, symbol: "arrow.triangle.2.circlepath")
         runWorkbench("systemctl restart trade-os && curl --fail --silent --show-error http://127.0.0.1:8080/api/network/ping") { [weak self] text in
             guard let self else { return }
             self.output(text)
             let succeeded = self.commandSucceeded(text)
-            self.setActivity(succeeded ? "trosa 应用已重启" : "trosa 应用重启失败", detail: succeeded ? "正在重新检查服务器状态。" : "请打开运行记录查看原因。", tone: succeeded ? TrosaPalette.moss : TrosaPalette.danger, symbol: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle")
+            self.setActivity(succeeded ? "Trosa 应用已重启" : "Trosa 应用重启失败", detail: succeeded ? "正在重新检查服务器状态。" : "请打开运行记录查看原因。", tone: succeeded ? TrosaPalette.moss : TrosaPalette.danger, symbol: succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle")
             self.refreshOverview()
         }
     }
@@ -966,7 +966,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     @objc private func rebootServer() {
         setActivity("已请求重启整台服务器", detail: "服务器将在约 1 分钟后重启，网站会短暂不可用。", tone: TrosaPalette.ochre, symbol: "power")
-        runWorkbench("shutdown -r +1 'trosa manager requested reboot'") { [weak self] text in
+        runWorkbench("shutdown -r +1 'server workbench requested reboot'") { [weak self] text in
             self?.output(text)
         }
     }
@@ -1261,7 +1261,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
                 let formatter = DateFormatter()
                 formatter.locale = Locale(identifier: "zh_CN")
                 formatter.dateFormat = "yyyy-MM-dd HH:mm"
-                let defaultMessage = "update: trosa \(formatter.string(from: Date()))"
+                let defaultMessage = "update: Trosa \(formatter.string(from: Date()))"
                 guard let message = self.prompt(text: "这次更新的简单说明", defaultValue: defaultMessage) else { return }
                 self.commitSyncAndPublish(message: message)
             }
@@ -1507,7 +1507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if window == nil {
             let controller = TrosaManagerViewController()
             let newWindow = NSWindow(contentViewController: controller)
-            newWindow.title = "trosa 工作台"
+            newWindow.title = "服务器工作台"
             newWindow.setContentSize(NSSize(width: 1120, height: 790))
             newWindow.minSize = NSSize(width: 960, height: 700)
             newWindow.isReleasedWhenClosed = false
