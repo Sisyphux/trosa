@@ -1027,9 +1027,12 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func gitPushArguments() -> [String] {
-        // This Mac stores the existing GitHub sign-in in Keychain. Be explicit
-        // so a stale GitHub CLI helper cannot block the simple sync button.
-        ["-c", "credential.helper=osxkeychain", "-c", "http.version=HTTP/1.1", "push", "origin", "main"]
+        // GitHub Desktop keeps its signed-in write token in the Keychain item
+        // used for api.github.com. The generic osxkeychain helper does not
+        // resolve that item for this repository, so read it just-in-time for
+        // Git's credential protocol and never write it to disk or the remote.
+        let githubDesktopHelper = "!f() { token=$(/usr/bin/security find-generic-password -w -s 'GitHub - https://api.github.com' 2>/dev/null) || return 1; [ -n \"$token\" ] || return 1; printf 'username=x\\npassword=%s\\n' \"$token\"; }; f"
+        return ["-c", "credential.helper=", "-c", "credential.helper=\(githubDesktopHelper)", "-c", "http.version=HTTP/1.1", "push", "origin", "main"]
     }
 
     private func runWorkbench(_ command: String, completion: ((String) -> Void)? = nil) {

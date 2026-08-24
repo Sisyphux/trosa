@@ -22,7 +22,7 @@ tools/trosa-manager/build-macos-app.sh --install
 - 远程目录浏览、上传、下载、新建目录和 7 天服务器回收站
 
 当 Workbench 因 SSH 不可用而降级到 ECS Session Manager（SSM）模式时，状态读取、服务维护和目录操作会通过短生命周期交互式会话完成；Workbench CLI 原生的文件上传、下载和 Agent 模式在该连接模式下不可用，界面不会把它们误报为成功。
-- Trosa 代码一键“保存并同步上线”：本机 Git 提交 → GitHub 同步 → ECS 发布；GitHub 同步失败时不会更新网站
+- Trosa 代码一键“保存并同步上线”：本机 Git 提交 → 读取 GitHub Desktop 的已登录凭据并同步 GitHub → ECS 发布；GitHub 同步失败时不会更新网站，凭据只在推送进程内存中使用
 - 一致性备份下载到 Mac，并保留 14 天
 
 程序依赖本机已配置的 `workbench`，不会把 Workbench 凭据写入项目或 Git。

@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-24 — 修复服务器工作台的 GitHub 同步失败
+
+- 用户可见变化：工作台“保存并同步上线”和“同步 GitHub”不再因为系统 Git 找不到 GitHub Desktop 的登录凭据而失败；会复用当前 Mac Keychain 中 GitHub Desktop 已登录的写入凭据，成功后再继续 ECS 发布。
+- 安全与数据边界：凭据只由 macOS `security` 在推送进程内存中临时读取，不写入项目、Git 配置、日志、SQLite 或服务器；未找到凭据时仍会停止发布，避免 GitHub 未同步而网站先更新。
+- 数据/依赖影响：不修改 SQLite、客户数据、附件或数据库结构；不新增第三方依赖，继续使用 macOS 自带 Git、Keychain 和 GitHub Desktop 登录状态。
+- 验证：已用当前 GitHub Desktop Keychain 凭据完成一次无改动推送认证；工作台重新构建后会进行 Swift 类型检查、实际 GitHub 推送和 ECS 发布验收。
+
 ## 2026-08-24 — 修复 SSM 模式下的代码发布并明确 GitHub 同步边界
 
 - 用户可见变化：服务器工作台的“保存并同步上线”现在可以在 ECS 不支持 Workbench 非交互式 `exec` 和文件上传时继续发布；云端通过 SSM 交互式会话下载并发布刚推送的 GitHub commit，完成健康检查后再切换正式版本。
