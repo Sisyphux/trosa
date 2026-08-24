@@ -34,7 +34,8 @@ set command_payload $env(TROSA_WORKBENCH_COMMAND_PAYLOAD)
 # Split the completion marker in the sent command so Expect cannot mistake the
 # shell's local echo of the command for the marker produced by the server.
 set command "printf '%s' '$command_payload' | base64 -d | gzip -d | bash; status=\$?; printf 'TROSA_MANAGER_'; printf 'COMMAND_END exit=%s\\n' \$status"
-set send_slow {10 .001}
+set send_slow {1 .003}
+set command_exit 1
 
 spawn $workbench_bin connect --instance-id $instance_id --region $region --user-name root --new
 expect {
@@ -44,12 +45,13 @@ expect {
 }
 send -s -- "$command\r"
 expect {
-    -re {TROSA_MANAGER_COMMAND_END exit=[0-9]+} {}
+    -re {TROSA_MANAGER_COMMAND_END exit=([0-9]+)} { set command_exit $expect_out(1,string) }
     timeout { puts stderr "Timed out waiting for the Workbench command"; exit 1 }
     eof { puts stderr "Workbench session closed before the command completed"; exit 1 }
 }
 send "\004"
 expect eof
+exit $command_exit
 EOF
 else
   "$workbench_bin" exec \
