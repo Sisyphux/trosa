@@ -5,7 +5,7 @@
 - 用户可见变化：服务器工作台的“保存并同步上线”现在可以在 ECS 不支持 Workbench 非交互式 `exec` 和文件上传时继续发布；云端通过 SSM 交互式会话下载并发布刚推送的 GitHub commit，完成健康检查后再切换正式版本。
 - 发布行为：发布对象固定为本地当前 `HEAD` 对应的公开 `Sisyphux/trosa` commit，不包含未提交文件、本地数据库、附件、密钥或 Python 虚拟环境；失败时保留原 release 并自动回退。单独 GitHub Push 仍只同步源码，不直接触发 ECS，避免把“同步成功”误报为“已上线”。
 - 数据/依赖影响：不修改 SQLite、客户数据、附件或数据库结构；SSM 发布路径使用 ECS 现有的 `curl`、`tar`、Python 虚拟环境和 systemd，不新增应用运行时依赖。当前仓库必须保持公开，云端才能在无额外 GitHub Token 的情况下下载 commit 归档。
-- 验证：`publish-workbench.sh`、`run-workbench-command.sh` Shell 语法检查和 Git diff 检查通过；本次提交后将通过真实 SSM 发布并核对 ECS release、应用健康接口和公网健康接口。
+- 验证：`publish-workbench.sh`、`run-workbench-command.sh` Shell 语法检查和 Git diff 检查通过；2026-08-24 已通过真实 SSM 发布，ECS release 为 `20260824032443`，`app=active`、`tunnel=active`、`health=ok`，公网 `/api/network/ping` 返回 `status=ok`。
 
 ## 2026-08-24 — 将 GitHub 项目改名为 trosa
 
