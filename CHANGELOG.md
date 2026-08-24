@@ -1,5 +1,12 @@
 # 变更日志
 
+## 2026-08-24 — 修复 SSM 模式下的代码发布并明确 GitHub 同步边界
+
+- 用户可见变化：服务器工作台的“保存并同步上线”现在可以在 ECS 不支持 Workbench 非交互式 `exec` 和文件上传时继续发布；云端通过 SSM 交互式会话下载并发布刚推送的 GitHub commit，完成健康检查后再切换正式版本。
+- 发布行为：发布对象固定为本地当前 `HEAD` 对应的公开 `Sisyphux/trosa` commit，不包含未提交文件、本地数据库、附件、密钥或 Python 虚拟环境；失败时保留原 release 并自动回退。单独 GitHub Push 仍只同步源码，不直接触发 ECS，避免把“同步成功”误报为“已上线”。
+- 数据/依赖影响：不修改 SQLite、客户数据、附件或数据库结构；SSM 发布路径使用 ECS 现有的 `curl`、`tar`、Python 虚拟环境和 systemd，不新增应用运行时依赖。当前仓库必须保持公开，云端才能在无额外 GitHub Token 的情况下下载 commit 归档。
+- 验证：`publish-workbench.sh`、`run-workbench-command.sh` Shell 语法检查和 Git diff 检查通过；本次提交后将通过真实 SSM 发布并核对 ECS release、应用健康接口和公网健康接口。
+
 ## 2026-08-24 — 将 GitHub 项目改名为 trosa
 
 - 用户可见变化：正式代码仓库已从 `Sisyphux/crm-reminder` 改名为 `Sisyphux/trosa`；原有代码、main 分支和提交历史保留。账号下另一个名为 `-` 的空仓库未改动。

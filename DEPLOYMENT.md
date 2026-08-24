@@ -1,6 +1,18 @@
 # Trade OS 上线指南（家庭服务器 + Cloudflare Tunnel）
 
-云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端仍保持单台主机、单个 SQLite 写入进程；Workbench 只用于受控查看、上传发布包和执行 systemd 运维命令。
+云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端仍保持单台主机、单个 SQLite 写入进程；Workbench 用于受控查看、发布已推送的代码和执行 systemd 运维命令。
+
+## 日常代码发布
+
+当前推荐流程是在服务器工作台的“更新网站”页面点击“保存并同步上线”。它会先把当前修改提交到本地 Git，再推送到 `Sisyphux/trosa`，然后通过 ECS Session Manager（SSM）让云服务器下载并发布同一个 commit，最后检查应用健康状态。这样 GitHub 和正式服务器保持同一版本。
+
+单独执行 `git push` 或使用 GitHub Desktop 的 Push，只会更新 GitHub，不会自动更新 ECS。手动推送后，在同一个本地项目目录运行：
+
+```bash
+deploy/cloud/publish-workbench.sh
+```
+
+该脚本只发布本地 `HEAD` 对应的、已经推送到公开 GitHub 仓库的 commit；它不会发布未提交的文件。当前仓库没有 GitHub Actions 或 Webhook，因此“推送后自动发布”目前指服务器工作台的“保存并同步上线”流程，而不是任意 GitHub Push 事件触发的云端流水线。
 
 当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为阿里云 ECS；应用通过 Cloudflare Tunnel 提供公网入口。公司 Mac 不再运行第二套 Trade OS，只在连接公司网络并取得固定地址 `192.168.0.58` 时，自动提供一个读取云端周报的局域网入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
 
