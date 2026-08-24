@@ -49,7 +49,7 @@ RELEASE_ID='$RELEASE_ID'
 COMMIT_SHA='$COMMIT_SHA'
 GITHUB_REMOTE='$GITHUB_REMOTE'
 ARCHIVE_NAME="trosa-$COMMIT_SHA.tar.gz"
-ARCHIVE_PATH="/tmp/$ARCHIVE_NAME"
+ARCHIVE_PATH="/tmp/\$ARCHIVE_NAME"
 RELEASE_DIR="\$REMOTE_ROOT/releases/\$RELEASE_ID"
 PREVIOUS="\$(readlink -f "\$REMOTE_ROOT/current" 2>/dev/null || true)"
 curl --fail --location --silent --show-error --max-time 180 \
