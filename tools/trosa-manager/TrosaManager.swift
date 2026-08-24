@@ -138,6 +138,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     private let tabs = NSTabView()
     private var overviewTimer: Timer?
     private var overviewRefreshInFlight = false
+    private var hasResourceSnapshot = false
     private let overviewRefreshInterval: TimeInterval = 30
     private let activityIcon = NSImageView()
     private let activityLabel = NSTextField(labelWithString: "准备检查服务器状态")
@@ -418,7 +419,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         let stack = NSStackView(views: [
             heading,
             statusPanel,
-            sectionCaption("服务器资源", "每 30 秒自动检查一次；数值来自服务器本机。"),
+            sectionCaption("服务器资源", "后台每 30 秒更新；数值来自服务器本机。"),
             resourceItems,
             sectionCaption("日常操作", "从这里进入最常用的四件事。"),
             shortcuts,
@@ -930,10 +931,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func applyResourceStatus(_ fields: [String: String]?) {
-        guard let fields else {
-            setResourcesUnavailable(detail: "Workbench 未返回资源数据")
-            return
-        }
+        guard let fields else { return }
 
         let memoryDetail = "\(formattedBytes(fields["mem_used"])) / \(formattedBytes(fields["mem_total"]))"
         let diskDetail = "\(formattedBytes(fields["disk_used"])) / \(formattedBytes(fields["disk_total"]))"
@@ -1082,43 +1080,65 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     private func refreshOverviewIfNeeded() {
         guard tabs.selectedTabViewItem?.label == "概览", view.window?.isVisible != false else { return }
-        refreshOverview()
+        performOverviewRefresh(background: true)
     }
 
     @objc private func refreshOverview() {
+        performOverviewRefresh(background: false)
+    }
+
+    private func performOverviewRefresh(background: Bool) {
         guard !overviewRefreshInFlight else { return }
         overviewRefreshInFlight = true
-        statusLabel.stringValue = "正在检查服务器…"
-        statusLabel.textColor = TrosaPalette.ink
-        statusDetailLabel.stringValue = "正在确认网站、应用、安全连接和主机资源。"
-        checkedAtLabel.stringValue = ""
-        setResourcesLoading()
-        setActivity("正在检查服务器", detail: "通常只需要几秒钟。", tone: TrosaPalette.mist, symbol: "arrow.triangle.2.circlepath")
+        if !background {
+            statusLabel.stringValue = "正在检查服务器…"
+            statusLabel.textColor = TrosaPalette.ink
+            statusDetailLabel.stringValue = "正在确认网站、应用、安全连接和主机资源。"
+            checkedAtLabel.stringValue = ""
+            if !hasResourceSnapshot {
+                setResourcesLoading()
+            }
+            setActivity("正在检查服务器", detail: "通常只需要几秒钟。", tone: TrosaPalette.mist, symbol: "arrow.triangle.2.circlepath")
+        }
         runScript("deploy/cloud/status-workbench.sh") { [weak self] text in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.overviewRefreshInFlight = false
-                self.output(text)
+                if !background || !self.commandSucceeded(text) {
+                    self.output(text)
+                }
                 let managerStatus = self.managerStatus(from: text)
                 let resourceStatus = self.resourceStatus(from: text)
                 let commandOK = self.commandSucceeded(text)
-                self.applyResourceStatus(resourceStatus)
 
                 guard commandOK, let managerStatus else {
                     self.setHealthLabel(self.websiteHealthLabel, text: "无法读取", healthy: false)
                     self.setHealthLabel(self.appHealthLabel, text: "无法读取", healthy: false)
                     self.setHealthLabel(self.tunnelHealthLabel, text: "无法读取", healthy: false)
-                    self.setResourcesUnavailable(detail: "Workbench 未返回服务器状态")
+                    if !self.hasResourceSnapshot {
+                        self.setResourcesUnavailable(detail: "Workbench 未返回服务器状态")
+                    }
                     self.releaseLabel.stringValue = "无法读取"
                     self.deployReleaseLabel.stringValue = "无法读取"
                     self.releaseLabel.textColor = TrosaPalette.danger
                     self.deployReleaseLabel.textColor = TrosaPalette.danger
-                    self.checkedAtLabel.stringValue = "本次检查失败 · 30 秒后自动重试"
+                    self.checkedAtLabel.stringValue = background
+                        ? "本次更新失败 · 保留上次数据 · 30 秒后重试"
+                        : "本次检查失败 · 30 秒后自动重试"
                     self.statusLabel.stringValue = "暂时无法读取服务器"
                     self.statusLabel.textColor = TrosaPalette.danger
-                    self.statusDetailLabel.stringValue = "没有把连接失败判断为服务器停止；请检查 Workbench 连接。"
+                    self.statusDetailLabel.stringValue = background && self.hasResourceSnapshot
+                        ? "连接暂时没有返回新状态；已保留上次资源数值，工作台会继续重试。"
+                        : "没有把连接失败判断为服务器停止；请检查 Workbench 连接。"
                     self.setActivity("无法读取服务器状态", detail: "请检查 Workbench 连接；工作台会自动重试。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle.fill")
                     return
+                }
+
+                if let resourceStatus {
+                    self.applyResourceStatus(resourceStatus)
+                    self.hasResourceSnapshot = true
+                } else if !self.hasResourceSnapshot {
+                    self.setResourcesUnavailable(detail: "Workbench 未返回资源数据")
                 }
 
                 let publicHealthOK = managerStatus["health"] == "ok" || text.contains("\"status\":\"ok\"") || text.contains("\"status\": \"ok\"")
@@ -1137,14 +1157,17 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
                 let formatter = DateFormatter()
                 formatter.locale = Locale(identifier: "zh_CN")
                 formatter.dateFormat = "M 月 d 日 HH:mm"
-                self.checkedAtLabel.stringValue = "上次检查：\(formatter.string(from: Date())) · 每 30 秒自动检查"
+                self.checkedAtLabel.stringValue = "上次更新：\(formatter.string(from: Date())) · 后台每 30 秒更新"
                 if healthy {
-                    self.statusLabel.stringValue = "服务器运行正常"
-                    self.statusLabel.textColor = TrosaPalette.moss
-                    self.statusDetailLabel.stringValue = resourceStatus == nil
-                        ? "Trosa 网站、应用和安全连接都可以正常使用；资源信息未返回。"
-                        : "Trosa 网站、应用、安全连接和主机资源都已读取。"
-                    self.setActivity("一切正常", detail: "网站可以使用，今天无需处理服务器。", tone: TrosaPalette.moss, symbol: "checkmark.circle.fill")
+                    let wasHealthy = self.statusLabel.stringValue == "服务器运行正常"
+                    if !background || !wasHealthy {
+                        self.statusLabel.stringValue = "服务器运行正常"
+                        self.statusLabel.textColor = TrosaPalette.moss
+                        self.statusDetailLabel.stringValue = self.hasResourceSnapshot
+                            ? "Trosa 网站、应用、安全连接和主机资源都可以正常使用。"
+                            : "Trosa 网站、应用和安全连接都可以正常使用；资源信息未返回。"
+                        self.setActivity("一切正常", detail: "网站可以使用，今天无需处理服务器。", tone: TrosaPalette.moss, symbol: "checkmark.circle.fill")
+                    }
                 } else {
                     self.statusLabel.stringValue = "有一项需要检查"
                     self.statusLabel.textColor = TrosaPalette.danger

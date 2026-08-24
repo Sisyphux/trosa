@@ -15,6 +15,7 @@ import signal
 import ssl
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,8 @@ CLIENT_NETWORKS = tuple(
     if item.strip()
 )
 STOP = threading.Event()
+OFFICE_ADDRESS_CHECK_INTERVAL_SECONDS = 2.0
+OFFICE_ADDRESS_GRACE_SECONDS = 20.0
 
 _API_PATHS = (
     re.compile(r"^/api/auth/me$"),
@@ -244,7 +247,19 @@ def main() -> None:
         server.timeout = 2
         print("公司周报入口已开启：http://%s:%s" % (LISTEN_HOST, LISTEN_PORT), flush=True)
         try:
-            while not STOP.is_set() and _office_address_present():
+            # A Wi-Fi/DHCP transition can make one ifconfig poll miss the
+            # address briefly. Keep the read-only listener alive during that
+            # short gap so clients do not see connection refused.
+            last_address_seen = time.monotonic()
+            next_address_check = last_address_seen
+            while not STOP.is_set():
+                now = time.monotonic()
+                if now >= next_address_check:
+                    if _office_address_present():
+                        last_address_seen = now
+                    next_address_check = now + OFFICE_ADDRESS_CHECK_INTERVAL_SECONDS
+                if now - last_address_seen >= OFFICE_ADDRESS_GRACE_SECONDS:
+                    break
                 server.handle_request()
         finally:
             server.server_close()
