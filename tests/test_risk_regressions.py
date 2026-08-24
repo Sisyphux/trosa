@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import io
 import json
 import os
@@ -199,6 +200,44 @@ class CalendarAndAccessTest(unittest.TestCase):
                 os.environ.pop('CRM_INTERNAL_VIEWER_CIDRS', None)
             else:
                 os.environ['CRM_INTERNAL_VIEWER_CIDRS'] = previous_cidrs
+
+    def test_mac_weekly_gateway_token_is_loopback_only_and_read_only(self):
+        token = 'test-weekly-gateway-token-with-sufficient-entropy'
+        previous_digest = os.environ.get('CRM_WEEKLY_GATEWAY_TOKEN_SHA256')
+        os.environ['CRM_WEEKLY_GATEWAY_TOKEN_SHA256'] = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        try:
+            spec = importlib.util.spec_from_file_location('crm_app_weekly_gateway_test', ROOT / 'app.py')
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            client = module.app.test_client()
+            header = {'X-TradeOS-Weekly-Gateway': token}
+
+            entry = client.get('/share/weekly', headers=header, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+            self.assertEqual(entry.status_code, 302)
+            self.assertIn('weekly=1', entry.headers.get('Location', ''))
+            auth = client.get('/api/auth/me', headers=header, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+            self.assertTrue(auth.get_json()['weekly_viewer'])
+            self.assertFalse(auth.get_json()['logged_in'])
+            self.assertEqual(client.get(
+                '/api/weekly-summary', headers=header, environ_base={'REMOTE_ADDR': '127.0.0.1'}
+            ).status_code, 200)
+            self.assertEqual(client.post(
+                '/api/customers', headers=header, environ_base={'REMOTE_ADDR': '127.0.0.1'}, json={}
+            ).status_code, 401)
+
+            external = client.get('/share/weekly', headers=header, environ_base={'REMOTE_ADDR': '8.8.8.8'})
+            self.assertNotIn('weekly=1', external.headers.get('Location', ''))
+            wrong = client.get(
+                '/api/weekly-summary',
+                headers={'X-TradeOS-Weekly-Gateway': 'wrong-token'},
+                environ_base={'REMOTE_ADDR': '127.0.0.1'},
+            )
+            self.assertEqual(wrong.status_code, 401)
+        finally:
+            if previous_digest is None:
+                os.environ.pop('CRM_WEEKLY_GATEWAY_TOKEN_SHA256', None)
+            else:
+                os.environ['CRM_WEEKLY_GATEWAY_TOKEN_SHA256'] = previous_digest
 
     def test_prospecting_integration_token_is_hashed_and_least_privilege(self):
         spec = importlib.util.spec_from_file_location('crm_app_integration_test', ROOT / 'app.py')

@@ -136,6 +136,9 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     private var technicalLogHeight: NSLayoutConstraint?
     private let technicalLogToggle = NSButton(title: "显示技术记录", target: nil, action: nil)
     private let tabs = NSTabView()
+    private var overviewTimer: Timer?
+    private var overviewRefreshInFlight = false
+    private let overviewRefreshInterval: TimeInterval = 30
     private let activityIcon = NSImageView()
     private let activityLabel = NSTextField(labelWithString: "准备检查服务器状态")
     private let activityDetailLabel = NSTextField(labelWithString: "")
@@ -148,6 +151,16 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     private let tunnelHealthLabel = NSTextField(labelWithString: "待检查")
     private let releaseLabel = NSTextField(labelWithString: "正在读取")
     private let deployReleaseLabel = NSTextField(labelWithString: "正在读取")
+    private let cpuUsageLabel = NSTextField(labelWithString: "待检查")
+    private let cpuDetailLabel = NSTextField(labelWithString: "等待状态检查")
+    private let memoryUsageLabel = NSTextField(labelWithString: "待检查")
+    private let memoryDetailLabel = NSTextField(labelWithString: "等待状态检查")
+    private let diskUsageLabel = NSTextField(labelWithString: "待检查")
+    private let diskDetailLabel = NSTextField(labelWithString: "等待状态检查")
+    private let loadLabel = NSTextField(labelWithString: "待检查")
+    private let loadDetailLabel = NSTextField(labelWithString: "等待状态检查")
+    private let uptimeLabel = NSTextField(labelWithString: "待检查")
+    private let uptimeDetailLabel = NSTextField(labelWithString: "等待状态检查")
     private let fileStatusLabel = NSTextField(labelWithString: "请选择一个位置，再点击“打开”读取服务器文件。")
     private let gitStatusLabel = NSTextField(labelWithString: "正在检查本机更新")
     private let backupScheduleLabel = NSTextField(labelWithString: "每天 03:30 自动备份到这台 Mac")
@@ -220,9 +233,20 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        startOverviewTimer()
         refreshOverview()
         refreshLocalBackups()
         refreshGitStatus(showOutput: false)
+    }
+
+    override func viewWillDisappear() {
+        overviewTimer?.invalidate()
+        overviewTimer = nil
+        super.viewWillDisappear()
+    }
+
+    deinit {
+        overviewTimer?.invalidate()
     }
 
     private func makeHeader() -> NSView {
@@ -358,6 +382,18 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         statusStack.spacing = 18
         install(statusStack, in: statusPanel, inset: 18)
 
+        let resourceItems = NSStackView(views: [
+            statusMetric(title: "CPU", detail: "当前使用率", symbol: "cpu", value: cpuUsageLabel, detailValue: cpuDetailLabel),
+            statusMetric(title: "内存", detail: "已使用 / 总量", symbol: "memorychip", value: memoryUsageLabel, detailValue: memoryDetailLabel),
+            statusMetric(title: "磁盘", detail: "根分区使用率", symbol: "internaldrive", value: diskUsageLabel, detailValue: diskDetailLabel),
+            statusMetric(title: "负载", detail: "1 / 5 / 15 分钟", symbol: "chart.line.uptrend.xyaxis", value: loadLabel, detailValue: loadDetailLabel),
+            statusMetric(title: "运行时间", detail: "服务器连续运行", symbol: "clock", value: uptimeLabel, detailValue: uptimeDetailLabel)
+        ])
+        resourceItems.orientation = .horizontal
+        resourceItems.alignment = .top
+        resourceItems.distribution = .fillEqually
+        resourceItems.spacing = 10
+
         let shortcuts = NSStackView(views: [
             quickAction(symbol: "folder.badge.plus", title: "上传客户资料", detail: "Excel、附件和客户文件", buttonTitle: "去上传", action: #selector(showFiles)),
             quickAction(symbol: "folder", title: "管理服务器文件", detail: "查看、下载、整理和回收", buttonTitle: "打开文件", action: #selector(showFiles)),
@@ -379,7 +415,16 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         ])
         maintenanceActions.spacing = 8
 
-        let stack = NSStackView(views: [heading, statusPanel, sectionCaption("日常操作", "从这里进入最常用的四件事。"), shortcuts, maintenanceTitle, maintenanceActions])
+        let stack = NSStackView(views: [
+            heading,
+            statusPanel,
+            sectionCaption("服务器资源", "每 30 秒自动检查一次；数值来自服务器本机。"),
+            resourceItems,
+            sectionCaption("日常操作", "从这里进入最常用的四件事。"),
+            shortcuts,
+            maintenanceTitle,
+            maintenanceActions
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 16
@@ -609,7 +654,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         return stack
     }
 
-    private func statusMetric(title: String, detail: String, symbol: String, value: NSTextField) -> NSView {
+    private func statusMetric(title: String, detail: String, symbol: String, value: NSTextField, detailValue: NSTextField? = nil) -> NSView {
         let panel = makePanel(background: TrosaPalette.paper, cornerRadius: 12)
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
@@ -619,12 +664,13 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = TrosaPalette.ink
-        let detailLabel = NSTextField(wrappingLabelWithString: detail)
+        let detailLabel = detailValue ?? NSTextField(wrappingLabelWithString: detail)
         detailLabel.font = NSFont.systemFont(ofSize: 10)
         detailLabel.textColor = TrosaPalette.mutedInk
         detailLabel.maximumNumberOfLines = 2
         value.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
         value.textColor = TrosaPalette.ochre
+        value.maximumNumberOfLines = 2
         value.lineBreakMode = .byTruncatingMiddle
         let text = NSStackView(views: [titleLabel, value, detailLabel])
         text.orientation = .vertical
@@ -757,7 +803,11 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func commandSucceeded(_ text: String) -> Bool {
-        !text.hasPrefix("命令失败") && !text.hasPrefix("无法执行")
+        if let marker = text.range(of: "TROSA_MANAGER_COMMAND_END exit=") {
+            let code = text[marker.upperBound...].prefix { $0.isNumber }
+            return code == "0"
+        }
+        return !text.hasPrefix("命令失败") && !text.hasPrefix("无法执行")
     }
 
     private func setHealthLabel(_ label: NSTextField, text: String, healthy: Bool) {
@@ -787,13 +837,144 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func managerStatus(from text: String) -> [String: String]? {
-        guard let line = text.split(separator: "\n").first(where: { $0.hasPrefix("TROSA_MANAGER_STATUS ") }) else { return nil }
+        statusFields(from: text, prefix: "TROSA_MANAGER_STATUS ")
+    }
+
+    private func resourceStatus(from text: String) -> [String: String]? {
+        statusFields(from: text, prefix: "TROSA_MANAGER_RESOURCE ")
+    }
+
+    private func statusFields(from text: String, prefix: String) -> [String: String]? {
+        // Workbench's interactive SSM terminal returns CRLF. Swift treats a
+        // CRLF pair as one grapheme cluster, so splitting directly on "\n"
+        // would leave the entire response as one line and hide valid fields.
+        let normalizedText = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalizedText.split(separator: "\n").map {
+            String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let line = lines.first(where: { $0.hasPrefix(prefix) }) else { return nil }
         var values: [String: String] = [:]
         for field in line.split(separator: " ").dropFirst() {
             let parts = field.split(separator: "=", maxSplits: 1).map(String.init)
             if parts.count == 2 { values[parts[0]] = parts[1] }
         }
         return values
+    }
+
+    private func formattedPercent(_ raw: String?) -> String {
+        guard let raw, let number = Double(raw) else { return "—" }
+        return String(format: "%.1f%%", number)
+    }
+
+    private func formattedBytes(_ raw: String?) -> String {
+        guard let raw, let bytes = Int64(raw), bytes >= 0 else { return "—" }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+
+    private func formattedUptime(_ raw: String?) -> String {
+        guard let raw, let totalSeconds = Int64(raw), totalSeconds >= 0 else { return "—" }
+        let days = totalSeconds / 86_400
+        let hours = (totalSeconds % 86_400) / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        if days > 0 { return "\(days) 天 \(hours) 小时" }
+        if hours > 0 { return "\(hours) 小时 \(minutes) 分钟" }
+        if minutes > 0 { return "\(minutes) 分钟" }
+        return "不到 1 分钟"
+    }
+
+    private func statusValue(_ raw: String?) -> String {
+        guard let raw, !raw.isEmpty, raw != "unknown" else { return "—" }
+        return raw
+    }
+
+    private func resourceTone(for raw: String?) -> NSColor {
+        guard let raw, let number = Double(raw) else { return TrosaPalette.mutedInk }
+        if number >= 90 { return TrosaPalette.danger }
+        if number >= 75 { return TrosaPalette.ochre }
+        return TrosaPalette.mist
+    }
+
+    private func setResourceMetric(_ valueLabel: NSTextField, detailLabel: NSTextField, value: String, detail: String, tone: NSColor) {
+        valueLabel.stringValue = value
+        valueLabel.textColor = tone
+        detailLabel.stringValue = detail
+    }
+
+    private func setResourcesLoading() {
+        let metrics: [(NSTextField, NSTextField)] = [
+            (cpuUsageLabel, cpuDetailLabel),
+            (memoryUsageLabel, memoryDetailLabel),
+            (diskUsageLabel, diskDetailLabel),
+            (loadLabel, loadDetailLabel),
+            (uptimeLabel, uptimeDetailLabel)
+        ]
+        for (valueLabel, detailLabel) in metrics {
+            setResourceMetric(valueLabel, detailLabel: detailLabel, value: "读取中", detail: "正在采集服务器数据", tone: TrosaPalette.mist)
+        }
+    }
+
+    private func setResourcesUnavailable(detail: String) {
+        let metrics: [(NSTextField, NSTextField)] = [
+            (cpuUsageLabel, cpuDetailLabel),
+            (memoryUsageLabel, memoryDetailLabel),
+            (diskUsageLabel, diskDetailLabel),
+            (loadLabel, loadDetailLabel),
+            (uptimeLabel, uptimeDetailLabel)
+        ]
+        for (valueLabel, detailLabel) in metrics {
+            setResourceMetric(valueLabel, detailLabel: detailLabel, value: "无法读取", detail: detail, tone: TrosaPalette.danger)
+        }
+    }
+
+    private func applyResourceStatus(_ fields: [String: String]?) {
+        guard let fields else {
+            setResourcesUnavailable(detail: "Workbench 未返回资源数据")
+            return
+        }
+
+        let memoryDetail = "\(formattedBytes(fields["mem_used"])) / \(formattedBytes(fields["mem_total"]))"
+        let diskDetail = "\(formattedBytes(fields["disk_used"])) / \(formattedBytes(fields["disk_total"]))"
+        let loads = [fields["load_1"], fields["load_5"], fields["load_15"]].map(statusValue)
+        let loadText = loads.allSatisfy { $0 != "—" } ? loads.joined(separator: " / ") : "—"
+
+        setResourceMetric(
+            cpuUsageLabel,
+            detailLabel: cpuDetailLabel,
+            value: formattedPercent(fields["cpu_pct"]),
+            detail: "当前使用率",
+            tone: resourceTone(for: fields["cpu_pct"])
+        )
+        setResourceMetric(
+            memoryUsageLabel,
+            detailLabel: memoryDetailLabel,
+            value: formattedPercent(fields["mem_pct"]),
+            detail: memoryDetail,
+            tone: resourceTone(for: fields["mem_pct"])
+        )
+        setResourceMetric(
+            diskUsageLabel,
+            detailLabel: diskDetailLabel,
+            value: formattedPercent(fields["disk_pct"]),
+            detail: diskDetail,
+            tone: resourceTone(for: fields["disk_pct"])
+        )
+        setResourceMetric(
+            loadLabel,
+            detailLabel: loadDetailLabel,
+            value: loadText,
+            detail: "1 / 5 / 15 分钟",
+            tone: TrosaPalette.mist
+        )
+        setResourceMetric(
+            uptimeLabel,
+            detailLabel: uptimeDetailLabel,
+            value: formattedUptime(fields["uptime_seconds"]),
+            detail: "服务器连续运行",
+            tone: TrosaPalette.mist
+        )
     }
 
     @objc private func toggleTechnicalLog() {
@@ -853,11 +1034,8 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
 
     private func runWorkbench(_ command: String, completion: ((String) -> Void)? = nil) {
         guard let config = config() else { return }
-        let arguments = [
-            "exec", "--instance-id", config.instanceID, "--region", config.region,
-            "--user-name", "root", "--command", command
-        ]
-        runLocal(workbenchPath(), arguments, completion: completion)
+        let runner = projectRoot.appendingPathComponent("deploy/cloud/run-workbench-command.sh").path
+        runLocal("/bin/bash", [runner, config.instanceID, config.region, command], completion: completion)
     }
 
     private func runScript(_ relativePath: String, completion: ((String) -> Void)? = nil) {
@@ -890,22 +1068,61 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         }
     }
 
+    private func startOverviewTimer() {
+        overviewTimer?.invalidate()
+        let timer = Timer(timeInterval: overviewRefreshInterval, repeats: true) { [weak self] _ in
+            self?.refreshOverviewIfNeeded()
+        }
+        overviewTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func refreshOverviewIfNeeded() {
+        guard tabs.selectedTabViewItem?.label == "概览", view.window?.isVisible != false else { return }
+        refreshOverview()
+    }
+
     @objc private func refreshOverview() {
+        guard !overviewRefreshInFlight else { return }
+        overviewRefreshInFlight = true
         statusLabel.stringValue = "正在检查服务器…"
         statusLabel.textColor = TrosaPalette.ink
-        statusDetailLabel.stringValue = "正在确认网站、应用和安全连接。"
+        statusDetailLabel.stringValue = "正在确认网站、应用、安全连接和主机资源。"
         checkedAtLabel.stringValue = ""
+        setResourcesLoading()
         setActivity("正在检查服务器", detail: "通常只需要几秒钟。", tone: TrosaPalette.mist, symbol: "arrow.triangle.2.circlepath")
         runScript("deploy/cloud/status-workbench.sh") { [weak self] text in
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.overviewRefreshInFlight = false
                 self.output(text)
                 let managerStatus = self.managerStatus(from: text)
-                let publicHealthOK = managerStatus?["health"] == "ok" || text.contains("\"status\":\"ok\"") || text.contains("\"status\": \"ok\"")
+                let resourceStatus = self.resourceStatus(from: text)
+                let commandOK = self.commandSucceeded(text)
+                self.applyResourceStatus(resourceStatus)
+
+                guard commandOK, let managerStatus else {
+                    self.setHealthLabel(self.websiteHealthLabel, text: "无法读取", healthy: false)
+                    self.setHealthLabel(self.appHealthLabel, text: "无法读取", healthy: false)
+                    self.setHealthLabel(self.tunnelHealthLabel, text: "无法读取", healthy: false)
+                    self.setResourcesUnavailable(detail: "Workbench 未返回服务器状态")
+                    self.releaseLabel.stringValue = "无法读取"
+                    self.deployReleaseLabel.stringValue = "无法读取"
+                    self.releaseLabel.textColor = TrosaPalette.danger
+                    self.deployReleaseLabel.textColor = TrosaPalette.danger
+                    self.checkedAtLabel.stringValue = "本次检查失败 · 30 秒后自动重试"
+                    self.statusLabel.stringValue = "暂时无法读取服务器"
+                    self.statusLabel.textColor = TrosaPalette.danger
+                    self.statusDetailLabel.stringValue = "没有把连接失败判断为服务器停止；请检查 Workbench 连接。"
+                    self.setActivity("无法读取服务器状态", detail: "请检查 Workbench 连接；工作台会自动重试。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle.fill")
+                    return
+                }
+
+                let publicHealthOK = managerStatus["health"] == "ok" || text.contains("\"status\":\"ok\"") || text.contains("\"status\": \"ok\"")
                 let activeCount = text.components(separatedBy: "active (running)").count - 1
-                let appRunning = managerStatus?["app"] == "active" || activeCount >= 1
-                let tunnelRunning = managerStatus?["tunnel"] == "active" || activeCount >= 2
-                let healthy = self.commandSucceeded(text) && publicHealthOK && appRunning && tunnelRunning
+                let appRunning = managerStatus["app"] == "active" || activeCount >= 1
+                let tunnelRunning = managerStatus["tunnel"] == "active" || activeCount >= 2
+                let healthy = publicHealthOK && appRunning && tunnelRunning
                 self.setHealthLabel(self.websiteHealthLabel, text: publicHealthOK ? "可以访问" : "需要检查", healthy: publicHealthOK)
                 self.setHealthLabel(self.appHealthLabel, text: appRunning ? "正在运行" : "需要检查", healthy: appRunning)
                 self.setHealthLabel(self.tunnelHealthLabel, text: tunnelRunning ? "已连接" : "需要检查", healthy: tunnelRunning)
@@ -917,16 +1134,18 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
                 let formatter = DateFormatter()
                 formatter.locale = Locale(identifier: "zh_CN")
                 formatter.dateFormat = "M 月 d 日 HH:mm"
-                self.checkedAtLabel.stringValue = "上次检查：\(formatter.string(from: Date()))"
+                self.checkedAtLabel.stringValue = "上次检查：\(formatter.string(from: Date())) · 每 30 秒自动检查"
                 if healthy {
                     self.statusLabel.stringValue = "服务器运行正常"
                     self.statusLabel.textColor = TrosaPalette.moss
-                    self.statusDetailLabel.stringValue = "Trosa 网站、应用和安全连接都可以正常使用。"
+                    self.statusDetailLabel.stringValue = resourceStatus == nil
+                        ? "Trosa 网站、应用和安全连接都可以正常使用；资源信息未返回。"
+                        : "Trosa 网站、应用、安全连接和主机资源都已读取。"
                     self.setActivity("一切正常", detail: "网站可以使用，今天无需处理服务器。", tone: TrosaPalette.moss, symbol: "checkmark.circle.fill")
                 } else {
                     self.statusLabel.stringValue = "有一项需要检查"
                     self.statusLabel.textColor = TrosaPalette.danger
-                    self.statusDetailLabel.stringValue = "请看下方哪一项显示“需要检查”；必要时打开运行记录。"
+                    self.statusDetailLabel.stringValue = "请看下方哪一项显示“需要检查”；资源数据仍会单独显示。"
                     self.setActivity("服务器需要检查", detail: "已保留技术记录；可先尝试重启 Trosa 应用。", tone: TrosaPalette.danger, symbol: "exclamationmark.triangle.fill")
                 }
             }

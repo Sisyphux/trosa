@@ -20,6 +20,8 @@ sudo systemctl enable --now trade-os cloudflared
 `/var/lib/trade-os`，由 `tradeos` 用户独占写入；Tunnel 凭据只保存在
 `/etc/cloudflared/`，不会进入代码仓库。
 
+公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
+
 日常操作：
 
 ```bash
@@ -29,6 +31,13 @@ deploy/cloud/publish-workbench.sh
 deploy/cloud/rollback-workbench.sh
 deploy/cloud/backup-workbench.sh
 ```
+
+`status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
+`TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、版本以及
+CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
+当目标实例无法通过 SSH 连接、Workbench 降级到 Session Manager（SSM）模式时，脚本会
+通过一次短生命周期的交互式 Shell 读取同样的状态；这是因为 Workbench 的 SSM 模式不支持
+非交互式 `exec`。会话结束后立即关闭，不保留后台终端。
 
 发布前建议先查看状态；发布失败时脚本会自动回退，手动回退使用：
 

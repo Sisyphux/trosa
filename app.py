@@ -135,6 +135,8 @@ _PROSPECTING_INTEGRATION_KEY = 'integration_token:prospecting_lab:hamid'
 # office DHCP/VLAN layouts can change without requiring a code change.
 _INTERNAL_VIEWER_CIDRS_ENV = 'CRM_INTERNAL_VIEWER_CIDRS'
 _INTERNAL_VIEWER_CIDRS_DEFAULT = ''
+_WEEKLY_GATEWAY_TOKEN_HASH_ENV = 'CRM_WEEKLY_GATEWAY_TOKEN_SHA256'
+_WEEKLY_GATEWAY_HEADER = 'X-TradeOS-Weekly-Gateway'
 
 
 def _parse_ip_allowlist(raw_value):
@@ -172,6 +174,29 @@ def _internal_viewer_ip_allowed():
     except ValueError:
         return False
     return any(address in network for network in _INTERNAL_VIEWER_NETWORKS)
+
+
+def _weekly_gateway_token_allowed():
+    """Accept the Mac LAN gateway only through the loopback Tunnel origin.
+
+    The Mac keeps the raw random token in a private local file.  The cloud
+    server stores only its SHA-256 digest.  A direct request to Waitress can
+    never qualify unless it is also coming from the local Tunnel peer.
+    """
+    expected_digest = str(os.environ.get(_WEEKLY_GATEWAY_TOKEN_HASH_ENV, '')).strip().lower()
+    if not re.fullmatch(r'[0-9a-f]{64}', expected_digest):
+        return False
+    try:
+        peer = ipaddress.ip_address((request.remote_addr or '').strip())
+    except ValueError:
+        return False
+    if not peer.is_loopback:
+        return False
+    supplied_token = str(request.headers.get(_WEEKLY_GATEWAY_HEADER) or '').strip()
+    if not supplied_token:
+        return False
+    supplied_digest = hashlib.sha256(supplied_token.encode('utf-8')).hexdigest()
+    return secrets.compare_digest(supplied_digest, expected_digest)
 
 
 def _readonly_viewer_read_path(path):
@@ -517,12 +542,13 @@ def before_request():
     _maintenance_gate.enter_request()
     g._maintenance_gate_entered = True
     """在每个请求前设置当前用户"""
-    # The former public-IP weekly share is retired.  Clearing this legacy
-    # marker prevents an old cookie from bypassing the public login policy.
+    # The former public-IP/cookie share remains retired.  The optional Mac LAN
+    # gateway authenticates every proxied request independently and receives
+    # only the existing read-only weekly permissions.
     session.pop('weekly_viewer', None)
-    g.weekly_viewer = False
+    g.weekly_viewer = _weekly_gateway_token_allowed()
     g.internal_viewer = _internal_viewer_ip_allowed()
-    g.readonly_viewer = g.internal_viewer
+    g.readonly_viewer = g.internal_viewer or g.weekly_viewer
     user = session.get('user', '')
     # This expires browser sessions created before the deliberate PIN reset.
     if _production_mode and user in USERS and session.get('pin_auth_version') != _PIN_STORE_VERSION:
@@ -1424,11 +1450,11 @@ def prospecting_lab_integration_token():
 
 @app.route('/share/weekly', methods=['GET'])
 def shared_weekly_view():
-    """Open the read-only weekly board from the configured office LAN only."""
-    if not getattr(g, 'internal_viewer', False):
+    """Open the read-only weekly board from the office LAN or its Mac gateway."""
+    if not getattr(g, 'readonly_viewer', False):
         # The public hostname must not retain a passwordless exception.  A
-        # browser that reaches this path through Cloudflare is sent to the
-        # normal login shell instead of receiving a viewer session.
+        # normal browser without the private gateway token is sent to the
+        # login shell instead of receiving read-only permissions.
         return redirect(url_for('index'))
     return redirect(url_for('index', weekly='1'))
 

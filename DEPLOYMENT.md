@@ -2,11 +2,12 @@
 
 云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端仍保持单台主机、单个 SQLite 写入进程；Workbench 只用于受控查看、上传发布包和执行 systemd 运维命令。
 
-当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为 Mac；应用通过 Cloudflare Tunnel 提供公网入口，同时在明确配置的公司局域网接口上提供只读会议入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
+当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为阿里云 ECS；应用通过 Cloudflare Tunnel 提供公网入口。公司 Mac 不再运行第二套 Trade OS，只在连接公司网络并取得固定地址 `192.168.0.58` 时，自动提供一个读取云端周报的局域网入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
 
 ## 运行角色
 
-- **主机（当前 Mac）**：唯一允许运行 Trade OS 与写入 `CRM_DB_PATH` 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
+- **主机（当前 ECS）**：唯一允许运行 Trade OS 与写入 `CRM_DB_PATH` 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
+- **公司 Mac**：不保存、不合并、不写入业务数据库；只在公司网络上提供 `http://192.168.0.58:8080` 只读周报入口。
 - **备用机**：保留同版本代码、Python 环境、`cloudflared` 安装与不含密钥的环境模板；平时不启动 Trade OS，不挂载或同步正在使用的数据目录。
 - **备份副本**：每天从主机生成带校验清单的 SQLite 快照，再加密复制到外接 SSD 和一处异地存储。Time Machine 可作为整机恢复补充，不能替代这份可独立校验的业务备份。
 
@@ -14,12 +15,23 @@ SQLite 不支持两台主机同时写同一数据目录。发生主机故障时�
 
 ## 上线前
 
-### 当前 Mac 的正式运行方式
+### 公司局域网只读周报入口
+
+正式应用和 SQLite 全部留在 ECS。公司 Mac 安装 `com.tradeos.weekly-lan` 后会常驻等待网络变化：只有本机真正取得 `192.168.0.58` 时才监听 8080；离开公司、关机或失去该地址后入口自动消失。它只转发应用外壳、周报汇总和周报客户详情，任何写入请求及其他 CRM 接口都在 Mac 和 ECS 两端拒绝。
+
+1. 确认公司路由器将 `192.168.0.58` 固定分配给这台 Mac，且没有把 8080 转发到互联网。
+2. 在 Mac 项目目录执行 `deploy/macos/install-weekly-lan.sh`。首次安装会创建仅本机可读的随机密钥，并输出对应的 SHA-256 摘要。
+3. 将输出的 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256=...` 安全写入 ECS 的 `/etc/trade-os/trade-os.env`，重启 `trade-os`。ECS 只保存摘要，不保存 Mac 使用的原始密钥。
+4. 在非公司网络确认 Mac 不监听 8080；回到公司后从另一台设备打开 `http://192.168.0.58:8080`，确认自动进入本周工作。再验证普通客户接口与 POST 请求均被拒绝。
+
+安装文件位于 `~/Library/Application Support/TradeOS/`，私密配置为 `weekly-lan.env`，日志位于 `logs/weekly-lan.log` 和 `logs/weekly-lan-error.log`。该入口不依赖旧的 `com.tradeos.app`、`com.tradeos.tunnel` 或 `com.tradeos.health`；这三个 Mac 正式服务继续保持禁用，避免与 ECS 双运行。
+
+### 旧 Mac 正式服务（仅用于灾难回退）
 
 当前项目提供 `deploy/macos/` 中的正式运行文件：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于登录后自动启动服务。正式环境安装在 `~/Library/Application Support/TradeOS/runtime/`，避开 macOS 对桌面目录的自动启动限制；原项目的 `data/` 指向该目录中的唯一业务数据。它们只会在最终切换时启用，准备期间继续使用现有本地启动器。
 
 - 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；三位用户的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 `CRM_DB_PATH/system.db`。
-- 公司内网会议入口需要在生产环境文件中设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`（按实际办公室网段调整）。内网 URL 为 `http://<生产 Mac 的局域网 IP>:8080/share/weekly`，只允许读取周报和周报客户详情，不能写入客户数据；路由器不得做端口转发。公网 `https://app.trosa.space` 不再提供免密共享例外，仍需成员账号和访问码。
+- 只有执行灾难回退并让 Mac 再次成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`。ECS 正常运行期间不得启动这套旧服务。
 - 生产服务将唯一业务数据保存在 `~/Library/Application Support/TradeOS/runtime/data/`；项目根目录的 `data/` 仅为指向该位置的链接，不复制、不合并、不创建第二份日常数据库。
 - 日常开发始终在桌面项目目录完成。完成并验证修改后，运行 `deploy/macos/publish-production.sh`，它会同步代码和静态资源、重启正式服务并检查本机健康状态；不会同步或删除 `data/`、私密设置、日志或 Python 运行环境。
 - LaunchAgent 适合当前由 Mac 登录用户持续使用的场景。正式运行时 Mac 需接通电源、保持联网和用户登录。`run-production.sh` 使用 macOS 自带的 `caffeinate -i` 阻止**空闲系统睡眠**，但不阻止显示器熄灭，因此屏幕关闭后本机服务与 Cloudflare Tunnel 仍保持在线。用户从菜单手动选择“睡眠”或机器断电时服务仍会短暂离线；唤醒后健康检查会恢复连接。
