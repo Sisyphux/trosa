@@ -1053,6 +1053,7 @@ final class TrosaManagerViewController: NSViewController, NSTableViewDataSource,
         if panel.runModal() == .OK, let url = panel.url {
             projectRoot = url
             UserDefaults.standard.set(url.path, forKey: "trosa.projectRoot")
+            hasResourceSnapshot = false
             updateProjectLabel()
             setActivity("已切换当前项目", detail: "正在重新读取 Trosa 的服务器与文件状态。", tone: TrosaPalette.mist, symbol: "folder")
             refreshOverview()
