@@ -4,7 +4,7 @@
 
 - 运维变化：状态读取和代码发布的详细脚本现在随每个 GitHub release 一起保存；本地工作台通过 SSM 只发送短命令，让 ECS 下载并执行当前 commit 中的脚本，避免交互式终端承载长脚本时丢失字符。
 - 数据/依赖影响：不修改 SQLite、客户数据、附件或数据库结构；仍使用公开 GitHub commit、ECS 现有 `curl`、`bash`、`tar`、Python 虚拟环境和 systemd。
-- 验证：新增脚本通过 Shell 语法检查；提交后将实际核对状态读取、发布退出码、ECS release 和公网健康接口。
+- 验证：新增脚本通过 Shell 语法检查；已实际完成短命令发布，ECS release 为 `20260824055757`，状态脚本稳定返回 `TROSA_MANAGER_STATUS` 与 `TROSA_MANAGER_RESOURCE`，远端退出码为 0，公网 `/api/network/ping` 返回 `status=ok`。
 
 ## 2026-08-24 — 加固 SSM 长命令发布结果处理
 
