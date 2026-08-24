@@ -29,6 +29,11 @@ case "$GITHUB_REMOTE" in
     ;;
 esac
 
+if [[ ! "$GITHUB_REMOTE" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  printf 'A public GitHub repository URL is required: %s\n' "$GITHUB_REMOTE" >&2
+  exit 1
+fi
+
 if [[ -z "$COMMIT_SHA" || ! "$COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   printf 'Unable to resolve the local HEAD commit.\n' >&2
   exit 1
@@ -36,63 +41,32 @@ fi
 
 case "$RELEASE_ID" in
   ''|*[!A-Za-z0-9._-]*)
-  printf 'Invalid release id: %s\n' "$RELEASE_ID" >&2
-  exit 1
-  ;;
+    printf 'Invalid release id: %s\n' "$RELEASE_ID" >&2
+    exit 1
+    ;;
+esac
+case "$REMOTE_ROOT" in
+  ''|*[!A-Za-z0-9._/-]*)
+    printf 'Invalid remote root: %s\n' "$REMOTE_ROOT" >&2
+    exit 1
+    ;;
+esac
+case "$SERVICE_NAME" in
+  ''|*[!A-Za-z0-9_.@-]*)
+    printf 'Invalid service name: %s\n' "$SERVICE_NAME" >&2
+    exit 1
+    ;;
 esac
 
+# The detailed publisher is part of the exact commit being released. SSM
+# only receives a short command, avoiding input-buffer corruption in its
+# interactive-only terminal mode.
+GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
+REMOTE_SCRIPT_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$COMMIT_SHA/deploy/cloud/publish-remote.sh"
 remote_command=$(cat <<EOF
-set -eu
-REMOTE_ROOT='$REMOTE_ROOT'
-SERVICE_NAME='$SERVICE_NAME'
-RELEASE_ID='$RELEASE_ID'
-COMMIT_SHA='$COMMIT_SHA'
-GITHUB_REMOTE='$GITHUB_REMOTE'
-ARCHIVE_NAME="trosa-$COMMIT_SHA.tar.gz"
-ARCHIVE_PATH="/tmp/\$ARCHIVE_NAME"
-RELEASE_DIR="\$REMOTE_ROOT/releases/\$RELEASE_ID"
-PREVIOUS="\$(readlink -f "\$REMOTE_ROOT/current" 2>/dev/null || true)"
-curl --fail --location --silent --show-error --max-time 180 \
-  "\$GITHUB_REMOTE/archive/\$COMMIT_SHA.tar.gz" \
-  -o "\$ARCHIVE_PATH"
-rm -rf "\$RELEASE_DIR"
-mkdir -p "\$RELEASE_DIR"
-tar -xzf "\$ARCHIVE_PATH" -C "\$RELEASE_DIR" --strip-components=1
-"\$REMOTE_ROOT/venv/bin/pip" install --disable-pip-version-check -r "\$RELEASE_DIR/requirements.txt"
-"\$REMOTE_ROOT/venv/bin/python" -m py_compile \
-  "\$RELEASE_DIR/app.py" "\$RELEASE_DIR/db.py" "\$RELEASE_DIR/scheduler.py" "\$RELEASE_DIR/serve.py"
-chown -R root:root "\$RELEASE_DIR"
-ln -sfn "\$RELEASE_DIR" "\$REMOTE_ROOT/current.next"
-mv -Tf "\$REMOTE_ROOT/current.next" "\$REMOTE_ROOT/current"
-systemctl daemon-reload
-if ! systemctl restart "\$SERVICE_NAME"; then
-  if [ -n "\$PREVIOUS" ]; then
-    ln -sfn "\$PREVIOUS" "\$REMOTE_ROOT/current.next"
-    mv -Tf "\$REMOTE_ROOT/current.next" "\$REMOTE_ROOT/current"
-    systemctl restart "\$SERVICE_NAME" || true
-  fi
-  exit 1
-fi
-healthy=0
-for attempt in \$(seq 1 15); do
-  if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping >/dev/null; then
-    healthy=1
-    break
-  fi
-  sleep 1
-done
-if [ "\$healthy" != 1 ]; then
-  if [ -n "\$PREVIOUS" ]; then
-    ln -sfn "\$PREVIOUS" "\$REMOTE_ROOT/current.next"
-    mv -Tf "\$REMOTE_ROOT/current.next" "\$REMOTE_ROOT/current"
-    systemctl restart "\$SERVICE_NAME" || true
-  fi
-  journalctl -u "\$SERVICE_NAME" -n 80 --no-pager || true
-  exit 1
-fi
-rm -f "\$ARCHIVE_PATH"
-find "\$REMOTE_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -print | sort -r | tail -n +6 | xargs -r rm -rf
-printf 'published %s\n' "\$RELEASE_ID"
+set -euo pipefail
+curl --fail --location --silent --show-error --max-time 60 '$REMOTE_SCRIPT_URL' | \
+  bash -s -- '$REMOTE_ROOT' '$SERVICE_NAME' '$RELEASE_ID' '$COMMIT_SHA' '$GITHUB_REMOTE'
 EOF
 )
 
