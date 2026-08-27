@@ -5769,7 +5769,7 @@ function renderSmartFillPreview(type, result) {
   var websiteStatus = result.website_status === 'read'
     ? '<div class="smart-preview-status success"><strong>官网读取成功' + (pageCount > 1 ? ' · 已读取首页及 ' + (pageCount - 1) + ' 个介绍页面' : '') + '</strong><span>' + escapeHtml(result.website || '') + '</span></div>'
     : result.website_status === 'search_only'
-      ? '<div class="smart-preview-status success"><strong>官网未能直接读取，已使用 Brave Search 公开摘要</strong><span>' + escapeHtml(result.website_error || result.website || '') + '</span></div>'
+      ? '<div class="smart-preview-status success"><strong>官网未能直接读取，已使用 Exa 公开摘要</strong><span>' + escapeHtml(result.website_error || result.website || '') + '</span></div>'
       : '<div class="smart-preview-status error"><strong>' + (result.website_status === 'not_provided' ? '未提供官网' : '官网未能读取') + '</strong><span>' + escapeHtml(result.website_error || '可以继续手动填写公司资料') + '</span></div>';
   function previewField(label, value, key) {
     var source = (result.sources || {})[key] || '待确认';
@@ -5786,7 +5786,9 @@ function renderSmartFillPreview(type, result) {
   var sourceLinks = (result.source_links || []).slice(0, 5).map(function(item) {
     return '<li><a href="' + escapeHtml(item.url || '#') + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(item.title || item.url || '来源页面') + '</a><span>' + escapeHtml(item.snippet || '') + '</span></li>';
   }).join('');
-  var methodNote = result.browser_tools_used ? '动态页面由 browser-tools 读取' : (result.brave_used ? 'Brave Search 已补充公开来源' : '当前未使用外部搜索摘要');
+  var methodNote = result.website_read_method === 'web_fetch_exa'
+    ? '网页正文由 Exa MCP 读取'
+    : (result.browser_tools_used ? '动态页面由 browser-tools 读取' : (result.exa_used ? 'Exa MCP 已补充公开来源' : '当前未使用外部搜索摘要'));
   document.getElementById('smartFillPreviewContent').innerHTML = websiteStatus +
     '<div class="smart-preview-grid">' + previewField('公司', result.name, 'name') +
     previewField('国家 / 地区', result.country, 'country') +
@@ -7329,4 +7331,3 @@ function overviewCloseCustDetail() {
 
 function overviewPrevWeek() { overviewWeekOffset--; loadOverview(); }
 function overviewNextWeek() { overviewWeekOffset++; loadOverview(); }
-

@@ -635,6 +635,8 @@ USER_TABLE_SQL = [
         annual_revenue TEXT DEFAULT '',
         tags TEXT DEFAULT '',
         import_source TEXT DEFAULT 'manual',
+        external_source TEXT DEFAULT '',
+        external_id TEXT DEFAULT '',
         attention_state TEXT DEFAULT '',
         attention_reason TEXT DEFAULT '',
         attention_updated_at TEXT DEFAULT '',
@@ -751,7 +753,28 @@ USER_TABLE_SQL = [
         reply_date TEXT DEFAULT '',
         is_reported INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        external_source TEXT DEFAULT '',
+        external_id TEXT DEFAULT '',
+        external_updated_at TEXT DEFAULT '',
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+    ''',
+    # Idempotency receipts for remote integrations. A client may retry after a
+    # network timeout, so the server must be able to return the original
+    # result without replaying the business mutation.
+    '''
+    CREATE TABLE IF NOT EXISTS integration_sync_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        integration TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL,
+        candidate_id TEXT DEFAULT '',
+        customer_id INTEGER,
+        response_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(integration, idempotency_key),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
     )
     ''',
     # 背调报告
@@ -1047,6 +1070,8 @@ USER_MIGRATIONS = {
         'annual_revenue': "TEXT DEFAULT ''",
         'tags': "TEXT DEFAULT ''",
         'import_source': "TEXT DEFAULT 'manual'",
+        'external_source': "TEXT DEFAULT ''",
+        'external_id': "TEXT DEFAULT ''",
         'attention_state': "TEXT DEFAULT ''",
         'attention_reason': "TEXT DEFAULT ''",
         'attention_updated_at': "TEXT DEFAULT ''",
@@ -1084,6 +1109,9 @@ USER_MIGRATIONS = {
         'recipient_email': "TEXT DEFAULT ''",
         'contact_id': "INTEGER",
         'message_id': "TEXT DEFAULT ''",
+        'external_source': "TEXT DEFAULT ''",
+        'external_id': "TEXT DEFAULT ''",
+        'external_updated_at': "TEXT DEFAULT ''",
     },
     'contacts': {
         'whatsapp': "TEXT DEFAULT ''",
@@ -1282,6 +1310,14 @@ def init_user_tables(user):
                      ON customers(is_deleted, is_pinned DESC, pinned_order ASC, updated_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_customers_active_updated
                      ON customers(is_deleted, updated_at DESC)''')
+        c.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_external_identity
+                     ON customers(external_source, external_id)
+                     WHERE trim(external_source) <> '' AND trim(external_id) <> '' ''')
+        c.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_outreach_external_identity
+                     ON outreach_emails(external_source, external_id)
+                     WHERE trim(external_source) <> '' AND trim(external_id) <> '' ''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_integration_sync_receipts_key
+                     ON integration_sync_receipts(integration, idempotency_key)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_customer_files_customer
                      ON customer_files(customer_id, is_deleted, created_at DESC)''')
         

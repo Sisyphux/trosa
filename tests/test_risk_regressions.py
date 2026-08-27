@@ -1488,7 +1488,7 @@ class SmartWebsiteImportTest(unittest.TestCase):
         with mock.patch.object(module, 'fetch_website_content', return_value=(
             'Central Group acrylic signage distributor in Colombia. Contact hello@centralco.example.',
             {'ok': True, 'pages_read': ['https://centralco.example'], 'read_method': 'direct', 'website_facts': website_facts},
-        )), mock.patch.object(module, 'brave_search', return_value=([], {'enabled': False})), \
+        )), mock.patch.object(module, 'exa_search', return_value=([], {'enabled': False})), \
              mock.patch.object(module, 'quick_chat') as chat:
             response = client.post('/api/customers/smart-import', json={
                 'company': '', 'website': 'https://centralco.example',

@@ -44,7 +44,7 @@ from db import (
 )
 from ical_gen import build_icalendar
 from scheduler import start_scheduler, stop_scheduler, get_scheduler_status, _user_module_enabled
-from app.engine import fetch_website_content, quick_chat, extract_text_from_image, brave_search
+from app.engine import fetch_website_content, quick_chat, extract_text_from_image, exa_search
 from config import EMAIL_VERIFICATION_CONFIG
 
 # ========== 配置 ==========
@@ -128,6 +128,8 @@ _PIN_ATTEMPTS_LOCK = threading.Lock()
 _PIN_STORE_VERSION_KEY = 'auth_pin_store_version'
 _PIN_STORE_VERSION = '2'
 _PROSPECTING_INTEGRATION_KEY = 'integration_token:prospecting_lab:hamid'
+_SELA_SYNC_INTEGRATION = 'sela'
+_SELA_SYNC_SCHEMA_VERSION = 1
 
 # An unauthenticated internal viewer is deliberately narrower than a normal
 # member session.  It is identified from the direct LAN peer address, never
@@ -244,6 +246,11 @@ def _prospecting_integration_user():
         (request.method == 'POST' and re.fullmatch(
             r'/api/customers/\d+/(contacts|outreach)', request.path
         )),
+        (request.method == 'GET' and request.path in {
+            '/api/integrations/sela/health',
+            '/api/integrations/sela/exclusions',
+        }),
+        (request.method == 'POST' and request.path == '/api/integrations/sela/sync'),
     )
     return 'hamid' if any(allowed) else ''
 
@@ -910,6 +917,29 @@ def normalize_website(value):
     return website
 
 
+def _sync_website_domain(value):
+    """Return a host-only website identity for integration matching.
+
+    The normal customer-create path historically used a substring SQL match,
+    so ``acrilicos.com`` incorrectly collided with
+    ``totalacrilicos.com.br``. Integrations must compare canonical hosts, not
+    arbitrary URL text.
+    """
+    website = normalize_website(value)
+    if not website:
+        return ''
+    parsed = urlparse(website if '://' in website else 'https://' + website)
+    host = (parsed.hostname or '').strip().casefold().removeprefix('www.')
+    return host.rstrip('.')
+
+
+def _sync_name_key(value):
+    """Keep company matching aligned with sela's conservative name key."""
+    text = str(value or '').strip().casefold().replace('&', ' and ')
+    text = re.sub(r'\b(incorporated|corporation|company|limited|llc|ltd|inc|co|corp|plc|pty)\b', ' ', text)
+    return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9\u4e00-\u9fff]+', ' ', text)).strip()
+
+
 def _canonical_email(value):
     return (value or '').strip().casefold()
 
@@ -1444,6 +1474,452 @@ def prospecting_lab_integration_token():
     conn.close()
     log_operation('ROTATE', 'integration', details='创建/轮换 Prospecting Lab 集成令牌')
     return jsonify({'success': True, 'enabled': True, 'token': token, 'created_at': now})
+
+
+_SELA_SYNC_OUTREACH_STATUSES = {'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED'}
+
+
+def _sela_sync_now():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _sela_sync_hash(value):
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def _sela_sync_matches(conn, payload):
+    """Resolve one sela candidate using exact, auditable identity keys."""
+    candidate_id = str(payload.get('candidate_id') or '').strip()
+    wanted_name = _sync_name_key(payload.get('company'))
+    wanted_domain = _sync_website_domain(payload.get('website'))
+    wanted_email = _canonical_email((payload.get('contact') or {}).get('email')) \
+        if isinstance(payload.get('contact'), dict) else ''
+
+    rows = [dict(row) for row in conn.execute(
+        "SELECT * FROM customers WHERE (is_deleted=0 OR is_deleted IS NULL)"
+    ).fetchall()]
+    if not rows:
+        return [], ''
+
+    customer_ids = [row['id'] for row in rows]
+    placeholders = ','.join('?' for _ in customer_ids)
+    contact_rows = conn.execute(
+        f"SELECT customer_id, lower(trim(email)) AS email FROM contacts "
+        f"WHERE customer_id IN ({placeholders}) AND trim(COALESCE(email, '')) <> ''",
+        customer_ids,
+    ).fetchall()
+    emails_by_customer = {}
+    for row in contact_rows:
+        emails_by_customer.setdefault(row['customer_id'], set()).add(row['email'])
+
+    external_rows = [
+        row for row in rows
+        if str(row.get('external_source') or '').strip() == _SELA_SYNC_INTEGRATION
+        and str(row.get('external_id') or '').strip() == candidate_id
+    ]
+    if external_rows:
+        if len(external_rows) > 1:
+            return external_rows, 'MULTIPLE_EXTERNAL_LINKS'
+        linked = external_rows[0]
+        actual_domain = _sync_website_domain(linked.get('website'))
+        if wanted_domain and actual_domain and wanted_domain != actual_domain:
+            return [linked], 'EXTERNAL_ID_CONFLICT'
+        linked['matched_by'] = ['external_id']
+        return [linked], ''
+
+    matches = {}
+    for row in rows:
+        methods = []
+        actual_domain = _sync_website_domain(row.get('website'))
+        if wanted_domain and actual_domain and wanted_domain == actual_domain:
+            methods.append('domain')
+        if wanted_name and wanted_name in {
+            _sync_name_key(row.get('company')), _sync_name_key(row.get('name')),
+        }:
+            methods.append('company')
+        # A conflicting known website must not be overridden by a shared or
+        # stale email address. A blank CRM website may still be completed by
+        # the authoritative external identity.
+        if wanted_email and wanted_email in emails_by_customer.get(row['id'], set()) \
+                and (not wanted_domain or not actual_domain or actual_domain == wanted_domain):
+            methods.append('email')
+        if methods:
+            item = dict(row)
+            item['matched_by'] = methods
+            matches[row['id']] = item
+    return list(matches.values()), ''
+
+
+def _sela_sync_contact(conn, customer_id, raw_contact, now):
+    if not isinstance(raw_contact, dict):
+        return []
+    fields = ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin',
+              'preferred_channel', 'contact_type', 'notes')
+    contact = {
+        key: (str(raw_contact.get(key) or '').strip() if key != 'email'
+              else _canonical_email(raw_contact.get(key)))
+        for key in fields
+    }
+    contact['is_primary'] = 1 if raw_contact.get('is_primary', 1) else 0
+    if not any(contact.get(key) for key in fields):
+        return []
+
+    duplicate = None
+    if contact['email']:
+        duplicate = conn.execute(
+            '''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted
+               FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+               WHERE lower(trim(ct.email))=? ORDER BY ct.id LIMIT 1''',
+            (contact['email'],),
+        ).fetchone()
+    if duplicate and duplicate['customer_id'] != customer_id and not duplicate['is_deleted']:
+        return ['CONTACT_EMAIL_ALREADY_ASSIGNED']
+    if duplicate and duplicate['customer_id'] == customer_id:
+        merged = dict(duplicate)
+        for key in fields:
+            if key == 'email':
+                continue
+            if contact.get(key) and not merged.get(key):
+                merged[key] = contact[key]
+        merged['is_primary'] = max(int(merged.get('is_primary') or 0), contact['is_primary'])
+        conn.execute(
+            '''UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?,
+               preferred_channel=?, contact_type=?, is_primary=?, notes=? WHERE id=?''',
+            (merged.get('name') or '', merged.get('title') or '', contact['email'],
+             merged.get('phone') or '', merged.get('whatsapp') or '', merged.get('linkedin') or '',
+             merged.get('preferred_channel') or '', merged.get('contact_type') or 'person',
+             merged['is_primary'], merged.get('notes') or '', duplicate['id']),
+        )
+        return []
+
+    conn.execute(
+        '''INSERT INTO contacts
+           (customer_id, name, title, email, phone, whatsapp, linkedin,
+            preferred_channel, contact_type, is_primary, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (customer_id, contact['name'], contact['title'], contact['email'], contact['phone'],
+         contact['whatsapp'], contact['linkedin'], contact['preferred_channel'],
+         contact['contact_type'] or 'person', contact['is_primary'], contact['notes'], now),
+    )
+    return []
+
+
+def _sela_sync_outreach(conn, customer_id, candidate_id, outreach, now):
+    status = str(outreach.get('status') or '').strip().upper()
+    sent_at = str(outreach.get('sent_at') or '').strip()
+    sent_date = sent_at[:10]
+    status_map = {
+        'BOUNCED': 'bounced',
+        'REPLIED': 'replied',
+        'INTERESTED': 'replied',
+        'NOT_INTERESTED': 'replied',
+        'SENT': 'pending',
+    }
+    reply_status = status_map[status]
+    subject = str(outreach.get('subject') or '').strip()
+    content = str(outreach.get('content') or '')
+    updated_at = str(outreach.get('updated_at') or sent_at or now).strip()
+
+    existing = conn.execute(
+        '''SELECT * FROM outreach_emails
+           WHERE external_source=? AND external_id=? LIMIT 1''',
+        (_SELA_SYNC_INTEGRATION, candidate_id),
+    ).fetchone()
+    if not existing:
+        # Adopt a pre-existing row created by the legacy bridge, so the first
+        # v1 sync does not create a second timeline entry.
+        existing = conn.execute(
+            '''SELECT * FROM outreach_emails
+               WHERE customer_id=? AND subject=? AND substr(sent_date, 1, 10)=?
+               ORDER BY id LIMIT 1''',
+            (customer_id, subject, sent_date),
+        ).fetchone()
+
+    if existing:
+        conn.execute(
+            '''UPDATE outreach_emails
+               SET subject=?, content=?, sent_date=?, reply_status=?,
+                   external_source=?, external_id=?, external_updated_at=?
+               WHERE id=?''',
+            (subject, content, sent_date, reply_status, _SELA_SYNC_INTEGRATION,
+             candidate_id, updated_at, existing['id']),
+        )
+        return int(existing['id'])
+
+    cursor = conn.execute(
+        '''INSERT INTO outreach_emails
+           (customer_id, subject, content, sent_date, reply_status, created_at,
+            external_source, external_id, external_updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (customer_id, subject, content, sent_date, reply_status, now,
+         _SELA_SYNC_INTEGRATION, candidate_id, updated_at),
+    )
+    return int(cursor.lastrowid)
+
+
+@app.route('/api/integrations/sela/health', methods=['GET'])
+@login_required
+def sela_integration_health():
+    """Small authenticated health/readiness probe for the local bridge."""
+    conn = get_db()
+    try:
+        customers = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS updated_at "
+            "FROM customers WHERE (is_deleted=0 OR is_deleted IS NULL)"
+        ).fetchone()
+        outreach = conn.execute(
+            "SELECT COALESCE(MAX(COALESCE(external_updated_at, created_at)), '') AS updated_at "
+            "FROM outreach_emails"
+        ).fetchone()
+    finally:
+        conn.close()
+    version = _sela_sync_hash({
+        'customers': int(customers['count'] or 0),
+        'customers_updated_at': customers['updated_at'] or '',
+        'outreach_updated_at': outreach['updated_at'] or '',
+    })
+    return jsonify({
+        'success': True,
+        'service': 'trosa',
+        'sync_api': 'sela-v1',
+        'schema_version': _SELA_SYNC_SCHEMA_VERSION,
+        'data_version': version,
+        'server_time': _sela_sync_now(),
+    })
+
+
+@app.route('/api/integrations/sela/exclusions', methods=['GET'])
+@login_required
+def sela_integration_exclusions():
+    """Return a compact, deterministic exclusion snapshot with ETag support."""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            '''SELECT c.id, c.name, c.company, c.country, c.website, c.status,
+                      c.customer_type, c.last_contact, c.updated_at,
+                      COALESCE(MAX(o.sent_date), '') AS latest_outreach_date
+               FROM customers c
+               LEFT JOIN outreach_emails o ON o.customer_id=c.id
+               WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)
+               GROUP BY c.id
+               ORDER BY c.id'''
+        ).fetchall()
+    finally:
+        conn.close()
+
+    records = []
+    for row in rows:
+        item = dict(row)
+        # A research-only new prospect is not a hard exclusion until there is
+        # an actual CRM interaction or an explicit existing-customer state.
+        if (str(item.get('customer_type') or '').strip().casefold() == 'new'
+                and str(item.get('status') or '').strip() == '未建联'
+                and not str(item.get('latest_outreach_date') or '').strip()):
+            continue
+        records.append({
+            'id': int(item['id']),
+            'name': str(item.get('name') or ''),
+            'company': str(item.get('company') or ''),
+            'country': str(item.get('country') or ''),
+            'website': str(item.get('website') or ''),
+            'status': str(item.get('status') or ''),
+            'customer_type': str(item.get('customer_type') or ''),
+            'last_contact': str(item.get('last_contact') or ''),
+            'updated_at': str(item.get('updated_at') or ''),
+            'latest_outreach_date': str(item.get('latest_outreach_date') or ''),
+        })
+    version = _sela_sync_hash(records)
+    etag = '"' + version + '"'
+    response_headers = {
+        'ETag': etag,
+        'X-Trosa-Sync-Version': version,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    }
+    supplied_etag = str(request.headers.get('If-None-Match') or '').strip()
+    if supplied_etag in {etag, version}:
+        return Response(status=304, headers=response_headers)
+    body = {
+        'success': True,
+        'service': 'trosa',
+        'sync_api': 'sela-v1',
+        'schema_version': _SELA_SYNC_SCHEMA_VERSION,
+        'data_version': version,
+        'generated_at': _sela_sync_now(),
+        'records': records,
+    }
+    response = Response(json.dumps(body, ensure_ascii=False), mimetype='application/json')
+    for key, value in response_headers.items():
+        response.headers[key] = value
+    return response
+
+
+@app.route('/api/integrations/sela/sync', methods=['POST'])
+@login_required
+def sela_integration_sync():
+    """Atomically apply one confirmed sela outreach event.
+
+    The endpoint is intentionally separate from the human CRUD routes. A
+    client can retry the same event after a lost response; the idempotency
+    receipt and external identities make that retry safe.
+    """
+    if request.content_length and request.content_length > 1024 * 1024:
+        return jsonify({'success': False, 'error': '同步请求过大'}), 413
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': '同步请求必须是 JSON 对象'}), 400
+
+    candidate_id = str(payload.get('candidate_id') or '').strip()
+    idempotency_key = str(
+        request.headers.get('X-Idempotency-Key') or payload.get('idempotency_key') or ''
+    ).strip()
+    body_key = str(payload.get('idempotency_key') or '').strip()
+    if body_key and idempotency_key != body_key:
+        return jsonify({'success': False, 'error': '幂等键不一致'}), 400
+    if not candidate_id or len(candidate_id) > 128 or not idempotency_key or len(idempotency_key) > 200:
+        return jsonify({'success': False, 'error': 'candidate_id 和幂等键不能为空'}), 400
+    outreach = payload.get('outreach')
+    if not isinstance(outreach, dict):
+        return jsonify({'success': False, 'error': '缺少 outreach 事件'}), 400
+    outreach_status = str(outreach.get('status') or '').strip().upper()
+    if outreach_status not in _SELA_SYNC_OUTREACH_STATUSES or not str(outreach.get('sent_at') or '').strip():
+        return jsonify({'success': False, 'error': '只有已确认发送的事件可以同步'}), 400
+    company = str(payload.get('company') or '').strip()
+    if not company:
+        return jsonify({'success': False, 'error': '缺少公司名称'}), 400
+
+    hash_payload = dict(payload)
+    hash_payload.pop('idempotency_key', None)
+    request_hash = _sela_sync_hash(hash_payload)
+    conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        receipt = conn.execute(
+            '''SELECT request_sha256, response_json FROM integration_sync_receipts
+               WHERE integration=? AND idempotency_key=? LIMIT 1''',
+            (_SELA_SYNC_INTEGRATION, idempotency_key),
+        ).fetchone()
+        if receipt:
+            if receipt['request_sha256'] != request_hash:
+                conn.rollback()
+                return jsonify({'success': False, 'error': '幂等键已对应另一份请求'}), 409
+            response_body = json.loads(receipt['response_json'])
+            conn.commit()
+            return jsonify(response_body)
+
+        matches, match_error = _sela_sync_matches(conn, payload)
+        if match_error:
+            conn.rollback()
+            return jsonify({
+                'success': True, 'status': 'REVIEW', 'reason': match_error,
+                'candidate_id': candidate_id,
+            })
+        if len(matches) > 1:
+            conn.rollback()
+            return jsonify({
+                'success': True, 'status': 'REVIEW', 'reason': 'MULTIPLE_TROSA_MATCHES',
+                'candidate_id': candidate_id,
+                'trosa_ids': [int(row['id']) for row in matches],
+            })
+
+        now = _sela_sync_now()
+        created = not matches
+        if created:
+            website = normalize_website(payload.get('website'))
+            cursor = conn.execute(
+                '''INSERT INTO customers
+                   (name, company, country, level, type, website, profile, field,
+                    status, notes, customer_type, tags, import_source,
+                    external_source, external_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (company, company, normalize_country(payload.get('country')), 'C', '', website,
+                 str(payload.get('business_type') or '').strip(), 'PMMA / Acrylic',
+                 '跟进中', f'来源 Run: {str(payload.get("source_run") or "").strip()}',
+                 'existing', 'Sela', 'sela', _SELA_SYNC_INTEGRATION, candidate_id, now, now),
+            )
+            customer_id = int(cursor.lastrowid)
+        else:
+            row = matches[0]
+            customer_id = int(row['id'])
+            owner = str(row.get('external_source') or '').strip()
+            owner_id = str(row.get('external_id') or '').strip()
+            if owner and (owner != _SELA_SYNC_INTEGRATION or owner_id != candidate_id):
+                conn.rollback()
+                return jsonify({
+                    'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_LINKED',
+                    'candidate_id': candidate_id, 'trosa_id': customer_id,
+                })
+            website = normalize_website(payload.get('website'))
+            country = normalize_country(payload.get('country'))
+            conn.execute(
+                '''UPDATE customers
+                   SET website=CASE WHEN COALESCE(website, '')='' THEN ? ELSE website END,
+                       country=CASE WHEN COALESCE(country, '')='' THEN ? ELSE country END,
+                       external_source=?, external_id=?, updated_at=?
+                   WHERE id=?''',
+                (website, country, _SELA_SYNC_INTEGRATION, candidate_id, now, customer_id),
+            )
+
+        warnings = _sela_sync_contact(conn, customer_id, payload.get('contact'), now)
+        source_note = str(payload.get('source_note') or '').strip()[:20000]
+        marker = f'[Sela Candidate ID: {candidate_id}]'
+        if source_note:
+            existing_note = conn.execute(
+                '''SELECT id FROM external_analysis_notes
+                   WHERE customer_id=? AND content LIKE ? LIMIT 1''',
+                (customer_id, marker + '%'),
+            ).fetchone()
+            if not existing_note:
+                conn.execute(
+                    '''INSERT INTO external_analysis_notes
+                       (customer_id, content, source, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?)''',
+                    (customer_id, source_note, _SELA_SYNC_INTEGRATION, now, now),
+                )
+
+        outreach_id = _sela_sync_outreach(conn, customer_id, candidate_id, outreach, now)
+        sent_date = str(outreach.get('sent_at') or '')[:10]
+        conn.execute(
+            '''UPDATE customers SET customer_type='existing',
+               status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END,
+               last_contact=CASE WHEN COALESCE(last_contact, '') < ? THEN ? ELSE last_contact END,
+               updated_at=? WHERE id=?''',
+            (sent_date, sent_date, now, customer_id),
+        )
+        conn.execute(
+            '''INSERT INTO operation_logs (action, target_type, target_id, details, created_at)
+               VALUES (?, ?, ?, ?, ?)''',
+            ('SYNC', 'sela', customer_id, f'sela 幂等同步 candidate {candidate_id}', now),
+        )
+        response_body = {
+            'success': True,
+            'status': 'SYNCED',
+            'schema_version': _SELA_SYNC_SCHEMA_VERSION,
+            'candidate_id': candidate_id,
+            'trosa_id': customer_id,
+            'outreach_id': outreach_id,
+            'created': created,
+            'warnings': warnings,
+            'idempotency_key': idempotency_key,
+        }
+        conn.execute(
+            '''INSERT INTO integration_sync_receipts
+               (integration, idempotency_key, request_sha256, candidate_id,
+                customer_id, response_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (_SELA_SYNC_INTEGRATION, idempotency_key, request_hash, candidate_id,
+             customer_id, json.dumps(response_body, ensure_ascii=False), now, now),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception('sela integration sync failed for candidate %s', candidate_id)
+        return jsonify({'success': False, 'error': '云端同步事务失败，请稍后重试'}), 500
+    finally:
+        conn.close()
+
+    schedule_safety_backup('sela_integration_sync')
+    return jsonify(response_body)
 
 
 # ========== 首页 ==========
@@ -3013,17 +3489,19 @@ def create_customer():
     # Prevent the most expensive duplicate mistakes before writing anything.
     website = normalize_website(data.get('website'))
     data['website'] = website
-    if website:
-        from urllib.parse import urlparse
-        parsed = urlparse(website if '://' in website else 'https://' + website)
-        domain = (parsed.netloc or '').lower().removeprefix('www.')
-        if domain:
-            c.execute("SELECT id, company, name FROM customers WHERE lower(replace(replace(website,'https://',''),'http://','')) LIKE ? AND (is_deleted=0 OR is_deleted IS NULL) LIMIT 1",
-                      (f'%{domain}%',))
-            duplicate = c.fetchone()
-            if duplicate:
-                conn.close()
-                return jsonify({'error': f'网站域名已属于客户：{duplicate["company"] or duplicate["name"]}', 'duplicate_customer_id': duplicate['id']}), 409
+    website_domain = _sync_website_domain(website)
+    if website_domain:
+        existing_websites = c.execute(
+            "SELECT id, company, name, website FROM customers "
+            "WHERE (is_deleted=0 OR is_deleted IS NULL) AND trim(COALESCE(website, '')) <> ''"
+        ).fetchall()
+        duplicate = next(
+            (row for row in existing_websites if _sync_website_domain(row['website']) == website_domain),
+            None,
+        )
+        if duplicate:
+            conn.close()
+            return jsonify({'error': f'网站域名已属于客户：{duplicate["company"] or duplicate["name"]}', 'duplicate_customer_id': duplicate['id']}), 409
     for contact in contacts:
         email = (contact.get('email') or '').strip().lower()
         phone_values = [(contact.get('phone') or '').strip(), (contact.get('whatsapp') or '').strip()]
@@ -6530,7 +7008,7 @@ def smart_import_customer():
               'sources': {}, 'ai_used': False, 'website_read': False,
               'website_status': 'not_provided', 'website_error': '',
               'website_read_method': '', 'website_facts': [], 'source_links': [],
-              'brave_used': False, 'browser_tools_used': False}
+              'exa_used': False, 'browser_tools_used': False}
     domain = ''
     if website_input:
         from urllib.parse import urlparse
@@ -6553,19 +7031,19 @@ def smart_import_customer():
                 result['auto_filled'].append('country')
                 result['sources']['country'] = '域名后缀'
 
-    # Brave is an optional evidence source. It searches the customer's own
+    # Exa is a read-only evidence source. It searches the customer's own
     # domain for public snippets and links; it never writes CRM data.
-    brave_results = []
-    brave_text = ''
+    exa_results = []
+    exa_text = ''
     if domain:
-        brave_results, brave_meta = brave_search(f'site:{domain}', count=5)
-        result['brave_used'] = bool(brave_results)
+        exa_results, exa_meta = exa_search(f'site:{domain}', count=5)
+        result['exa_used'] = bool(exa_results)
         result['source_links'] = [
             {'title': item.get('title', ''), 'url': item.get('url', ''), 'snippet': item.get('snippet', ''), 'age': item.get('age', '')}
-            for item in brave_results
+            for item in exa_results
         ]
-        brave_text = '\n'.join(
-            f"{item.get('title', '')}\n{item.get('snippet', '')}" for item in brave_results
+        exa_text = '\n'.join(
+            f"{item.get('title', '')}\n{item.get('snippet', '')}" for item in exa_results
         ).strip()
     if company_input and not result['field']:
         name_lower = company_input.lower()
@@ -6602,8 +7080,8 @@ def smart_import_customer():
     website_meta = {}
     if result.get('website'):
         web_content, website_meta = fetch_website_content(result['website'], return_meta=True, deep=True)
-        result['website_status'] = 'read' if website_meta.get('ok') else ('search_only' if brave_results else 'error')
-        result['website_error'] = website_meta.get('error_message', '') or ('官网无法直接读取，以下为 Brave Search 公开摘要' if brave_results else '')
+        result['website_status'] = 'read' if website_meta.get('ok') else ('search_only' if exa_results else 'error')
+        result['website_error'] = website_meta.get('error_message', '') or ('官网无法直接读取，以下为 Exa 公开摘要' if exa_results else '')
         result['website_http_status'] = website_meta.get('http_status')
         result['website_pages'] = website_meta.get('pages_read', [])
         result['website_read_method'] = website_meta.get('read_method', '')
@@ -6643,7 +7121,7 @@ def smart_import_customer():
     result['website_read'] = bool(website_meta.get('ok'))
     evidence_text = web_content
     if not evidence_text or len(evidence_text) < 1200:
-        evidence_text = '\n\n'.join(filter(None, [evidence_text, brave_text]))
+        evidence_text = '\n\n'.join(filter(None, [evidence_text, exa_text]))
     if evidence_text:
         email_pattern = r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b'
         emails = list(dict.fromkeys(re.findall(email_pattern, evidence_text)))[:4]
@@ -6656,7 +7134,7 @@ def smart_import_customer():
             if 'email' not in result['auto_filled']:
                 result['auto_filled'].append('email')
 
-    # Use visible website/Brave evidence for country and industry only when the
+    # Use visible website/Exa evidence for country and industry only when the
     # field is empty. These values are labelled as rule-based inferences.
     if not result.get('field'):
         evidence_lower = evidence_text.casefold()
@@ -7777,7 +8255,14 @@ def calendar_refresh():
 
 @app.route('/api/network/ping')
 def network_ping():
-    return jsonify({'status': 'ok', 'message': '服务运行正常'})
+    return jsonify({
+        'status': 'ok',
+        'message': '服务运行正常',
+        # Keep the deployment probe able to verify that the atomic sync
+        # contract—not only the Flask process—is present after a release.
+        'sela_sync_api': 'sela-v1',
+        'sela_sync_schema_version': _SELA_SYNC_SCHEMA_VERSION,
+    })
 
 
 # ========== 系统信息 API ==========

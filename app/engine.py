@@ -19,6 +19,8 @@ from html.parser import HTMLParser
 import requests
 
 
+EXA_MCP_URL = 'https://mcp.exa.ai/mcp'
+EXA_MCP_PROTOCOL_VERSION = '2025-06-18'
 _WEBSITE_SSL_CONTEXT = None
 
 
@@ -655,42 +657,239 @@ def _browser_tools_content(url: str, timeout: int = 30):
     return content, {'attempted': True, 'ok': True, 'url': final_url}
 
 
-def brave_search(query: str, count: int = 5, country: str = 'US', freshness: str = ''):
-    """Search Brave when BRAVE_API_KEY is configured; return only public snippets."""
-    api_key = os.environ.get('BRAVE_API_KEY', '').strip()
-    if not api_key or not query.strip():
-        return [], {'enabled': False, 'error': '未配置 BRAVE_API_KEY'}
-    try:
-        params = {'q': query.strip(), 'count': min(max(int(count), 1), 20), 'country': (country or 'US').upper()}
-        if freshness:
-            params['freshness'] = freshness
-        response = requests.get(
-            'https://api.search.brave.com/res/v1/web/search',
-            params=params,
-            headers={
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip',
-                'X-Subscription-Token': api_key,
-                'User-Agent': 'Trade-OS website enrichment/1.0',
-            },
-            timeout=15,
+def _mcp_response_message(response):
+    """Read the JSON-RPC message from a JSON or Server-Sent Events response."""
+    content_type = (response.headers.get('Content-Type') or '').casefold()
+    if 'json' in content_type:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                return payload
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    messages = []
+    for line in (response.text or '').splitlines():
+        line = line.strip()
+        if not line.startswith('data:'):
+            continue
+        raw = line[5:].strip()
+        if not raw or raw == '[DONE]':
+            continue
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            messages.append(payload)
+    if messages:
+        return messages[-1]
+    raise RuntimeError('Exa MCP 未返回有效的 JSON-RPC 响应')
+
+
+def _exa_mcp_call(tool_name: str, arguments: dict, timeout: int = 20):
+    """Call one read-only Exa MCP tool through its streamable HTTP endpoint."""
+    timeout_seconds = max(5, min(int(timeout), 60))
+    base_headers = {
+        'Accept': 'application/json, text/event-stream',
+        'Content-Type': 'application/json',
+        'MCP-Protocol-Version': EXA_MCP_PROTOCOL_VERSION,
+        'User-Agent': 'Trade-OS Exa MCP client/1.0',
+    }
+    initialize_payload = {
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'initialize',
+        'params': {
+            'protocolVersion': EXA_MCP_PROTOCOL_VERSION,
+            'capabilities': {},
+            'clientInfo': {'name': 'trade-os', 'version': '1.0'},
+        },
+    }
+
+    with requests.Session() as client:
+        initialize_response = client.post(
+            EXA_MCP_URL,
+            headers=base_headers,
+            json=initialize_payload,
+            timeout=timeout_seconds,
         )
-        response.raise_for_status()
-        payload = response.json()
-        results = []
-        for item in ((payload.get('web') or {}).get('results') or [])[:params['count']]:
-            link = str(item.get('url') or '').strip()
-            if not link:
-                continue
-            results.append({
-                'title': str(item.get('title') or '').strip()[:240],
-                'url': link[:1000],
-                'snippet': re.sub(r'\s+', ' ', str(item.get('description') or '')).strip()[:800],
-                'age': str(item.get('age') or item.get('page_age') or '').strip()[:80],
-            })
-        return results, {'enabled': True, 'ok': True}
+        initialize_response.raise_for_status()
+        initialize_message = _mcp_response_message(initialize_response)
+        if initialize_message.get('error'):
+            raise RuntimeError(str(initialize_message['error'])[:240])
+
+        session_id = initialize_response.headers.get('Mcp-Session-Id')
+        if not session_id:
+            raise RuntimeError('Exa MCP 未返回会话 ID')
+
+        session_headers = dict(base_headers)
+        session_headers['Mcp-Session-Id'] = session_id
+        initialized_response = client.post(
+            EXA_MCP_URL,
+            headers=session_headers,
+            json={'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+            timeout=timeout_seconds,
+        )
+        initialized_response.raise_for_status()
+
+        call_response = client.post(
+            EXA_MCP_URL,
+            headers=session_headers,
+            json={
+                'jsonrpc': '2.0',
+                'id': 2,
+                'method': 'tools/call',
+                'params': {'name': tool_name, 'arguments': arguments},
+            },
+            timeout=timeout_seconds,
+        )
+        call_response.raise_for_status()
+        call_message = _mcp_response_message(call_response)
+
+    if call_message.get('error'):
+        raise RuntimeError(str(call_message['error'])[:240])
+    result = call_message.get('result')
+    if not isinstance(result, dict):
+        raise RuntimeError('Exa MCP 返回了无法识别的工具结果')
+    return result
+
+
+def _mcp_text_content(result: dict) -> str:
+    """Join text blocks returned by an MCP tool."""
+    blocks = result.get('content') or []
+    text_blocks = [
+        str(block.get('text') or '').strip()
+        for block in blocks
+        if isinstance(block, dict) and block.get('type') == 'text' and block.get('text')
+    ]
+    return '\n\n'.join(text_blocks).strip()
+
+
+def _parse_exa_search_results(text: str, limit: int):
+    """Normalize Exa's text result blocks into the existing CRM result shape."""
+    pattern = re.compile(
+        r'(?ms)(?:^|\n)Title:\s*(?P<title>[^\n]+)\n'
+        r'URL:\s*(?P<url>https?://[^\s]+)(?P<body>.*?)(?=\nTitle:\s|\Z)'
+    )
+    results = []
+    for match in pattern.finditer(text or ''):
+        link = match.group('url').strip().rstrip('.,);]')
+        body = match.group('body')
+        published_match = re.search(r'(?m)^Published:\s*(.+)$', body)
+        highlights_match = re.search(
+            r'(?ms)^Highlights:\s*(.*?)(?=\n(?:Author|Published|Title|URL):|\Z)',
+            body,
+        )
+        snippet = highlights_match.group(1) if highlights_match else body
+        snippet = re.sub(r'\s+', ' ', snippet).strip()[:800]
+        results.append({
+            'title': match.group('title').strip()[:240],
+            'url': link[:1000],
+            'snippet': snippet,
+            'age': (published_match.group(1).strip() if published_match else '')[:80],
+        })
+        if len(results) >= limit:
+            break
+
+    if results:
+        return results
+
+    # Keep a usable source link if Exa changes its text labels in a future
+    # response format. The raw text is still treated as a snippet only.
+    urls = re.findall(r'''https?://[^\s)\]}>"']+''', text or '')
+    for link in urls[:limit]:
+        results.append({
+            'title': 'Exa web search result',
+            'url': link.rstrip('.,);]')[:1000],
+            'snippet': re.sub(r'\s+', ' ', text or '').strip()[:800],
+            'age': '',
+        })
+    return results
+
+
+def _exa_query_with_filters(query: str, country: str = 'US', freshness: str = '') -> str:
+    """Preserve the old country/freshness intent in Exa's natural-language query."""
+    parts = [query.strip()]
+    if country:
+        parts.append(f'Prefer sources from {(country or "US").upper()}')
+    if freshness:
+        freshness_labels = {
+            'pd': 'published within the past 24 hours',
+            'pw': 'published within the past week',
+            'pm': 'published within the past month',
+            'py': 'published within the past year',
+        }
+        if freshness in freshness_labels:
+            parts.append(freshness_labels[freshness])
+        elif re.fullmatch(r'\d{4}-\d{2}-\d{2}to\d{4}-\d{2}-\d{2}', freshness):
+            start, end = freshness.split('to', 1)
+            parts.append(f'published between {start} and {end}')
+        else:
+            parts.append(f'published within {freshness}')
+    return '; '.join(part for part in parts if part)
+
+
+def exa_search(query: str, count: int = 5, country: str = 'US', freshness: str = ''):
+    """Search public web sources through Exa MCP; return only public snippets."""
+    if not query.strip():
+        return [], {'enabled': False, 'provider': 'exa', 'tool': 'web_search_exa', 'error': '搜索词为空'}
+    search_query = _exa_query_with_filters(query, country, freshness)
+    result_limit = min(max(int(count), 1), 20)
+    try:
+        payload = _exa_mcp_call(
+            'web_search_exa',
+            {'query': search_query, 'numResults': result_limit},
+            timeout=20,
+        )
+        raw_text = _mcp_text_content(payload)
+        results = _parse_exa_search_results(raw_text, result_limit)
+        return results, {
+            'enabled': True,
+            'ok': True,
+            'provider': 'exa',
+            'tool': 'web_search_exa',
+            'query': search_query,
+        }
     except Exception as exc:
-        return [], {'enabled': True, 'ok': False, 'error': str(exc)[:240]}
+        return [], {
+            'enabled': True,
+            'ok': False,
+            'provider': 'exa',
+            'tool': 'web_search_exa',
+            'error': str(exc)[:240],
+        }
+
+
+def exa_fetch(url: str, max_characters: int = 5000, timeout: int = 20):
+    """Read a known public webpage through Exa MCP."""
+    target_url = str(url or '').strip()
+    if not target_url:
+        return '', {'enabled': False, 'provider': 'exa', 'tool': 'web_fetch_exa', 'error': 'URL 为空'}
+    try:
+        payload = _exa_mcp_call(
+            'web_fetch_exa',
+            {
+                'urls': [target_url],
+                'maxCharacters': min(max(int(max_characters), 1), 10000),
+            },
+            timeout=timeout,
+        )
+        content = _mcp_text_content(payload)[:max(1, int(max_characters))]
+        return content, {
+            'enabled': True,
+            'ok': bool(content),
+            'provider': 'exa',
+            'tool': 'web_fetch_exa',
+        }
+    except Exception as exc:
+        return '', {
+            'enabled': True,
+            'ok': False,
+            'provider': 'exa',
+            'tool': 'web_fetch_exa',
+            'error': str(exc)[:240],
+        }
 
 
 def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False, deep: bool = False):
@@ -708,7 +907,7 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
     meta = {
         'ok': False, 'http_status': None, 'error_code': '', 'error_message': '',
         'pages_read': [], 'read_method': 'direct', 'website_facts': {},
-        'browser_tools_attempted': False,
+        'browser_tools_attempted': False, 'exa_attempted': False, 'exa_used': False,
     }
 
     def finish(content):
@@ -761,6 +960,25 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
             return browser_text
         return ''
 
+    def exa_fallback():
+        exa_text, exa_meta = exa_fetch(url, max_characters=5000, timeout=max(timeout, 20))
+        meta['exa_attempted'] = True
+        if exa_text:
+            meta.update(
+                ok=True,
+                read_method='web_fetch_exa',
+                pages_read=[url],
+                website_facts=_extract_website_facts('', exa_text, url),
+                exa_used=True,
+            )
+            return exa_text
+        meta['exa_error'] = exa_meta.get('error', 'Exa MCP 未提取到正文')
+        return ''
+
+    def external_fallback():
+        browser_text = browser_fallback()
+        return browser_text or exa_fallback()
+
     try:
         try:
             clean_text, html_content, status = read_page(url)
@@ -787,7 +1005,7 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
         meta['http_status'] = status
         meta['pages_read'].append(url)
         if not clean_text:
-            browser_text = browser_fallback()
+            browser_text = external_fallback()
             if browser_text:
                 return finish(browser_text)
             meta.update(error_code='empty_content', error_message='网站可以打开，但没有读取到有效正文')
@@ -824,20 +1042,20 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
         combined_text = '\n\n'.join([clean_text[:2600]] + extra_texts)[:5000]
         meta['website_facts'] = _extract_website_facts(html_content + ''.join(extra_html), combined_text, url)
         if deep and len(combined_text.strip()) < 180:
-            browser_text = browser_fallback()
+            browser_text = external_fallback()
             if browser_text:
                 return finish(browser_text)
         meta['ok'] = True
         return finish(combined_text)
 
     except urllib.error.HTTPError as exc:
-        browser_text = browser_fallback()
+        browser_text = external_fallback()
         if browser_text:
             return finish(browser_text)
         meta.update(http_status=exc.code, error_code='http_error', error_message=f'网站返回 HTTP {exc.code}')
         return finish('')
     except urllib.error.URLError as exc:
-        browser_text = browser_fallback()
+        browser_text = external_fallback()
         if browser_text:
             return finish(browser_text)
         reason = str(getattr(exc, 'reason', '') or exc)
@@ -847,13 +1065,13 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
             meta.update(error_code='unreachable', error_message=f'网站无法连接：{reason[:120]}')
         return finish('')
     except TimeoutError:
-        browser_text = browser_fallback()
+        browser_text = external_fallback()
         if browser_text:
             return finish(browser_text)
         meta.update(error_code='timeout', error_message='连接网站超时')
         return finish('')
     except Exception as exc:
-        browser_text = browser_fallback()
+        browser_text = external_fallback()
         if browser_text:
             return finish(browser_text)
         meta.update(error_code='unknown', error_message=f'读取网站失败：{str(exc)[:120]}')
@@ -1005,5 +1223,4 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     conn.commit()
     conn.close()
     return result
-
 

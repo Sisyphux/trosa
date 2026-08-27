@@ -63,7 +63,8 @@ fi
 
 healthy=0
 for attempt in $(seq 1 15); do
-  if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping >/dev/null; then
+  ping_body=$(curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping || true)
+  if printf '%s' "$ping_body" | grep -q '"sela_sync_api"[[:space:]]*:[[:space:]]*"sela-v1"'; then
     healthy=1
     break
   fi

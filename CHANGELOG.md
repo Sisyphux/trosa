@@ -1,5 +1,11 @@
 # 变更日志
 
+## 2026-08-26 — 将网页搜索迁移到 Exa MCP
+
+- 用户可见变化：网页研究 skill 现在通过 Exa MCP 的 `web_search_exa` 搜索网页、通过 `web_fetch_exa` 读取具体页面；原有检索参数映射、研究证据边界和结果输出结构保持不变。Trosa 客户网站识别的公开摘要与正文回退也改用 Exa MCP。
+- 配置/依赖影响：新增 `/Users/luoxin/.codex/skills/exa-search`，在 `~/.codex/config.toml` 注册 `https://mcp.exa.ai/mcp`；移除旧搜索 skill 的本地脚本、npm 依赖和 `BRAVE_API_KEY` 环境变量依赖。不修改 SQLite、客户数据、附件或数据库结构。
+- 验证：`codex mcp get exa --json` 显示 server enabled 且无 token 环境变量；Trosa 51 项 Python 回归测试、Python/JavaScript 语法检查和 Git diff 检查通过；真实端到端调用成功返回 2 条搜索结果，并读取首个网页 1,200 字符。
+
 ## 2026-08-24 — 将服务器工作台源码移出 Trosa 项目
 
 - 项目边界：Mac 原生服务器工作台已移到桌面上的独立项目 `/Users/luoxin/Desktop/Trosa AI OS`；Trosa 网站仓库不再包含 `tools/trosa-manager`。

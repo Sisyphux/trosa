@@ -5,13 +5,20 @@ set -u
 app_status=$(systemctl is-active trade-os 2>/dev/null || true)
 tunnel_status=$(systemctl is-active cloudflared 2>/dev/null || true)
 health_status=down
-if curl --fail --silent --show-error http://127.0.0.1:8080/api/network/ping; then
+sync_api=unknown
+ping_body=$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/api/network/ping 2>/dev/null || true)
+if [ -n "$ping_body" ]; then
   health_status=ok
+  if printf '%s' "$ping_body" | grep -q '"sela_sync_api"[[:space:]]*:[[:space:]]*"sela-v1"'; then
+    sync_api=sela-v1
+  else
+    sync_api=legacy
+  fi
 fi
 release=$(readlink -f /opt/trade-os/current 2>/dev/null || true)
 release=${release##*/}
 if [ -z "$release" ]; then release=none; fi
-printf 'TROSA_MANAGER_STATUS app=%s tunnel=%s health=%s release=%s\n' "$app_status" "$tunnel_status" "$health_status" "$release"
+printf 'TROSA_MANAGER_STATUS app=%s tunnel=%s health=%s sync_api=%s release=%s\n' "$app_status" "$tunnel_status" "$health_status" "$sync_api" "$release"
 
 # Keep the resource line stable and machine-readable so the Mac workbench can
 # present host facts without scraping the human-oriented diagnostic output.
