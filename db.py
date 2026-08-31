@@ -721,6 +721,35 @@ USER_TABLE_SQL = [
         FOREIGN KEY (activity_id) REFERENCES follow_up_logs(id) ON DELETE CASCADE
     )
     ''',
+    # Gmail keeps a durable message-level receipt even when an email cannot
+    # yet be assigned to a customer.  This prevents periodic syncs from
+    # re-creating Inbox work and preserves the exact source message after a
+    # user later confirms its customer in the shared communication flow.
+    '''
+    CREATE TABLE IF NOT EXISTS gmail_message_states (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider_message_id TEXT NOT NULL UNIQUE,
+        provider_thread_id TEXT DEFAULT '',
+        message_time TEXT DEFAULT '',
+        sender_email TEXT DEFAULT '',
+        recipient_emails TEXT DEFAULT '[]',
+        subject TEXT DEFAULT '',
+        customer_id INTEGER,
+        contact_id INTEGER,
+        match_status TEXT NOT NULL DEFAULT 'unmatched'
+            CHECK(match_status IN ('matched', 'unmatched', 'ambiguous', 'ignored', 'error')),
+        activity_id INTEGER,
+        inbox_item_id INTEGER,
+        raw_payload TEXT NOT NULL DEFAULT '{}',
+        last_error TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+        FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
+        FOREIGN KEY (activity_id) REFERENCES follow_up_logs(id) ON DELETE SET NULL,
+        FOREIGN KEY (inbox_item_id) REFERENCES inbox_items(id) ON DELETE SET NULL
+    )
+    ''',
     # 联系人
     '''
     CREATE TABLE IF NOT EXISTS contacts (
@@ -1346,6 +1375,10 @@ def init_user_tables(user):
                      ON follow_up_logs(customer_id, follow_date DESC, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_follow_logs_reported_date
                      ON follow_up_logs(is_reported, follow_date, is_deleted, customer_id)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_gmail_message_states_customer_time
+                     ON gmail_message_states(customer_id, message_time DESC)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_gmail_message_states_status_time
+                     ON gmail_message_states(match_status, updated_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_outreach_customer_date
                      ON outreach_emails(customer_id, sent_date DESC, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_outreach_reported_date

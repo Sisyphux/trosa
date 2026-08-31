@@ -220,6 +220,13 @@ body {
 .chat-agent-compose .form-control { min-width: 0; flex: 1; }
 .chat-agent-compose textarea.form-control { resize: vertical; min-height: 68px; line-height: 1.45; }
 @media (max-width: 720px) { .chat-agent-modal { width: calc(100vw - 20px); } .chat-agent-body { min-height: 260px; } }
+.gmail-integration-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 18px; color: var(--v2-ink-soft); font-size: .82rem; line-height: 1.55; }
+.gmail-integration-state strong { color: var(--v2-ink); font-size: .9rem; }
+.gmail-integration-state > span { grid-column: 1; overflow-wrap: anywhere; }
+.gmail-integration-state > button, .gmail-integration-actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.gmail-integration-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.gmail-integration-unavailable strong, .gmail-integration-error strong { color: var(--v2-ink-soft); }
+@media (max-width: 640px) { .gmail-integration-state { grid-template-columns: 1fr; } .gmail-integration-state > span, .gmail-integration-state > button, .gmail-integration-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; } }
 .sidebar-identity { display: flex; align-items: center; gap: 10px; padding: 14px 10px 0; }
 .sidebar-avatar {
   display: grid;

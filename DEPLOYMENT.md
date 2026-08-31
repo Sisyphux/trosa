@@ -103,6 +103,15 @@ SQLite 不支持两台主机同时写同一数据目录。发生主机故障时�
 
 6. 在 Cloudflare Zero Trust 中创建 Access Application，只允许三位团队成员邮箱，并为 Tunnel 开启“Protect with Access”。应用访问码继续保留，形成两层访问控制。
 
+### Gmail 沟通同步（可选）
+
+Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和 Search 都不依赖它。
+
+1. 在 Google Cloud 创建 OAuth Web application，启用 Gmail API，并将生产回调地址精确配置为 `https://你的域名/api/integrations/gmail/oauth/callback`。
+2. 在 `/etc/trade-os/trade-os.env` 设置 `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET`、`GMAIL_REDIRECT_URI`、`GMAIL_TOKEN_ENCRYPTION_KEY` 和 `GMAIL_SYNC_ENABLED=true`。加密密钥至少 32 个字符，只保存在权限为 600 的环境文件中，不能提交到仓库。
+3. 重启 `trade-os` 后，由每位用户在“设置 → Gmail 沟通同步”自行授权。系统首次按批读取近 90 天邮件，随后默认每 5 分钟执行 Gmail 增量同步；可用 `GMAIL_SYNC_INTERVAL_SECONDS`、`GMAIL_INITIAL_MAX_MESSAGES` 和 `GMAIL_SYNC_MAX_MESSAGES` 调整节奏和每批上限。
+4. 仅现有联系人邮箱的唯一精确匹配才自动写入时间线；无匹配或冲突邮件进入 Inbox，须人工确认客户后才写入。Google 授权失效时，用户需在设置中重新连接。
+
 ## 数据目录
 
 `CRM_DB_PATH` 指向唯一可写的业务数据目录，里面包含用户数据库、系统数据库、导入来源、仓库标识和本地快照。

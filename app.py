@@ -46,6 +46,16 @@ from ical_gen import build_icalendar
 from scheduler import start_scheduler, stop_scheduler, get_scheduler_status, _user_module_enabled
 from app.engine import fetch_website_content, quick_chat, extract_text_from_image, exa_search
 from config import EMAIL_VERIFICATION_CONFIG
+from gmail_sync import (
+    GmailConfigurationError,
+    GmailSyncError,
+    attach_gmail_capture_to_activity,
+    build_authorization_url,
+    complete_oauth_authorization,
+    disconnect_gmail,
+    gmail_status,
+    start_gmail_sync,
+)
 
 # ========== 配置 ==========
 logging.basicConfig(
@@ -1585,6 +1595,82 @@ def prospecting_lab_integration_token():
     return jsonify({'success': True, 'enabled': True, 'token': token, 'created_at': now})
 
 
+# ========== Gmail communication sync ==========
+
+@app.route('/api/integrations/gmail/status', methods=['GET'])
+@login_required
+def gmail_integration_status():
+    """Expose only safe connection metadata for the signed-in user's settings."""
+    return jsonify(gmail_status(g.current_user))
+
+
+@app.route('/api/integrations/gmail/authorize', methods=['GET'])
+@login_required
+def gmail_integration_authorize():
+    """Start a server-side OAuth flow tied to the current browser session."""
+    state = secrets.token_urlsafe(32)
+    session['gmail_oauth_state'] = {
+        'value': state,
+        'user': g.current_user,
+        'expires_at': time.time() + 10 * 60,
+    }
+    try:
+        return redirect(build_authorization_url(state))
+    except GmailConfigurationError as error:
+        session.pop('gmail_oauth_state', None)
+        return jsonify({'error': str(error)}), 503
+
+
+@app.route('/api/integrations/gmail/oauth/callback', methods=['GET'])
+def gmail_integration_callback():
+    """Complete OAuth only when the originating logged-in session still matches."""
+    pending = session.pop('gmail_oauth_state', None)
+    supplied_state = str(request.args.get('state') or '')
+    current_user = getattr(g, 'current_user', '')
+    valid = (
+        isinstance(pending, dict)
+        and pending.get('user') == current_user
+        and pending.get('expires_at', 0) >= time.time()
+        and supplied_state
+        and secrets.compare_digest(str(pending.get('value') or ''), supplied_state)
+    )
+    if not valid:
+        return redirect(url_for('index', gmail='invalid_state'))
+    if request.args.get('error'):
+        return redirect(url_for('index', gmail='denied'))
+    try:
+        complete_oauth_authorization(current_user, request.args.get('code'))
+        # Initial history can be sizable, so it begins in the local worker and
+        # never holds Google’s browser redirect open.
+        start_gmail_sync(current_user, reason='oauth_connect')
+        log_operation('CONNECT', 'gmail_integration', details='连接 Gmail 沟通同步')
+        return redirect(url_for('index', gmail='connected'))
+    except GmailSyncError as error:
+        logger.warning('Gmail OAuth callback failed for %s: %s', current_user, error)
+        return redirect(url_for('index', gmail='failed'))
+
+
+@app.route('/api/integrations/gmail/sync', methods=['POST'])
+@login_required
+def gmail_integration_sync_now():
+    try:
+        result = start_gmail_sync(g.current_user, reason='manual')
+    except GmailConfigurationError as error:
+        return jsonify({'error': str(error)}), 503
+    except GmailSyncError as error:
+        return jsonify({'error': str(error)}), 409
+    return jsonify(result), 202
+
+
+@app.route('/api/integrations/gmail', methods=['DELETE'])
+@login_required
+def gmail_integration_disconnect():
+    disconnect_gmail(g.current_user)
+    _invalidate_derived_caches()
+    log_operation('DISCONNECT', 'gmail_integration', details='停止 Gmail 沟通同步并删除本地授权')
+    return jsonify({'success': True})
+
+
 _SELA_SYNC_OUTREACH_STATUSES = {'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED'}
 
 
@@ -2142,8 +2228,11 @@ def _customer_attention_label(state):
     }.get(state or '', '')
 
 
+_CAPTURE_INBOX_TYPES = frozenset(('browser_capture', 'gmail_capture'))
+
+
 def _inbox_capture_context(raw_content, created_at=''):
-    """Extract explicit browser-capture context without guessing customer identity."""
+    """Extract explicit captured-message context without guessing customer identity."""
     try:
         payload = json.loads(raw_content or '{}')
     except (TypeError, ValueError):
@@ -2174,7 +2263,7 @@ def _inbox_capture_context(raw_content, created_at=''):
     if direction == 'unknown' and directions:
         direction = 'two_way' if len(directions) > 1 or 'two_way' in directions else next(iter(directions))
     channel = str(payload.get('channel') or '').strip()
-    activity_type = 'email' if channel == 'netease' else ('whatsapp' if channel == 'whatsapp' else 'follow_up')
+    activity_type = 'email' if channel in ('netease', 'gmail') else ('whatsapp' if channel == 'whatsapp' else 'follow_up')
     event_date = str(payload.get('end_time') or payload.get('start_time') or (message_dates[-1] if message_dates else '') or created_at or '')[:10]
     content = '\n\n'.join(parts).strip() or str(payload.get('content') or '').strip()
     return {
@@ -2240,7 +2329,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
     ).fetchall()
     for row in rows:
         item = dict(row)
-        capture = _inbox_capture_context(item.get('content'), item.get('created_at')) if item.get('item_type') == 'browser_capture' else {}
+        capture = _inbox_capture_context(item.get('content'), item.get('created_at')) if item.get('item_type') in _CAPTURE_INBOX_TYPES else {}
         reliable_contact = _reliable_customer_contact(cursor, item.get('customer_id')) if item.get('customer_id') else None
         is_recordable = bool(item.get('status') == 'open' and item.get('content'))
         add_context(item['customer_id'], {
@@ -2248,7 +2337,8 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
             'item_type': item.get('item_type') or '', 'title': item.get('title') or '',
             'content': capture.get('content') or (item.get('content') or '')[:240],
             'date': capture.get('date') or (item.get('created_at') or '')[:10],
-            'source': 'browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox',
+            'source': ('gmail' if item.get('item_type') == 'gmail_capture'
+                       else ('browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox')),
             'source_label': capture.get('platform') or ('Inbox 客户回复' if item.get('item_type') == 'customer_reply' else '待归属沟通'),
             'source_url': capture.get('source_url') or '',
             'direction': capture.get('direction') or ('inbound' if item.get('item_type') == 'customer_reply' else 'unknown'),
@@ -4423,13 +4513,14 @@ def get_inbox():
         reliable_contact = _reliable_customer_contact(c, item.get('customer_id')) if item.get('customer_id') else None
         item['contact_id'] = (reliable_contact or {}).get('id')
         item['contact_name'] = (reliable_contact or {}).get('name', '')
-        item['source'] = 'browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox'
+        item['source'] = ('gmail' if item.get('item_type') == 'gmail_capture'
+                          else ('browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox'))
         if item.get('item_type') == 'customer_reply':
             item['direction'] = 'inbound'
             item['activity_type'] = 'customer_reply'
             item['follow_date'] = (item.get('created_at') or '')[:10]
             item['source_label'] = 'Inbox 客户回复'
-        elif item.get('item_type') == 'browser_capture':
+        elif item.get('item_type') in _CAPTURE_INBOX_TYPES:
             capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
             item.update({
                 'capture_content': capture.get('content', ''),
@@ -4440,7 +4531,7 @@ def get_inbox():
                 'capture_platform': capture.get('platform', ''),
                 'capture_source_url': capture.get('source_url', ''),
                 'capture_identity': capture.get('identity', ''),
-                'source_label': capture.get('platform') or capture.get('channel') or '浏览器采集',
+                'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
             })
         items.append(item)
 
@@ -4711,7 +4802,8 @@ def get_inbox():
         if sum(1 for candidate in items if candidate.get('item_type') == 'ai_suggestion') >= 12:
             break
 
-    priority = {'customer_reply': 0, 'browser_capture': 1, 'uncontacted_follow_up': 2, 'new_customer': 3, 'ai_suggestion': 4}
+    priority = {'customer_reply': 0, 'browser_capture': 1, 'gmail_capture': 1,
+                'uncontacted_follow_up': 2, 'new_customer': 3, 'ai_suggestion': 4}
     items.sort(key=lambda item: (priority.get(item.get('item_type'), 9), item.get('created_at') or ''), reverse=False)
     # AI customer recommendations are frozen.  Keep any old rows in storage,
     # but never expose them as actionable Inbox work.
@@ -4719,7 +4811,7 @@ def get_inbox():
     counts = {
         'all': len(items),
         'customer_reply': sum(1 for item in items if item['item_type'] == 'customer_reply'),
-        'browser_capture': sum(1 for item in items if item['item_type'] == 'browser_capture'),
+        'browser_capture': sum(1 for item in items if item['item_type'] in _CAPTURE_INBOX_TYPES),
         'uncontacted_follow_up': sum(1 for item in items if item['item_type'] == 'uncontacted_follow_up'),
         'ai_suggestion': sum(1 for item in items if item['item_type'] == 'ai_suggestion'),
         'new_customer': sum(1 for item in items if item['item_type'] == 'new_customer'),
@@ -7118,16 +7210,17 @@ def record_customer_communication(customer_id, data, before_commit=None):
         inbox_item = None
         inbox_before = None
         if inbox_item_id:
-            inbox_item = c.execute("""SELECT id, customer_id, item_type, status FROM inbox_items
+            inbox_item = c.execute("""SELECT id, customer_id, item_type, status, content, dedupe_key, created_at FROM inbox_items
                                     WHERE id=? AND status='open'
-                                      AND item_type IN ('customer_reply', 'browser_capture')""",
+                                      AND item_type IN ('customer_reply', 'browser_capture', 'gmail_capture')""",
                                    (inbox_item_id,)).fetchone()
             if not inbox_item:
                 raise CrmWriteError('该 Inbox 条目已处理或不存在', 409)
+            inbox_item = dict(inbox_item)
             if inbox_item['item_type'] == 'customer_reply' and inbox_item['customer_id'] != customer_id:
                 raise CrmWriteError('该 Inbox 回复归属不符，请重新选择客户', 409)
-            if inbox_item['item_type'] == 'browser_capture' and inbox_item['customer_id'] not in (None, customer_id):
-                raise CrmWriteError('该浏览器采集已归属其他客户', 409)
+            if inbox_item['item_type'] in ('browser_capture', 'gmail_capture') and inbox_item['customer_id'] not in (None, customer_id):
+                raise CrmWriteError('该待归属沟通已归属其他客户', 409)
             inbox_before = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
         now = _calendar_now_text()
         completed_reminder = c.execute('''SELECT id, title, content, reason, remind_date, reminder_type
@@ -7150,6 +7243,8 @@ def record_customer_communication(customer_id, data, before_commit=None):
                    data.get('contact_id'), completed_reminder_id, data.get('source', 'manual'),
                    1 if data.get('is_reported') else 0, now))
         activity_id = c.lastrowid
+        if inbox_item and inbox_item['item_type'] == 'gmail_capture':
+            attach_gmail_capture_to_activity(c, inbox_item, activity_id, customer_id, data.get('contact_id'))
         if completed_reminder_id:
             c.execute('''UPDATE reminders SET is_done=1, completed_at=?, source_activity_id=?
                          WHERE id=? AND is_done=0''', (now, activity_id, completed_reminder_id))
@@ -7178,7 +7273,7 @@ def record_customer_communication(customer_id, data, before_commit=None):
         understanding = _refresh_customer_understanding(c, customer_id, activity_id, now)
         _resolve_ai_inbox(c, customer_id, now)
         if inbox_item_id:
-            if inbox_item['item_type'] == 'browser_capture' and inbox_item['customer_id'] is None:
+            if inbox_item['item_type'] in _CAPTURE_INBOX_TYPES and inbox_item['customer_id'] is None:
                 c.execute("UPDATE inbox_items SET customer_id=? WHERE id=? AND status='open'", (customer_id, inbox_item_id))
             c.execute("UPDATE inbox_items SET status='resolved', resolved_at=? WHERE id=? AND status='open'",
                       (now, inbox_item_id))

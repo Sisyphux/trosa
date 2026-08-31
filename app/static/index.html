@@ -457,6 +457,10 @@
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
         </div>
+        <div class="card gmail-integration-card" style="margin-bottom:22px;" aria-labelledby="gmailIntegrationTitle">
+          <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>读取已连接 Gmail 的收发邮件；唯一精确邮箱会自动归到客户，其他邮件保留在 Inbox 供你确认。</p></div></div>
+          <div class="card-body" id="gmailIntegrationStatus" aria-live="polite"><div class="settings-help">正在检查 Gmail 连接状态…</div></div>
+        </div>
         <div class="card" id="excelImportSettingsCard" data-module="excel_import" style="margin-bottom:22px;">
           <div class="card-header"><h3>Excel 导入</h3></div>
           <div class="card-body">

@@ -1434,9 +1434,13 @@ function setInboxFilter(filter) {
 
 // 按待办动作/情况分类，不按客户个体平铺。ai_suggestion 按 dedupe_key 里的
 // signal_version 前缀拆成语义子类，其余 item_type 本身就是语义化分类。
+function isInboxCommunicationCapture(item) {
+  return !!item && (item.item_type === 'browser_capture' || item.item_type === 'gmail_capture');
+}
+
 function inboxCategory(item) {
   if (item.item_type === 'customer_reply') return 'new_reply';
-  if (item.item_type === 'browser_capture') return 'capture';
+  if (isInboxCommunicationCapture(item)) return 'capture';
   if (item.item_type === 'uncontacted_follow_up') return 'uncontacted';
   if (item.item_type === 'new_customer') return 'new_customer';
   if (item.item_type === 'ai_suggestion') {
@@ -1561,7 +1565,7 @@ function renderInboxItemHtml(item) {
   var mainAction = '';
   if (item.item_type === 'customer_reply') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
-  } else if (item.item_type === 'browser_capture') {
+  } else if (isInboxCommunicationCapture(item)) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
   } else if (item.item_type === 'ai_suggestion') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="openInboxSuggestionTask(' + customerId + ')">安排下一步</button>';
@@ -1586,8 +1590,8 @@ function renderInboxItemHtml(item) {
   var archive = item.item_type === 'customer_reply' ? '<button class="text-action" onclick="archiveInboxItem(\'' + escapeHtml(item.dedupe_key) + '\',' + customerId + ',\'' + escapeHtml(item.item_type) + '\')">无需记录</button>' : '';
 
   var summaryText = '';
-  if (item.item_type === 'browser_capture') {
-    summaryText = item.capture_content || item.title || '待确认的浏览器沟通';
+  if (isInboxCommunicationCapture(item)) {
+    summaryText = item.capture_content || item.title || '待确认的客户沟通';
   } else if (item.item_type === 'ai_suggestion' || item.item_type === 'uncontacted_follow_up' || item.item_type === 'new_customer') {
     summaryText = item.why_now || item.suggested_action || item.content || item.title || '';
   } else {
@@ -1597,8 +1601,8 @@ function renderInboxItemHtml(item) {
   var detail = '';
   if (expanded) {
     var body = '';
-    if (item.item_type === 'browser_capture') {
-      var captureSource = [item.capture_platform || '浏览器采集', item.capture_channel].filter(Boolean).join(' · ');
+    if (isInboxCommunicationCapture(item)) {
+      var captureSource = [item.capture_platform || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'), item.capture_channel].filter(Boolean).join(' · ');
       body = '<div class="inbox-why">来源：' + escapeHtml(captureSource) + '</div>' +
         '<div class="inbox-evidence">原始对象：' + escapeHtml(item.capture_identity || '未识别') + '</div>' +
         '<p>' + escapeHtml(item.capture_content || item.content || '没有可显示的原文') + '</p>';
@@ -1712,16 +1716,16 @@ async function recordInboxReply(itemId) {
 
 function recordInboxCapture(itemId) {
   var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
-  if (!item || item.item_type !== 'browser_capture') { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); return; }
+  if (!isInboxCommunicationCapture(item)) { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); return; }
   openCommunicationConfirm({
-    source: 'browser_extension', inboxItemId: item.id,
+    source: item.item_type === 'gmail_capture' ? 'gmail' : 'browser_extension', inboxItemId: item.id,
     // A capture can remain open after its identity was reliably resolved.
     // Keep that confirmed context; only genuinely unassigned captures need the picker.
     customerId: item.customer_id || '', customerName: item.customer_company || item.customer_name || '',
     contactId: item.contact_id || '', contactName: item.contact_name || '',
     content: item.capture_content || '', followDate: item.capture_date || '',
     direction: item.capture_direction || 'unknown', activityType: item.capture_activity_type || 'follow_up',
-    sourceLabel: item.capture_platform || item.capture_channel || '浏览器采集',
+    sourceLabel: item.capture_platform || item.capture_channel || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'),
     sourceDetail: item.capture_source_url || item.capture_identity || '',
     subtitle: '原始沟通已带入。请选择客户并核对内容后保存；未确认前不会改变 Inbox。'
   });
@@ -6724,9 +6728,94 @@ async function loadLogs(action) {
 }
 
 // ========== SETTINGS ==========
+function renderGmailIntegrationStatus(status) {
+  var container = document.getElementById('gmailIntegrationStatus');
+  if (!container) return;
+  status = status || {};
+  var state = status.status || (status.connected ? 'connected' : 'not_connected');
+  var html = '';
+  if (!status.configured) {
+    html = '<div class="gmail-integration-state gmail-integration-unavailable"><strong>尚未配置</strong><span>' + escapeHtml(status.configuration_message || '请由维护者完成 Gmail OAuth 与令牌加密配置。') + '</span></div>';
+  } else if (!status.connected) {
+    html = '<div class="gmail-integration-state"><strong>尚未连接 Gmail</strong><span>首次连接默认同步最近 90 天；之后会按新邮件增量读取。</span><button class="btn btn-sm btn-primary" type="button" onclick="connectGmailIntegration()">连接 Gmail</button></div>';
+  } else {
+    var label = state === 'syncing' ? '正在同步…' : (state === 'needs_reconnect' ? '需要重新连接' : (state === 'error' ? '上次同步未完成' : '已连接'));
+    var detail = status.email ? ('账号：' + status.email) : '已连接账号';
+    if (status.last_success_at) detail += ' · 上次成功：' + formatDate(status.last_success_at);
+    if (state === 'syncing') detail += ' · 邮件会在后台逐步写入时间线或 Inbox。';
+    if (status.last_error) detail += ' · ' + status.last_error;
+    var result = status.last_result || {};
+    var counts = [];
+    if (Number(result.matched || 0)) counts.push('已归档 ' + result.matched + ' 封');
+    if (Number(result.unmatched || 0)) counts.push('待归属 ' + result.unmatched + ' 封');
+    if (Number(result.ambiguous || 0)) counts.push('待确认 ' + result.ambiguous + ' 封');
+    if (counts.length) detail += ' · ' + counts.join('，');
+    var syncLabel = state === 'syncing' ? '正在同步' : (state === 'needs_reconnect' ? '重新连接 Gmail' : '现在同步');
+    var action = state === 'needs_reconnect'
+      ? '<button class="btn btn-sm btn-primary" type="button" onclick="connectGmailIntegration()">' + syncLabel + '</button>'
+      : '<button class="btn btn-sm btn-primary" type="button" onclick="syncGmailIntegration()" ' + (state === 'syncing' ? 'disabled' : '') + '>' + syncLabel + '</button>';
+    html = '<div class="gmail-integration-state gmail-integration-' + escapeHtml(state) + '"><strong>' + escapeHtml(label) + '</strong><span>' + escapeHtml(detail) + '</span><div class="gmail-integration-actions">' + action + '<button class="text-action" type="button" onclick="disconnectGmailIntegration()">停止同步</button></div></div>';
+  }
+  container.innerHTML = html;
+  if (state === 'syncing') setTimeout(loadGmailIntegrationStatus, 1800);
+}
+
+async function loadGmailIntegrationStatus() {
+  try {
+    var status = await api('/api/integrations/gmail/status', { skipGlobalSync: true, silentError: true, retryAttempts: 1 });
+    if (status) renderGmailIntegrationStatus(status);
+  } catch (error) {
+    var container = document.getElementById('gmailIntegrationStatus');
+    if (container) container.innerHTML = '<div class="gmail-integration-state gmail-integration-error"><strong>无法读取 Gmail 状态</strong><button class="btn btn-sm" type="button" onclick="loadGmailIntegrationStatus()">重试</button></div>';
+  }
+}
+
+function connectGmailIntegration() {
+  window.location.assign('/api/integrations/gmail/authorize');
+}
+
+async function syncGmailIntegration() {
+  try {
+    var result = await api('/api/integrations/gmail/sync', { method: 'POST', body: JSON.stringify({}), skipGlobalSync: true });
+    if (result && result.already_running) showToast('Gmail 正在同步，请稍候', 'info');
+    else showToast('已开始在后台同步 Gmail', 'success');
+    loadGmailIntegrationStatus();
+  } catch (error) {
+    showToast((error && error.message) || '无法开始 Gmail 同步', 'error');
+  }
+}
+
+async function disconnectGmailIntegration() {
+  if (!await showAppConfirm({ title: '停止 Gmail 同步', message: '将停止读取此账号的新邮件，并删除 Trosa 本地保存的授权令牌；已经归档的沟通记录会保留。', submitLabel: '停止同步', danger: true })) return;
+  try {
+    await api('/api/integrations/gmail', { method: 'DELETE', body: JSON.stringify({}), skipGlobalSync: true });
+    showToast('已停止 Gmail 同步并删除本地授权', 'success');
+    loadGmailIntegrationStatus();
+  } catch (error) {
+    showToast((error && error.message) || '无法停止 Gmail 同步', 'error');
+  }
+}
+
+function showGmailOAuthNotice() {
+  var params = new URLSearchParams(window.location.search);
+  var state = params.get('gmail');
+  if (!state) return;
+  var message = {
+    connected: 'Gmail 已连接，正在后台同步最近邮件。',
+    denied: '未完成 Gmail 授权，尚未读取任何邮件。',
+    invalid_state: 'Gmail 授权已过期或不属于当前登录会话，请重新连接。',
+    failed: 'Gmail 连接未完成，请检查设置后重试。'
+  }[state];
+  if (message) showToast(message, state === 'connected' ? 'success' : 'warning');
+  params.delete('gmail');
+  var query = params.toString();
+  window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
+}
+
 async function loadSettings() {
   if (!userPreferences) await loadUserPreferences();
   renderPersonalSettings();
+  loadGmailIntegrationStatus();
   try {
     var sys = await api('/api/system');
     document.getElementById('systemInfo').innerHTML =
@@ -7374,6 +7463,7 @@ async function showApp() {
   calendarMonth = now.getMonth();
   document.getElementById('dashDate').textContent = formatChineseToday(now);
   switchPage('dashboard');
+  showGmailOAuthNotice();
   loadUserPreferences().then(function(preferences) {
     if (preferences && preferences.default_page && preferences.default_page !== 'dashboard' && currentPage === 'dashboard') switchPage(preferences.default_page);
   }).catch(function(error) { console.warn('偏好设置稍后重试', error); });

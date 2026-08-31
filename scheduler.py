@@ -120,6 +120,15 @@ def _run_email_verification_jobs():
     set_db_user(None)
 
 
+def _run_gmail_sync_jobs():
+    """Kick off bounded, account-scoped Gmail sync workers without blocking APScheduler."""
+    try:
+        from gmail_sync import enqueue_scheduled_gmail_sync
+        enqueue_scheduled_gmail_sync()
+    except Exception:
+        logger.exception('Gmail 定时同步调度失败')
+
+
 def send_windows_notification(title, body):
     """发送 Windows 系统通知（使用 PowerShell）"""
     escaped_title = title.replace("'", "''")
@@ -251,6 +260,31 @@ def start_scheduler():
             seconds=max(10, int(EMAIL_VERIFICATION_CONFIG.get('job_interval_seconds', 30))),
             id='email_verification_worker',
             name='邮箱 SMTP 可发送性验证',
+            replace_existing=True,
+            max_instances=1,
+        )
+
+    # Gmail is optional and is registered only after OAuth credentials and a
+    # token-encryption secret are present. Connected accounts are still
+    # checked individually inside the worker, so one user never unlocks or
+    # reads another user's mailbox.
+    try:
+        from gmail_sync import scheduler_enabled
+        gmail_enabled = scheduler_enabled()
+    except Exception:
+        gmail_enabled = False
+        logger.exception('Gmail 同步配置检查失败')
+    if gmail_enabled:
+        try:
+            gmail_interval = max(60, min(int(os.environ.get('GMAIL_SYNC_INTERVAL_SECONDS', '300')), 3600))
+        except (TypeError, ValueError):
+            gmail_interval = 300
+        scheduler.add_job(
+            func=_run_gmail_sync_jobs,
+            trigger='interval',
+            seconds=gmail_interval,
+            id='gmail_sync_worker',
+            name='Gmail 沟通增量同步',
             replace_existing=True,
             max_instances=1,
         )
