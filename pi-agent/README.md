@@ -1,0 +1,29 @@
+# Trosa Pi Agent runtime
+
+这是 Trosa 聊天入口使用的 Pi 运行时配置，不是 MCP，也不直接访问 SQLite。
+
+`trosa-tools.ts` 是 Pi 扩展：CRM 读写全部走已认证的 `/api/gateway/*`，本地文件只通过受边界保护的只读工具读取。Flask 负责为 Hamid 聊天请求生成隔离的 Pi 会话文件，并从 Pi JSON 事件中提取最终回复和 action id/Undo 信息。
+
+## 运行时配置
+
+- `TROSA_PI_AGENT_ENABLED=true`：启用聊天入口的 Pi runtime；未设置时保留受限本地回退。
+- `TROSA_PI_EXECUTABLE=/usr/local/bin/pi`：Pi 可执行文件绝对路径，默认从 PATH 查找。
+- `TROSA_PI_PROVIDER=deepseek`、`TROSA_PI_MODEL=deepseek/deepseek-v4-flash`：模型选择。密钥由 Pi 的认证文件或对应 provider 的环境变量提供，不写入仓库。
+- `TROSA_PI_HOME=/var/lib/trade-os/pi-home`：可选的 Pi 认证/缓存目录。ECS 的 systemd 启用了 `ProtectHome`，生产环境应把 Pi 的认证文件放在这个由 `tradeos` 用户独占的目录，而不是用户家目录。
+- `TROSA_PI_SESSION_DIR=/var/lib/trade-os/pi-sessions`：Pi 会话目录，由 `tradeos` 用户独占。
+- `TROSA_PI_WORKFILES_ROOT=`：可选的只读本地工作文件夹；留空时 Pi 不会看到本地文件工具。
+- `TROSA_GATEWAY_URL=http://127.0.0.1:8080`、`TROSA_GATEWAY_TOKEN=`：Hamid 绑定且至少拥有 `crm:read,crm:write` 的 personal access token。只放在服务环境文件中，绝不写入 Git。
+
+## 本地验证
+
+```bash
+TROSA_PI_AGENT_ENABLED=true \
+TROSA_GATEWAY_URL=http://127.0.0.1:8080 \
+TROSA_PI_MODEL=deepseek/deepseek-v4-flash \
+pi --mode json --no-builtin-tools --no-context-files --no-extensions \
+  -e ./pi-agent/trosa-tools.ts \
+  --system-prompt "$(<./pi-agent/system-prompt.md)" \
+  -p "我今天有什么要做？"
+```
+
+生产安装必须由维护者在 ECS 上安装已验证的 Pi 版本（本轮验证为 `0.84.1`）与对应 Node.js，并将上述私密变量安全写入 `/etc/trade-os/trade-os.env`；本仓库发布脚本不会上传密钥或正式数据。Pi 子进程不会继承该服务的全部环境变量，只接收所选模型的凭证、Gateway token 和上述受限路径。

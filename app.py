@@ -6111,6 +6111,187 @@ def _chat_operation(label, action):
     return {'label': label, 'action_id': action.get('id', ''), 'undo_available': bool(action.get('id'))}
 
 
+_PI_AGENT_CALL_LOCK = threading.Lock()
+
+
+def _pi_runtime_environment(gateway_token, request_id):
+    """Build a least-privilege environment for the external Pi process.
+
+    The web service environment also contains session, integration and backup
+    secrets that Pi never needs.  Keep only runtime basics, the selected model
+    credential (when one is configured), and the explicit Trosa tool boundary.
+    """
+    environment = {}
+    for name in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+                 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'NODE_PATH', 'NPM_CONFIG_PREFIX'):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    pi_home = str(os.environ.get('TROSA_PI_HOME') or os.environ.get('HOME') or '').strip()
+    if pi_home:
+        environment['HOME'] = pi_home
+    provider = str(os.environ.get('TROSA_PI_PROVIDER') or 'deepseek').strip().lower()
+    provider_credentials = {
+        'deepseek': ('DEEPSEEK_API_KEY',),
+        'openai': ('OPENAI_API_KEY',),
+        'anthropic': ('ANTHROPIC_API_KEY',),
+        'google': ('GOOGLE_API_KEY', 'GEMINI_API_KEY'),
+        'gemini': ('GOOGLE_API_KEY', 'GEMINI_API_KEY'),
+        'openrouter': ('OPENROUTER_API_KEY',),
+        'dashscope': ('DASHSCOPE_API_KEY',),
+        'qwen': ('DASHSCOPE_API_KEY',),
+        'zhipu': ('ZHIPU_API_KEY',),
+    }
+    for name in provider_credentials.get(provider, ()):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    environment.update({
+        'TROSA_GATEWAY_URL': str(os.environ.get('TROSA_GATEWAY_URL') or 'http://127.0.0.1:8080').strip().rstrip('/'),
+        'TROSA_GATEWAY_TOKEN': gateway_token,
+        'TROSA_PI_REQUEST_ID': request_id,
+        'TROSA_WORKFILES_ROOT': str(os.environ.get('TROSA_PI_WORKFILES_ROOT') or '').strip(),
+    })
+    return environment
+
+
+def _pi_agent_enabled():
+    """Return whether the Hamid chat route may invoke the real Pi runtime."""
+    return str(os.environ.get('TROSA_PI_AGENT_ENABLED', '')).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _pi_agent_session_path():
+    """Create a private, per-browser Pi session file path."""
+    session_id = session.get('trosa_pi_session_id')
+    if not isinstance(session_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', session_id):
+        session_id = secrets.token_urlsafe(24)
+        session['trosa_pi_session_id'] = session_id
+    session_dir = os.path.abspath(os.path.expanduser(
+        os.environ.get('TROSA_PI_SESSION_DIR') or os.path.join(DB_DIR, 'pi-sessions')
+    ))
+    os.makedirs(session_dir, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(session_dir, 0o700)
+    except OSError:
+        pass
+    return os.path.join(session_dir, f'hamid-{session_id}.jsonl')
+
+
+def _pi_message_text(message):
+    """Extract only user-facing text blocks from a Pi message/event."""
+    if not isinstance(message, dict):
+        return ''
+    content = message.get('content')
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ''
+    return '\n'.join(str(item.get('text') or '').strip() for item in content
+                     if isinstance(item, dict) and item.get('type') == 'text' and item.get('text')).strip()
+
+
+def _parse_pi_json_events(stdout):
+    """Parse Pi JSON-mode output without leaking raw model/tool diagnostics."""
+    assistant_text = ''
+    operations = []
+    seen_actions = set()
+    error_message = ''
+    for raw_line in str(stdout or '').splitlines():
+        try:
+            event = json.loads(raw_line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if event.get('type') == 'message_end':
+            message = event.get('message') or {}
+            if message.get('role') == 'assistant':
+                assistant_text = _pi_message_text(message) or assistant_text
+                if message.get('stopReason') == 'error' and message.get('errorMessage'):
+                    error_message = str(message['errorMessage'])[:200]
+        elif event.get('type') == 'tool_execution_end':
+            result = event.get('result') or {}
+            details = result.get('details') if isinstance(result, dict) else {}
+            if not isinstance(details, dict):
+                details = {}
+            action_id = str(details.get('action_id') or '').strip()
+            if action_id and action_id not in seen_actions:
+                seen_actions.add(action_id)
+                operations.append({
+                    'label': str(details.get('action_label') or details.get('action_type') or '已完成 CRM 操作'),
+                    'action_id': action_id,
+                    'undo_available': details.get('undo_available', True) is not False,
+                })
+    return assistant_text, operations, error_message
+
+
+def _run_pi_agent(message, request_id='', context=None):
+    """Run one Pi turn with only Trosa/file tools and return a chat payload.
+
+    Pi is intentionally a subprocess boundary.  The Flask process never gives
+    it a database path or a general shell tool; the extension calls the
+    authenticated Gateway over loopback and enforces the configured file root.
+    """
+    executable = str(os.environ.get('TROSA_PI_EXECUTABLE') or '').strip() or shutil.which('pi')
+    extension = os.path.abspath(os.environ.get(
+        'TROSA_PI_EXTENSION', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pi-agent', 'trosa-tools.ts')
+    ))
+    prompt_path = os.path.abspath(os.environ.get(
+        'TROSA_PI_SYSTEM_PROMPT', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pi-agent', 'system-prompt.md')
+    ))
+    gateway_token = str(os.environ.get('TROSA_PI_GATEWAY_TOKEN') or os.environ.get('TROSA_GATEWAY_TOKEN') or '').strip()
+    if not executable or not os.path.isfile(extension) or not os.path.isfile(prompt_path):
+        return {'reply': '真实智能助理尚未安装完成；当前没有执行任何 CRM 修改。', 'operations': []}, 503
+    if not gateway_token:
+        return {'reply': '真实智能助理尚未接通 Trosa 工作区；当前没有执行任何 CRM 修改。', 'operations': []}, 503
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as handle:
+            system_prompt = handle.read()
+    except OSError:
+        return {'reply': '智能助理配置暂时不可用；当前没有执行任何 CRM 修改。', 'operations': []}, 503
+
+    context = context if isinstance(context, dict) else {}
+    context_hint = ''
+    if context.get('customer_name'):
+        context_hint = f"\n当前聊天的短期线索是客户“{str(context['customer_name'])[:120]}”；如需写入，仍必须重新通过工具确认客户身份。"
+    if context.get('last_action_id'):
+        context_hint += f"\n最近一次可撤销操作 action id 为 {str(context['last_action_id'])[:100]}；只有用户明确要求撤销时才使用。"
+    user_prompt = str(message or '').strip() + context_hint
+    request_id = str(request_id or secrets.token_urlsafe(16)).strip()[:160]
+    env = _pi_runtime_environment(gateway_token, request_id)
+    command = [
+        executable, '--mode', 'json', '--no-builtin-tools', '--no-context-files', '--no-extensions',
+        '-e', extension,
+        '--provider', str(os.environ.get('TROSA_PI_PROVIDER') or 'deepseek').strip(),
+        '--model', str(os.environ.get('TROSA_PI_MODEL') or 'deepseek/deepseek-v4-flash').strip(),
+        '--session', _pi_agent_session_path(),
+        '--system-prompt', system_prompt,
+        '-p', user_prompt,
+    ]
+    try:
+        timeout = max(15, min(int(os.environ.get('TROSA_PI_TIMEOUT_SECONDS', '150')), 300))
+    except (TypeError, ValueError):
+        timeout = 150
+    try:
+        with _PI_AGENT_CALL_LOCK:
+            completed = subprocess.run(command, cwd=os.path.dirname(os.path.abspath(__file__)), env=env,
+                                       capture_output=True, text=True, encoding='utf-8', errors='replace',
+                                       timeout=timeout, check=False)
+    except subprocess.TimeoutExpired:
+        return {'reply': '智能助理响应超时，当前没有执行任何未报告的 CRM 修改。请稍后重试。', 'operations': []}, 504
+    except OSError:
+        return {'reply': '智能助理运行时暂时不可用，当前没有执行任何 CRM 修改。', 'operations': []}, 503
+
+    reply, operations, runtime_error = _parse_pi_json_events(completed.stdout)
+    if not reply:
+        if operations:
+            reply = '已完成请求中的 CRM 操作。'
+        elif runtime_error or completed.returncode:
+            reply = '智能助理暂时无法完成这次请求，当前没有保存未报告的 CRM 修改。请稍后重试。'
+        else:
+            reply = '智能助理没有返回可用结果，当前没有执行任何 CRM 修改。'
+    status = 200 if completed.returncode == 0 and reply else 502
+    return {'reply': reply, 'operations': operations, 'candidates': []}, status
+
+
 @app.route('/api/chat/agent', methods=['POST'])
 @login_required
 def chat_agent():
@@ -6127,6 +6308,18 @@ def chat_agent():
         return jsonify({'error': '请求标识无效'}), 400
     lowered = message.casefold()
     context = session.get('trosa_chat_context') if isinstance(session.get('trosa_chat_context'), dict) else {}
+    # Explicit undo keeps a deterministic path so a model outage can never
+    # turn “撤销刚才的操作” into an ordinary conversational answer.  All
+    # other Hamid messages use the real Pi runtime when it is enabled.
+    explicit_undo = bool(re.search(r'撤销.*(?:刚才|上一|上个)|撤回.*(?:刚才|上一|上个)', message))
+    if _pi_agent_enabled() and not explicit_undo:
+        pi_response, pi_status = _run_pi_agent(message, request_id=request_key, context=context)
+        action_ids = [item.get('action_id') for item in pi_response.get('operations', [])
+                      if item.get('action_id') and item.get('undo_available', True)]
+        if action_ids:
+            context['last_action_id'] = action_ids[-1]
+            session['trosa_chat_context'] = context
+        return jsonify(pi_response), pi_status
     response = {'reply': '', 'operations': [], 'candidates': []}
 
     if re.search(r'撤销.*(?:刚才|上一|上个)|撤回.*(?:刚才|上一|上个)', message):

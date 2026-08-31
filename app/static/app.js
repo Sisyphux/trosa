@@ -1014,7 +1014,7 @@ function updateSidebarIdentity() {
   if (chatEntry) chatEntry.hidden = !(currentUser && currentUser.id === 'hamid');
 }
 
-function chatAgentAppend(role, text, operations) {
+function chatAgentAppend(role, text, operations, candidates) {
   var messages = document.getElementById('chatAgentMessages');
   if (!messages) return;
   var row = document.createElement('div');
@@ -1035,6 +1035,12 @@ function chatAgentAppend(role, text, operations) {
     }
     row.appendChild(detail);
   });
+  (candidates || []).forEach(function(candidate) {
+    var candidateRow = document.createElement('div');
+    candidateRow.className = 'chat-agent-candidate';
+    candidateRow.textContent = candidate.label || candidate.name || '候选客户';
+    row.appendChild(candidateRow);
+  });
   messages.appendChild(row);
   messages.scrollTop = messages.scrollHeight;
 }
@@ -1042,9 +1048,19 @@ function chatAgentAppend(role, text, operations) {
 function openChatAgent() {
   if (!currentUser || currentUser.id !== 'hamid') return;
   var messages = document.getElementById('chatAgentMessages');
-  if (messages && !messages.childElementCount) chatAgentAppend('assistant', '你好，我可以查看今天安排、查询客户近况、记录沟通和创建提醒。');
+  if (messages && !messages.childElementCount) chatAgentAppend('assistant', '你好，直接告诉我你想了解或完成的工作即可。我可以查客户近况、读取工作资料、记录沟通和安排下一步。');
   openModal('chatAgentModal');
   setTimeout(function() { var input = document.getElementById('chatAgentInput'); if (input) input.focus(); }, 0);
+}
+
+function handleChatAgentKeydown(event) {
+  // Chinese/Japanese IME uses Enter to commit composition. It must never send
+  // the message before the user has finished entering text.
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    sendChatAgentMessage();
+  }
 }
 
 async function sendChatAgentMessage() {
@@ -1057,9 +1073,9 @@ async function sendChatAgentMessage() {
   try {
     var idempotencyKey = 'chat_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
     var result = await api('/api/chat/agent', { method: 'POST', body: JSON.stringify({ message: message, idempotency_key: idempotencyKey }) });
-    chatAgentAppend('assistant', result.reply || '我暂时无法完成这项操作。', result.operations || []);
+    chatAgentAppend('assistant', result.reply || '我暂时无法完成这项操作。', result.operations || [], result.candidates || []);
   } catch (error) {
-    chatAgentAppend('assistant', '这次没有完成任何修改，请稍后重试。');
+    chatAgentAppend('assistant', error && error.reply || '这次没有完成任何修改，请稍后重试。');
   } finally {
     button.disabled = false; button.textContent = '发送'; input.focus();
   }

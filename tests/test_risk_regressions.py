@@ -1322,6 +1322,53 @@ class CalendarAndAccessTest(unittest.TestCase):
         amy.post('/api/auth/login', json={'user': 'amy'})
         self.assertEqual(amy.post('/api/chat/agent', json={'message': '我今天有什么要做？'}).status_code, 404)
 
+    def test_hamid_chat_can_delegate_to_pi_runtime_without_giving_it_db_access(self):
+        spec = importlib.util.spec_from_file_location('crm_app_pi_runtime_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        pi_events = '\n'.join([
+            json.dumps({'type': 'tool_execution_end', 'toolName': 'record_communication',
+                        'result': {'details': {'action_id': 'agact_test_runtime_1234567890',
+                                               'action_type': 'record_communication', 'undo_available': True}}}),
+            json.dumps({'type': 'message_end', 'message': {'role': 'assistant',
+                                                            'content': [{'type': 'text', 'text': '已记录 EXION 的最新沟通。'}],
+                                                            'stopReason': 'stop'}}),
+        ])
+        fake_completed = mock.Mock(returncode=0, stdout=pi_events, stderr='')
+        with mock.patch.dict(os.environ, {
+            'TROSA_PI_AGENT_ENABLED': 'true',
+            'TROSA_PI_GATEWAY_TOKEN': 'test-token',
+            'TROSA_PI_EXECUTABLE': sys.executable,
+            'CRM_SESSION_SECRET': 'must-not-reach-pi',
+        }, clear=False), mock.patch.object(module.subprocess, 'run', return_value=fake_completed) as run:
+            response = client.post('/api/chat/agent', json={'message': '帮我看看 EXION 的最新情况', 'idempotency_key': 'pi-runtime-test'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['reply'], '已记录 EXION 的最新沟通。')
+        self.assertEqual(response.get_json()['operations'][0]['action_id'], 'agact_test_runtime_1234567890')
+        command = run.call_args.args[0]
+        self.assertIn('--mode', command)
+        self.assertIn('--no-builtin-tools', command)
+        self.assertIn('--no-context-files', command)
+        self.assertIn(str(ROOT / 'pi-agent' / 'trosa-tools.ts'), command)
+        self.assertNotIn('--api-key', command)
+        runtime_env = run.call_args.kwargs['env']
+        self.assertEqual(runtime_env['TROSA_GATEWAY_TOKEN'], 'test-token')
+        self.assertNotIn('CRM_SESSION_SECRET', runtime_env)
+
+    def test_pi_runtime_failure_is_reported_without_claiming_a_crm_write(self):
+        spec = importlib.util.spec_from_file_location('crm_app_pi_runtime_failure_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        with mock.patch.dict(os.environ, {'TROSA_PI_AGENT_ENABLED': 'true', 'TROSA_PI_GATEWAY_TOKEN': ''}, clear=False):
+            response = client.post('/api/chat/agent', json={'message': '帮我整理一下客户情况'})
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('没有执行任何 CRM 修改', response.get_json()['reply'])
+        self.assertEqual(response.get_json()['operations'], [])
+
     def test_agent_timeline_and_message_search_are_composable_and_authenticated(self):
         spec = importlib.util.spec_from_file_location('crm_app_agent_search_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
