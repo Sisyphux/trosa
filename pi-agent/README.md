@@ -27,3 +27,25 @@ pi --mode json --no-builtin-tools --no-context-files --no-extensions \
 ```
 
 生产安装必须由维护者在 ECS 上安装已验证的 Pi 版本（本轮验证为 `0.84.1`）与对应 Node.js，并将上述私密变量安全写入 `/etc/trade-os/trade-os.env`；本仓库发布脚本不会上传密钥或正式数据。Pi 子进程不会继承该服务的全部环境变量，只接收所选模型的凭证、Gateway token 和上述受限路径。
+
+## MCP Server（本地开发）
+
+`trosa-mcp-server.mjs` 是标准 stdio MCP Server。它只读取 `TROSA_GATEWAY_URL` 与 `TROSA_GATEWAY_TOKEN`，并把九个工具请求转发给现有 `/api/gateway/*`；它不导入、打开或读取 SQLite。
+
+先在本机安装其固定依赖：
+
+```bash
+npm install --prefix pi-agent
+TROSA_GATEWAY_URL=http://127.0.0.1:8080 \
+TROSA_GATEWAY_TOKEN=... \
+node ./pi-agent/trosa-mcp-server.mjs
+```
+
+Pi 0.84.1 没有内置 MCP client，因此本仓库附带了仅用于验证的 `trosa-mcp-client.ts` 扩展：
+
+```bash
+pi --no-builtin-tools --no-context-files --no-extensions \
+  -e ./pi-agent/trosa-mcp-client.ts -p "我今天有什么要做？"
+```
+
+该扩展经 stdio 连接上述 MCP Server，不会回退为直接 Gateway 调用。生产 ECS 不启用 Pi 或 MCP，除非维护者另行明确配置。
