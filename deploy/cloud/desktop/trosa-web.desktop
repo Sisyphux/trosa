@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Trosa 浏览器
+Comment=打开 Trosa 网站与普通网页浏览器
+Exec=/usr/local/bin/trosa-browser https://app.trosa.space
+Icon=google-chrome
+Terminal=false
+Categories=Network;WebBrowser;

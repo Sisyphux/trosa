@@ -1,0 +1,4 @@
+WebBrowser=trosa-chrome
+MailReader=thunderbird
+TerminalEmulator=debian-x-terminal-emulator
+FileManager=thunar

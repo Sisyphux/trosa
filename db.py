@@ -861,10 +861,52 @@ USER_TABLE_SQL = [
         proposal_type TEXT NOT NULL CHECK(proposal_type IN ('task', 'activity')),
         customer_id INTEGER NOT NULL,
         payload TEXT NOT NULL,
+        proposal_action TEXT DEFAULT '',
+        source TEXT DEFAULT '',
+        source_reference TEXT DEFAULT '',
+        idempotency_key TEXT DEFAULT '',
+        request_sha256 TEXT DEFAULT '',
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'confirmed', 'cancelled')),
         created_at TEXT DEFAULT (datetime('now', 'localtime')),
         confirmed_at TEXT DEFAULT '',
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+    ''',
+    # Gateway proposal retries are handled per user database.  The original
+    # request hash detects reuse of a key for different business content.
+    '''
+    CREATE TABLE IF NOT EXISTS agent_gateway_idempotency (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL,
+        proposal_id INTEGER,
+        response_json TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(action, idempotency_key),
+        FOREIGN KEY (proposal_id) REFERENCES agent_proposals(id) ON DELETE SET NULL
+    )
+    ''',
+    # Direct Agent writes point at the same durable undo snapshot as the CRM
+    # action.  This adds attribution and a stable action id without duplicating
+    # the business data or its rollback representation.
+    '''
+    CREATE TABLE IF NOT EXISTS agent_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_id TEXT NOT NULL UNIQUE,
+        token_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        customer_id INTEGER,
+        related_type TEXT DEFAULT '',
+        related_id INTEGER,
+        undo_token TEXT NOT NULL,
+        request_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'undone')),
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        undone_at TEXT DEFAULT '',
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
     )
     ''',
     # Every user-confirmed mutation stores a before/after snapshot. Undo is
@@ -1135,6 +1177,16 @@ USER_MIGRATIONS = {
     'imported_activity_rows': {
         'source_key': "TEXT DEFAULT ''",
     },
+    'agent_proposals': {
+        'proposal_action': "TEXT DEFAULT ''",
+        'source': "TEXT DEFAULT ''",
+        'source_reference': "TEXT DEFAULT ''",
+        'idempotency_key': "TEXT DEFAULT ''",
+        'request_sha256': "TEXT DEFAULT ''",
+    },
+    'agent_actions': {
+        'user_id': "TEXT DEFAULT ''",
+    },
 }
 
 
@@ -1304,6 +1356,10 @@ def init_user_tables(user):
                      ON web_monitor_logs(customer_id, status, checked_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_proposals_pending
                      ON agent_proposals(status, customer_id, created_at DESC)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_gateway_idempotency_key
+                     ON agent_gateway_idempotency(action, idempotency_key)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_actions_created
+                     ON agent_actions(created_at DESC, action_id)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_undo_actions_status_time
                      ON undo_actions(status, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_customers_pinned_order

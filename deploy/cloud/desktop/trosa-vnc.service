@@ -1,0 +1,30 @@
+[Unit]
+Description=Trosa private XFCE desktop via TigerVNC
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=trosa-desktop
+Group=trosa-desktop
+Environment=HOME=/home/trosa-desktop
+Environment=XDG_RUNTIME_DIR=/run/trosa-desktop
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RuntimeDirectory=trosa-desktop
+RuntimeDirectoryMode=0700
+WorkingDirectory=/home/trosa-desktop
+ExecStart=/usr/bin/vncserver :1 -fg -localhost yes -SecurityTypes None -geometry 1440x900 -depth 24 -xstartup /home/trosa-desktop/.vnc/xstartup
+ExecStop=/usr/bin/vncserver -kill :1
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=20
+MemoryMax=768M
+TasksMax=128
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

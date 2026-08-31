@@ -70,8 +70,19 @@ deploy/cloud/logs-workbench.sh
 
 `publish-workbench.sh` 会读取本地当前 `HEAD` 和 GitHub `origin`，让 ECS 通过 SSM 下载该 commit 的公开归档，解压到新的 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。发布包来自已推送的 commit，不包含本机未提交修改，也不上传本地数据、密钥或虚拟环境。
 
-`backup-workbench.sh` 会在 ECS 创建一致性快照，打包数据库和附件，下载到 Mac 的
-`~/Library/Application Support/trosa/backups/`，核对 SHA-256 后保留最近 14 天的归档。
+`backup-workbench.sh` 会在 ECS 使用 SQLite 在线备份生成应用级一致性副本，打包数据库、附件和
+manifest，下载到 Mac 的 `~/Library/Application Support/trosa/backups/`，核对 SHA-256 后保留最近
+14 天的归档。它不创建阿里云 ECS 系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建 ECS。
+
+## 私有浏览器桌面
+
+服务器还运行一个独立的轻量 XFCE 桌面，供必要时在浏览器中直接操作 Ubuntu。它使用
+`trosa-desktop` 无 sudo 权限账户，与 Trosa 的 `tradeos` 数据账户隔离；TigerVNC 与 noVNC
+只监听服务器 `127.0.0.1:5901/6080`，没有 ECS 公网端口、UFW 规则或 Cloudflare Tunnel 路由。
+
+从 Mac 通过 `trosa-desktop` SSH 主机别名打开本机隧道，再访问
+`http://127.0.0.1:6080/vnc.html`。服务器工作台已将此动作做成“打开服务器桌面”。服务文件、
+停用方式和验收要求见 [desktop/README.md](desktop/README.md)。
 
 数据库仍是单写入源。不要在 Mac 上重新启动旧的正式应用并通过同一个域名使用；当前 Mac 的三个旧 LaunchAgent 已禁用但文件保留。如需回退到 Mac，先停止 ECS Tunnel，再执行：
 

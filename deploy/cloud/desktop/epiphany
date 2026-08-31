@@ -1,0 +1,5 @@
+#!/bin/sh
+# WebKit's sandbox cannot attach to TigerVNC's virtual X display on Ubuntu 22.04.
+# The desktop is only reachable through the Mac's private SSH tunnel.
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+exec /usr/bin/epiphany "$@"

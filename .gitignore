@@ -37,6 +37,7 @@ deploy/cloud/workbench.env
 # Local runtimes, caches, archives, and temporary working material
 .venv/
 .venv-mac/
+node_modules/
 .pytest_cache/
 archive/
 tmp/

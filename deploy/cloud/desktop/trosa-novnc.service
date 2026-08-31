@@ -1,0 +1,25 @@
+[Unit]
+Description=Trosa private browser desktop gateway (noVNC)
+After=trosa-vnc.service
+Requires=trosa-vnc.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=trosa-desktop
+Group=trosa-desktop
+WorkingDirectory=/home/trosa-desktop
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 127.0.0.1:6080 127.0.0.1:5901
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=20
+TimeoutStopSec=15
+MemoryMax=128M
+TasksMax=64
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

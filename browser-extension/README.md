@@ -11,9 +11,9 @@
 开发验收可运行：
 
 ```bash
-NODE_PATH=/Users/luoxin/.codex/skills/browser-tools/node_modules node browser-extension/tests/runtime.test.cjs
-NODE_PATH=/Users/luoxin/.codex/skills/browser-tools/node_modules node browser-extension/tests/assignment-flow.test.cjs
-node browser-extension/tests/smoke.test.js
+cd browser-extension
+npm install
+npm test
 ```
 
 侧栏右上角的“✓”会运行当前页面验收：检查页面授权、每个可访问 frame 的内容脚本通信与自动恢复、消息数量、Trade OS 登录状态和可修改归属能力。报告不包含邮件正文、邮箱或手机号；遇到问题时复制该报告即可定位失败层级。

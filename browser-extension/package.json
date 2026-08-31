@@ -1,0 +1,10 @@
+{
+  "name": "trosa-browser-extension-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tests/runtime.test.cjs && node tests/assignment-flow.test.cjs && node tests/smoke.test.js && node tests/empty-read-retry.test.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "27.4.0"
+  }
+}

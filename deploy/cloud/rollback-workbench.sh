@@ -32,8 +32,7 @@ printf 'rolled back to %s\n' "\$TARGET"
 EOF
 )
 
-workbench exec \
-  --instance-id "$TRADE_OS_ECS_INSTANCE_ID" \
-  --region "$TRADE_OS_ECS_REGION" \
-  --user-name root \
-  --command "$remote_command"
+"$SCRIPT_DIR/run-workbench-command.sh" \
+  "$TRADE_OS_ECS_INSTANCE_ID" \
+  "$TRADE_OS_ECS_REGION" \
+  "$remote_command"

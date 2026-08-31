@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run one command through Workbench, including its interactive SSM fallback.
+# Run one command through key-based SSH when configured, otherwise Workbench.
 set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
@@ -10,6 +10,24 @@ fi
 instance_id=$1
 region=$2
 remote_command=$3
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
+if [[ -z "${TRADE_OS_SSH_HOST:-}" && -r "$ENV_FILE" ]]; then
+  # This optional local setting contains only an SSH host alias, never a
+  # password or cloud credential.
+  source "$ENV_FILE"
+fi
+
+if [[ -n "${TRADE_OS_SSH_HOST:-}" ]]; then
+  ssh_bin="$(command -v ssh || true)"
+  if [[ -z "$ssh_bin" ]]; then
+    printf 'SSH client not found in PATH\n' >&2
+    exit 127
+  fi
+  exec "$ssh_bin" -o BatchMode=yes -o ConnectTimeout=10 "$TRADE_OS_SSH_HOST" "$remote_command"
+fi
+
 workbench_bin=$(command -v workbench || true)
 if [ -z "$workbench_bin" ]; then
   printf 'Workbench CLI not found in PATH\n' >&2

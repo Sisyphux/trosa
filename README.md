@@ -61,13 +61,22 @@ archive/               历史发布包
 Windows 可双击 `start.bat`。也可以在已安装依赖的环境中运行：
 
 ```bash
-python app.py
+.venv/bin/python app.py
 ```
 
 默认访问地址为 `http://localhost:8080`。改动后至少执行：
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py" -v
-python -m py_compile app.py db.py scheduler.py
+.venv/bin/python -m unittest discover -s tests -p "test_*.py" -v
+.venv/bin/python -m py_compile app.py db.py scheduler.py
 node --check app/static/app.js
+(cd browser-extension && npm test)
+```
+
+首次在本机开发时，创建 Python 虚拟环境并安装固定依赖；浏览器扩展测试也需安装其锁定的开发依赖：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+(cd browser-extension && npm install)
 ```

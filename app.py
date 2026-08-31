@@ -27,7 +27,7 @@ import tarfile
 import email
 from email import policy as email_policy
 from xml.etree import ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlencode
 from concurrent.futures import ThreadPoolExecutor
 from email_validator import validate_email as validate_email_address, EmailNotValidError
 import dns.resolver
@@ -130,6 +130,8 @@ _PIN_STORE_VERSION = '2'
 _PROSPECTING_INTEGRATION_KEY = 'integration_token:prospecting_lab:hamid'
 _SELA_SYNC_INTEGRATION = 'sela'
 _SELA_SYNC_SCHEMA_VERSION = 1
+_AGENT_GATEWAY_TOKEN_PREFIX = 'agent_gateway_token:'
+_AGENT_GATEWAY_SCOPES = frozenset(('crm:read', 'crm:propose', 'crm:write'))
 
 # An unauthenticated internal viewer is deliberately narrower than a normal
 # member session.  It is identified from the direct LAN peer address, never
@@ -253,6 +255,38 @@ def _prospecting_integration_user():
         (request.method == 'POST' and request.path == '/api/integrations/sela/sync'),
     )
     return 'hamid' if any(allowed) else ''
+
+
+def _agent_gateway_principal():
+    """Authenticate a personal Agent Gateway token for Gateway routes only."""
+    if not request.path.startswith('/api/gateway/'):
+        return None
+    header = str(request.headers.get('Authorization') or '')
+    if not header.startswith('Bearer '):
+        return None
+    token = header[7:].strip()
+    match = re.fullmatch(r'trosa_pat_([A-Za-z0-9]{8,32})_([A-Za-z0-9_-]{32,256})', token)
+    if not match:
+        return None
+    token_id = match.group(1)
+    conn = get_system_db()
+    try:
+        row = conn.execute('SELECT value FROM app_settings WHERE key=?',
+                           (_AGENT_GATEWAY_TOKEN_PREFIX + token_id,)).fetchone()
+    finally:
+        conn.close()
+    try:
+        record = json.loads(row['value']) if row and row['value'] else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    digest = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    user = str(record.get('user') or '')
+    scopes = frozenset(record.get('scopes') or [])
+    if (not record or record.get('revoked_at') or user not in USERS
+            or not scopes.issubset(_AGENT_GATEWAY_SCOPES)
+            or not secrets.compare_digest(digest, str(record.get('token_sha256') or ''))):
+        return None
+    return {'id': token_id, 'user': user, 'scopes': scopes}
 
 
 def _ensure_pin_store():
@@ -561,8 +595,13 @@ def before_request():
     if _production_mode and user in USERS and session.get('pin_auth_version') != _PIN_STORE_VERSION:
         session.clear()
         user = ''
-    integration_user = _prospecting_integration_user() if not user else ''
-    if integration_user:
+    gateway_principal = _agent_gateway_principal() if not user else None
+    integration_user = _prospecting_integration_user() if not user and not gateway_principal else ''
+    if gateway_principal:
+        set_db_user(gateway_principal['user'])
+        g.current_user = gateway_principal['user']
+        g.gateway_principal = gateway_principal
+    elif integration_user:
         set_db_user(integration_user)
         g.current_user = integration_user
         g.integration_name = 'prospecting_lab'
@@ -584,6 +623,8 @@ def login_required(f):
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
+        if getattr(g, 'gateway_principal', None):
+            return jsonify({'error': 'Agent Gateway token 不能访问网页登录接口'}), 403
         if not g.current_user and not (
             getattr(g, 'readonly_viewer', False)
             and request.method == 'GET'
@@ -1446,6 +1487,74 @@ def auth_users():
     return jsonify({'users': users_list, 'requires_pin': _production_mode})
 
 
+@app.route('/api/agent-gateway/tokens', methods=['GET', 'POST'])
+@login_required
+def agent_gateway_tokens():
+    """Personal access tokens are shown exactly once, and only their digest is retained."""
+    if request.method == 'GET':
+        conn = get_system_db()
+        try:
+            rows = conn.execute("SELECT key, value FROM app_settings WHERE key LIKE ?",
+                                (_AGENT_GATEWAY_TOKEN_PREFIX + '%',)).fetchall()
+        finally:
+            conn.close()
+        tokens = []
+        for row in rows:
+            try:
+                record = json.loads(row['value'])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if record.get('user') == g.current_user:
+                tokens.append({'id': row['key'][len(_AGENT_GATEWAY_TOKEN_PREFIX):], 'label': record.get('label', ''),
+                               'scopes': record.get('scopes', []), 'created_at': record.get('created_at', ''),
+                               'revoked_at': record.get('revoked_at', '')})
+        return jsonify({'success': True, 'data': {'tokens': tokens}})
+
+    data = request.get_json(silent=True) or {}
+    scopes = data.get('scopes')
+    if not isinstance(scopes, list) or not scopes or not set(scopes).issubset(_AGENT_GATEWAY_SCOPES):
+        return jsonify({'error': 'scope 无效'}), 400
+    label = str(data.get('label') or '').strip()[:80]
+    token_id = secrets.token_urlsafe(12).replace('-', 'a').replace('_', 'b')[:16]
+    token = f'trosa_pat_{token_id}_{secrets.token_urlsafe(48)}'
+    record = {'token_sha256': hashlib.sha256(token.encode('utf-8')).hexdigest(), 'user': g.current_user,
+              'scopes': sorted(set(scopes)), 'label': label, 'created_at': _calendar_now_text(), 'revoked_at': ''}
+    conn = get_system_db()
+    try:
+        conn.execute('INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?)',
+                     (_AGENT_GATEWAY_TOKEN_PREFIX + token_id, json.dumps(record, ensure_ascii=False), _calendar_now_text()))
+        conn.commit()
+    finally:
+        conn.close()
+    log_operation('CREATE_AGENT_GATEWAY_TOKEN', 'agent_gateway_token', None, f'{label or token_id}: {", ".join(record["scopes"])}')
+    return jsonify({'success': True, 'data': {'id': token_id, 'token': token, 'scopes': record['scopes'],
+                                               'created_at': record['created_at']}}), 201
+
+
+@app.route('/api/agent-gateway/tokens/<token_id>', methods=['DELETE'])
+@login_required
+def revoke_agent_gateway_token(token_id):
+    if not re.fullmatch(r'[A-Za-z0-9]{8,32}', token_id):
+        return jsonify({'error': 'token 无效'}), 404
+    conn = get_system_db()
+    try:
+        row = conn.execute('SELECT value FROM app_settings WHERE key=?',
+                           (_AGENT_GATEWAY_TOKEN_PREFIX + token_id,)).fetchone()
+        record = json.loads(row['value']) if row and row['value'] else {}
+        if record.get('user') != g.current_user:
+            return jsonify({'error': 'token 不存在'}), 404
+        record['revoked_at'] = _calendar_now_text()
+        conn.execute('UPDATE app_settings SET value=?, updated_at=? WHERE key=?',
+                     (json.dumps(record, ensure_ascii=False), _calendar_now_text(), _AGENT_GATEWAY_TOKEN_PREFIX + token_id))
+        conn.commit()
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return jsonify({'error': 'token 无效'}), 404
+    finally:
+        conn.close()
+    log_operation('REVOKE_AGENT_GATEWAY_TOKEN', 'agent_gateway_token', None, token_id)
+    return jsonify({'success': True, 'data': {'id': token_id, 'revoked': True}})
+
+
 @app.route('/api/integrations/prospecting-lab/token', methods=['POST', 'DELETE'])
 @login_required
 def prospecting_lab_integration_token():
@@ -2032,6 +2141,201 @@ def _customer_attention_label(state):
         'not_investing_now': '当前不投入',
     }.get(state or '', '')
 
+
+def _inbox_capture_context(raw_content, created_at=''):
+    """Extract explicit browser-capture context without guessing customer identity."""
+    try:
+        payload = json.loads(raw_content or '{}')
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    messages = payload.get('messages') if isinstance(payload.get('messages'), list) else []
+    parts = []
+    directions = set()
+    message_dates = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        text = str(message.get('text') or message.get('raw_text') or '').strip()
+        if not text:
+            continue
+        direction = str(message.get('direction') or '').strip()
+        if direction in ('outbound', 'inbound', 'two_way'):
+            directions.add(direction)
+        message_time = str(message.get('time') or '').strip()
+        if message_time:
+            message_dates.append(message_time)
+        prefix = ' · '.join(value for value in (message_time, message.get('sender') or direction) if value)
+        parts.append((prefix + '\n' if prefix else '') + text)
+    direction = str(payload.get('direction') or '').strip()
+    if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
+        direction = 'unknown'
+    if direction == 'unknown' and directions:
+        direction = 'two_way' if len(directions) > 1 or 'two_way' in directions else next(iter(directions))
+    channel = str(payload.get('channel') or '').strip()
+    activity_type = 'email' if channel == 'netease' else ('whatsapp' if channel == 'whatsapp' else 'follow_up')
+    event_date = str(payload.get('end_time') or payload.get('start_time') or (message_dates[-1] if message_dates else '') or created_at or '')[:10]
+    content = '\n\n'.join(parts).strip() or str(payload.get('content') or '').strip()
+    return {
+        'content': content[:12000],
+        'direction': direction,
+        'activity_type': activity_type,
+        'channel': channel,
+        'platform': str(payload.get('platform') or '').strip(),
+        'source_url': str(payload.get('source_url') or '').strip(),
+        'identity': str(payload.get('conversation_identity') or payload.get('email') or payload.get('phone') or '').strip(),
+        'date': event_date,
+    }
+
+
+def _reliable_customer_contact(cursor, customer_id):
+    """Return a contact only when it is explicitly primary or the sole contact."""
+    rows = cursor.execute(
+        '''SELECT id, name, email, phone, whatsapp, is_primary
+           FROM contacts WHERE customer_id=? ORDER BY is_primary DESC, created_at ASC, id ASC''',
+        (customer_id,)
+    ).fetchall()
+    if not rows:
+        return None
+    primary = [row for row in rows if int(row['is_primary'] or 0) == 1]
+    if len(primary) == 1:
+        return dict(primary[0])
+    if len(rows) == 1:
+        return dict(rows[0])
+    return None
+
+
+def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
+    """Find one bounded, explainable match per customer for the global search."""
+    if not customer_ids or not search_tokens:
+        return {}
+    placeholders = ','.join('?' for _ in customer_ids)
+
+    def match_clause(columns):
+        clauses = []
+        params = []
+        for token in search_tokens:
+            like = f'%{token}%'
+            clauses.append('(' + ' OR '.join(f"COALESCE({column}, '') LIKE ?" for column in columns) + ')')
+            params.extend([like] * len(columns))
+        return '(' + ' OR '.join(clauses) + ')', params
+
+    contexts = {}
+
+    def add_context(customer_id, context):
+        if customer_id and customer_id not in contexts:
+            contexts[customer_id] = context
+
+    # An open Inbox item is the only search match that should open the
+    # confirmation form directly. Resolved items remain useful as evidence but
+    # must not invite a duplicate write.
+    clause, params = match_clause(['i.title', 'i.content'])
+    rows = cursor.execute(
+        f'''SELECT i.id, i.customer_id, i.item_type, i.title, i.content, i.status, i.created_at
+            FROM inbox_items i
+            WHERE i.customer_id IN ({placeholders}) AND {clause}
+            ORDER BY CASE WHEN i.status='open' THEN 0 ELSE 1 END, i.created_at DESC, i.id DESC''',
+        list(customer_ids) + params
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        capture = _inbox_capture_context(item.get('content'), item.get('created_at')) if item.get('item_type') == 'browser_capture' else {}
+        reliable_contact = _reliable_customer_contact(cursor, item.get('customer_id')) if item.get('customer_id') else None
+        is_recordable = bool(item.get('status') == 'open' and item.get('content'))
+        add_context(item['customer_id'], {
+            'type': 'inbox', 'label': 'Inbox 条目', 'id': item['id'],
+            'item_type': item.get('item_type') or '', 'title': item.get('title') or '',
+            'content': capture.get('content') or (item.get('content') or '')[:240],
+            'date': capture.get('date') or (item.get('created_at') or '')[:10],
+            'source': 'browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox',
+            'source_label': capture.get('platform') or ('Inbox 客户回复' if item.get('item_type') == 'customer_reply' else '待归属沟通'),
+            'source_url': capture.get('source_url') or '',
+            'direction': capture.get('direction') or ('inbound' if item.get('item_type') == 'customer_reply' else 'unknown'),
+            'activity_type': capture.get('activity_type') or ('customer_reply' if item.get('item_type') == 'customer_reply' else 'follow_up'),
+            'contact_id': (reliable_contact or {}).get('id'),
+            'contact_name': (reliable_contact or {}).get('name', ''),
+            'status': item.get('status') or '',
+            'action': 'record' if is_recordable else 'view',
+        })
+
+    clause, params = match_clause(['f.content', 'f.result', 'f.next_plan', 'f.activity_type'])
+    rows = cursor.execute(
+        f'''SELECT f.id, f.customer_id, f.follow_date, f.activity_type, f.direction,
+                   f.contact_id, f.source, f.content, f.result, f.next_plan, f.created_at,
+                   ct.name AS contact_name
+            FROM follow_up_logs f
+            LEFT JOIN contacts ct ON ct.id=f.contact_id AND ct.customer_id=f.customer_id
+            WHERE f.customer_id IN ({placeholders})
+              AND (f.is_deleted=0 OR f.is_deleted IS NULL) AND {clause}
+            ORDER BY f.follow_date DESC, f.created_at DESC, f.id DESC''',
+        list(customer_ids) + params
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        add_context(item['customer_id'], {
+            'type': 'communication', 'label': '沟通记录', 'id': item['id'],
+            'content': (item.get('content') or item.get('result') or item.get('next_plan') or '')[:240],
+            'result': (item.get('result') or '')[:240], 'date': item.get('follow_date') or '',
+            'source': item.get('source') or 'manual',
+            'source_label': item.get('activity_type') or '沟通记录',
+            'direction': item.get('direction') or 'unknown', 'activity_type': item.get('activity_type') or 'follow_up',
+            'contact_id': item.get('contact_id'), 'contact_name': item.get('contact_name') or '',
+            'action': 'view',
+        })
+
+    clause, params = match_clause(['o.subject', 'o.content', 'o.reply_content'])
+    rows = cursor.execute(
+        f'''SELECT o.id, o.customer_id, o.sent_date, o.subject, o.content, o.reply_content,
+                   o.reply_status, o.created_at
+            FROM outreach_emails o
+            WHERE o.customer_id IN ({placeholders}) AND {clause}
+            ORDER BY o.sent_date DESC, o.created_at DESC, o.id DESC''',
+        list(customer_ids) + params
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        add_context(item['customer_id'], {
+            'type': 'communication', 'label': '开发邮件', 'id': item['id'],
+            'content': (item.get('subject') or item.get('reply_content') or item.get('content') or '')[:240],
+            'result': (item.get('reply_content') or '')[:240], 'date': item.get('sent_date') or '',
+            'source': 'outreach_email', 'source_label': '开发邮件', 'direction': 'outbound',
+            'activity_type': 'email', 'contact_id': None, 'contact_name': '', 'action': 'view',
+        })
+
+    clause, params = match_clause(['ct.name', 'ct.email', 'ct.phone', 'ct.whatsapp', 'ct.linkedin'])
+    rows = cursor.execute(
+        f'''SELECT ct.id, ct.customer_id, ct.name, ct.email, ct.phone, ct.whatsapp, ct.linkedin
+            FROM contacts ct WHERE ct.customer_id IN ({placeholders}) AND {clause}
+            ORDER BY ct.is_primary DESC, ct.created_at ASC, ct.id ASC''',
+        list(customer_ids) + params
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        add_context(item['customer_id'], {
+            'type': 'contact', 'label': '联系人', 'id': item['id'],
+            'contact_name': item.get('name') or '', 'contact_email': item.get('email') or '',
+            'content': (item.get('name') or item.get('email') or item.get('phone') or '')[:240],
+            'action': 'view',
+        })
+
+    clause, params = match_clause(['r.title', 'r.content', 'r.reason'])
+    rows = cursor.execute(
+        f'''SELECT r.id, r.customer_id, r.title, r.content, r.reason, r.remind_date, r.is_done
+            FROM reminders r WHERE r.customer_id IN ({placeholders}) AND {clause}
+            ORDER BY r.is_done ASC, r.remind_date ASC, r.id ASC''',
+        list(customer_ids) + params
+    ).fetchall()
+    for row in rows:
+        item = dict(row)
+        add_context(item['customer_id'], {
+            'type': 'task', 'label': '待办', 'id': item['id'],
+            'title': item.get('title') or item.get('content') or '', 'date': item.get('remind_date') or '',
+            'content': (item.get('title') or item.get('content') or item.get('reason') or '')[:240],
+            'status': 'done' if item.get('is_done') else 'open', 'action': 'view',
+        })
+    return contexts
+
 @app.route('/api/customers', methods=['GET'])
 @login_required
 def get_customers():
@@ -2125,6 +2429,7 @@ def get_customers():
     else:
         query = 'SELECT * FROM customers WHERE (is_deleted = 0 OR is_deleted IS NULL)'
     params = []
+    search_tokens = []
 
     if cleaned_search:
         search_tokens = [token for token in re.split(r'\s+', cleaned_search) if token]
@@ -2139,9 +2444,11 @@ def get_customers():
                          OR EXISTS (SELECT 1 FROM reminders rm WHERE rm.customer_id = customers.id
                                     AND (rm.title LIKE ? OR rm.content LIKE ? OR rm.reason LIKE ?))
                          OR EXISTS (SELECT 1 FROM outreach_emails oe WHERE oe.customer_id = customers.id
-                                    AND (oe.subject LIKE ? OR oe.content LIKE ? OR oe.reply_content LIKE ?)))'''
+                                    AND (oe.subject LIKE ? OR oe.content LIKE ? OR oe.reply_content LIKE ?))
+                         OR EXISTS (SELECT 1 FROM inbox_items ix WHERE ix.customer_id = customers.id
+                                    AND (ix.title LIKE ? OR ix.content LIKE ?)))'''
             like = f'%{token}%'
-            params.extend([like] * 23)
+            params.extend([like] * 25)
     if status:
         query += ' AND status = ?'
         params.append(status)
@@ -2361,6 +2668,9 @@ def get_customers():
                 reasons.append('匹配搜索内容')
             reasons.extend(interpreted_filters[:4])
             cust['match_reasons'] = reasons
+        search_contexts = _customer_search_match_contexts(c, [cust['id'] for cust in customers], search_tokens)
+        for cust in customers:
+            cust['match_context'] = search_contexts.get(cust['id'])
 
     if not database_pagination:
         total = len(customers)
@@ -4092,7 +4402,11 @@ def get_inbox():
     items = []
 
     c.execute('''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country,
-                        COALESCE(c.is_pinned, 0) AS is_pinned
+                        COALESCE(c.is_pinned, 0) AS is_pinned,
+                        (SELECT ct.id FROM contacts ct WHERE ct.customer_id=i.customer_id
+                         AND ct.is_primary=1 ORDER BY ct.created_at ASC, ct.id ASC LIMIT 1) AS primary_contact_id,
+                        (SELECT ct.name FROM contacts ct WHERE ct.customer_id=i.customer_id
+                         AND ct.is_primary=1 ORDER BY ct.created_at ASC, ct.id ASC LIMIT 1) AS primary_contact_name
                  FROM inbox_items i
                  LEFT JOIN customers c ON c.id = i.customer_id
                  WHERE i.status = 'open'
@@ -4106,6 +4420,28 @@ def get_inbox():
     for row in c.fetchall():
         item = dict(row)
         item['virtual'] = False
+        reliable_contact = _reliable_customer_contact(c, item.get('customer_id')) if item.get('customer_id') else None
+        item['contact_id'] = (reliable_contact or {}).get('id')
+        item['contact_name'] = (reliable_contact or {}).get('name', '')
+        item['source'] = 'browser_extension' if item.get('item_type') == 'browser_capture' else 'inbox'
+        if item.get('item_type') == 'customer_reply':
+            item['direction'] = 'inbound'
+            item['activity_type'] = 'customer_reply'
+            item['follow_date'] = (item.get('created_at') or '')[:10]
+            item['source_label'] = 'Inbox 客户回复'
+        elif item.get('item_type') == 'browser_capture':
+            capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
+            item.update({
+                'capture_content': capture.get('content', ''),
+                'capture_direction': capture.get('direction', 'unknown'),
+                'capture_activity_type': capture.get('activity_type', 'follow_up'),
+                'capture_date': capture.get('date', ''),
+                'capture_channel': capture.get('channel', ''),
+                'capture_platform': capture.get('platform', ''),
+                'capture_source_url': capture.get('source_url', ''),
+                'capture_identity': capture.get('identity', ''),
+                'source_label': capture.get('platform') or capture.get('channel') or '浏览器采集',
+            })
         items.append(item)
 
     # Materialize only suggestions that require a decision. Archived/resolved
@@ -4375,7 +4711,7 @@ def get_inbox():
         if sum(1 for candidate in items if candidate.get('item_type') == 'ai_suggestion') >= 12:
             break
 
-    priority = {'customer_reply': 0, 'uncontacted_follow_up': 1, 'new_customer': 2, 'ai_suggestion': 3}
+    priority = {'customer_reply': 0, 'browser_capture': 1, 'uncontacted_follow_up': 2, 'new_customer': 3, 'ai_suggestion': 4}
     items.sort(key=lambda item: (priority.get(item.get('item_type'), 9), item.get('created_at') or ''), reverse=False)
     # AI customer recommendations are frozen.  Keep any old rows in storage,
     # but never expose them as actionable Inbox work.
@@ -4383,6 +4719,7 @@ def get_inbox():
     counts = {
         'all': len(items),
         'customer_reply': sum(1 for item in items if item['item_type'] == 'customer_reply'),
+        'browser_capture': sum(1 for item in items if item['item_type'] == 'browser_capture'),
         'uncontacted_follow_up': sum(1 for item in items if item['item_type'] == 'uncontacted_follow_up'),
         'ai_suggestion': sum(1 for item in items if item['item_type'] == 'ai_suggestion'),
         'new_customer': sum(1 for item in items if item['item_type'] == 'new_customer'),
@@ -5347,6 +5684,566 @@ def search_agent_messages():
     })
 
 
+def _gateway_response(data=None, error=None, status=200, pagination=None):
+    payload = {'success': not bool(error)}
+    if error:
+        payload['error'] = {'code': error[0], 'message': error[1]}
+    else:
+        payload['data'] = data or {}
+    if pagination is not None:
+        payload['pagination'] = pagination
+    return jsonify(payload), status
+
+
+def gateway_scope_required(scope):
+    def decorator(f):
+        from functools import wraps
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            principal = getattr(g, 'gateway_principal', None)
+            if not principal:
+                return _gateway_response(error=('authentication', '缺少或无效的 Agent token'), status=401)
+            if scope not in principal['scopes']:
+                return _gateway_response(error=('permission', f'当前 token 没有 {scope} 权限'), status=403)
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def _gateway_limit(default=25):
+    try:
+        return max(1, min(int(request.args.get('limit', default)), 50))
+    except (TypeError, ValueError):
+        return default
+
+
+def _gateway_reject_user_override(data):
+    if not isinstance(data, dict):
+        return False
+    return any(key in data for key in ('user_id', 'owner_id', 'user')) or _gateway_reject_user_override(data.get('payload'))
+
+
+def _gateway_customer_payload(row):
+    return {'id': row['id'], 'name': row['name'] or '', 'company': row['company'] or '',
+            'country': row['country'] or '', 'last_contact': row['last_contact'] or '',
+            'next_follow_up': row['next_follow_up'] or ''}
+
+
+@app.route('/api/gateway/customers', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_search_customers():
+    query = str(request.args.get('query') or '').strip()[:200]
+    limit = _gateway_limit()
+    params, where = [], ['(is_deleted=0 OR is_deleted IS NULL)']
+    if query:
+        where.append('(lower(COALESCE(name, "")) LIKE ? OR lower(COALESCE(company, "")) LIKE ? OR lower(COALESCE(country, "")) LIKE ?)')
+        term = '%' + query.casefold() + '%'
+        params.extend((term, term, term))
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT id, name, company, country, last_contact, next_follow_up FROM customers WHERE '''
+                            + ' AND '.join(where) + ' ORDER BY updated_at DESC, id DESC LIMIT ?', params + [limit]).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'customers': [_gateway_customer_payload(row) for row in rows]}, pagination={'limit': limit, 'has_more': len(rows) == limit})
+
+
+@app.route('/api/gateway/customers/<int:customer_id>', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_get_customer(customer_id):
+    conn = get_db()
+    try:
+        row = conn.execute('''SELECT id, name, company, country, website, field, industry, status, level,
+                                      last_contact, next_follow_up, attention_state, attention_reason
+                               FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
+        if not row:
+            return _gateway_response(error=('not_found', '客户不存在'), status=404)
+        task = conn.execute('''SELECT id, title, remind_date FROM reminders WHERE customer_id=? AND is_done=0
+                               AND reminder_type NOT LIKE 'outreach_%' ORDER BY remind_date, id LIMIT 1''', (customer_id,)).fetchone()
+        contact = conn.execute('''SELECT id, name, title, email, phone FROM contacts WHERE customer_id=?
+                                  ORDER BY is_primary DESC, id LIMIT 1''', (customer_id,)).fetchone()
+    finally:
+        conn.close()
+    customer = dict(row)
+    customer['next_task'] = dict(task) if task else None
+    customer['primary_contact'] = dict(contact) if contact else None
+    return _gateway_response({'customer': customer})
+
+
+@app.route('/api/gateway/today', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_get_today():
+    limit, today = _gateway_limit(), _calendar_today().isoformat()
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT r.id, r.customer_id, r.title, r.content, r.remind_date, c.name, c.company
+                               FROM reminders r JOIN customers c ON c.id=r.customer_id
+                               WHERE r.is_done=0 AND r.remind_date<=? AND r.reminder_type NOT LIKE 'outreach_%'
+                                 AND (c.is_deleted=0 OR c.is_deleted IS NULL)
+                               ORDER BY r.remind_date, r.id LIMIT ?''', (today, limit)).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'tasks': [{'id': row['id'], 'customer_id': row['customer_id'], 'title': row['title'] or row['content'] or '',
+                                         'due_date': row['remind_date'], 'customer_name': row['company'] or row['name'] or ''} for row in rows]},
+                             pagination={'limit': limit, 'has_more': len(rows) == limit})
+
+
+@app.route('/api/gateway/activity', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_search_activity():
+    limit = _gateway_limit()
+    customer_id = request.args.get('customer_id', type=int)
+    query = str(request.args.get('query') or '').strip()[:200]
+    where, params = ['(f.is_deleted=0 OR f.is_deleted IS NULL)'], []
+    if customer_id:
+        where.append('f.customer_id=?'); params.append(customer_id)
+    if query:
+        where.append('(lower(f.content) LIKE ? OR lower(f.result) LIKE ?)'); params.extend(['%' + query.casefold() + '%'] * 2)
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT f.id, f.customer_id, f.follow_date, f.content, f.result, f.activity_type,
+                                      f.direction, f.source, c.name, c.company
+                               FROM follow_up_logs f JOIN customers c ON c.id=f.customer_id WHERE ''' + ' AND '.join(where)
+                            + ' ORDER BY f.follow_date DESC, f.created_at DESC, f.id DESC LIMIT ?', params + [limit]).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'activities': [{'id': row['id'], 'customer_id': row['customer_id'], 'date': row['follow_date'],
+                                               'content': row['content'], 'result': row['result'], 'type': row['activity_type'],
+                                               'direction': row['direction'], 'source': row['source'],
+                                               'customer_name': row['company'] or row['name'] or ''} for row in rows]},
+                             pagination={'limit': limit, 'has_more': len(rows) == limit})
+
+
+@app.route('/api/gateway/inbox', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_get_inbox():
+    response = get_inbox.__wrapped__()
+    payload = response.get_json() or {}
+    items = payload.get('items') or payload.get('inbox_items') or []
+    compact = []
+    for item in items[:_gateway_limit()]:
+        compact.append({key: item.get(key) for key in ('id', 'item_type', 'customer_id', 'title', 'content', 'created_at', 'source', 'status')})
+    return _gateway_response({'items': compact}, pagination={'limit': _gateway_limit(), 'has_more': len(items) > len(compact)})
+
+
+def _validate_agent_proposal(action, customer_id, payload, conn, strict=False):
+    if action not in ('record_communication', 'create_task', 'complete_task') or not isinstance(payload, dict):
+        raise CrmWriteError('提议动作或内容无效')
+    if action == 'complete_task':
+        task_id = payload.get('task_id')
+        if not isinstance(task_id, int):
+            raise CrmWriteError('完成待办提议需要 task_id')
+        task = conn.execute('SELECT id, customer_id, is_done FROM reminders WHERE id=?', (task_id,)).fetchone()
+        if not task or task['is_done']:
+            raise CrmWriteError('待办不存在或已完成', 404)
+        if customer_id is not None and customer_id != task['customer_id']:
+            raise CrmWriteError('待办与客户不匹配')
+        return task['customer_id'], 'activity'
+    if not isinstance(customer_id, int) or not conn.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+        raise CrmWriteError('客户不存在', 404)
+    if action == 'create_task':
+        if not str(payload.get('title') or '').strip() or not str(payload.get('due_date') or '').strip():
+            raise CrmWriteError('待办提议需要动作和日期')
+    else:
+        if not str(payload.get('content') or payload.get('activity_content') or '').strip():
+            raise CrmWriteError('沟通提议需要事实内容')
+        if strict:
+            _validate_direction(payload.get('direction', 'unknown'))
+    return customer_id, 'task' if action == 'create_task' else 'activity'
+
+
+def _insert_agent_proposal(conn, action, customer_id, payload, source='', source_reference='', idempotency_key='', request_sha256='', strict=False):
+    customer_id, proposal_type = _validate_agent_proposal(action, customer_id, payload, conn, strict=strict)
+    cursor = conn.execute('''INSERT INTO agent_proposals
+                           (proposal_type, customer_id, payload, proposal_action, source, source_reference, idempotency_key, request_sha256, status, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
+                          (proposal_type, customer_id, json.dumps(payload, ensure_ascii=False, sort_keys=True), action, source,
+                           source_reference, idempotency_key, request_sha256, _calendar_now_text()))
+    return cursor.lastrowid, customer_id, proposal_type
+
+
+@app.route('/api/gateway/proposals', methods=['POST'])
+@gateway_scope_required('crm:propose')
+def gateway_create_proposal():
+    data = request.get_json(silent=True) or {}
+    if _gateway_reject_user_override(data):
+        return _gateway_response(error=('validation', 'Agent 不可指定 user_id 或切换用户'), status=400)
+    action, payload = str(data.get('action') or '').strip(), data.get('payload')
+    customer_id = data.get('customer_id')
+    key = str(request.headers.get('Idempotency-Key') or '').strip()
+    if not key or len(key) > 200:
+        return _gateway_response(error=('validation', '需要 1-200 字符的 Idempotency-Key'), status=400)
+    request_hash = hashlib.sha256(json.dumps({'action': action, 'customer_id': customer_id, 'payload': payload}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    conn = get_db()
+    try:
+        conn.execute('BEGIN')
+        existing = conn.execute('SELECT request_sha256, response_json FROM agent_gateway_idempotency WHERE action=? AND idempotency_key=?', (action, key)).fetchone()
+        if existing:
+            conn.rollback()
+            if not secrets.compare_digest(existing['request_sha256'], request_hash):
+                return _gateway_response(error=('conflict', '该 Idempotency-Key 已用于不同请求'), status=409)
+            return _gateway_response(json.loads(existing['response_json']), status=200)
+        proposal_id, resolved_customer_id, proposal_type = _insert_agent_proposal(conn, action, customer_id, payload,
+            source='agent_gateway', source_reference=str(payload.get('source_reference') or '')[:300], idempotency_key=key, request_sha256=request_hash, strict=True)
+        response_data = {'proposal': {'id': proposal_id, 'action': action, 'type': proposal_type, 'customer_id': resolved_customer_id,
+                                      'status': 'pending', 'requires_confirmation': True,
+                                      'confirmation_path': f'/api/agent/proposals/{proposal_id}'}}
+        conn.execute('''INSERT INTO agent_gateway_idempotency(action, idempotency_key, request_sha256, proposal_id, response_json, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''', (action, key, request_hash, proposal_id,
+                        json.dumps(response_data, ensure_ascii=False), _calendar_now_text(), _calendar_now_text()))
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return _gateway_response(error=('not_found' if error.status == 404 else 'validation', error.message), status=error.status)
+    except Exception as error:
+        conn.rollback()
+        logger.error('gateway_create_proposal error: %s', error, exc_info=True)
+        return _gateway_response(error=('internal_error', '无法创建提议'), status=500)
+    finally:
+        conn.close()
+    log_operation('CREATE_AGENT_GATEWAY_PROPOSAL', 'agent_proposal', proposal_id, action)
+    return _gateway_response(response_data, status=201)
+
+
+class _GatewayIdempotentReplay(Exception):
+    def __init__(self, response_data):
+        self.response_data = response_data
+
+
+def _gateway_direct_write(action, data, idempotency_key):
+    """Execute one approved low-risk CRM operation through a shared write function."""
+    payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
+    customer_id = data.get('customer_id')
+    request_hash = hashlib.sha256(json.dumps({'action': action, 'customer_id': customer_id, 'payload': payload},
+                                             sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+    principal = g.gateway_principal
+    preflight_conn = get_db()
+    try:
+        existing = preflight_conn.execute('SELECT request_sha256, response_json FROM agent_gateway_idempotency WHERE action=? AND idempotency_key=?',
+                                          ('write:' + action, idempotency_key)).fetchone()
+    finally:
+        preflight_conn.close()
+    if existing:
+        if not secrets.compare_digest(existing['request_sha256'], request_hash):
+            raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
+        return json.loads(existing['response_json']), True
+
+    def receipt_hook(conn, cursor, result):
+        existing = cursor.execute('SELECT request_sha256, response_json FROM agent_gateway_idempotency WHERE action=? AND idempotency_key=?',
+                                  ('write:' + action, idempotency_key)).fetchone()
+        if existing:
+            if secrets.compare_digest(existing['request_sha256'], request_hash):
+                raise _GatewayIdempotentReplay(json.loads(existing['response_json']))
+            raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
+        action_id = 'agact_' + secrets.token_urlsafe(18)
+        related_type, related_id = {
+            'record_communication': ('follow_up_log', result.get('id')),
+            'create_task': ('reminder', result.get('id')),
+            'complete_task': ('reminder', payload.get('task_id')),
+            'update_customer': ('customer', result.get('id')),
+            'update_contact': ('contact', result.get('id')),
+            'resolve_inbox': ('inbox_item', result.get('id')),
+        }[action]
+        response_data = {'action': {'id': action_id, 'type': action, 'status': 'completed',
+                                    'customer_id': result.get('customer_id') or customer_id,
+                                    'related_type': related_type, 'related_id': related_id,
+                                    'undo_token': result['undo_token'], 'undo_description': result.get('undo_description', '')}}
+        cursor.execute('''INSERT INTO agent_actions
+                          (action_id, token_id, user_id, action_type, customer_id, related_type, related_id, undo_token, request_json, status, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)''',
+                       (action_id, principal['id'], principal['user'], action, result.get('customer_id') or customer_id, related_type, related_id,
+                        result['undo_token'], json.dumps({'action': action, 'customer_id': customer_id, 'payload': payload}, ensure_ascii=False),
+                        _calendar_now_text()))
+        cursor.execute('''INSERT INTO agent_gateway_idempotency(action, idempotency_key, request_sha256, response_json, created_at, updated_at)
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                       ('write:' + action, idempotency_key, request_hash, json.dumps(response_data, ensure_ascii=False),
+                        _calendar_now_text(), _calendar_now_text()))
+        result['_gateway_response'] = response_data
+
+    source = str(payload.get('source') or 'agent_gateway').strip()[:100]
+    payload = {**payload, 'source': source}
+    if action == 'record_communication':
+        if not isinstance(customer_id, int):
+            raise CrmWriteError('记录沟通需要 customer_id')
+        result = record_customer_communication(customer_id, payload, before_commit=receipt_hook)
+    elif action == 'create_task':
+        if not isinstance(customer_id, int):
+            raise CrmWriteError('创建待办需要 customer_id')
+        result = create_customer_follow_up_task(customer_id, payload, before_commit=receipt_hook)
+    elif action == 'complete_task':
+        if not isinstance(payload.get('task_id'), int):
+            raise CrmWriteError('完成待办需要 task_id')
+        result = complete_customer_task(payload['task_id'], payload, before_commit=receipt_hook)
+    elif action == 'update_customer':
+        if not isinstance(customer_id, int):
+            raise CrmWriteError('修改客户资料需要 customer_id')
+        result = update_customer_profile(customer_id, payload, before_commit=receipt_hook)
+    elif action == 'update_contact':
+        if not isinstance(payload.get('contact_id'), int):
+            raise CrmWriteError('修改联系人资料需要 contact_id')
+        result = update_customer_contact(payload['contact_id'], payload, before_commit=receipt_hook)
+    elif action == 'resolve_inbox':
+        if not isinstance(payload.get('inbox_item_id'), int):
+            raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
+        result = resolve_customer_inbox_item(payload['inbox_item_id'], payload, before_commit=receipt_hook)
+    else:
+        raise CrmWriteError('此操作需要 proposal 或不允许直接执行', 409)
+    return result['_gateway_response'], False
+
+
+@app.route('/api/gateway/actions', methods=['POST'])
+@gateway_scope_required('crm:write')
+def gateway_execute_action():
+    data = request.get_json(silent=True) or {}
+    if _gateway_reject_user_override(data):
+        return _gateway_response(error=('validation', 'Agent 不可指定 user_id 或切换用户'), status=400)
+    action = str(data.get('action') or '').strip()
+    if action in {'delete_customer', 'delete_contact', 'delete_task', 'delete_timeline', 'delete_inbox', 'delete_attachment',
+                  'bulk_update', 'restore_database', 'manage_tokens'}:
+        return _gateway_response(error=('conflict', '高风险操作不允许 crm:write 直接执行；请使用 proposal 或人工流程'), status=409)
+    key = str(request.headers.get('Idempotency-Key') or '').strip()
+    if not key or len(key) > 200:
+        return _gateway_response(error=('validation', '需要 1-200 字符的 Idempotency-Key'), status=400)
+    try:
+        response_data, replayed = _gateway_direct_write(action, data, key)
+    except _GatewayIdempotentReplay as replay:
+        return _gateway_response(replay.response_data)
+    except CrmWriteError as error:
+        code = 'conflict' if error.status == 409 else ('not_found' if error.status == 404 else 'validation')
+        return _gateway_response(error=(code, error.message), status=error.status)
+    except Exception as error:
+        logger.error('gateway_execute_action error: %s', error, exc_info=True)
+        return _gateway_response(error=('internal_error', 'Agent 操作未保存'), status=500)
+    log_operation('AGENT_GATEWAY_WRITE', 'agent_action', None, action)
+    return _gateway_response(response_data, status=200 if replayed else 201)
+
+
+@app.route('/api/gateway/actions/<action_id>/undo', methods=['POST'])
+@gateway_scope_required('crm:write')
+def gateway_undo_action(action_id):
+    if not re.fullmatch(r'agact_[A-Za-z0-9_-]{16,64}', action_id or ''):
+        return _gateway_response(error=('not_found', 'Agent action 不存在'), status=404)
+    conn = get_db()
+    try:
+        conn.execute('BEGIN')
+        action = conn.execute("SELECT * FROM agent_actions WHERE action_id=? AND status='completed'", (action_id,)).fetchone()
+        if not action:
+            conn.rollback()
+            return _gateway_response(error=('not_found', 'Agent action 不存在或已经撤销'), status=404)
+        undone, error = _undo_action_for_user(conn, action['undo_token'])
+        if error:
+            conn.rollback()
+            return _gateway_response(error=('conflict', error), status=409)
+        now = _calendar_now_text()
+        conn.execute("UPDATE agent_actions SET status='undone', undone_at=? WHERE action_id=? AND status='completed'", (now, action_id))
+        conn.commit()
+    except Exception as error:
+        conn.rollback()
+        logger.error('gateway_undo_action error: %s', error, exc_info=True)
+        return _gateway_response(error=('internal_error', '撤销失败，原数据未被覆盖'), status=500)
+    finally:
+        conn.close()
+    log_operation('UNDO_AGENT_GATEWAY_WRITE', 'agent_action', None, action_id)
+    return _gateway_response({'action': {'id': action_id, 'status': 'undone', 'undo_token': action['undo_token']}})
+
+
+def _chat_gateway_call(user, handler, path, method='GET', payload=None, idempotency_key='', handler_args=()):
+    """Invoke the public Gateway tool handler under the signed-in chat user's tool identity."""
+    headers = {'Idempotency-Key': idempotency_key} if idempotency_key else {}
+    with app.test_request_context(path, method=method, headers=headers, json=payload if method != 'GET' else None):
+        set_db_user(user)
+        g.current_user = user
+        g.gateway_principal = {'id': f'trosa_chat_{user}', 'user': user,
+                               'scopes': frozenset(('crm:read', 'crm:propose', 'crm:write'))}
+        response = handler(*handler_args)
+        if isinstance(response, tuple):
+            response, status = response[0], response[1]
+        else:
+            status = response.status_code
+        return response.get_json() or {}, status
+
+
+def _chat_customer_candidates(user, mention):
+    query = str(mention or '').strip()[:120]
+    if not query:
+        return [], None
+    payload, status = _chat_gateway_call(user, gateway_search_customers,
+                                         '/api/gateway/customers?' + urlencode({'query': query}))
+    if status != 200:
+        return [], None
+    customers = (payload.get('data') or {}).get('customers') or []
+    normalized = _agent_normalize(query)
+    exact = [customer for customer in customers if normalized and normalized in {
+        _agent_normalize(customer.get('name')), _agent_normalize(customer.get('company'))
+    }]
+    return customers, exact[0] if len(exact) == 1 else None
+
+
+def _chat_extract_customer_mention(message):
+    text = str(message or '').strip()
+    for suffix in ('最近怎么样', '最近如何', '什么情况'):
+        if suffix in text:
+            return text.split(suffix, 1)[0].strip(' ，。')
+    match = re.search(r'(?:提醒我跟进|提醒[^，。！？!?]{0,12}跟进|跟进|问一下价格)\s*([A-Za-z0-9\-\u4e00-\u9fff .&]+)', text)
+    if match:
+        return re.sub(r'(?:下周[一二三四五六日天]?|今天|明天|后天|再|一下|价格|。|，).*$', '', match.group(1)).strip()
+    before_date = re.split(r'(?:今天|昨日|昨天|刚才|下周|明天|后天)', text, maxsplit=1)[0]
+    before_date = re.sub(r'^(?:请)?(?:帮我)?(?:记录一下|记一下|记录)\s*', '', before_date).strip(' ，。')
+    return before_date.split()[-1] if before_date else ''
+
+
+def _chat_relative_reminder_date(message):
+    meeting = re.search(r'(\d{1,2})\s*月\s*(\d{1,2})\s*日', message)
+    advance = re.search(r'提前\s*(\d{1,2}|[一二三四五六七八九十])\s*天', message)
+    if meeting and advance:
+        try:
+            meeting_date = datetime(_calendar_today().year, int(meeting.group(1)), int(meeting.group(2))).date()
+            amount = advance.group(1)
+            days = int(amount) if amount.isdigit() else {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                                                         '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}[amount]
+            return (meeting_date - timedelta(days=days)).isoformat()
+        except ValueError:
+            return ''
+    return _agent_parse_date(message)
+
+
+def _chat_operation(label, action):
+    return {'label': label, 'action_id': action.get('id', ''), 'undo_available': bool(action.get('id'))}
+
+
+@app.route('/api/chat/agent', methods=['POST'])
+@login_required
+def chat_agent():
+    """Hamid's small, tool-only conversational CRM entry point (no direct DB writes)."""
+    if g.current_user != 'hamid':
+        return jsonify({'error': '此测试版聊天助手目前仅向 Hamid 开放'}), 404
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message') or '').strip()
+    if not message or len(message) > 2000:
+        return jsonify({'error': '请输入不超过 2000 字的消息'}), 400
+    user = g.current_user
+    request_key = str(data.get('idempotency_key') or '').strip()
+    if request_key and len(request_key) > 200:
+        return jsonify({'error': '请求标识无效'}), 400
+    lowered = message.casefold()
+    context = session.get('trosa_chat_context') if isinstance(session.get('trosa_chat_context'), dict) else {}
+    response = {'reply': '', 'operations': [], 'candidates': []}
+
+    if re.search(r'撤销.*(?:刚才|上一|上个)|撤回.*(?:刚才|上一|上个)', message):
+        action_id = context.get('last_action_id', '')
+        if not action_id:
+            response['reply'] = '这次聊天里还没有可撤销的操作。'
+            return jsonify(response)
+        payload, status = _chat_gateway_call(user, gateway_undo_action, f'/api/gateway/actions/{action_id}/undo', method='POST', handler_args=(action_id,))
+        if status != 200:
+            response['reply'] = '刚才的操作暂时不能撤销：' + ((payload.get('error') or {}).get('message') or '请稍后重试。')
+            return jsonify(response), status
+        response['reply'] = '已撤销刚才的操作，相关客户记录已恢复。'
+        context['last_action_id'] = ''
+        session['trosa_chat_context'] = context
+        return jsonify(response)
+
+    if ('今天' in message and any(word in message for word in ('做什么', '待办', '要做', '安排'))) or message in ('今天', '今日'):
+        payload, status = _chat_gateway_call(user, gateway_get_today, '/api/gateway/today')
+        if status != 200:
+            return jsonify({'reply': '暂时无法读取今天的安排，请稍后重试。', 'operations': []}), status
+        tasks = (payload.get('data') or {}).get('tasks') or []
+        if not tasks:
+            response['reply'] = '今天没有到期的明确待办。'
+        else:
+            lines = [f"{item.get('customer_name') or '客户'}：{item.get('title') or '待办'}（{item.get('due_date')}）" for item in tasks[:6]]
+            response['reply'] = '今天优先处理：\n' + '\n'.join(lines)
+        return jsonify(response)
+
+    if any(word in message for word in ('最近怎么样', '最近如何', '什么情况')):
+        mention = _chat_extract_customer_mention(message)
+        customers, customer = _chat_customer_candidates(user, mention)
+        if not customer:
+            response['reply'] = '我没法可靠确定你指的是哪位客户。请从下面候选中明确告诉我公司名称。'
+            response['candidates'] = [{'id': item['id'], 'label': item.get('company') or item.get('name') or '未命名客户'} for item in customers[:5]]
+            return jsonify(response)
+        detail, detail_status = _chat_gateway_call(user, gateway_get_customer, f'/api/gateway/customers/{customer["id"]}', handler_args=(customer['id'],))
+        activity, activity_status = _chat_gateway_call(user, gateway_search_activity,
+            '/api/gateway/activity?' + urlencode({'customer_id': customer['id'], 'limit': 1}))
+        if detail_status != 200 or activity_status != 200:
+            return jsonify({'reply': '暂时无法读取该客户的完整情况，请稍后重试。', 'operations': []}), 502
+        facts = (detail.get('data') or {}).get('customer') or {}
+        recent = ((activity.get('data') or {}).get('activities') or [{}])[0]
+        name = facts.get('company') or facts.get('name') or '该客户'
+        current = recent.get('content') or '暂无已记录的最近沟通'
+        next_task = facts.get('next_task') or {}
+        next_line = (next_task.get('title') or '暂无明确下一步') + (f"（{next_task.get('remind_date')}）" if next_task.get('remind_date') else '')
+        response['reply'] = f'{name}：最近记录是“{current}”。当前状态：{facts.get("attention_reason") or "等待新的业务事实"}。下一步：{next_line}。'
+        context['customer_id'], context['customer_name'] = customer['id'], name
+        session['trosa_chat_context'] = context
+        return jsonify(response)
+
+    wants_record = any(word in message for word in ('记录', '记一下', '帮我记', '存一下'))
+    wants_reminder = any(word in message for word in ('提醒', '跟进'))
+    mention = _chat_extract_customer_mention(message)
+    customers, customer = _chat_customer_candidates(user, mention)
+    if not customer and context.get('customer_id') and (not mention or mention in ('那', '这个', '他', '她')):
+        detail, status = _chat_gateway_call(user, gateway_get_customer, f'/api/gateway/customers/{context["customer_id"]}', handler_args=(context['customer_id'],))
+        customer = (detail.get('data') or {}).get('customer') if status == 200 else None
+    if wants_record or wants_reminder:
+        if not customer:
+            response['reply'] = '我没法可靠确定要操作哪个客户，因此没有修改任何记录。请明确说出客户或公司名称。'
+            response['candidates'] = [{'id': item['id'], 'label': item.get('company') or item.get('name') or '未命名客户'} for item in customers[:5]]
+            return jsonify(response)
+        customer_name = customer.get('company') or customer.get('name') or '该客户'
+        key = request_key or ('chat_' + secrets.token_urlsafe(18))
+        if wants_record:
+            content = re.sub(r'^(?:请)?(?:帮我)?(?:记录一下|记一下|记录|存一下)\s*', '', message).strip()
+            content = re.sub(r'[，。]?(?:帮我)?记一下[。！!]?$', '', content).strip()
+            if mention and content.startswith(mention):
+                content = content[len(mention):].strip(' ，。')
+            due_date = _chat_relative_reminder_date(message) if '提前' in message and '天' in message else ''
+            write_payload = {'action': 'record_communication', 'customer_id': customer['id'], 'payload': {
+                'content': content, 'follow_date': _calendar_today().isoformat(),
+                'direction': 'inbound' if any(word in content for word in ('确认', '回复', '说', '表示')) else 'unknown',
+                'activity_type': 'follow_up', 'source': 'trosa_chat',
+                'next_task': f'跟进{customer_name}上海会面' if due_date else '', 'next_follow_up': due_date,
+            }}
+            payload, status = _chat_gateway_call(user, gateway_execute_action, '/api/gateway/actions', method='POST', payload=write_payload, idempotency_key=key)
+            if status not in (200, 201):
+                return jsonify({'reply': '这次沟通没有保存：' + ((payload.get('error') or {}).get('message') or '请稍后重试。'), 'operations': []}), status
+            action = (payload.get('data') or {}).get('action') or {}
+            response['operations'].append(_chat_operation(f'记录 {customer_name} 沟通' + (f'，并创建 {due_date} 提醒' if due_date else ''), action))
+            response['reply'] = f'已记录 {customer_name} 最新沟通' + (f'，并创建 {due_date} 提醒。' if due_date else '。')
+        else:
+            due_date = _agent_parse_date(message)
+            if not due_date:
+                return jsonify({'reply': '请给我一个明确日期，例如“下周三”或“9 月 12 日”。', 'operations': []})
+            write_payload = {'action': 'create_task', 'customer_id': customer['id'], 'payload': {'title': f'跟进{customer_name}', 'due_date': due_date, 'source': 'trosa_chat'}}
+            payload, status = _chat_gateway_call(user, gateway_execute_action, '/api/gateway/actions', method='POST', payload=write_payload, idempotency_key=key)
+            if status not in (200, 201):
+                return jsonify({'reply': '提醒没有创建：' + ((payload.get('error') or {}).get('message') or '请稍后重试。'), 'operations': []}), status
+            action = (payload.get('data') or {}).get('action') or {}
+            response['operations'].append(_chat_operation(f'创建 {customer_name} 跟进提醒（{due_date}）', action))
+            response['reply'] = f'已为 {customer_name} 创建 {due_date} 跟进提醒。'
+        context.update({'customer_id': customer['id'], 'customer_name': customer_name,
+                        'last_action_id': response['operations'][0]['action_id']})
+        session['trosa_chat_context'] = context
+        return jsonify(response)
+    return jsonify({'reply': '我目前可以查看今天安排、查询客户近况、记录沟通、创建提醒，以及撤销刚才的聊天操作。', 'operations': []})
+
+
+@app.route('/api/chat/agent/actions/<action_id>/undo', methods=['POST'])
+@login_required
+def chat_agent_undo(action_id):
+    if g.current_user != 'hamid':
+        return jsonify({'error': '此测试版聊天助手目前仅向 Hamid 开放'}), 404
+    payload, status = _chat_gateway_call(g.current_user, gateway_undo_action,
+                                         f'/api/gateway/actions/{action_id}/undo', method='POST', handler_args=(action_id,))
+    if status != 200:
+        return jsonify({'reply': '该操作暂时不能撤销：' + ((payload.get('error') or {}).get('message') or '请稍后重试。')}), status
+    context = session.get('trosa_chat_context') if isinstance(session.get('trosa_chat_context'), dict) else {}
+    if context.get('last_action_id') == action_id:
+        context['last_action_id'] = ''
+        session['trosa_chat_context'] = context
+    return jsonify({'reply': '已撤销这项操作，相关客户记录已恢复。', 'action_id': action_id})
+
+
 @app.route('/api/agent/proposals', methods=['POST'])
 @login_required
 def create_agent_proposal():
@@ -5360,76 +6257,112 @@ def create_agent_proposal():
         return jsonify({'error': '待办提议需要动作和日期'}), 400
     if proposal_type == 'activity' and not str(payload.get('content') or '').strip():
         return jsonify({'error': '沟通提议需要事实内容'}), 400
+    action = 'create_task' if proposal_type == 'task' else 'record_communication'
     conn = get_db()
-    c = conn.cursor()
-    if not c.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+    try:
+        proposal_id, _, _ = _insert_agent_proposal(conn, action, customer_id, payload, source='agent_api')
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'error': error.message}), error.status
+    finally:
         conn.close()
-        return jsonify({'error': '客户不存在'}), 404
-    now = _calendar_now_text()
-    c.execute('INSERT INTO agent_proposals (proposal_type, customer_id, payload, status, created_at) VALUES (?, ?, ?, \'pending\', ?)',
-              (proposal_type, customer_id, json.dumps(payload, ensure_ascii=False), now))
-    proposal_id = c.lastrowid
-    conn.commit()
-    conn.close()
     log_operation('CREATE_AGENT_PROPOSAL', 'agent_proposal', proposal_id, f'{proposal_type} 提议待确认')
     return jsonify({'success': True, 'id': proposal_id, 'status': 'pending', 'requires_confirmation': True}), 201
+
+
+@app.route('/api/agent/proposals/<int:proposal_id>', methods=['GET', 'PUT'])
+@login_required
+def get_or_update_agent_proposal(proposal_id):
+    conn = get_db()
+    try:
+        proposal = conn.execute('SELECT * FROM agent_proposals WHERE id=?', (proposal_id,)).fetchone()
+        if not proposal:
+            return jsonify({'error': '提议不存在'}), 404
+        proposal = dict(proposal)
+        if request.method == 'GET':
+            proposal['payload'] = json.loads(proposal['payload'])
+            return jsonify({'success': True, 'proposal': proposal})
+        if proposal['status'] != 'pending':
+            return jsonify({'error': '只能编辑待确认提议'}), 409
+        payload = request.get_json(silent=True) or {}
+        action = proposal.get('proposal_action') or ('create_task' if proposal['proposal_type'] == 'task' else 'record_communication')
+        customer_id, _ = _validate_agent_proposal(action, proposal['customer_id'], payload, conn)
+        conn.execute('UPDATE agent_proposals SET customer_id=?, payload=?, source_reference=? WHERE id=? AND status=\'pending\'',
+                     (customer_id, json.dumps(payload, ensure_ascii=False, sort_keys=True), str(payload.get('source_reference') or '')[:300], proposal_id))
+        conn.commit()
+        return jsonify({'success': True, 'proposal_id': proposal_id, 'status': 'pending'})
+    except (TypeError, ValueError, json.JSONDecodeError):
+        conn.rollback()
+        return jsonify({'error': '提议内容无效'}), 400
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'error': error.message}), error.status
+    finally:
+        conn.close()
 
 
 @app.route('/api/agent/proposals/<int:proposal_id>/confirm', methods=['POST'])
 @login_required
 def confirm_agent_proposal(proposal_id):
     conn = get_db()
-    c = conn.cursor()
-    proposal = c.execute("SELECT * FROM agent_proposals WHERE id=? AND status='pending'", (proposal_id,)).fetchone()
+    proposal = conn.execute("SELECT * FROM agent_proposals WHERE id=? AND status='pending'", (proposal_id,)).fetchone()
     if not proposal:
         conn.close()
         return jsonify({'error': '提议不存在或已处理'}), 404
     proposal = dict(proposal)
-    payload = json.loads(proposal['payload'])
-    now = _calendar_now_text()
-    customer_id = proposal['customer_id']
-    customer_before = _snapshot_entity(conn, 'customers', customer_id)
-    undo_entities = []
-    if proposal['proposal_type'] == 'task':
-        title, due_date = str(payload.get('title') or '').strip(), str(payload.get('due_date') or '').strip()
-        try: datetime.strptime(due_date, '%Y-%m-%d')
-        except ValueError:
-            conn.close(); return jsonify({'error': '待办日期格式无效'}), 400
-        existing_same_day = c.execute('''SELECT id FROM reminders
-                                         WHERE customer_id=? AND is_done=0
-                                           AND reminder_type='follow_up' AND remind_date=?
-                                         ORDER BY id LIMIT 1''', (customer_id, due_date)).fetchone()
-        task_before = _snapshot_entity(conn, 'reminders', existing_same_day['id']) if existing_same_day else None
-        target_id = _merge_or_create_reminder(c, customer_id, title, title, str(payload.get('reason') or '').strip(), due_date, now=now)
-        c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id=? AND is_done=0', (customer_id,))
-        c.execute('UPDATE customers SET next_follow_up=?, manual_next_follow=1, updated_at=? WHERE id=?', (c.fetchone()[0] or due_date, now, customer_id))
-        undo_entities.append(_undo_entity('reminders', target_id, task_before,
-                                          _snapshot_entity(conn, 'reminders', target_id)))
-        _resolve_ai_inbox(c, customer_id, now)
-    else:
-        content = str(payload.get('content') or '').strip()
-        follow_date = str(payload.get('follow_date') or _calendar_today().isoformat()).strip()
-        try: datetime.strptime(follow_date, '%Y-%m-%d')
-        except ValueError:
-            conn.close(); return jsonify({'error': '沟通日期格式无效'}), 400
-        target_id = c.execute('''INSERT INTO follow_up_logs (customer_id, content, follow_date, result, next_plan, activity_type, direction, source, created_at)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, 'agent_confirmed', ?)''',
-                              (customer_id, sanitize_mark_html(content), follow_date, sanitize_mark_html(str(payload.get('result') or '')), sanitize_mark_html(str(payload.get('next_plan') or '')), str(payload.get('activity_type') or 'follow_up'), str(payload.get('direction') or 'unknown'), now)).lastrowid
-        c.execute('UPDATE customers SET last_contact=?, updated_at=? WHERE id=?', (follow_date, now, customer_id))
-        undo_entities.append(_undo_entity('follow_up_logs', target_id, None,
-                                          _snapshot_entity(conn, 'follow_up_logs', target_id)))
-    undo_entities.append(_undo_entity('customers', customer_id, customer_before,
-                                      _snapshot_entity(conn, 'customers', customer_id)))
-    action_label = '待办' if proposal['proposal_type'] == 'task' else '沟通记录'
-    undo_description = f'撤销写入：{action_label}'
-    undo_token = _create_undo_action(conn, 'CONFIRM_AGENT_PROPOSAL', proposal['proposal_type'],
-                                     target_id, undo_entities, undo_description)
-    c.execute("UPDATE agent_proposals SET status='confirmed', confirmed_at=? WHERE id=?", (now, proposal_id))
-    conn.commit()
     conn.close()
+    try:
+        payload = json.loads(proposal['payload'])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return jsonify({'error': '提议内容无效'}), 409
+
+    def mark_confirmed(write_conn, cursor, _result):
+        cursor.execute("UPDATE agent_proposals SET status='confirmed', confirmed_at=? WHERE id=? AND status='pending'",
+                       (_calendar_now_text(), proposal_id))
+        if cursor.rowcount != 1:
+            raise CrmWriteError('提议已被其他操作处理，请刷新后重试', 409)
+
+    try:
+        action = proposal.get('proposal_action') or ('create_task' if proposal['proposal_type'] == 'task' else 'record_communication')
+        if action == 'create_task':
+            result = create_customer_follow_up_task(proposal['customer_id'], {
+                'title': payload.get('title'), 'due_date': payload.get('due_date'),
+                'reason': payload.get('reason', ''),
+            }, before_commit=mark_confirmed)
+            target_id = result['id']
+        elif action == 'record_communication':
+            result = record_customer_communication(proposal['customer_id'], {
+                'activity_content': payload.get('content'), 'activity_result': payload.get('result', ''),
+                'activity_type': payload.get('activity_type', 'follow_up'),
+                'direction': payload.get('direction', 'unknown'),
+                'follow_date': payload.get('follow_date'),
+                'next_task': payload.get('next_task') or payload.get('next_plan', ''),
+                'next_follow_up': payload.get('next_follow_up', ''),
+                'contact_id': payload.get('contact_id'), 'inbox_item_id': payload.get('inbox_item_id'),
+                'source': payload.get('source') or 'agent_confirmed', 'is_reported': payload.get('is_reported'),
+            }, before_commit=mark_confirmed)
+            target_id = result['id']
+        elif action == 'complete_task':
+            result = complete_customer_task(payload.get('task_id'), {
+                'activity_content': payload.get('content') or payload.get('activity_content'),
+                'activity_result': payload.get('result', ''), 'activity_type': payload.get('activity_type', 'follow_up'),
+                'direction': payload.get('direction', 'unknown'), 'next_task': payload.get('next_task') or payload.get('next_plan', ''),
+                'next_follow_up': payload.get('next_follow_up', ''), 'source': payload.get('source') or 'agent_confirmed',
+                'is_reported': payload.get('is_reported'),
+            }, before_commit=mark_confirmed)
+            target_id = result['activity_id']
+        else:
+            return jsonify({'error': '提议动作无效'}), 409
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception as error:
+        logger.error('confirm_agent_proposal error: %s', error, exc_info=True)
+        return jsonify({'error': '确认 Agent 提议失败，未保存任何更改'}), 500
+
     log_operation('CONFIRM_AGENT_PROPOSAL', proposal['proposal_type'], target_id, f'确认 Agent 提议 #{proposal_id}')
     return jsonify({'success': True, 'proposal_id': proposal_id, 'target_id': target_id, 'status': 'confirmed',
-                    'undo_token': undo_token, 'undo_description': undo_description})
+                    'undo_token': result['undo_token'], 'undo_description': result['undo_description']})
 
 
 @app.route('/api/agent/proposals/<int:proposal_id>/cancel', methods=['POST'])
@@ -5692,99 +6625,141 @@ def edit_reminder(reminder_id):
                     'undo_description': description})
 
 
+class CrmWriteError(Exception):
+    """A validated business failure that a route can return without partial writes."""
+
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def _run_crm_write(operation, before_commit=None):
+    """Run one core CRM action atomically, with an optional same-transaction hook."""
+    conn = get_db()
+    try:
+        conn.execute('BEGIN')
+        result = operation(conn, conn.cursor())
+        if before_commit:
+            before_commit(conn, conn.cursor(), result)
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _validate_direction(value):
+    direction = str(value or 'unknown').strip()
+    if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
+        raise CrmWriteError('信息方向无效')
+    return direction
+
+
+def complete_customer_task(reminder_id, data, before_commit=None):
+    """Complete one task and record its factual outcome in one transaction."""
+    data = data or {}
+    activity_content = str(data.get('activity_content') or data.get('result') or '').strip()
+    activity_result = str(data.get('activity_result') or '').strip()
+    activity_type = str(data.get('activity_type') or 'follow_up').strip()
+    direction = _validate_direction(data.get('direction'))
+    next_task = str(data.get('next_task') or '').strip()
+    next_follow_date = str(data.get('next_follow_up') or '').strip()
+    is_reported = 1 if data.get('is_reported') else 0
+    if next_task and not next_follow_date:
+        raise CrmWriteError('安排下一步时需要选择日期')
+
+    def operation(conn, c):
+        reminder = c.execute('''SELECT r.*, c.name as customer_name, c.customer_type
+                                FROM reminders r JOIN customers c ON r.customer_id=c.id
+                                WHERE r.id=?''', (reminder_id,)).fetchone()
+        if not reminder:
+            raise CrmWriteError('提醒不存在', 404)
+        customer_id = reminder['customer_id']
+        customer_before = _snapshot_entity(conn, 'customers', customer_id)
+        related_reminders_before = {reminder_id: _snapshot_entity(conn, 'reminders', reminder_id)}
+        for row in c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
+                                AND reminder_type LIKE 'outreach_%' ''', (customer_id,)).fetchall():
+            related_reminders_before[row['id']] = _snapshot_entity(conn, 'reminders', row['id'])
+        now = _calendar_now_text()
+        task_title = reminder['title'] or reminder['content'] or f'联系 {reminder["customer_name"]}'
+        actual_content = activity_content or f'完成任务：{task_title}'
+        c.execute('UPDATE reminders SET is_done=1, completed_at=? WHERE id=?', (now, reminder_id))
+        c.execute('''INSERT INTO follow_up_logs
+                     (customer_id, content, follow_date, result, next_plan, activity_type, direction,
+                      related_task_id, is_reported, source, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (customer_id, sanitize_mark_html(actual_content), _calendar_today().isoformat(),
+                   sanitize_mark_html(activity_result), sanitize_mark_html(next_task), activity_type,
+                   direction, reminder_id, is_reported, data.get('source', 'manual'), now))
+        activity_id = c.lastrowid
+        next_task_before = None
+        if (reminder['reminder_type'] or '').startswith('outreach_'):
+            c.execute('''UPDATE reminders SET is_done=1, completed_at=?
+                         WHERE customer_id=? AND is_done=0 AND reminder_type LIKE 'outreach_%' ''',
+                      (now, customer_id))
+        task_id = None
+        next_follow_message = ''
+        activity_date = _calendar_today().isoformat()
+        if next_task and next_follow_date:
+            existing_next = c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
+                                         AND reminder_type='follow_up' AND remind_date=?
+                                         ORDER BY id LIMIT 1''', (customer_id, next_follow_date)).fetchone()
+            if existing_next:
+                next_task_before = _snapshot_entity(conn, 'reminders', existing_next['id'])
+            task_id = _merge_or_create_reminder(c, customer_id, next_task, next_task,
+                                                activity_result or actual_content, next_follow_date,
+                                                source_activity_id=activity_id, now=now)
+            next_follow_message = f'，下一步：{next_task}（{next_follow_date}）'
+        c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id=? AND is_done=0', (customer_id,))
+        next_open_date = c.fetchone()[0] or ''
+        c.execute('''UPDATE customers SET next_follow_up=?, manual_next_follow=?, last_contact=?,
+                     customer_type='existing', status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END,
+                     updated_at=? WHERE id=?''',
+                  (next_open_date, 1 if next_open_date else 0, activity_date, now, customer_id))
+        attention = _set_customer_attention_state(c, customer_id, actual_content, activity_result,
+                                                  direction, bool(next_open_date))
+        understanding = _refresh_customer_understanding(c, customer_id, activity_id, now)
+        _resolve_ai_inbox(c, customer_id, now)
+        undo_entities = [
+            _undo_entity('reminders', related_id, related_before, _snapshot_entity(conn, 'reminders', related_id))
+            for related_id, related_before in related_reminders_before.items()
+        ]
+        if task_id and task_id not in related_reminders_before:
+            undo_entities.append(_undo_entity('reminders', task_id, next_task_before,
+                                              _snapshot_entity(conn, 'reminders', task_id)))
+        undo_entities.extend([
+            _undo_entity('follow_up_logs', activity_id, None, _snapshot_entity(conn, 'follow_up_logs', activity_id)),
+            _undo_entity('customers', customer_id, customer_before, _snapshot_entity(conn, 'customers', customer_id)),
+        ])
+        undo_description = f'撤销完成待办：{task_title}'
+        undo_token = _create_undo_action(conn, 'COMPLETE_TASK', 'reminder', reminder_id,
+                                         undo_entities, undo_description)
+        return {
+            'message': f'活动已保存{next_follow_message}', 'activity_id': activity_id, 'task_id': task_id,
+            'attention': attention, 'understanding': understanding, 'undo_token': undo_token,
+            'undo_description': undo_description, 'customer_id': customer_id,
+            'log_detail': f'记录活动: {reminder["customer_name"]} - {actual_content}{next_follow_message}',
+        }
+
+    result = _run_crm_write(operation, before_commit)
+    log_operation('FOLLOW_UP', 'reminder', reminder_id, result['log_detail'])
+    return result
+
+
 @app.route('/api/reminders/<int:reminder_id>', methods=['PUT'])
 @login_required
 def complete_reminder(reminder_id):
-    data = request.get_json(silent=True) or {}
-    activity_content = (data.get('activity_content') or data.get('result') or '').strip()
-    activity_result = (data.get('activity_result') or '').strip()
-    activity_type = (data.get('activity_type') or 'follow_up').strip()
-    direction = (data.get('direction') or 'unknown').strip()
-    if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
-        return jsonify({'error': '信息方向无效'}), 400
-    next_task = (data.get('next_task') or '').strip()
-    next_follow_date = data.get('next_follow_up', '')
-    is_reported = 1 if data.get('is_reported') else 0
-    if next_task and not next_follow_date:
-        return jsonify({'error': '安排下一步时需要选择日期'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT r.*, c.name as customer_name, c.customer_type FROM reminders r JOIN customers c ON r.customer_id = c.id WHERE r.id = ?', (reminder_id,))
-    reminder = c.fetchone()
-    if not reminder:
-        conn.close()
-        return jsonify({'error': '提醒不存在'}), 404
-    customer_id = reminder['customer_id']
-    customer_before = _snapshot_entity(conn, 'customers', customer_id)
-    related_reminders_before = {reminder_id: _snapshot_entity(conn, 'reminders', reminder_id)}
-    for row in c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
-                            AND reminder_type LIKE 'outreach_%' ''', (customer_id,)).fetchall():
-        related_reminders_before[row['id']] = _snapshot_entity(conn, 'reminders', row['id'])
-    now = _calendar_now_text()
-    task_title = reminder['title'] or reminder['content'] or f'联系 {reminder["customer_name"]}'
-    if not activity_content:
-        activity_content = f'完成任务：{task_title}'
-    c.execute('UPDATE reminders SET is_done = 1, completed_at = ? WHERE id = ?', (now, reminder_id))
-    c.execute('''INSERT INTO follow_up_logs
-                 (customer_id, content, follow_date, result, next_plan, activity_type, direction, related_task_id, is_reported, source, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-              (reminder['customer_id'], sanitize_mark_html(activity_content), _calendar_today().isoformat(),
-               sanitize_mark_html(activity_result),
-               sanitize_mark_html(next_task), activity_type, direction, reminder_id, is_reported, 'manual', now))
-    activity_id = c.lastrowid
-    next_task_before = None
-    # 新客户开发的 15/30/60 天节点只用于提醒尚未行动的客户。完成其中
-    # 任一节点后，后续节点不应继续作为重复待办留在客户详情中。
-    if (reminder['reminder_type'] or '').startswith('outreach_'):
-        c.execute('''UPDATE reminders SET is_done=1, completed_at=?
-                     WHERE customer_id=? AND is_done=0
-                       AND reminder_type LIKE 'outreach_%' ''',
-                  (now, customer_id))
-    next_follow_message = ''
-    task_id = None
-    activity_date = _calendar_today().isoformat()
-    if next_task and next_follow_date:
-        existing_next = c.execute('''SELECT id FROM reminders
-                                     WHERE customer_id=? AND is_done=0
-                                       AND reminder_type='follow_up' AND remind_date=?
-                                     ORDER BY id LIMIT 1''', (customer_id, next_follow_date)).fetchone()
-        if existing_next:
-            next_task_before = _snapshot_entity(conn, 'reminders', existing_next['id'])
-        task_id = _merge_or_create_reminder(c, customer_id, next_task, next_task,
-                                            activity_result or activity_content,
-                                            next_follow_date, source_activity_id=activity_id, now=now)
-        next_follow_message = f'，下一步：{next_task}（{next_follow_date}）'
-    c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id = ? AND is_done = 0', (customer_id,))
-    next_open_date = c.fetchone()[0] or ''
-    c.execute('''UPDATE customers
-                 SET next_follow_up=?, manual_next_follow=?, last_contact=?, customer_type='existing',
-                     status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END,
-                     updated_at=? WHERE id=?''',
-              (next_open_date, 1 if next_open_date else 0, activity_date, now, customer_id))
-    attention = _set_customer_attention_state(c, customer_id, activity_content, activity_result,
-                                              direction, bool(next_open_date))
-    understanding = _refresh_customer_understanding(c, customer_id, activity_id, now)
-    _resolve_ai_inbox(c, customer_id, now)
-    undo_entities = []
-    for related_id, related_before in related_reminders_before.items():
-        undo_entities.append(_undo_entity('reminders', related_id, related_before,
-                                          _snapshot_entity(conn, 'reminders', related_id)))
-    if task_id and task_id not in related_reminders_before:
-        undo_entities.append(_undo_entity('reminders', task_id, next_task_before,
-                                          _snapshot_entity(conn, 'reminders', task_id)))
-    undo_entities.append(_undo_entity('follow_up_logs', activity_id, None,
-                                      _snapshot_entity(conn, 'follow_up_logs', activity_id)))
-    undo_entities.append(_undo_entity('customers', customer_id, customer_before,
-                                      _snapshot_entity(conn, 'customers', customer_id)))
-    undo_description = f'撤销完成待办：{task_title}'
-    undo_token = _create_undo_action(conn, 'COMPLETE_TASK', 'reminder', reminder_id,
-                                     undo_entities, undo_description)
-    conn.commit()
-    conn.close()
-    log_operation('FOLLOW_UP', 'reminder', reminder_id, f'记录活动: {reminder["customer_name"]} - {activity_content}{next_follow_message}')
-    return jsonify({'message': f'活动已保存{next_follow_message}', 'activity_id': activity_id,
-                    'task_id': task_id, 'attention': attention, 'understanding': understanding,
-                    'undo_token': undo_token, 'undo_description': undo_description})
+    try:
+        result = complete_customer_task(reminder_id, request.get_json(silent=True) or {})
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception as error:
+        logger.error('complete_reminder error: %s', error, exc_info=True)
+        return jsonify({'error': '完成待办失败，未保存任何更改'}), 500
+    return jsonify({key: value for key, value in result.items() if key not in ('customer_id', 'log_detail')})
 
 
 @app.route('/api/reminders/<int:reminder_id>/reschedule', methods=['POST'])
@@ -5916,141 +6891,290 @@ def get_follow_history(customer_id):
     return jsonify(history)
 
 
-@app.route('/api/customers/<int:customer_id>/follow_history', methods=['POST'])
-@login_required
-def add_follow_history(customer_id):
-    data = request.get_json(silent=True) or {}
-    activity_content = (data.get('activity_content') or data.get('content') or '').strip()
-    activity_result = (data.get('activity_result') or data.get('result') or '').strip()
-    activity_type = (data.get('activity_type') or 'follow_up').strip()
-    direction = (data.get('direction') or 'unknown').strip()
-    if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
-        return jsonify({'error': '信息方向无效'}), 400
-    next_task = (data.get('next_task') or data.get('next_plan') or '').strip()
-    next_follow_date = (data.get('next_follow_up') or '').strip()
+def record_customer_communication(customer_id, data, before_commit=None):
+    """Record a verified communication, its task consequences and Inbox resolution atomically."""
+    data = data or {}
+    activity_content = str(data.get('activity_content') or data.get('content') or '').strip()
+    activity_result = str(data.get('activity_result') or data.get('result') or '').strip()
+    activity_type = str(data.get('activity_type') or 'follow_up').strip()
+    direction = _validate_direction(data.get('direction'))
+    next_task = str(data.get('next_task') or data.get('next_plan') or '').strip()
+    next_follow_date = str(data.get('next_follow_up') or '').strip()
     if not activity_content:
-        return jsonify({'error': '请填写发生了什么'}), 400
+        raise CrmWriteError('请填写发生了什么')
     if next_task and not next_follow_date:
-        return jsonify({'error': '安排下一步时需要选择日期'}), 400
-    follow_date = (data.get('follow_date') or _calendar_today().isoformat()).strip()
+        raise CrmWriteError('安排下一步时需要选择日期')
+    follow_date = str(data.get('follow_date') or _calendar_today().isoformat()).strip()
     try:
         datetime.strptime(follow_date, '%Y-%m-%d')
     except ValueError:
-        return jsonify({'error': '沟通日期格式无效'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    now = _calendar_now_text()
-    # A manual communication record fulfils the most recent open follow-up that
-    # was due on or before that communication date. This keeps the timeline as
-    # the single record of work and avoids asking the user to record it again.
-    c.execute('''SELECT id, title, content, reason, remind_date, reminder_type
-                 FROM reminders
-                 WHERE customer_id=? AND is_done=0 AND reminder_type='follow_up'
-                   AND remind_date <= ?
-                 ORDER BY remind_date DESC, id DESC LIMIT 1''',
-              (customer_id, follow_date))
-    completed_reminder = c.fetchone()
-    completed_reminder_id = completed_reminder['id'] if completed_reminder else None
-    c.execute('''INSERT INTO follow_up_logs
-                 (customer_id, content, follow_date, result, next_plan, activity_type, direction, contact_id, related_task_id, source, is_reported, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-              (customer_id, sanitize_mark_html(activity_content), follow_date,
-               sanitize_mark_html(activity_result), sanitize_mark_html(next_task), activity_type, direction, data.get('contact_id'), completed_reminder_id,
-               data.get('source', 'manual'), 1 if data.get('is_reported') else 0, now))
-    new_id = c.lastrowid
-    if completed_reminder_id:
-        c.execute('''UPDATE reminders SET is_done=1, completed_at=?, source_activity_id=?
-                     WHERE id=? AND is_done=0''', (now, new_id, completed_reminder_id))
-    # 已记录真实沟通后，剩余的新客户开发节点已失去提醒意义；保留历史，
-    # 但不再将同一客户以 30/60 天节点重复推回待办。
-    c.execute('''UPDATE reminders SET is_done=1, completed_at=?
-                 WHERE customer_id=? AND is_done=0
-                   AND reminder_type LIKE 'outreach_%' ''',
-              (now, customer_id))
-    task_id = None
-    if next_task and next_follow_date:
-        task_id = _merge_or_create_reminder(c, customer_id, next_task, next_task,
-                                            activity_result or activity_content,
-                                            next_follow_date, source_activity_id=new_id, now=now)
-    c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id = ? AND is_done = 0', (customer_id,))
-    next_open_date = c.fetchone()[0] or ''
-    # last_contact 应以用户填写的沟通日期为准，避免补录历史跟进时把客户"上次联系"
-    # 推到今天，从而在客户列表/总览里出现与活动记录不符的"未来"或"今日"日期。
-    c.execute('''UPDATE customers SET last_contact=?, next_follow_up=?, manual_next_follow=?, customer_type='existing',
-                 status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END, updated_at=? WHERE id=?''',
-              (follow_date, next_open_date, 1 if next_open_date else 0, now, customer_id))
-    attention = _set_customer_attention_state(c, customer_id, activity_content, activity_result,
-                                              direction, bool(next_open_date))
-    understanding = _refresh_customer_understanding(c, customer_id, new_id, now)
-    _resolve_ai_inbox(c, customer_id, now)
-    activity = dict(c.execute('''SELECT id, customer_id, content, follow_date, result, next_plan,
-                                        activity_type, direction, contact_id, related_task_id,
-                                        source, is_reported, created_at
-                                 FROM follow_up_logs WHERE id=?''', (new_id,)).fetchone())
-    next_task_row = c.execute('''SELECT id, title, content, reason, remind_date, reminder_type,
-                                        source_activity_id, created_at
-                                 FROM reminders
-                                 WHERE customer_id=? AND is_done=0
-                                   AND COALESCE(reminder_type, 'follow_up') NOT LIKE 'outreach_%'
-                                 ORDER BY remind_date ASC, manual_order ASC, id ASC LIMIT 1''', (customer_id,)).fetchone()
-    next_task_payload = dict(next_task_row) if next_task_row else None
-    conn.commit()
-    conn.close()
+        raise CrmWriteError('沟通日期格式无效')
+    raw_inbox_item_id = data.get('inbox_item_id')
+    try:
+        inbox_item_id = int(raw_inbox_item_id) if raw_inbox_item_id else None
+    except (TypeError, ValueError):
+        raise CrmWriteError('Inbox 条目无效')
+
+    def operation(conn, c):
+        customer = c.execute('''SELECT id FROM customers
+                                WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
+        if not customer:
+            raise CrmWriteError('客户不存在', 404)
+        customer_before = _snapshot_entity(conn, 'customers', customer_id)
+        related_reminders_before = {}
+        inbox_item = None
+        inbox_before = None
+        if inbox_item_id:
+            inbox_item = c.execute("""SELECT id, customer_id, item_type, status FROM inbox_items
+                                    WHERE id=? AND status='open'
+                                      AND item_type IN ('customer_reply', 'browser_capture')""",
+                                   (inbox_item_id,)).fetchone()
+            if not inbox_item:
+                raise CrmWriteError('该 Inbox 条目已处理或不存在', 409)
+            if inbox_item['item_type'] == 'customer_reply' and inbox_item['customer_id'] != customer_id:
+                raise CrmWriteError('该 Inbox 回复归属不符，请重新选择客户', 409)
+            if inbox_item['item_type'] == 'browser_capture' and inbox_item['customer_id'] not in (None, customer_id):
+                raise CrmWriteError('该浏览器采集已归属其他客户', 409)
+            inbox_before = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+        now = _calendar_now_text()
+        completed_reminder = c.execute('''SELECT id, title, content, reason, remind_date, reminder_type
+                                          FROM reminders WHERE customer_id=? AND is_done=0
+                                            AND reminder_type='follow_up' AND remind_date<=?
+                                          ORDER BY remind_date DESC, id DESC LIMIT 1''',
+                                       (customer_id, follow_date)).fetchone()
+        completed_reminder_id = completed_reminder['id'] if completed_reminder else None
+        if completed_reminder_id:
+            related_reminders_before[completed_reminder_id] = _snapshot_entity(conn, 'reminders', completed_reminder_id)
+        for row in c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
+                                AND reminder_type LIKE 'outreach_%' ''', (customer_id,)).fetchall():
+            related_reminders_before[row['id']] = _snapshot_entity(conn, 'reminders', row['id'])
+        c.execute('''INSERT INTO follow_up_logs
+                     (customer_id, content, follow_date, result, next_plan, activity_type, direction,
+                      contact_id, related_task_id, source, is_reported, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (customer_id, sanitize_mark_html(activity_content), follow_date,
+                   sanitize_mark_html(activity_result), sanitize_mark_html(next_task), activity_type, direction,
+                   data.get('contact_id'), completed_reminder_id, data.get('source', 'manual'),
+                   1 if data.get('is_reported') else 0, now))
+        activity_id = c.lastrowid
+        if completed_reminder_id:
+            c.execute('''UPDATE reminders SET is_done=1, completed_at=?, source_activity_id=?
+                         WHERE id=? AND is_done=0''', (now, activity_id, completed_reminder_id))
+        c.execute('''UPDATE reminders SET is_done=1, completed_at=?
+                     WHERE customer_id=? AND is_done=0 AND reminder_type LIKE 'outreach_%' ''',
+                  (now, customer_id))
+        task_id = None
+        next_task_before = None
+        if next_task and next_follow_date:
+            existing_next = c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
+                                         AND reminder_type='follow_up' AND remind_date=?
+                                         ORDER BY id LIMIT 1''', (customer_id, next_follow_date)).fetchone()
+            if existing_next and existing_next['id'] not in related_reminders_before:
+                next_task_before = _snapshot_entity(conn, 'reminders', existing_next['id'])
+            task_id = _merge_or_create_reminder(c, customer_id, next_task, next_task,
+                                                activity_result or activity_content, next_follow_date,
+                                                source_activity_id=activity_id, now=now)
+        c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id=? AND is_done=0', (customer_id,))
+        next_open_date = c.fetchone()[0] or ''
+        c.execute('''UPDATE customers SET last_contact=?, next_follow_up=?, manual_next_follow=?,
+                     customer_type='existing', status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END,
+                     updated_at=? WHERE id=?''',
+                  (follow_date, next_open_date, 1 if next_open_date else 0, now, customer_id))
+        attention = _set_customer_attention_state(c, customer_id, activity_content, activity_result,
+                                                  direction, bool(next_open_date))
+        understanding = _refresh_customer_understanding(c, customer_id, activity_id, now)
+        _resolve_ai_inbox(c, customer_id, now)
+        if inbox_item_id:
+            if inbox_item['item_type'] == 'browser_capture' and inbox_item['customer_id'] is None:
+                c.execute("UPDATE inbox_items SET customer_id=? WHERE id=? AND status='open'", (customer_id, inbox_item_id))
+            c.execute("UPDATE inbox_items SET status='resolved', resolved_at=? WHERE id=? AND status='open'",
+                      (now, inbox_item_id))
+        activity = dict(c.execute('''SELECT id, customer_id, content, follow_date, result, next_plan,
+                                            activity_type, direction, contact_id, related_task_id,
+                                            source, is_reported, created_at
+                                     FROM follow_up_logs WHERE id=?''', (activity_id,)).fetchone())
+        next_task_row = c.execute('''SELECT id, title, content, reason, remind_date, reminder_type,
+                                            source_activity_id, created_at
+                                     FROM reminders WHERE customer_id=? AND is_done=0
+                                       AND COALESCE(reminder_type, 'follow_up') NOT LIKE 'outreach_%'
+                                     ORDER BY remind_date ASC, manual_order ASC, id ASC LIMIT 1''', (customer_id,)).fetchone()
+        undo_entities = [
+            _undo_entity('reminders', reminder_id, before, _snapshot_entity(conn, 'reminders', reminder_id))
+            for reminder_id, before in related_reminders_before.items()
+        ]
+        if task_id and task_id not in related_reminders_before:
+            undo_entities.append(_undo_entity('reminders', task_id, next_task_before,
+                                              _snapshot_entity(conn, 'reminders', task_id)))
+        undo_entities.extend([
+            _undo_entity('follow_up_logs', activity_id, None, _snapshot_entity(conn, 'follow_up_logs', activity_id)),
+            _undo_entity('customers', customer_id, customer_before, _snapshot_entity(conn, 'customers', customer_id)),
+        ])
+        if inbox_item_id:
+            undo_entities.append(_undo_entity('inbox_items', inbox_item_id, inbox_before,
+                                              _snapshot_entity(conn, 'inbox_items', inbox_item_id)))
+        undo_description = '撤销记录沟通'
+        undo_token = _create_undo_action(conn, 'RECORD_COMMUNICATION', 'follow_up_log', activity_id,
+                                         undo_entities, undo_description)
+        return {
+            'success': True, 'id': activity_id, 'task_id': task_id, 'next_follow_up': next_open_date,
+            'attention': attention, 'understanding': understanding, 'activity': activity,
+            'recent_contact_date': follow_date,
+            'current_waiting': attention.get('reason', '') if attention.get('state') != 'planned' else '',
+            'completed_task': dict(completed_reminder) if completed_reminder else None,
+            'next_step': dict(next_task_row) if next_task_row else None,
+            'resolved_inbox_item_id': inbox_item_id,
+            'undo_token': undo_token, 'undo_description': undo_description,
+        }
+
+    result = _run_crm_write(operation, before_commit)
     log_operation('FOLLOW_UP', 'customer', customer_id, f'添加活动: {activity_content}')
-    return jsonify({'success': True, 'id': new_id, 'task_id': task_id,
-                    'next_follow_up': next_open_date, 'attention': attention,
-                    'understanding': understanding, 'activity': activity,
-                    'recent_contact_date': follow_date,
-                    'current_waiting': attention.get('reason', '') if attention.get('state') != 'planned' else '',
-                    'completed_task': dict(completed_reminder) if completed_reminder else None,
-                    'next_step': next_task_payload})
+    return result
+
+
+def create_customer_follow_up_task(customer_id, data, before_commit=None):
+    """Create or merge a dated follow-up task, refresh rollups and keep an undo snapshot."""
+    data = data or {}
+    title = str(data.get('title') or '').strip()
+    due_date = str(data.get('due_date') or '').strip()
+    reason = str(data.get('reason') or '').strip()
+    if not title or not due_date:
+        raise CrmWriteError('任务动作和日期不能为空')
+    try:
+        datetime.strptime(due_date, '%Y-%m-%d')
+    except ValueError:
+        raise CrmWriteError('待办日期格式无效')
+
+    def operation(conn, c):
+        if not c.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)',
+                         (customer_id,)).fetchone():
+            raise CrmWriteError('客户不存在', 404)
+        customer_before = _snapshot_entity(conn, 'customers', customer_id)
+        now = _calendar_now_text()
+        existing_same_day = c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
+                                         AND reminder_type='follow_up' AND remind_date=?
+                                         ORDER BY id LIMIT 1''', (customer_id, due_date)).fetchone()
+        task_before = _snapshot_entity(conn, 'reminders', existing_same_day['id']) if existing_same_day else None
+        task_id = _merge_or_create_reminder(c, customer_id, title, title, reason, due_date, now=now)
+        c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id=? AND is_done=0', (customer_id,))
+        next_open_date = c.fetchone()[0] or due_date
+        c.execute('UPDATE customers SET next_follow_up=?, manual_next_follow=1, updated_at=? WHERE id=?',
+                  (next_open_date, now, customer_id))
+        task_after = _snapshot_entity(conn, 'reminders', task_id)
+        customer_after = _snapshot_entity(conn, 'customers', customer_id)
+        undo_description = f'撤销创建待办：{title}'
+        undo_token = _create_undo_action(
+            conn, 'CREATE_TASK', 'reminder', task_id,
+            [_undo_entity('reminders', task_id, task_before, task_after),
+             _undo_entity('customers', customer_id, customer_before, customer_after)], undo_description,
+        )
+        understanding = _refresh_customer_understanding(c, customer_id, now=now)
+        _resolve_ai_inbox(c, customer_id, now)
+        return {'success': True, 'id': task_id, 'task': task_after, 'next_task': task_after,
+                'next_follow_up': next_open_date, 'understanding': understanding, 'undo_token': undo_token,
+                'undo_description': undo_description}
+
+    result = _run_crm_write(operation, before_commit)
+    log_operation('CREATE', 'task', result['id'], f'创建下一步: {title} ({due_date})')
+    return result
+
+
+def update_customer_profile(customer_id, data, before_commit=None):
+    """Update only ordinary customer profile fields with the standard undo transaction."""
+    data = data or {}
+    allowed = ('name', 'company', 'country', 'website', 'field', 'industry', 'profile', 'notes', 'tags')
+    supplied = {key: data[key] for key in allowed if key in data}
+    if not supplied:
+        raise CrmWriteError('请提供至少一个可更新的客户资料字段')
+
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'customers', customer_id)
+        if not before or before.get('is_deleted'):
+            raise CrmWriteError('客户不存在', 404)
+        values = dict(before)
+        values.update(supplied)
+        values['country'] = normalize_country(values.get('country', ''))
+        values['website'] = normalize_website(values.get('website', ''))
+        now = _calendar_now_text()
+        c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, profile=?, notes=?, tags=?, updated_at=? WHERE id=?''',
+                  (values.get('name', ''), values.get('company', ''), values.get('country', ''), values.get('website', ''),
+                   values.get('field', ''), values.get('industry', ''), values.get('profile', ''), values.get('notes', ''),
+                   values.get('tags', ''), now, customer_id))
+        after = _snapshot_entity(conn, 'customers', customer_id)
+        undo_token = _create_undo_action(conn, 'UPDATE_CUSTOMER_PROFILE', 'customer', customer_id,
+                                         [_undo_entity('customers', customer_id, before, after)], '撤销 Agent 修改客户资料')
+        return {'id': customer_id, 'customer_id': customer_id, 'undo_token': undo_token,
+                'undo_description': '撤销修改客户资料'}
+    return _run_crm_write(operation, before_commit)
+
+
+def update_customer_contact(contact_id, data, before_commit=None):
+    """Update ordinary contact information without granting contact deletion."""
+    data = data or {}
+    allowed = ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin', 'preferred_channel', 'contact_type', 'notes')
+    supplied = {key: data[key] for key in allowed if key in data}
+    if not supplied:
+        raise CrmWriteError('请提供至少一个可更新的联系人资料字段')
+
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'contacts', contact_id)
+        if not before:
+            raise CrmWriteError('联系人不存在', 404)
+        values = dict(before)
+        values.update(supplied)
+        c.execute('''UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?, preferred_channel=?, contact_type=?, notes=? WHERE id=?''',
+                  (values.get('name', ''), values.get('title', ''), values.get('email', ''), values.get('phone', ''),
+                   values.get('whatsapp', ''), values.get('linkedin', ''), values.get('preferred_channel', ''),
+                   values.get('contact_type', 'person'), values.get('notes', ''), contact_id))
+        after = _snapshot_entity(conn, 'contacts', contact_id)
+        undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
+                                         [_undo_entity('contacts', contact_id, before, after)], '撤销 Agent 修改联系人资料')
+        return {'id': contact_id, 'customer_id': before['customer_id'], 'undo_token': undo_token,
+                'undo_description': '撤销修改联系人资料'}
+    return _run_crm_write(operation, before_commit)
+
+
+def resolve_customer_inbox_item(inbox_item_id, data=None, before_commit=None):
+    """Resolve a normal Inbox item reversibly; communication capture still uses its richer shared flow."""
+    data = data or {}
+    resolution_note = str(data.get('resolution_note') or '').strip()[:1000]
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+        if not before or before.get('status') != 'open':
+            raise CrmWriteError('Inbox 条目不存在或已处理', 404)
+        now = _calendar_now_text()
+        c.execute('''UPDATE inbox_items SET status='resolved', resolved_at=?, resolution_note=? WHERE id=? AND status='open' ''',
+                  (now, resolution_note, inbox_item_id))
+        after = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+        undo_token = _create_undo_action(conn, 'RESOLVE_INBOX', 'inbox_item', inbox_item_id,
+                                         [_undo_entity('inbox_items', inbox_item_id, before, after)], '撤销 Agent 处理 Inbox')
+        return {'id': inbox_item_id, 'customer_id': before.get('customer_id'), 'undo_token': undo_token,
+                'undo_description': '撤销处理 Inbox'}
+    return _run_crm_write(operation, before_commit)
+
+
+@app.route('/api/customers/<int:customer_id>/follow_history', methods=['POST'])
+@login_required
+def add_follow_history(customer_id):
+    try:
+        return jsonify(record_customer_communication(customer_id, request.get_json(silent=True) or {}))
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception as error:
+        logger.error('add_follow_history error: %s', error, exc_info=True)
+        return jsonify({'error': '记录沟通失败，未保存任何更改'}), 500
 
 
 @app.route('/api/customers/<int:customer_id>/tasks', methods=['POST'])
 @login_required
 def create_customer_task(customer_id):
-    data = request.get_json(silent=True) or {}
-    title = (data.get('title') or '').strip()
-    due_date = (data.get('due_date') or '').strip()
-    reason = (data.get('reason') or '').strip()
-    if not title or not due_date:
-        return jsonify({'error': '任务动作和日期不能为空'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT id FROM customers WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (customer_id,))
-    if not c.fetchone():
-        conn.close()
-        return jsonify({'error': '客户不存在'}), 404
-    customer_before = _snapshot_entity(conn, 'customers', customer_id)
-    now = _calendar_now_text()
-    existing_same_day = c.execute('''SELECT id FROM reminders
-                                     WHERE customer_id=? AND is_done=0
-                                       AND reminder_type='follow_up' AND remind_date=?
-                                     ORDER BY id LIMIT 1''', (customer_id, due_date)).fetchone()
-    task_before = _snapshot_entity(conn, 'reminders', existing_same_day['id']) if existing_same_day else None
-    task_id = _merge_or_create_reminder(c, customer_id, title, title, reason, due_date, now=now)
-    c.execute('SELECT MIN(remind_date) FROM reminders WHERE customer_id = ? AND is_done = 0', (customer_id,))
-    next_open_date = c.fetchone()[0] or due_date
-    c.execute('UPDATE customers SET next_follow_up=?, manual_next_follow=1, updated_at=? WHERE id=?',
-              (next_open_date, now, customer_id))
-    task_after = _snapshot_entity(conn, 'reminders', task_id)
-    customer_after = _snapshot_entity(conn, 'customers', customer_id)
-    description = f'撤销创建待办：{title}'
-    undo_token = _create_undo_action(
-        conn, 'CREATE_TASK', 'reminder', task_id,
-        [_undo_entity('reminders', task_id, task_before, task_after),
-         _undo_entity('customers', customer_id, customer_before, customer_after)],
-        description,
-    )
-    understanding = _refresh_customer_understanding(c, customer_id, now=now)
-    _resolve_ai_inbox(c, customer_id, now)
-    conn.commit()
-    conn.close()
-    log_operation('CREATE', 'task', task_id, f'创建下一步: {title} ({due_date})')
-    return jsonify({'success': True, 'id': task_id, 'task': task_after,
-                    'next_task': task_after, 'next_follow_up': next_open_date,
-                    'understanding': understanding, 'undo_token': undo_token,
-                    'undo_description': description}), 201
+    try:
+        result = create_customer_follow_up_task(customer_id, request.get_json(silent=True) or {})
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception as error:
+        logger.error('create_customer_task error: %s', error, exc_info=True)
+        return jsonify({'error': '创建待办失败，未保存任何更改'}), 500
+    return jsonify(result), 201
 
 
 # ========== Browser communication capture API ==========

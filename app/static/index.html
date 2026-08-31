@@ -75,6 +75,7 @@
     <details class="sidebar-tools">
       <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
+        <button type="button" id="chatAgentEntry" hidden onclick="openChatAgent()">聊天助手</button>
         <button type="button" onclick="switchPage('newpool')">新客户</button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
         <button type="button" onclick="switchPage('history')">全部记录</button>
@@ -190,6 +191,7 @@
         <div class="inbox-filters" id="inboxFilters">
           <button class="inbox-filter active" data-inbox-filter="all" onclick="setInboxFilter('all')">全部</button>
           <button class="inbox-filter" data-inbox-filter="customer_reply" onclick="setInboxFilter('customer_reply')">客户回复</button>
+          <button class="inbox-filter" data-inbox-filter="browser_capture" onclick="setInboxFilter('browser_capture')">待归属沟通</button>
           <button class="inbox-filter" data-inbox-filter="uncontacted_follow_up" onclick="setInboxFilter('uncontacted_follow_up')">未联系跟进</button>
         </div>
         <div class="inbox-list" id="inboxList"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
@@ -943,11 +945,13 @@
 <!-- Inbox Reply Modal -->
 <div class="modal-overlay" id="inboxReplyModal">
   <div class="modal inbox-reply-modal">
-    <div class="modal-header"><div><div class="workspace-kicker">快速记录</div><h3>记录客户回复</h3><p class="modal-subtitle">粘贴内容并关联客户，一次保存到客户时间线。</p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle">确认实际发生的事实；需要时再安排明确的下一步。</p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
-      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent">客户说了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true)">AI 帮我整理（可选）</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="7" oninput="clearInboxReplyAnalysis()" placeholder="手动输入或粘贴客户回复；需要时再点击 AI 帮我整理"></textarea></div>
+      <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true)">AI 帮我整理（可选）</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="7" oninput="clearInboxReplyAnalysis()" placeholder="记录这次沟通、客户回复或未回复情况；需要时再点击 AI 帮我整理"></textarea></div>
       <div class="quick-reply-analysis" id="inboxReplyAnalysis" hidden></div>
-      <div class="form-group"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required">*</span></label>
+      <div class="form-group" id="communicationConfirmKnownCustomer" hidden><span class="form-label">客户</span><p class="form-hint" id="communicationConfirmKnownCustomerName"></p></div>
+      <div class="form-group" id="communicationConfirmCustomerPicker"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required">*</span></label>
         <div class="customer-picker" id="inboxReplyCustomerPicker">
           <input type="hidden" id="inboxReplyCustomer">
           <input type="search" class="form-control customer-picker-input" id="inboxReplyCustomerSearch" placeholder="搜索公司、联系人、国家或业务领域" autocomplete="off">
@@ -963,7 +967,7 @@
         <div class="form-group"><label class="form-label" for="inboxReplyNextDate">什么时候做</label><input type="date" class="form-control" id="inboxReplyNextDate"></div>
       </div>
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">保存回复</button></div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">确认并记录</button></div>
   </div>
 </div>
 
@@ -1086,6 +1090,14 @@
 
 
 <!-- AI Research Section (inside customer edit modal) -->
+
+<div class="modal-overlay" id="chatAgentModal" role="dialog" aria-modal="true" aria-labelledby="chatAgentTitle">
+  <div class="modal chat-agent-modal">
+    <div class="modal-header"><div><div class="workspace-kicker">Hamid 测试版</div><h3 id="chatAgentTitle">聊天助手</h3><p class="modal-subtitle">查看客户近况、记录沟通或安排下一步。</p></div><button class="modal-close" type="button" onclick="closeModal('chatAgentModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-body chat-agent-body" id="chatAgentMessages" aria-live="polite"></div>
+    <div class="modal-footer chat-agent-compose"><input id="chatAgentInput" class="form-control" maxlength="2000" placeholder="例如：我今天有什么要做？" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatAgentMessage();}"><button class="btn btn-primary" id="chatAgentSend" type="button" onclick="sendChatAgentMessage()">发送</button></div>
+  </div>
+</div>
 
 <datalist id="industryFieldOptions">
   <option value="亚克力分销"><option value="工程塑料分销"><option value="塑料板材分销"><option value="标牌与广告制作"><option value="展示展览">

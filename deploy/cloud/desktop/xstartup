@@ -1,0 +1,5 @@
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/trosa-desktop}"
+exec dbus-run-session -- startxfce4

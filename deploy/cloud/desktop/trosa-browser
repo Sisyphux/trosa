@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+profile_dir="$HOME/.config/trosa-chrome"
+mkdir -p "$profile_dir"
+
+if [ "$#" -eq 0 ]; then
+  set -- "https://app.trosa.space"
+fi
+
+/usr/bin/google-chrome-stable \
+  --user-data-dir="$profile_dir" \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-session-crashed-bubble \
+  --hide-crash-restore-bubble \
+  --disable-translate \
+  --disable-gpu \
+  --disable-extensions \
+  --disable-background-networking \
+  --disable-component-update \
+  --renderer-process-limit=4 \
+  --disable-features=MediaRouter,OptimizationHints,Translate,AutofillServerCommunication,AutofillEnablePayments \
+  --start-maximized \
+  "$@" &
+browser_pid=$!
+
+# Keep the one browser workspace filling the private desktop without exposing
+# the old XFCE panel as the primary interface.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  /usr/bin/wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz 2>/dev/null && break
+  sleep 1
+done
+
+wait "$browser_pid"

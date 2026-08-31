@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Create a verified ECS snapshot and download it to the Mac for off-host backup.
+# Create a verified application-level backup and download it to the Mac.
+# This does not create or use an Alibaba Cloud ECS disk snapshot.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,11 +52,10 @@ PY
 EOF
 )
 
-output="$(workbench exec \
-  --instance-id "$TRADE_OS_ECS_INSTANCE_ID" \
-  --region "$TRADE_OS_ECS_REGION" \
-  --user-name root \
-  --command "$remote_command")"
+output="$("$SCRIPT_DIR/run-workbench-command.sh" \
+  "$TRADE_OS_ECS_INSTANCE_ID" \
+  "$TRADE_OS_ECS_REGION" \
+  "$remote_command")"
 printf '%s\n' "$output"
 
 remote_sha="$(printf '%s\n' "$output" | sed -n 's/^SHA256=//p' | tail -n 1)"
@@ -64,8 +64,13 @@ if [[ -z "$remote_sha" ]]; then
   exit 1
 fi
 
-workbench download "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT/" \
-  --instance-id "$TRADE_OS_ECS_INSTANCE_ID" --region "$TRADE_OS_ECS_REGION" --force
+if [[ -n "${TRADE_OS_SSH_HOST:-}" ]]; then
+  scp -o BatchMode=yes -o ConnectTimeout=10 \
+    "${TRADE_OS_SSH_HOST}:${REMOTE_ARCHIVE}" "$LOCAL_BACKUP_ROOT/"
+else
+  workbench download "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT/" \
+    --instance-id "$TRADE_OS_ECS_INSTANCE_ID" --region "$TRADE_OS_ECS_REGION" --force
+fi
 
 local_archive="$LOCAL_BACKUP_ROOT/$ARCHIVE_NAME"
 local_sha="$(shasum -a 256 "$local_archive" | awk '{print $1}')"
@@ -77,10 +82,9 @@ fi
 # Keep exactly the requested rolling window of local daily archives.
 find "$LOCAL_BACKUP_ROOT" -type f -name 'trosa-backup-*.tar.gz' -mtime +14 -delete
 
-workbench exec \
-  --instance-id "$TRADE_OS_ECS_INSTANCE_ID" \
-  --region "$TRADE_OS_ECS_REGION" \
-  --user-name root \
-  --command "rm -f '$REMOTE_ARCHIVE'"
+"$SCRIPT_DIR/run-workbench-command.sh" \
+  "$TRADE_OS_ECS_INSTANCE_ID" \
+  "$TRADE_OS_ECS_REGION" \
+  "rm -f '$REMOTE_ARCHIVE'"
 
 printf 'local backup=%s\nsha256=%s\n' "$local_archive" "$local_sha"

@@ -1,0 +1,9 @@
+[Default Applications]
+x-scheme-handler/http=trosa-chrome.desktop
+x-scheme-handler/https=trosa-chrome.desktop
+text/html=trosa-chrome.desktop
+
+[Added Associations]
+x-scheme-handler/http=trosa-chrome.desktop;
+x-scheme-handler/https=trosa-chrome.desktop;
+text/html=trosa-chrome.desktop;

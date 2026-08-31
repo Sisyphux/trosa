@@ -738,6 +738,175 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertFalse(any(item['customer_id'] == customer_id and item['item_type'] == 'uncontacted_follow_up'
                              for item in after))
 
+    def test_recording_an_inbox_reply_through_follow_history_resolves_only_that_reply(self):
+        """The shared communication form must preserve the Inbox item's resolution boundary."""
+        spec = importlib.util.spec_from_file_location('crm_app_shared_inbox_record_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, date('now'), date('now'))",
+                         ('Inbox 联系人', 'Inbox 客户'))
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('customer_reply', ?, '客户回复待记录', ?, ?, 'open', datetime('now'))""",
+                         (customer_id, '客户确认下周再看报价', 'shared-inbox-reply-1'))
+            inbox_item_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        response = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '客户确认下周再看报价', 'activity_type': 'customer_reply',
+            'direction': 'inbound', 'follow_date': '2026-08-30',
+            'inbox_item_id': inbox_item_id, 'source': 'inbox'
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['resolved_inbox_item_id'], inbox_item_id)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (inbox_item_id,)).fetchone()[0], 'resolved')
+            row = conn.execute('SELECT source, activity_type, direction FROM follow_up_logs WHERE customer_id=?', (customer_id,)).fetchone()
+            self.assertEqual(tuple(row), ('inbox', 'customer_reply', 'inbound'))
+        finally:
+            conn.close()
+
+    def test_inbox_capture_context_and_failed_confirmation_keep_item_open(self):
+        """Browser captures retain reliable context and resolve only after confirmation."""
+        spec = importlib.util.spec_from_file_location('crm_app_inbox_capture_context_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        capture_payload = {
+            'channel': 'whatsapp', 'platform': 'WhatsApp Web',
+            'conversation_identity': '待归属买家',
+            'source_url': 'https://web.whatsapp.com/example',
+            'direction': 'inbound', 'messages': [
+                {'time': '2026-08-29 14:20', 'sender': '待归属买家',
+                 'direction': 'inbound', 'text': '请确认透明板材交期'}
+            ],
+        }
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                         ('Capture Buyer', 'Capture Context Co.', '2026-08-29', '2026-08-29'))
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO contacts (customer_id, name, email, is_primary, created_at)
+                         VALUES (?, 'Capture Contact', 'capture-contact@example.com', 1, '2026-08-29')""", (customer_id,))
+            conn.execute("""INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('customer_reply', ?, '客户回复', '已确认数量，请给出交期', ?, 'open', '2026-08-29 12:00:00')""",
+                         (customer_id, 'capture-context-reply'))
+            reply_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('browser_capture', ?, '待归属沟通：待归属买家', ?, ?, 'open', '2026-08-29 14:21:00')""",
+                         (customer_id, json.dumps(capture_payload, ensure_ascii=False), 'capture-context-browser'))
+            capture_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        inbox = client.get('/api/inbox')
+        self.assertEqual(inbox.status_code, 200, inbox.get_json())
+        items = {item['id']: item for item in inbox.get_json()['items'] if item.get('id')}
+        self.assertEqual(items[reply_id]['contact_name'], 'Capture Contact')
+        self.assertEqual(items[reply_id]['source_label'], 'Inbox 客户回复')
+        self.assertEqual(items[capture_id]['capture_content'], '2026-08-29 14:20 · 待归属买家\n请确认透明板材交期')
+        self.assertEqual(items[capture_id]['capture_direction'], 'inbound')
+        self.assertEqual(items[capture_id]['capture_activity_type'], 'whatsapp')
+        self.assertEqual(items[capture_id]['capture_date'], '2026-08-29')
+        self.assertEqual(items[capture_id]['source_label'], 'WhatsApp Web')
+        self.assertEqual(items[capture_id]['customer_id'], customer_id)
+        self.assertEqual(items[capture_id]['contact_id'], 1)
+        self.assertEqual(items[capture_id]['contact_name'], 'Capture Contact')
+
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        capture_handler = javascript[javascript.index('function recordInboxCapture'):javascript.index('function showInboxRecordUndoToast')]
+        self.assertIn("customerId: item.customer_id || ''", capture_handler)
+        self.assertIn("contactId: item.contact_id || ''", capture_handler)
+
+        failed = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '这次确认失败，不应写入', 'follow_date': 'not-a-date',
+            'inbox_item_id': capture_id, 'source': 'browser_extension',
+        })
+        self.assertEqual(failed.status_code, 400, failed.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            row = conn.execute('SELECT customer_id, status FROM inbox_items WHERE id=?', (capture_id,)).fetchone()
+            self.assertEqual(tuple(row), (customer_id, 'open'))
+        finally:
+            conn.close()
+
+        confirmed = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '请确认透明板材交期', 'activity_type': 'whatsapp',
+            'direction': 'inbound', 'follow_date': '2026-08-29',
+            'contact_id': 1, 'inbox_item_id': capture_id, 'source': 'browser_extension',
+        })
+        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
+        self.assertEqual(confirmed.get_json()['resolved_inbox_item_id'], capture_id)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            row = conn.execute('SELECT customer_id, status FROM inbox_items WHERE id=?', (capture_id,)).fetchone()
+            self.assertEqual(tuple(row), (customer_id, 'resolved'))
+            activity = conn.execute('''SELECT contact_id, source, activity_type, direction
+                                       FROM follow_up_logs WHERE id=?''', (confirmed.get_json()['id'],)).fetchone()
+            self.assertEqual(tuple(activity), (1, 'browser_extension', 'whatsapp', 'inbound'))
+        finally:
+            conn.close()
+
+    def test_customer_search_returns_explainable_inbox_and_communication_context(self):
+        """Global search results carry one bounded next action without leaking other customers."""
+        spec = importlib.util.spec_from_file_location('crm_app_search_context_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                         ('Search Inbox Buyer', 'Search Inbox Co.', '2026-08-29', '2026-08-29'))
+            inbox_customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO contacts (customer_id, name, email, is_primary) VALUES (?, ?, ?, 1)",
+                         (inbox_customer_id, 'Search Contact', 'search-contact@example.com'))
+            conn.execute("""INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('customer_reply', ?, '需要确认交期', '唯一待确认片段-交期', ?, 'open', '2026-08-29 10:00:00')""",
+                         (inbox_customer_id, 'search-context-inbox'))
+            inbox_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                         ('Search Timeline Buyer', 'Search Timeline Co.', '2026-08-29', '2026-08-29'))
+            communication_customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO follow_up_logs
+                         (customer_id, content, follow_date, activity_type, direction, contact_id, source, created_at)
+                         VALUES (?, '唯一沟通片段-报价', '2026-08-28', 'email', 'inbound', NULL, 'inbox', '2026-08-28 10:00:00')""",
+                         (communication_customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        inbox_search = client.get('/api/customers?search=唯一待确认片段&page=1&per_page=30')
+        self.assertEqual(inbox_search.status_code, 200, inbox_search.get_json())
+        inbox_customer = next(item for item in inbox_search.get_json()['customers'] if item['id'] == inbox_customer_id)
+        self.assertEqual(inbox_customer['match_context']['type'], 'inbox')
+        self.assertEqual(inbox_customer['match_context']['action'], 'record')
+        self.assertEqual(inbox_customer['match_context']['id'], inbox_id)
+        self.assertEqual(inbox_customer['match_context']['source'], 'inbox')
+        self.assertEqual(inbox_customer['match_context']['date'], '2026-08-29')
+        self.assertEqual(inbox_customer['match_context']['contact_name'], 'Search Contact')
+
+        communication_search = client.get('/api/customers?search=唯一沟通片段&page=1&per_page=30')
+        self.assertEqual(communication_search.status_code, 200, communication_search.get_json())
+        communication_customer = next(item for item in communication_search.get_json()['customers'] if item['id'] == communication_customer_id)
+        self.assertEqual(communication_customer['match_context']['type'], 'communication')
+        self.assertEqual(communication_customer['match_context']['action'], 'view')
+        self.assertEqual(communication_customer['match_context']['activity_type'], 'email')
+        self.assertEqual(communication_customer['match_context']['direction'], 'inbound')
+
     def test_batch_today_follow_up_removes_uncontacted_inbox_signal(self):
         """Clicking "今天跟进" in Inbox must clear the 新客户待跟进 signal immediately.
 
@@ -819,6 +988,339 @@ class CalendarAndAccessTest(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND title='确认报价需求'", (customer_id,)).fetchone()[0], 1)
         finally:
             conn.close()
+
+    def test_agent_activity_confirmation_matches_shared_communication_write(self):
+        """A confirmed Agent activity must have the same CRM consequences as the shared UI endpoint."""
+        spec = importlib.util.spec_from_file_location('crm_app_agent_shared_write_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def seed(user):
+            conn = sqlite3.connect(db.get_user_db_path(user))
+            try:
+                conn.execute("""INSERT INTO customers
+                             (name, company, status, customer_type, created_at, updated_at)
+                             VALUES (?, ?, '未建联', 'new', '2026-08-28', '2026-08-28')""",
+                             ('一致性客户', 'Shared Write Co.'))
+                customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+                conn.execute("""INSERT INTO reminders
+                             (customer_id, title, content, remind_date, is_done, reminder_type, created_at)
+                             VALUES (?, '原待办', '原待办', '2026-08-28', 0, 'follow_up', '2026-08-28')""",
+                             (customer_id,))
+                conn.execute("""INSERT INTO reminders
+                             (customer_id, title, content, remind_date, is_done, reminder_type, created_at)
+                             VALUES (?, '开发节点', '开发节点', '2026-09-01', 0, 'outreach_15', '2026-08-28')""",
+                             (customer_id,))
+                conn.execute("""INSERT INTO inbox_items
+                             (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                             VALUES ('browser_capture', NULL, '待归属沟通', '客户确认样品规格', ?, 'open', '2026-08-29 10:00:00')""",
+                             (f'agent-shared-{user}',))
+                inbox_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+                conn.commit()
+                return customer_id, inbox_id
+            finally:
+                conn.close()
+
+        hamid_customer, hamid_inbox = seed('hamid')
+        amy_customer, amy_inbox = seed('amy')
+        fields = {
+            'activity_content': '客户确认样品规格，9 月中旬上海见。',
+            'activity_result': '需要准备样品与会议资料', 'activity_type': 'whatsapp',
+            'direction': 'inbound', 'follow_date': '2026-08-29',
+            'next_task': '准备上海会面样品', 'next_follow_up': '2026-09-15',
+            'source': 'browser_extension',
+        }
+
+        ui_client = module.app.test_client()
+        ui_client.post('/api/auth/login', json={'user': 'hamid'})
+        ui_result = ui_client.post(f'/api/customers/{hamid_customer}/follow_history',
+                                   json={**fields, 'inbox_item_id': hamid_inbox})
+        self.assertEqual(ui_result.status_code, 200, ui_result.get_json())
+
+        agent_client = module.app.test_client()
+        agent_client.post('/api/auth/login', json={'user': 'amy'})
+        agent_payload = {
+            'content': fields['activity_content'], 'result': fields['activity_result'],
+            'activity_type': fields['activity_type'], 'direction': fields['direction'],
+            'follow_date': fields['follow_date'], 'next_task': fields['next_task'],
+            'next_follow_up': fields['next_follow_up'], 'source': fields['source'],
+            'inbox_item_id': amy_inbox,
+        }
+        proposal = agent_client.post('/api/agent/proposals', json={
+            'type': 'activity', 'customer_id': amy_customer, 'payload': agent_payload,
+        })
+        self.assertEqual(proposal.status_code, 201, proposal.get_json())
+        confirmed = agent_client.post(f"/api/agent/proposals/{proposal.get_json()['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
+
+        def snapshot(user, customer_id, inbox_id):
+            conn = sqlite3.connect(db.get_user_db_path(user))
+            try:
+                timeline = conn.execute('''SELECT content, follow_date, result, next_plan, activity_type, direction, source
+                                           FROM follow_up_logs WHERE customer_id=? ORDER BY id''', (customer_id,)).fetchall()
+                reminders = conn.execute('''SELECT title, remind_date, is_done, reminder_type
+                                            FROM reminders WHERE customer_id=?
+                                            ORDER BY reminder_type, remind_date, title''', (customer_id,)).fetchall()
+                inbox = conn.execute('SELECT customer_id, status FROM inbox_items WHERE id=?', (inbox_id,)).fetchone()
+                customer = conn.execute('''SELECT last_contact, next_follow_up, manual_next_follow,
+                                                   customer_type, status
+                                            FROM customers WHERE id=?''', (customer_id,)).fetchone()
+                return {'timeline': timeline, 'reminders': reminders, 'inbox': inbox, 'customer': customer}
+            finally:
+                conn.close()
+
+        self.assertEqual(snapshot('hamid', hamid_customer, hamid_inbox),
+                         snapshot('amy', amy_customer, amy_inbox))
+
+    def test_invalid_agent_activity_confirmation_rolls_back_every_business_change(self):
+        spec = importlib.util.spec_from_file_location('crm_app_agent_activity_rollback_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company) VALUES ('回滚客户', 'Rollback Co.')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO reminders
+                         (customer_id, title, remind_date, is_done, reminder_type)
+                         VALUES (?, '原待办', '2026-08-28', 0, 'follow_up')""", (customer_id,))
+            conn.execute("""INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('customer_reply', ?, '客户回复', '请确认交期', 'agent-rollback-inbox', 'open', '2026-08-29')""",
+                         (customer_id,))
+            inbox_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        proposal = client.post('/api/agent/proposals', json={
+            'type': 'activity', 'customer_id': customer_id,
+            'payload': {'content': '客户确认交期', 'follow_date': '2026-08-29',
+                        'direction': 'invalid', 'inbox_item_id': inbox_id, 'source': 'inbox'},
+        })
+        self.assertEqual(proposal.status_code, 201, proposal.get_json())
+        confirmed = client.post(f"/api/agent/proposals/{proposal.get_json()['id']}/confirm")
+        self.assertEqual(confirmed.status_code, 400, confirmed.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT is_done FROM reminders WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (inbox_id,)).fetchone()[0], 'open')
+            self.assertEqual(conn.execute('SELECT status FROM agent_proposals WHERE id=?',
+                                          (proposal.get_json()['id'],)).fetchone()[0], 'pending')
+        finally:
+            conn.close()
+
+    def test_agent_gateway_tokens_scopes_isolation_and_idempotent_proposals(self):
+        spec = importlib.util.spec_from_file_location('crm_app_gateway_security_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        ids = {}
+        for user, company in (('hamid', 'Gateway Hamid Co.'), ('amy', 'Gateway Amy Co.')):
+            conn = sqlite3.connect(db.get_user_db_path(user))
+            try:
+                if user == 'amy':
+                    conn.execute("INSERT INTO customers (name, company) VALUES ('隔离占位', 'Isolation Placeholder')")
+                conn.execute("INSERT INTO customers (name, company) VALUES (?, ?)", (user, company))
+                ids[user] = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+                conn.commit()
+            finally:
+                conn.close()
+
+        session_client = module.app.test_client()
+        session_client.post('/api/auth/login', json={'user': 'hamid'})
+        read_token = session_client.post('/api/agent-gateway/tokens', json={'label': 'read', 'scopes': ['crm:read']})
+        self.assertEqual(read_token.status_code, 201, read_token.get_json())
+        read_token = read_token.get_json()['data']['token']
+        proposal_token = session_client.post('/api/agent-gateway/tokens', json={'label': 'propose', 'scopes': ['crm:propose']})
+        self.assertEqual(proposal_token.status_code, 201, proposal_token.get_json())
+        proposal_token = proposal_token.get_json()['data']['token']
+        conn = sqlite3.connect(os.path.join(db.DB_DIR, 'system.db'))
+        try:
+            stored = conn.execute("SELECT value FROM app_settings WHERE key LIKE 'agent_gateway_token:%' LIMIT 1").fetchone()[0]
+            self.assertNotIn(read_token, stored)
+            self.assertIn('token_sha256', stored)
+        finally:
+            conn.close()
+
+        gateway = module.app.test_client()
+        self.assertEqual(gateway.get('/api/gateway/customers').status_code, 401)
+        self.assertEqual(gateway.get('/api/gateway/customers', headers={'Authorization': 'Bearer invalid'}).status_code, 401)
+        customers = gateway.get('/api/gateway/customers?query=Gateway', headers={'Authorization': 'Bearer ' + read_token})
+        self.assertEqual(customers.status_code, 200, customers.get_json())
+        self.assertEqual([row['company'] for row in customers.get_json()['data']['customers']], ['Gateway Hamid Co.'])
+        self.assertEqual(gateway.get(f"/api/gateway/customers/{ids['amy']}", headers={'Authorization': 'Bearer ' + read_token}).status_code, 404)
+        self.assertEqual(gateway.post('/api/gateway/proposals', headers={'Authorization': 'Bearer ' + read_token, 'Idempotency-Key': 'no-write'}, json={
+            'action': 'create_task', 'customer_id': ids['hamid'], 'payload': {'title': 'x', 'due_date': '2026-09-01'}
+        }).status_code, 403)
+        request_body = {'action': 'record_communication', 'customer_id': ids['hamid'], 'payload': {
+            'content': '客户确认 9 月上海见。', 'direction': 'inbound', 'activity_type': 'whatsapp',
+            'follow_date': '2026-08-30', 'source': 'agent_note', 'source_reference': 'chat:42',
+            'next_task': '准备样品', 'next_follow_up': '2026-09-15',
+        }}
+        headers = {'Authorization': 'Bearer ' + proposal_token, 'Idempotency-Key': 'gateway-communication-1'}
+        created = gateway.post('/api/gateway/proposals', headers=headers, json=request_body)
+        self.assertEqual(created.status_code, 201, created.get_json())
+        proposal_id = created.get_json()['data']['proposal']['id']
+        replay = gateway.post('/api/gateway/proposals', headers=headers, json=request_body)
+        self.assertEqual(replay.status_code, 200, replay.get_json())
+        self.assertEqual(replay.get_json()['data']['proposal']['id'], proposal_id)
+        conflict = gateway.post('/api/gateway/proposals', headers=headers, json={**request_body, 'payload': {**request_body['payload'], 'content': '不同事实'}})
+        self.assertEqual(conflict.status_code, 409, conflict.get_json())
+        denied_override = gateway.post('/api/gateway/proposals', headers={'Authorization': 'Bearer ' + proposal_token, 'Idempotency-Key': 'no-user-override'}, json={**request_body, 'user_id': 'amy'})
+        self.assertEqual(denied_override.status_code, 400, denied_override.get_json())
+        recovered = session_client.get(f'/api/agent/proposals/{proposal_id}')
+        self.assertEqual(recovered.status_code, 200, recovered.get_json())
+        confirmed = session_client.post(f'/api/agent/proposals/{proposal_id}/confirm')
+        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
+
+    def test_agent_gateway_write_uses_shared_undo_for_grouped_crm_actions(self):
+        spec = importlib.util.spec_from_file_location('crm_app_gateway_write_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, status, customer_type) VALUES ('Jay', 'EXION', '未建联', 'new')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO contacts (customer_id, name, email) VALUES (?, 'Jay', 'jay@example.com')", (customer_id,))
+            contact_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, '原待办', '2026-08-29', 0, 'follow_up')", (customer_id,))
+            old_task_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO inbox_items (item_type, customer_id, title, content, dedupe_key, status) VALUES ('customer_reply', ?, '客户回复', '上海见', 'gateway-write-inbox', 'open')", (customer_id,))
+            inbox_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        session_client = module.app.test_client()
+        session_client.post('/api/auth/login', json={'user': 'hamid'})
+        write_token = session_client.post('/api/agent-gateway/tokens', json={'scopes': ['crm:write']}).get_json()['data']['token']
+        propose_token = session_client.post('/api/agent-gateway/tokens', json={'scopes': ['crm:propose']}).get_json()['data']['token']
+        read_token = session_client.post('/api/agent-gateway/tokens', json={'scopes': ['crm:read']}).get_json()['data']['token']
+        gateway = module.app.test_client()
+        body = {'action': 'record_communication', 'customer_id': customer_id, 'payload': {
+            'content': 'Jay 今天确认 9 月 15 日上海见。', 'direction': 'inbound', 'activity_type': 'whatsapp',
+            'follow_date': '2026-08-30', 'inbox_item_id': inbox_id, 'next_task': '提前确认会面资料',
+            'next_follow_up': '2026-09-12', 'source': 'chat_agent',
+        }}
+        self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + propose_token, 'Idempotency-Key': 'propose-no-write'}, json=body).status_code, 403)
+        self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + read_token, 'Idempotency-Key': 'read-no-write'}, json=body).status_code, 403)
+        headers = {'Authorization': 'Bearer ' + write_token, 'Idempotency-Key': 'write-communication-1'}
+        written = gateway.post('/api/gateway/actions', headers=headers, json=body)
+        self.assertEqual(written.status_code, 201, written.get_json())
+        action_id = written.get_json()['data']['action']['id']
+        replay = gateway.post('/api/gateway/actions', headers=headers, json=body)
+        self.assertEqual(replay.status_code, 200, replay.get_json())
+        self.assertEqual(replay.get_json()['data']['action']['id'], action_id)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs WHERE customer_id=?', (customer_id,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (inbox_id,)).fetchone()[0], 'resolved')
+            self.assertEqual(conn.execute('SELECT is_done FROM reminders WHERE id=?', (old_task_id,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND title='提前确认会面资料' AND is_done=0", (customer_id,)).fetchone()[0], 1)
+            action = conn.execute('SELECT token_id, action_type, undo_token, request_json, status FROM agent_actions WHERE action_id=?', (action_id,)).fetchone()
+            self.assertEqual(action[1], 'record_communication')
+            self.assertTrue(action[0] and action[2] and '上海见' in action[3] and action[4] == 'completed')
+        finally:
+            conn.close()
+        undone = gateway.post('/api/gateway/actions/' + action_id + '/undo', headers={'Authorization': 'Bearer ' + write_token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (inbox_id,)).fetchone()[0], 'open')
+            self.assertEqual(conn.execute('SELECT is_done FROM reminders WHERE id=?', (old_task_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND title='提前确认会面资料'", (customer_id,)).fetchone()[0], 0)
+        finally:
+            conn.close()
+
+        def run_write(action, payload, key, customer=customer_id):
+            response = gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + write_token, 'Idempotency-Key': key}, json={
+                'action': action, 'customer_id': customer, 'payload': payload})
+            self.assertEqual(response.status_code, 201, response.get_json())
+            return response.get_json()['data']['action']['id']
+
+        task_action = run_write('create_task', {'title': '新待办', 'due_date': '2026-09-12'}, 'write-task-1')
+        self.assertEqual(gateway.post('/api/gateway/actions/' + task_action + '/undo', headers={'Authorization': 'Bearer ' + write_token}).status_code, 200)
+        complete_action = run_write('complete_task', {'task_id': old_task_id, 'content': '已完成原待办', 'direction': 'outbound'}, 'write-complete-1')
+        self.assertEqual(gateway.post('/api/gateway/actions/' + complete_action + '/undo', headers={'Authorization': 'Bearer ' + write_token}).status_code, 200)
+        inbox_action = run_write('resolve_inbox', {'inbox_item_id': inbox_id, 'resolution_note': '已核实'}, 'write-inbox-1')
+        self.assertEqual(gateway.post('/api/gateway/actions/' + inbox_action + '/undo', headers={'Authorization': 'Bearer ' + write_token}).status_code, 200)
+        profile_action = run_write('update_customer', {'notes': 'Agent 更新资料'}, 'write-profile-1')
+        contact_action = run_write('update_contact', {'contact_id': contact_id, 'title': '采购'}, 'write-contact-1')
+        self.assertEqual(gateway.post('/api/gateway/actions/' + profile_action + '/undo', headers={'Authorization': 'Bearer ' + write_token}).status_code, 200)
+        self.assertEqual(gateway.post('/api/gateway/actions/' + contact_action + '/undo', headers={'Authorization': 'Bearer ' + write_token}).status_code, 200)
+        self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + write_token, 'Idempotency-Key': 'no-delete'}, json={
+            'action': 'delete_customer', 'customer_id': customer_id, 'payload': {}
+        }).status_code, 409)
+
+    def test_hamid_chat_agent_handles_real_crm_conversations_through_gateway(self):
+        spec = importlib.util.spec_from_file_location('crm_app_chat_agent_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, attention_reason) VALUES ('Jay', 'EXION', '等待客户确认会议安排')")
+            exion_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO customers (name, company) VALUES ('Hideout', 'Hideout')")
+            hideout_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO customers (name, company) VALUES ('Acme One', 'Acme')")
+            conn.execute("INSERT INTO customers (name, company) VALUES ('Acme Two', 'Acme')")
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, '确认会议时间', ?, 0, 'follow_up')",
+                         (exion_id, module._calendar_today().isoformat()))
+            conn.execute("INSERT INTO follow_up_logs (customer_id, content, follow_date, direction) VALUES (?, '客户此前询问上海会面安排', '2026-08-29', 'inbound')", (exion_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        today = client.post('/api/chat/agent', json={'message': '我今天有什么要做？'})
+        self.assertEqual(today.status_code, 200, today.get_json())
+        self.assertIn('EXION', today.get_json()['reply'])
+        status = client.post('/api/chat/agent', json={'message': 'EXION 最近怎么样？'})
+        self.assertEqual(status.status_code, 200, status.get_json())
+        self.assertIn('客户此前询问上海会面安排', status.get_json()['reply'])
+        record_request = {'message': '记录一下 Jay 今天确认 9 月 15 日上海见。', 'idempotency_key': 'chat-retry-record'}
+        record = client.post('/api/chat/agent', json=record_request)
+        self.assertEqual(record.status_code, 200, record.get_json())
+        self.assertTrue(record.get_json()['operations'][0]['action_id'])
+        replay = client.post('/api/chat/agent', json=record_request)
+        self.assertEqual(replay.status_code, 200, replay.get_json())
+        self.assertEqual(replay.get_json()['operations'][0]['action_id'], record.get_json()['operations'][0]['action_id'])
+        reminder = client.post('/api/chat/agent', json={'message': '下周三提醒我跟进 Hideout。'})
+        self.assertEqual(reminder.status_code, 200, reminder.get_json())
+        self.assertIn('Hideout', reminder.get_json()['reply'])
+        combined = client.post('/api/chat/agent', json={'message': 'Jay 今天确认 9 月 15 日上海见，记一下，提前三天提醒我。'})
+        self.assertEqual(combined.status_code, 200, combined.get_json())
+        combined_action = combined.get_json()['operations'][0]['action_id']
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND remind_date='2026-09-12' AND is_done=0", (exion_id,)).fetchone()[0], 1)
+        finally:
+            conn.close()
+        undone = client.post('/api/chat/agent', json={'message': '撤销刚才的操作'})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT status FROM agent_actions WHERE action_id=?', (combined_action,)).fetchone()[0], 'undone')
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND remind_date='2026-09-12'", (exion_id,)).fetchone()[0], 0)
+        finally:
+            conn.close()
+        ambiguous = client.post('/api/chat/agent', json={'message': '记录一下 Acme 今天确认样品。'})
+        self.assertEqual(ambiguous.status_code, 200, ambiguous.get_json())
+        self.assertTrue(ambiguous.get_json()['candidates'])
+        self.assertIn('没有修改', ambiguous.get_json()['reply'])
+        no_date = client.post('/api/chat/agent', json={'message': '提醒我跟进 Hideout。'})
+        self.assertEqual(no_date.status_code, 200, no_date.get_json())
+        self.assertIn('明确日期', no_date.get_json()['reply'])
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_actions WHERE action_type=?', ('create_task',)).fetchone()[0], 1)
+        finally:
+            conn.close()
+        amy = module.app.test_client()
+        amy.post('/api/auth/login', json={'user': 'amy'})
+        self.assertEqual(amy.post('/api/chat/agent', json={'message': '我今天有什么要做？'}).status_code, 404)
 
     def test_agent_timeline_and_message_search_are_composable_and_authenticated(self):
         spec = importlib.util.spec_from_file_location('crm_app_agent_search_test', ROOT / 'app.py')

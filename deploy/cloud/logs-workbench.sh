@@ -9,8 +9,7 @@ source "$ENV_FILE"
 : "${TRADE_OS_ECS_INSTANCE_ID:?TRADE_OS_ECS_INSTANCE_ID is required}"
 LINES="${TRADE_OS_LOG_LINES:-120}"
 
-workbench exec \
-  --instance-id "$TRADE_OS_ECS_INSTANCE_ID" \
-  --region "$TRADE_OS_ECS_REGION" \
-  --user-name root \
-  --command "journalctl -u trade-os -n '$LINES' --no-pager"
+"$SCRIPT_DIR/run-workbench-command.sh" \
+  "$TRADE_OS_ECS_INSTANCE_ID" \
+  "$TRADE_OS_ECS_REGION" \
+  "journalctl -u trade-os -n '$LINES' --no-pager"
