@@ -6444,8 +6444,6 @@ def _run_pi_agent(message, request_id='', context=None):
     return {'reply': reply, 'operations': operations, 'candidates': []}, status
 
 
-@app.route('/api/chat/agent', methods=['POST'])
-@login_required
 def chat_agent():
     """Hamid's small, tool-only conversational CRM entry point (no direct DB writes)."""
     if g.current_user != 'hamid':
@@ -6573,8 +6571,6 @@ def chat_agent():
     return jsonify({'reply': '我目前可以查看今天安排、查询客户近况、记录沟通、创建提醒，以及撤销刚才的聊天操作。', 'operations': []})
 
 
-@app.route('/api/chat/agent/actions/<action_id>/undo', methods=['POST'])
-@login_required
 def chat_agent_undo(action_id):
     if g.current_user != 'hamid':
         return jsonify({'error': '此测试版聊天助手目前仅向 Hamid 开放'}), 404
