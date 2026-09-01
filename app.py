@@ -5918,6 +5918,56 @@ def gateway_get_inbox():
     return _gateway_response({'items': compact}, pagination={'limit': _gateway_limit(), 'has_more': len(items) > len(compact)})
 
 
+@app.route('/api/gateway/customers/<int:customer_id>/contacts', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_get_contacts(customer_id):
+    conn = get_db()
+    try:
+        if not conn.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+            return _gateway_response(error=('not_found', '客户不存在'), status=404)
+        rows = conn.execute('''SELECT id, customer_id, name, title, email, phone, whatsapp, linkedin,
+                                      preferred_channel, contact_type, is_primary, notes
+                               FROM contacts WHERE customer_id=? ORDER BY is_primary DESC, created_at DESC, id DESC''', (customer_id,)).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'contacts': [dict(row) for row in rows]})
+
+
+@app.route('/api/gateway/tasks', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_get_open_tasks():
+    customer_id = request.args.get('customer_id', type=int)
+    limit = _gateway_limit()
+    filters, params = ["r.is_done=0", "r.reminder_type NOT LIKE 'outreach_%'", "(c.is_deleted=0 OR c.is_deleted IS NULL)"], []
+    if customer_id:
+        filters.append('r.customer_id=?'); params.append(customer_id)
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT r.id, r.customer_id, r.title, r.content, r.reason, r.remind_date,
+                                      r.reminder_type, c.name, c.company FROM reminders r JOIN customers c ON c.id=r.customer_id
+                               WHERE ''' + ' AND '.join(filters) + ' ORDER BY r.remind_date, r.manual_order, r.id LIMIT ?', params + [limit]).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'tasks': [{'id': row['id'], 'customer_id': row['customer_id'], 'title': row['title'] or row['content'] or '',
+                                          'content': row['content'] or '', 'reason': row['reason'] or '', 'due_date': row['remind_date'],
+                                          'type': row['reminder_type'] or 'follow_up', 'customer_name': row['company'] or row['name'] or ''} for row in rows]},
+                             pagination={'limit': limit, 'has_more': len(rows) == limit})
+
+
+@app.route('/api/gateway/actions/recent', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_recent_actions():
+    limit = _gateway_limit()
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT action_id, action_type, customer_id, related_type, related_id, status, created_at, undone_at
+                               FROM agent_actions WHERE user_id=? ORDER BY created_at DESC, id DESC LIMIT ?''',
+                            (g.gateway_principal['user'], limit)).fetchall()
+    finally:
+        conn.close()
+    return _gateway_response({'actions': [dict(row) for row in rows]}, pagination={'limit': limit, 'has_more': len(rows) == limit})
+
+
 def _validate_agent_proposal(action, customer_id, payload, conn, strict=False):
     if action not in ('record_communication', 'create_task', 'complete_task') or not isinstance(payload, dict):
         raise CrmWriteError('提议动作或内容无效')
@@ -6032,9 +6082,11 @@ def _gateway_direct_write(action, data, idempotency_key):
             'record_communication': ('follow_up_log', result.get('id')),
             'create_task': ('reminder', result.get('id')),
             'complete_task': ('reminder', payload.get('task_id')),
+            'update_task': ('reminder', payload.get('task_id')),
             'update_customer': ('customer', result.get('id')),
             'update_contact': ('contact', result.get('id')),
             'resolve_inbox': ('inbox_item', result.get('id')),
+            'assign_inbox_customer': ('inbox_item', result.get('id')),
         }[action]
         response_data = {'action': {'id': action_id, 'type': action, 'status': 'completed',
                                     'customer_id': result.get('customer_id') or customer_id,
@@ -6066,6 +6118,10 @@ def _gateway_direct_write(action, data, idempotency_key):
         if not isinstance(payload.get('task_id'), int):
             raise CrmWriteError('完成待办需要 task_id')
         result = complete_customer_task(payload['task_id'], payload, before_commit=receipt_hook)
+    elif action == 'update_task':
+        if not isinstance(payload.get('task_id'), int):
+            raise CrmWriteError('修改待办需要 task_id')
+        result = update_customer_follow_up_task(payload['task_id'], payload, before_commit=receipt_hook)
     elif action == 'update_customer':
         if not isinstance(customer_id, int):
             raise CrmWriteError('修改客户资料需要 customer_id')
@@ -6078,6 +6134,10 @@ def _gateway_direct_write(action, data, idempotency_key):
         if not isinstance(payload.get('inbox_item_id'), int):
             raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
         result = resolve_customer_inbox_item(payload['inbox_item_id'], payload, before_commit=receipt_hook)
+    elif action == 'assign_inbox_customer':
+        if not isinstance(customer_id, int) or not isinstance(payload.get('inbox_item_id'), int):
+            raise CrmWriteError('确认 Inbox 归属需要 customer_id 和 inbox_item_id')
+        result = assign_customer_inbox_item(payload['inbox_item_id'], customer_id, payload, before_commit=receipt_hook)
     else:
         raise CrmWriteError('此操作需要 proposal 或不允许直接执行', 409)
     return result['_gateway_response'], False
@@ -7366,6 +7426,33 @@ def create_customer_follow_up_task(customer_id, data, before_commit=None):
     return result
 
 
+def update_customer_follow_up_task(reminder_id, data, before_commit=None):
+    """Update one open task using the same transaction, refresh and undo rules as the UI."""
+    data = data or {}
+    allowed = ('title', 'content', 'reason', 'remind_date')
+    provided = {field for field in allowed if field in data}
+    if not provided:
+        raise CrmWriteError('没有提供需要修改的待办字段')
+    if 'remind_date' in provided:
+        try: datetime.strptime(str(data.get('remind_date') or '').strip(), '%Y-%m-%d')
+        except ValueError: raise CrmWriteError('请提供 YYYY-MM-DD 格式的日期')
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'reminders', reminder_id)
+        if not before or before.get('is_done'): raise CrmWriteError('待办不存在或已经完成', 404)
+        customer_id, customer_before, now = before['customer_id'], _snapshot_entity(conn, 'customers', before['customer_id']), _calendar_now_text()
+        values = {key: str(data.get(key) if key in provided else before.get(key) or '').strip() for key in allowed}
+        if 'title' in provided and 'content' not in provided: values['content'] = values['title']
+        c.execute('UPDATE reminders SET title=?, content=?, reason=?, remind_date=?, updated_at=? WHERE id=?',
+                  (values['title'], values['content'], values['reason'], values['remind_date'], now, reminder_id))
+        _refresh_customer_follow_up(c, customer_id, now)
+        after, customer_after = _snapshot_entity(conn, 'reminders', reminder_id), _snapshot_entity(conn, 'customers', customer_id)
+        undo_token = _create_undo_action(conn, 'UPDATE_TASK', 'reminder', reminder_id,
+            [_undo_entity('reminders', reminder_id, before, after), _undo_entity('customers', customer_id, customer_before, customer_after)],
+            f'撤销待办修改：{before.get("title") or before.get("content") or "待办"}')
+        return {'id': reminder_id, 'customer_id': customer_id, 'task': after, 'undo_token': undo_token, 'undo_description': '撤销待办修改'}
+    return _run_crm_write(operation, before_commit)
+
+
 def update_customer_profile(customer_id, data, before_commit=None):
     """Update only ordinary customer profile fields with the standard undo transaction."""
     data = data or {}
@@ -7437,6 +7524,28 @@ def resolve_customer_inbox_item(inbox_item_id, data=None, before_commit=None):
                                          [_undo_entity('inbox_items', inbox_item_id, before, after)], '撤销 Agent 处理 Inbox')
         return {'id': inbox_item_id, 'customer_id': before.get('customer_id'), 'undo_token': undo_token,
                 'undo_description': '撤销处理 Inbox'}
+    return _run_crm_write(operation, before_commit)
+
+
+def assign_customer_inbox_item(inbox_item_id, customer_id, data=None, before_commit=None):
+    """Confirm an unassigned capture's customer without resolving or duplicating its communication."""
+    data = data or {}
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+        if not before or before.get('status') != 'open':
+            raise CrmWriteError('Inbox 条目不存在或已处理', 404)
+        if before.get('item_type') not in _CAPTURE_INBOX_TYPES:
+            raise CrmWriteError('只有待归属沟通可以确认客户归属')
+        if before.get('customer_id') not in (None, customer_id):
+            raise CrmWriteError('该 Inbox 条目已归属其他客户', 409)
+        if not c.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+            raise CrmWriteError('客户不存在', 404)
+        c.execute('UPDATE inbox_items SET customer_id=? WHERE id=? AND status=\'open\'', (customer_id, inbox_item_id))
+        after = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+        undo_token = _create_undo_action(conn, 'ASSIGN_INBOX_CUSTOMER', 'inbox_item', inbox_item_id,
+            [_undo_entity('inbox_items', inbox_item_id, before, after)], '撤销 Inbox 客户归属')
+        return {'id': inbox_item_id, 'customer_id': customer_id, 'undo_token': undo_token,
+                'undo_description': '撤销 Inbox 客户归属'}
     return _run_crm_write(operation, before_commit)
 
 

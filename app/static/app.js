@@ -515,24 +515,6 @@ function reconcileKeyedElements(container, records, options) {
 // command shelf, the global AI lens and the quick-reply modal.
 function initLiquidGlassPrototype() {
   var commandShelf = document.querySelector('.command-shelf');
-  document.querySelectorAll('.command-shelf.is-collapsible').forEach(function(shelf) {
-    var primary = shelf.querySelector('.command-primary');
-    if (primary) primary.addEventListener('click', function(event) {
-      var touchDevice = window.matchMedia && window.matchMedia('(hover: none), (pointer: coarse)').matches;
-      if (touchDevice && !shelf.classList.contains('is-expanded')) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        shelf.classList.add('is-expanded');
-        shelf.setAttribute('aria-expanded', 'true');
-      }
-    }, true);
-    shelf.addEventListener('click', function(event) {
-      if (event.target.closest('button')) return;
-      shelf.classList.toggle('is-expanded');
-      shelf.setAttribute('aria-expanded', shelf.classList.contains('is-expanded') ? 'true' : 'false');
-    });
-    shelf.setAttribute('aria-expanded', 'false');
-  });
   // The command shelf is a stable frame of reference. It keeps one material
   // treatment while the user scrolls, avoiding decorative glass movement.
   if (commandShelf) commandShelf.classList.remove('is-content-under');
@@ -1010,89 +992,6 @@ function updateSidebarIdentity() {
   if (avatar) avatar.textContent = String(name).substring(0, 2).toUpperCase();
   if (label) label.textContent = name;
   if (role) role.textContent = currentUser ? '个人工作区' : '团队工作区';
-  var chatEntry = document.getElementById('chatAgentEntry');
-  if (chatEntry) chatEntry.hidden = !(currentUser && currentUser.id === 'hamid');
-}
-
-function chatAgentAppend(role, text, operations, candidates) {
-  var messages = document.getElementById('chatAgentMessages');
-  if (!messages) return;
-  var row = document.createElement('div');
-  row.className = 'chat-agent-message chat-agent-' + role;
-  var body = document.createElement('div');
-  body.className = 'chat-agent-bubble';
-  body.textContent = text || '';
-  row.appendChild(body);
-  (operations || []).forEach(function(operation) {
-    var detail = document.createElement('div');
-    detail.className = 'chat-agent-operation';
-    detail.textContent = operation.label || '已完成操作';
-    if (operation.undo_available && operation.action_id) {
-      var undo = document.createElement('button');
-      undo.type = 'button'; undo.className = 'btn btn-sm'; undo.textContent = '撤销';
-      undo.onclick = function() { undoChatAgentAction(operation.action_id, undo); };
-      detail.appendChild(undo);
-    }
-    row.appendChild(detail);
-  });
-  (candidates || []).forEach(function(candidate) {
-    var candidateRow = document.createElement('div');
-    candidateRow.className = 'chat-agent-candidate';
-    candidateRow.textContent = candidate.label || candidate.name || '候选客户';
-    row.appendChild(candidateRow);
-  });
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function openChatAgent() {
-  if (!currentUser || currentUser.id !== 'hamid') return;
-  var messages = document.getElementById('chatAgentMessages');
-  if (messages && !messages.childElementCount) chatAgentAppend('assistant', '你好，直接告诉我你想了解或完成的工作即可。我可以查客户近况、读取工作资料、记录沟通和安排下一步。');
-  openModal('chatAgentModal');
-  setTimeout(function() { var input = document.getElementById('chatAgentInput'); if (input) input.focus(); }, 0);
-}
-
-function handleChatAgentKeydown(event) {
-  // Chinese/Japanese IME uses Enter to commit composition. It must never send
-  // the message before the user has finished entering text.
-  if (event.isComposing || event.keyCode === 229) return;
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-    event.preventDefault();
-    sendChatAgentMessage();
-  }
-}
-
-async function sendChatAgentMessage() {
-  var input = document.getElementById('chatAgentInput');
-  var button = document.getElementById('chatAgentSend');
-  var message = (input && input.value || '').trim();
-  if (!message) return;
-  chatAgentAppend('user', message);
-  input.value = ''; button.disabled = true; button.textContent = '正在处理…';
-  try {
-    var idempotencyKey = 'chat_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
-    var result = await api('/api/chat/agent', { method: 'POST', body: JSON.stringify({ message: message, idempotency_key: idempotencyKey }) });
-    chatAgentAppend('assistant', result.reply || '我暂时无法完成这项操作。', result.operations || [], result.candidates || []);
-  } catch (error) {
-    chatAgentAppend('assistant', error && error.reply || '这次没有完成任何修改，请稍后重试。');
-  } finally {
-    button.disabled = false; button.textContent = '发送'; input.focus();
-  }
-}
-
-async function undoChatAgentAction(actionId, button) {
-  if (button) { button.disabled = true; button.textContent = '正在撤销…'; }
-  try {
-    var result = await api('/api/chat/agent/actions/' + encodeURIComponent(actionId) + '/undo', { method: 'POST' });
-    chatAgentAppend('assistant', result.reply || '已撤销这项操作。');
-    if (button) button.remove();
-    if (currentPage === 'dashboard') loadDashboard();
-    if (currentPage === 'inbox') loadInbox();
-  } catch (error) {
-    if (button) { button.disabled = false; button.textContent = '撤销失败'; }
-    chatAgentAppend('assistant', '撤销没有完成，原记录没有被部分恢复。');
-  }
 }
 
 // ========== API Helper ==========

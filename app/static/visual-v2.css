@@ -207,19 +207,6 @@ body {
 }
 .sidebar-tools-menu button { min-height: 38px; padding: 8px 12px; border: 0; border-radius: 9px; background: transparent; color: var(--v2-ink-soft); font: inherit; font-size: var(--fs-label); text-align: left; cursor: pointer; }
 .sidebar-tools-menu button:hover { background: var(--v2-clay-soft); color: var(--v2-ink); }
-.chat-agent-modal { width: min(560px, calc(100vw - 32px)); }
-.chat-agent-body { min-height: 300px; max-height: min(56vh, 620px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: var(--v2-paper); }
-.chat-agent-message { display: flex; flex-direction: column; gap: 7px; max-width: 88%; }
-.chat-agent-user { align-self: flex-end; align-items: flex-end; }
-.chat-agent-assistant { align-self: flex-start; }
-.chat-agent-bubble { white-space: pre-line; padding: 11px 13px; border: 1px solid var(--v2-line); border-radius: 14px; color: var(--v2-ink); font-size: .92rem; line-height: 1.58; background: rgba(255,255,255,.68); }
-.chat-agent-user .chat-agent-bubble { background: var(--v2-clay-soft); border-color: rgba(168,95,69,.2); }
-.chat-agent-operation { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 10px; background: var(--v2-moss-soft); color: var(--v2-ink-soft); font-size: .8rem; }
-.chat-agent-candidate { padding: 7px 10px; border: 1px solid var(--v2-line); border-radius: 9px; background: rgba(255,255,255,.7); color: var(--v2-ink-soft); font-size: .82rem; }
-.chat-agent-compose { display: flex; gap: 8px; align-items: center; }
-.chat-agent-compose .form-control { min-width: 0; flex: 1; }
-.chat-agent-compose textarea.form-control { resize: vertical; min-height: 68px; line-height: 1.45; }
-@media (max-width: 720px) { .chat-agent-modal { width: calc(100vw - 20px); } .chat-agent-body { min-height: 260px; } }
 .gmail-integration-state { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 18px; color: var(--v2-ink-soft); font-size: .82rem; line-height: 1.55; }
 .gmail-integration-state strong { color: var(--v2-ink); font-size: .9rem; }
 .gmail-integration-state > span { grid-column: 1; overflow-wrap: anywhere; }
@@ -4481,16 +4468,10 @@ html.motion-lite .modal-customer-workspace > .modal-body {
   }
   .page-header .command-shelf.is-collapsible.is-expanded { max-width: 132px !important; }
   .page-header .command-shelf.is-collapsible .command-icon {
-    flex: 0 0 0 !important;
-    width: 0 !important;
-    min-width: 0 !important;
-    padding: 0 !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
-  }
-  .page-header .command-shelf.is-collapsible.is-expanded .command-icon {
-    flex-basis: 32px !important;
+    flex: 0 0 32px !important;
     width: 32px !important;
+    min-width: 32px !important;
+    padding: 0 !important;
     opacity: 1 !important;
     pointer-events: auto !important;
   }

@@ -75,7 +75,6 @@
     <details class="sidebar-tools">
       <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
-        <button type="button" id="chatAgentEntry" hidden onclick="openChatAgent()">聊天助手</button>
         <button type="button" onclick="switchPage('newpool')">新客户</button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
         <button type="button" onclick="switchPage('history')">全部记录</button>
@@ -397,7 +396,7 @@
         <div class="page-desc">所有通话、邮件和会议记录</div>
       </div>
       <div class="page-body">
-        <div class="card"><div class="card-body" id="historyTimeline"><div class="empty-state"><p>Loading...</p></div></div></div>
+        <div class="card"><div class="card-body" id="historyTimeline"><div class="empty-state"><p>正在加载...</p></div></div></div>
       </div>
     </div>
 
@@ -410,7 +409,7 @@
         <div class="page-desc">系统审计记录 — 自动记录对客户、提醒等数据的创建/修改/删除操作，用于排查问题和数据追踪</div>
       </div>
       <div class="page-body">
-        <div class="card"><div class="card-body" id="logsList"><div class="empty-state"><p>Loading...</p></div></div></div>
+        <div class="card"><div class="card-body" id="logsList"><div class="empty-state"><p>正在加载...</p></div></div></div>
       </div>
     </div>
 
@@ -482,7 +481,7 @@
         </div>
         <div class="card">
           <div class="card-header"><h3>系统信息</h3></div>
-          <div class="card-body" id="systemInfo"><div class="empty-state"><p>Loading...</p></div></div>
+          <div class="card-body" id="systemInfo"><div class="empty-state"><p>正在加载...</p></div></div>
         </div>
       </div>
     </div>
@@ -1095,13 +1094,6 @@
 
 <!-- AI Research Section (inside customer edit modal) -->
 
-<div class="modal-overlay" id="chatAgentModal" role="dialog" aria-modal="true" aria-labelledby="chatAgentTitle">
-  <div class="modal chat-agent-modal">
-    <div class="modal-header"><div><div class="workspace-kicker">Hamid 测试版</div><h3 id="chatAgentTitle">聊天助手</h3><p class="modal-subtitle">直接说你想了解或完成的工作；我会按需查客户和工作资料。</p></div><button class="modal-close" type="button" onclick="closeModal('chatAgentModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
-    <div class="modal-body chat-agent-body" id="chatAgentMessages" aria-live="polite"></div>
-    <div class="modal-footer chat-agent-compose"><textarea id="chatAgentInput" class="form-control" maxlength="2000" rows="3" placeholder="例如：我今天有什么要做？&#10;可使用 Shift + Enter 换行；发送请点击按钮或按 Cmd/Ctrl + Enter。" onkeydown="handleChatAgentKeydown(event)"></textarea><button class="btn btn-primary" id="chatAgentSend" type="button" onclick="sendChatAgentMessage()">发送</button></div>
-  </div>
-</div>
 
 <datalist id="industryFieldOptions">
   <option value="亚克力分销"><option value="工程塑料分销"><option value="塑料板材分销"><option value="标牌与广告制作"><option value="展示展览">
