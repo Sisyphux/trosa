@@ -4,6 +4,7 @@
 
 - 用户可见变化：Pi 助理固定服务 Hamid 的 Trosa 工作区；被问及当前数据时只说明 Hamid 工作区，不再解释本地数据库、文件路径或其他账号。
 - 数据边界：Pi 系统提示明确禁止读取、搜索或描述本地运行数据、SQLite、系统库及 Amy/Kelley 等其他账号；默认只注册 CRM Gateway 工具。文件工具须经单独审查并显式启用，不能用于日常 CRM 助理。
+- 操作入口：新增 `pi-agent/trosa-hamid` 专用启动器，固定走 Hamid stdio MCP、关闭 Pi 内置工具与仓库上下文，避免普通 coding agent 为 Today 查询执行无关文件或数据库检查。
 - 验证：完整 Python 回归 79/79、浏览器扩展测试及 JavaScript 语法检查通过。
 
 ## 2026-08-31 — 前端维护：移动快捷操作与废弃入口清理

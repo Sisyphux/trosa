@@ -54,8 +54,8 @@ server.registerTool("search_customers", { description: "Search the authenticated
   ({ query, limit }) => callGateway(`/api/gateway/customers?query=${encodeURIComponent(query)}&limit=${limit || 10}`));
 server.registerTool("get_customer", { description: "Get one customer previously returned by search_customers.", inputSchema: { customer_id: z.number().int().positive() } },
   ({ customer_id }) => callGateway(`/api/gateway/customers/${customer_id}`));
-server.registerTool("get_today", { description: "Get explicit customer tasks due today.", inputSchema: { limit: z.number().int().min(1).max(30).optional() } },
-  ({ limit }) => callGateway(`/api/gateway/today?limit=${limit || 15}`));
+server.registerTool("get_today", { description: "Get explicit customer tasks due today for the authenticated Hamid workspace in one request.", inputSchema: { limit: z.number().int().min(1).max(50).optional() } },
+  ({ limit }) => callGateway(`/api/gateway/today?limit=${limit || 50}`));
 server.registerTool("search_activity", { description: "Search recent CRM activity without guessing identities.", inputSchema: { customer_id: z.number().int().positive().optional(), query: z.string().max(200).optional(), limit: z.number().int().min(1).max(30).optional() } },
   ({ customer_id, query, limit }) => { const params = new URLSearchParams({ limit: String(limit || 15) }); if (customer_id) params.set("customer_id", String(customer_id)); if (query) params.set("query", query); return callGateway(`/api/gateway/activity?${params}`); });
 server.registerTool("get_inbox", { description: "Get the authenticated user's Trosa Inbox.", inputSchema: { limit: z.number().int().min(1).max(30).optional() } },

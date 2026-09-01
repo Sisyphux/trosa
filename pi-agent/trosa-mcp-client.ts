@@ -30,10 +30,11 @@ function bridge(name: string, label: string, description: string, parameters: an
 }
 
 const optionalLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 30 }));
+const todayLimit = Type.Optional(Type.Integer({ minimum: 1, maximum: 50 }));
 const tools = [
   bridge("search_customers", "Search customers", "Search Trosa customers via the MCP server.", Type.Object({ query: Type.String({ minLength: 1, maxLength: 200 }), limit: optionalLimit })),
   bridge("get_customer", "Get customer", "Get a customer ID returned by search_customers.", Type.Object({ customer_id: Type.Integer({ minimum: 1 }) })),
-  bridge("get_today", "Get today", "Get today's Trosa tasks.", Type.Object({ limit: optionalLimit })),
+  bridge("get_today", "Get today", "Get all of the authenticated Hamid workspace's due or overdue Trosa tasks in one request.", Type.Object({ limit: todayLimit })),
   bridge("search_activity", "Search activity", "Search Trosa activity.", Type.Object({ customer_id: Type.Optional(Type.Integer({ minimum: 1 })), query: Type.Optional(Type.String({ maxLength: 200 })), limit: optionalLimit })),
   bridge("get_inbox", "Get inbox", "Get Trosa Inbox items.", Type.Object({ limit: optionalLimit })),
   bridge("get_contacts", "Get contacts", "Get contacts for a known customer.", Type.Object({ customer_id: Type.Integer({ minimum: 1 }) })),

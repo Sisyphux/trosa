@@ -49,3 +49,24 @@ pi --no-builtin-tools --no-context-files --no-extensions \
 ```
 
 该扩展经 stdio 连接上述 MCP Server，不会回退为直接 Gateway 调用。生产 ECS 不启用 Pi 或 MCP，除非维护者另行明确配置。
+
+### Hamid 日常入口
+
+不要在 Trosa 仓库目录直接运行通用 `pi` 来处理 CRM；它是 coding agent，默认具有本地文件和 shell 工具，既慢也会越过 Hamid 的工作边界。
+
+使用专用启动器：
+
+```bash
+export DEEPSEEK_API_KEY=... # 或使用已配置的 Pi provider 认证
+./pi-agent/trosa-hamid -p "查看我的今日待办"
+```
+
+启动器固定使用 Hamid Gateway token、Trosa stdio MCP extension 与 Hamid 系统提示；关闭内置工具、上下文文件、自动扩展和会话保存，并从临时目录运行。因此它没有 shell、`read` 或本地 SQLite / `data/` 访问能力。`TROSA_PI_MCP_ENV_FILE` 可指定替代的私有 MCP 环境文件。
+
+Today 是确定性读取，不需要等待模型：
+
+```bash
+./pi-agent/trosa-hamid today
+```
+
+该命令直接调用同一个 MCP `get_today` 工具，一次读取 Hamid 最多 50 条到期/逾期待办；不会启动模型、Pi coding tools 或本地数据库检查。

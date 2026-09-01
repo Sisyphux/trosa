@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Start the Hamid-only Trosa assistant through the stdio MCP boundary.
+# This is intentionally separate from the generic `pi` coding-agent command.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TROSA_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MCP_ENV_FILE="${TROSA_PI_MCP_ENV_FILE:-$HOME/.config/trosa/pi-mcp.env}"
+
+if [[ ! -r "$MCP_ENV_FILE" ]]; then
+  printf 'Missing Hamid MCP configuration: %s\n' "$MCP_ENV_FILE" >&2
+  exit 2
+fi
+
+set -a
+source "$MCP_ENV_FILE"
+set +a
+
+if [[ -z "${TROSA_GATEWAY_URL:-}" || -z "${TROSA_GATEWAY_TOKEN:-}" ]]; then
+  printf 'Hamid MCP configuration is incomplete.\n' >&2
+  exit 2
+fi
+
+if [[ "${1:-}" == "today" ]]; then
+  shift
+  if [[ "$#" -ne 0 ]]; then
+    printf 'Usage: trosa-hamid today\n' >&2
+    exit 2
+  fi
+  exec node "$SCRIPT_DIR/trosa-mcp-today.mjs"
+fi
+
+# Provider credentials are deliberately supplied by the caller or Pi auth,
+# rather than sourced from the CRM repository or passed to the MCP child.
+PI_PROVIDER="${TROSA_PI_PROVIDER:-deepseek}"
+PI_MODEL="${TROSA_PI_MODEL:-deepseek/deepseek-v4-flash}"
+
+cd "${TMPDIR:-/tmp}"
+exec pi \
+  --provider "$PI_PROVIDER" \
+  --model "$PI_MODEL" \
+  --thinking off \
+  --no-builtin-tools \
+  --no-context-files \
+  --no-extensions \
+  --no-session \
+  -e "$SCRIPT_DIR/trosa-mcp-client.ts" \
+  --system-prompt "$(<"$SCRIPT_DIR/system-prompt.md")" \
+  "$@"
