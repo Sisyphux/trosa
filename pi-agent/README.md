@@ -11,7 +11,7 @@
 - `TROSA_PI_PROVIDER=deepseek`、`TROSA_PI_MODEL=deepseek/deepseek-v4-flash`：模型选择。密钥由 Pi 的认证文件或对应 provider 的环境变量提供，不写入仓库。
 - `TROSA_PI_HOME=/var/lib/trade-os/pi-home`：可选的 Pi 认证/缓存目录。ECS 的 systemd 启用了 `ProtectHome`，生产环境应把 Pi 的认证文件放在这个由 `tradeos` 用户独占的目录，而不是用户家目录。
 - `TROSA_PI_SESSION_DIR=/var/lib/trade-os/pi-sessions`：Pi 会话目录，由 `tradeos` 用户独占。
-- `TROSA_PI_WORKFILES_ROOT=`：可选的只读本地工作文件夹；留空时 Pi 不会看到本地文件工具。
+- `TROSA_PI_WORKFILES_ROOT=`：可选的只读本地工作文件夹。Hamid 的 CRM 助理默认不注册任何文件工具；只有经过单独审查后同时设置 `TROSA_PI_ALLOW_WORKFILES=true` 才能启用，且不得指向运行数据、代码仓库或凭证目录。
 - `TROSA_GATEWAY_URL=http://127.0.0.1:8080`、`TROSA_GATEWAY_TOKEN=`：Hamid 绑定且至少拥有 `crm:read,crm:write` 的 personal access token。只放在服务环境文件中，绝不写入 Git。
 
 ## 本地验证

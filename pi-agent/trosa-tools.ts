@@ -15,6 +15,10 @@ import { relative, resolve, sep } from "node:path";
 const GATEWAY_URL = (process.env.TROSA_GATEWAY_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const GATEWAY_TOKEN = (process.env.TROSA_GATEWAY_TOKEN || "").trim();
 const WORKFILES_ROOT = process.env.TROSA_WORKFILES_ROOT ? resolve(process.env.TROSA_WORKFILES_ROOT) : "";
+// CRM operation is the default and only normal Pi capability.  File access
+// must be explicitly enabled for a separately reviewed use case; it never
+// belongs to Hamid's day-to-day CRM assistant context.
+const WORKFILES_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.TROSA_PI_ALLOW_WORKFILES || "").trim().toLowerCase());
 const REQUEST_TIMEOUT_MS = Math.max(5000, Math.min(Number(process.env.TROSA_GATEWAY_TIMEOUT_MS || 45000), 120000));
 
 type GatewayResponse = {
@@ -305,7 +309,9 @@ const readWorkFile = defineTool({
 });
 
 export default function (pi: ExtensionAPI) {
-	for (const tool of [searchCustomers, getCustomer, getToday, searchActivity, getInbox, recordCommunication, createTask, completeTask, undoAction, searchWorkFiles, readWorkFile]) {
+	const tools = [searchCustomers, getCustomer, getToday, searchActivity, getInbox, recordCommunication, createTask, completeTask, undoAction];
+	if (WORKFILES_ENABLED) tools.push(searchWorkFiles, readWorkFile);
+	for (const tool of tools) {
 		pi.registerTool(tool);
 	}
 }
