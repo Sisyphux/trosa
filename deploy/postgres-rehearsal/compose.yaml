@@ -1,0 +1,34 @@
+name: trade-os-postgres-rehearsal
+
+services:
+  postgres:
+    # Pin the rehearsal major/minor version.  Do not use `latest` for an
+    # import rehearsal whose report must be reproducible.
+    image: postgres:17.11
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums
+    ports:
+      # Never publish a rehearsal database directly to the network.
+      - "127.0.0.1:${TRADE_OS_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - trade_os_postgres_rehearsal:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+
+volumes:
+  trade_os_postgres_rehearsal:

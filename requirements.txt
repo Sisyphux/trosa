@@ -8,3 +8,6 @@ xlrd==2.0.2
 email-validator==2.3.0
 dnspython==2.8.0
 cryptography==46.0.7
+# Unified PostgreSQL data base.  Runtime cutover remains opt-in through
+# TRADE_OS_DATABASE_URL; SQLite stays active until the approved migration.
+psycopg[binary]==3.2.10

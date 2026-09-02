@@ -38,7 +38,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
 from db import (
     get_db, get_system_db, get_user_db_path, set_db_user, get_current_user, get_app_root,
-    init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES,
+    init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
+    init_user_tables, refresh_users_registry,
     backup_database, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
     DB_DIR, run_startup_maintenance,
 )
@@ -615,7 +616,7 @@ def before_request():
         set_db_user(integration_user)
         g.current_user = integration_user
         g.integration_name = 'prospecting_lab'
-    elif user in USERS:
+    elif user in USERS and USERS[user].get('active', True):
         set_db_user(user)
         g.current_user = user
     else:
@@ -801,9 +802,10 @@ def log_operation(action, target_type, target_id=None, details=''):
         conn = get_db()
         c = conn.cursor()
         c.execute('''
-            INSERT INTO operation_logs (action, target_type, target_id, details, created_at)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (action, target_type, target_id, details, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            INSERT INTO operation_logs (action, target_type, target_id, details, created_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (action, target_type, target_id, details, datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+              getattr(g, 'current_user', '') or ''))
         conn.commit()
         conn.close()
         schedule_safety_backup('data_change')
@@ -1406,8 +1408,14 @@ def auth_login():
     """用户登录"""
     data = request.get_json(silent=True) or {}
     user_id = data.get('user', '').strip().lower()
-    if user_id not in USERS:
+    if user_id not in USERS or not USERS[user_id].get('active', True):
         return jsonify({'error': '账号或访问码不正确'}), 400
+    registered = next((item for item in get_registered_users() if item.get('username') == user_id), {})
+    password_hash = registered.get('password_hash') or ''
+    supplied_password = str(data.get('password', ''))
+    if password_hash:
+        if not supplied_password or not check_password_hash(password_hash, supplied_password):
+            return jsonify({'error': '账号或密码不正确'}), 400
     if _production_mode:
         now = time.monotonic()
         with _PIN_ATTEMPTS_LOCK:
@@ -1417,10 +1425,12 @@ def auth_login():
                 remaining = max(1, int(locked_until - now))
                 return jsonify({'error': f'访问码尝试次数过多，请在 {remaining // 60 + 1} 分钟后重试'}), 429
         supplied_pin = str(data.get('pin', '')).strip()
-        pin_hash = _user_pin_hash(user_id)
-        if not pin_hash:
+        pin_hash = _user_pin_hash(user_id) if not password_hash else ''
+        if password_hash:
+            pin_hash = password_hash
+        if not pin_hash and not password_hash:
             return jsonify({'error': '请先创建个人访问码', 'pin_setup_required': True}), 409
-        if not check_password_hash(pin_hash, supplied_pin):
+        if not password_hash and not check_password_hash(pin_hash, supplied_pin):
             with _PIN_ATTEMPTS_LOCK:
                 attempt = _PIN_ATTEMPTS.setdefault(user_id, {'failures': 0, 'locked_until': 0})
                 attempt['failures'] += 1
@@ -1491,10 +1501,94 @@ def auth_me():
 def auth_users():
     """获取所有用户列表"""
     users_list = []
+    records = {row.get('username') or row.get('id'): row for row in get_registered_users(include_inactive=False)}
     for uid, info in USERS.items():
+        if not info.get('active', True):
+            continue
+        record = records.get(uid, {})
         users_list.append({'id': uid, 'name': info['name'], 'label': info['label'], 'color': info['color'],
-                           'pin_setup_required': _production_mode and _user_needs_pin_setup(uid)})
+                           'pin_setup_required': _production_mode and not record.get('password_hash') and _user_needs_pin_setup(uid),
+                           'password_login': bool(record.get('password_hash')),
+                           'role': info.get('role', 'member')})
     return jsonify({'users': users_list, 'requires_pin': _production_mode})
+
+
+def _admin_required():
+    """Small role gate for the initial team-management surface."""
+    if g.current_user not in USERS or USERS[g.current_user].get('role') != 'admin':
+        return jsonify({'error': '只有管理员可以管理团队成员'}), 403
+    return None
+
+
+@app.route('/api/team/members', methods=['GET'])
+@login_required
+def team_members():
+    denied = _admin_required()
+    if denied:
+        return denied
+    members = []
+    for row in get_registered_users(include_inactive=True):
+        members.append({key: row.get(key) for key in
+                        ('username', 'name', 'role', 'created_by', 'created_at', 'active')})
+    return jsonify({'members': members})
+
+
+@app.route('/api/team/members', methods=['POST'])
+@login_required
+def create_team_member():
+    denied = _admin_required()
+    if denied:
+        return denied
+    data = request.get_json(silent=True) or {}
+    username = str(data.get('username') or '').strip().lower()
+    name = str(data.get('name') or '').strip()
+    password = str(data.get('password') or '')
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{1,39}', username):
+        return jsonify({'error': '账号需为 2-40 位小写字母、数字或 ._-'}), 400
+    if not name or len(name) > 80:
+        return jsonify({'error': '请输入成员姓名'}), 400
+    if len(password) < 8:
+        return jsonify({'error': '密码至少 8 位'}), 400
+    conn = get_system_db()
+    try:
+        now = _calendar_now_text()
+        conn.execute('''INSERT INTO users
+            (id, username, name, label, color, password_hash, role, created_by, created_at, active)
+            VALUES (?, ?, ?, ?, ?, ?, 'member', ?, ?, 1)''',
+                     (username, username, name, name, '#8B7355', generate_password_hash(password),
+                      g.current_user, now))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return jsonify({'error': '账号已存在'}), 409
+    finally:
+        conn.close()
+    refresh_users_registry()
+    init_user_tables(username)
+    log_operation('CREATE', 'team_member', details=f'创建成员账号 {username}')
+    return jsonify({'success': True, 'member': {'username': username, 'name': name, 'role': 'member', 'active': True}}), 201
+
+
+@app.route('/api/team/members/<username>/disable', methods=['POST'])
+@login_required
+def disable_team_member(username):
+    denied = _admin_required()
+    if denied:
+        return denied
+    username = str(username or '').strip().lower()
+    if username == g.current_user:
+        return jsonify({'error': '不能禁用当前管理员账号'}), 400
+    conn = get_system_db()
+    row = conn.execute('SELECT username FROM users WHERE username=?', (username,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': '成员不存在'}), 404
+    conn.execute('UPDATE users SET active=0 WHERE username=?', (username,))
+    conn.commit(); conn.close()
+    if username in USERS:
+        USERS[username]['active'] = False
+    log_operation('DISABLE', 'team_member', details=f'禁用成员账号 {username}')
+    return jsonify({'success': True, 'username': username, 'active': False})
 
 
 @app.route('/api/agent-gateway/tokens', methods=['GET', 'POST'])
@@ -2082,9 +2176,10 @@ def sela_integration_sync():
             (sent_date, sent_date, now, customer_id),
         )
         conn.execute(
-            '''INSERT INTO operation_logs (action, target_type, target_id, details, created_at)
-               VALUES (?, ?, ?, ?, ?)''',
-            ('SYNC', 'sela', customer_id, f'sela 幂等同步 candidate {candidate_id}', now),
+            '''INSERT INTO operation_logs (action, target_type, target_id, details, created_at, user_id)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            ('SYNC', 'sela', customer_id, f'sela 幂等同步 candidate {candidate_id}', now,
+             getattr(g, 'current_user', '') or ''),
         )
         response_body = {
             'success': True,

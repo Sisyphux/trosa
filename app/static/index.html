@@ -24,7 +24,7 @@
     <form class="login-pin-form" id="loginPinForm" hidden>
       <label class="form-label" id="loginPinLabel" for="loginPin">个人访问码</label>
       <div class="login-pin-row">
-        <input class="form-control" id="loginPin" type="password" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6 位数字">
+        <input class="form-control" id="loginPin" type="password" autocomplete="current-password" placeholder="输入访问码或密码">
         <button class="btn btn-primary" id="loginPinSubmit" type="submit">进入</button>
       </div>
       <div class="login-error" id="loginError" role="alert"></div>
@@ -454,6 +454,18 @@
             <div class="settings-group"><h4>界面字号</h4><div class="settings-inline-field"><span>字号</span><select id="preferenceFontSize" onchange="applyFontSize(this.value)"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xl">超大</option></select><span class="settings-font-preview">Aa 文字预览</span></div><p class="settings-help">调整整个界面的文字大小，切换即时预览，保存后持久生效。</p></div>
             <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式会参考设备状态与一次不到一秒的本地帧率测试；不会上传页面内容或客户数据。</p></div>
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
+          </div>
+        </div>
+        <div class="card" id="teamMembersSettingsCard" style="margin-bottom:22px; display:none;">
+          <div class="card-header"><div><h3>团队成员</h3><p>邀请成员创建账号后即可进入 Trosa；管理员可以随时禁用成员账号。</p></div></div>
+          <div class="card-body">
+            <form id="teamMemberForm" class="settings-inline-field" style="align-items:end; flex-wrap:wrap; gap:12px;" onsubmit="createTeamMember(event)">
+              <label>账号<input class="form-control" id="teamMemberUsername" required autocomplete="off" placeholder="例如 alice"></label>
+              <label>姓名<input class="form-control" id="teamMemberName" required autocomplete="name"></label>
+              <label>初始密码<input class="form-control" id="teamMemberPassword" type="password" required minlength="8" autocomplete="new-password"></label>
+              <button class="btn btn-sm btn-primary" type="submit">创建成员</button>
+            </form>
+            <div id="teamMembersList" class="settings-help" style="margin-top:18px;"></div>
           </div>
         </div>
         <div class="card gmail-integration-card" style="margin-bottom:22px;" aria-labelledby="gmailIntegrationTitle">

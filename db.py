@@ -24,6 +24,40 @@ USERS = {
 }
 USERS_LIST = list(USERS.keys())
 
+
+def get_registered_users(include_inactive=True):
+    """Return the system user registry, including dynamically invited members."""
+    ensure_db_dir()
+    path = os.path.join(DB_DIR, 'system.db')
+    if not os.path.exists(path):
+        return []
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        query = 'SELECT * FROM users'
+        if not include_inactive:
+            query += ' WHERE active = 1'
+        return [dict(row) for row in conn.execute(query + ' ORDER BY name, username').fetchall()]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def refresh_users_registry():
+    """Merge system.db users into the legacy in-memory routing registry."""
+    for row in get_registered_users():
+        username = (row.get('username') or row.get('id') or '').strip().lower()
+        if username:
+            USERS[username] = {
+                'name': row.get('name') or username,
+                'label': row.get('label') or row.get('name') or username,
+                'color': row.get('color') or '#8B7355',
+                'role': row.get('role') or ('admin' if username == 'hamid' else 'member'),
+                'active': bool(row.get('active', 1)),
+            }
+    USERS_LIST[:] = list(USERS.keys())
+
 import threading
 from config import STORAGE_MAINTENANCE_CONFIG
 
@@ -1216,6 +1250,9 @@ USER_MIGRATIONS = {
     'agent_actions': {
         'user_id': "TEXT DEFAULT ''",
     },
+    'operation_logs': {
+        'user_id': "TEXT DEFAULT ''",
+    },
 }
 
 
@@ -1336,6 +1373,10 @@ def init_user_tables(user):
                         c.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
             except Exception as e:
                 logger.debug(f"迁移 {table_name} 跳过: {e}")
+
+        # Each legacy database already represents one owner. Backfill the new
+        # audit identity without changing any historical business rows.
+        c.execute("UPDATE operation_logs SET user_id=? WHERE COALESCE(user_id, '')=''", (user,))
 
         _migrate_customer_level_constraint(c)
 
@@ -1486,6 +1527,21 @@ def init_system_db():
             created_at TEXT DEFAULT (datetime('now', 'localtime'))
         )
     ''')
+    user_columns = {
+        'username': "TEXT",
+        'password_hash': "TEXT DEFAULT ''",
+        'role': "TEXT DEFAULT 'member' CHECK(role IN ('admin', 'member'))",
+        'created_by': "TEXT DEFAULT ''",
+        'active': "INTEGER DEFAULT 1",
+    }
+    existing = {row[1] for row in c.execute('PRAGMA table_info(users)').fetchall()}
+    for column, definition in user_columns.items():
+        if column not in existing:
+            c.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
+    c.execute("UPDATE users SET username=id WHERE COALESCE(username, '') = ''")
+    c.execute("UPDATE users SET password_hash='' WHERE password_hash IS NULL")
+    c.execute("UPDATE users SET role=CASE WHEN id='hamid' THEN 'admin' ELSE 'member' END WHERE COALESCE(role, '') = ''")
+    c.execute("UPDATE users SET active=1 WHERE active IS NULL")
     
     # 周报表
     c.execute('''
@@ -1516,12 +1572,14 @@ def init_system_db():
     # 插入默认用户
     for uid, info in USERS.items():
         c.execute('''
-            INSERT OR IGNORE INTO users (id, name, label, color)
-            VALUES (?, ?, ?, ?)
-        ''', (uid, info['name'], info['label'], info['color']))
+            INSERT OR IGNORE INTO users (id, username, name, label, color, role, created_by, active)
+            VALUES (?, ?, ?, ?, ?, ?, 'system', 1)
+        ''', (uid, uid, info['name'], info['label'], info['color'], 'admin' if uid == 'hamid' else 'member'))
+    c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)')
     
     conn.commit()
     conn.close()
+    refresh_users_registry()
 
 
 # ========== 全部初始化 ==========
@@ -1538,7 +1596,8 @@ def init_all_dbs():
     init_system_db()
     
     # 3. 初始化每个用户的数据库
-    for user in USERS:
+    refresh_users_registry()
+    for user in list(USERS):
         init_user_tables(user)
     
     # 4. 执行一次完整性检查

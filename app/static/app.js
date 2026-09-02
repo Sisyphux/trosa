@@ -6714,6 +6714,9 @@ function showGmailOAuthNotice() {
 async function loadSettings() {
   if (!userPreferences) await loadUserPreferences();
   renderPersonalSettings();
+  var teamCard = document.getElementById('teamMembersSettingsCard');
+  if (teamCard) teamCard.style.display = currentUser && currentUser.role === 'admin' ? '' : 'none';
+  if (currentUser && currentUser.role === 'admin') loadTeamMembers();
   loadGmailIntegrationStatus();
   try {
     var sys = await api('/api/system');
@@ -6723,6 +6726,45 @@ async function loadSettings() {
       '<div class="settings-row"><span class="label">调度器</span><span class="value" style="color:' + (sys.scheduler_running ? 'var(--success)' : 'var(--danger)') + ';">' + (sys.scheduler_running ? '运行中' : '未运行') + '</span></div>';
   } catch(e) {}
   document.getElementById('excelUploadResult').innerHTML = '';
+}
+
+async function loadTeamMembers() {
+  var list = document.getElementById('teamMembersList');
+  if (!list) return;
+  list.textContent = '正在读取成员…';
+  try {
+    var data = await api('/api/team/members');
+    list.innerHTML = '<div class="settings-row"><span class="label">成员</span><span class="value">状态</span></div>' +
+      (data.members || []).map(function(member) {
+        var active = Number(member.active) === 1 || member.active === true;
+        return '<div class="settings-row"><span class="label">' + escapeHtml(member.name || member.username) + ' · ' + escapeHtml(member.username) + '</span><span class="value">' +
+          (active ? '启用' : '已禁用') + (active && member.username !== currentUser.id ? ' <button class="btn btn-sm" type="button" onclick="disableTeamMember(\'' + escapeHtml(member.username) + '\')">禁用</button>' : '') + '</span></div>';
+      }).join('');
+  } catch (error) { list.textContent = error.message || '成员列表暂时无法加载'; }
+}
+
+async function createTeamMember(event) {
+  event.preventDefault();
+  var form = document.getElementById('teamMemberForm');
+  try {
+    await api('/api/team/members', { method: 'POST', body: JSON.stringify({
+      username: document.getElementById('teamMemberUsername').value.trim(),
+      name: document.getElementById('teamMemberName').value.trim(),
+      password: document.getElementById('teamMemberPassword').value
+    })});
+    form.reset();
+    showToast('成员账号已创建', 'success');
+    loadTeamMembers();
+  } catch (error) { showToast(error.message || '创建成员失败', 'error'); }
+}
+
+async function disableTeamMember(username) {
+  if (!await showAppConfirm({title: '禁用成员账号', message: '禁用后该成员将无法登录，但历史工作记录会保留。', submitLabel: '确认禁用'})) return;
+  try {
+    await api('/api/team/members/' + encodeURIComponent(username) + '/disable', {method: 'POST'});
+    showToast('成员账号已禁用', 'success');
+    loadTeamMembers();
+  } catch (error) { showToast(error.message || '禁用失败', 'error'); }
 }
 
 function uploadExcel() {
@@ -7278,11 +7320,12 @@ function selectLoginUser(user, requiresPin) {
   var pinLabel = document.getElementById('loginPinLabel');
   var submit = document.getElementById('loginPinSubmit');
   var isSetup = Boolean(user.pin_setup_required);
+  var isPassword = Boolean(user.password_login);
   if (form) form.hidden = false;
-  if (form) form.dataset.mode = isSetup ? 'setup' : 'login';
-  if (pinLabel) pinLabel.textContent = isSetup ? '创建 6 位个人访问码' : '个人访问码';
+  if (form) form.dataset.mode = isSetup ? 'setup' : (isPassword ? 'password' : 'login');
+  if (pinLabel) pinLabel.textContent = isSetup ? '创建 6 位个人访问码' : (isPassword ? '密码' : '个人访问码');
   if (submit) submit.textContent = isSetup ? '创建并进入' : '进入';
-  if (pinInput) pinInput.placeholder = isSetup ? '设置你的 6 位数字' : '输入 6 位数字';
+  if (pinInput) pinInput.placeholder = isSetup ? '设置你的 6 位数字' : (isPassword ? '输入密码' : '输入 6 位数字');
   if (pinInput) { pinInput.value = ''; pinInput.focus(); }
   if (errorEl) errorEl.textContent = '';
 }
@@ -7290,7 +7333,7 @@ function selectLoginUser(user, requiresPin) {
 async function loginUser(userId, pin) {
   var errorEl = document.getElementById('loginError');
   try {
-    var data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ user: userId, pin: pin || '' }) });
+    var data = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ user: userId, pin: pin || '', password: pin || '' }) });
     if (data && data.success) {
       currentUser = data.user;
       showApp();
@@ -7320,7 +7363,8 @@ document.getElementById('loginPinForm').addEventListener('submit', function(even
   var pin = document.getElementById('loginPin').value.trim();
   var errorEl = document.getElementById('loginError');
   if (!selected) return;
-  if (!/^\d{6}$/.test(pin)) {
+  var passwordMode = form && form.dataset.mode === 'password';
+  if ((!passwordMode && !/^\d{6}$/.test(pin)) || (passwordMode && pin.length < 1)) {
     if (errorEl) errorEl.textContent = '请输入 6 位数字访问码';
     return;
   }
@@ -7512,11 +7556,21 @@ async function loadMoreWeeklyMembers(uid) {
   } catch (e) { showToast('更多周报客户暂时无法加载', 'error'); }
 }
 
-function loadOverview() {
+async function loadOverview() {
   var loadToken = ++OV._weeklyLoadToken;
   OV._weeklyMembers = {};
   var ws = getWeekStart(overviewWeekOffset);
   document.getElementById('overviewDateLabel').textContent = formatWeekLabel(ws);
+  try {
+    var userData = await api('/api/auth/users');
+    var activeUsers = (userData.users || []).filter(function(user) { return user.id; });
+    if (loadToken !== OV._weeklyLoadToken) return;
+    activeUsers.forEach(function(user) {
+      OV.labels[user.id] = user.name || user.id;
+      OV.colors[user.id] = user.color || '#8B7355';
+    });
+  } catch (error) { /* retain the legacy three-member fallback */ }
+  if (loadToken !== OV._weeklyLoadToken) return;
   document.getElementById('ovReports').innerHTML = '<div class="weekly-board">' + Object.keys(OV.labels).map(weeklyMemberShell).join('') + '</div>';
   Object.keys(OV.labels).forEach(function(uid) { loadWeeklyMember(uid, loadToken); });
 }
