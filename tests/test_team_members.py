@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlparse
 
 import db
 
@@ -14,6 +15,8 @@ class TeamMembersApiTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.original_db_dir = db.DB_DIR
+        self.original_users = dict(db.USERS)
+        self.original_users_list = list(db.USERS_LIST)
         db.DB_DIR = self.tempdir.name
         db.init_all_dbs()
         spec = importlib.util.spec_from_file_location('trosa_team_members_test_app', ROOT / 'app.py')
@@ -26,6 +29,9 @@ class TeamMembersApiTest(unittest.TestCase):
 
     def tearDown(self):
         db.DB_DIR = self.original_db_dir
+        db.USERS.clear()
+        db.USERS.update(self.original_users)
+        db.USERS_LIST[:] = self.original_users_list
         self.tempdir.cleanup()
 
     def test_legacy_users_are_migrated_without_losing_identity(self):
@@ -36,33 +42,40 @@ class TeamMembersApiTest(unittest.TestCase):
         self.assertEqual(hamid, ('hamid', 'Hamid', 'admin', 1))
         conn.close()
 
-    def test_admin_can_create_login_and_disable_member(self):
-        created = self.client.post('/api/team/members', json={
-            'username': 'alice', 'name': 'Alice', 'password': 'correct horse battery staple'
-        })
+    def test_member_accepts_one_time_invitation_and_uses_name_as_account(self):
+        created = self.client.post('/api/team/invitations', json={})
         self.assertEqual(created.status_code, 201, created.get_json())
-        self.assertTrue(Path(db.get_user_db_path('alice')).exists())
+        invitation_url = created.get_json()['invitation']['url']
+        token = urlparse(invitation_url).path.rsplit('/', 1)[-1]
+
+        accepted = self.client.post(f'/api/invitations/{token}/accept', json={
+            'name': '李 雷', 'password': 'correct horse battery staple'
+        })
+        self.assertEqual(accepted.status_code, 201, accepted.get_json())
+        self.assertEqual(accepted.get_json()['user']['id'], '李 雷')
+        self.assertTrue(Path(db.get_user_db_path('李 雷')).exists())
 
         self.client.post('/api/auth/logout')
         logged_in = self.client.post('/api/auth/login', json={
-            'user': 'alice', 'password': 'correct horse battery staple'
+            'user': '李 雷', 'password': 'correct horse battery staple'
         })
         self.assertEqual(logged_in.status_code, 200, logged_in.get_json())
         self.client.post('/api/auth/logout')
         self.client.post('/api/auth/login', json={'user': 'hamid'})
-        disabled = self.client.post('/api/team/members/alice/disable')
+        disabled = self.client.post('/api/team/members/%E6%9D%8E%20%E9%9B%B7/disable')
         self.assertEqual(disabled.status_code, 200)
         self.client.post('/api/auth/logout')
         self.assertEqual(self.client.post('/api/auth/login', json={
-            'user': 'alice', 'password': 'correct horse battery staple'
+            'user': '李 雷', 'password': 'correct horse battery staple'
         }).status_code, 400)
+        self.assertEqual(self.client.post(f'/api/invitations/{token}/accept', json={
+            'name': '另一位', 'password': 'correct horse battery staple'
+        }).status_code, 404)
 
     def test_operation_log_records_authenticated_user(self):
-        self.assertEqual(self.client.post('/api/team/members', json={
-            'username': 'bob', 'name': 'Bob', 'password': 'password-1234'
-        }).status_code, 201)
+        self.assertEqual(self.client.post('/api/team/invitations', json={}).status_code, 201)
         conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        row = conn.execute("SELECT user_id FROM operation_logs WHERE target_type='team_member' ORDER BY id DESC LIMIT 1").fetchone()
+        row = conn.execute("SELECT user_id FROM operation_logs WHERE target_type='team_invitation' ORDER BY id DESC LIMIT 1").fetchone()
         self.assertEqual(row[0], 'hamid')
         conn.close()
 

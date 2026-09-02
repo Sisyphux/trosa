@@ -1580,7 +1580,24 @@ def init_system_db():
             VALUES (?, ?, ?, ?, ?, ?, 'system', 1)
         ''', (uid, uid, info['name'], info['label'], info['color'], 'admin' if uid == 'hamid' else 'member'))
     c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)')
-    
+
+    # Invitation secrets are never stored directly.  An invited person chooses
+    # their own name (which is also their account identifier) and password when
+    # accepting the one-time link.
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS team_invitations (
+            id TEXT PRIMARY KEY,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            accepted_at TEXT DEFAULT '',
+            accepted_user_id TEXT DEFAULT '',
+            revoked_at TEXT DEFAULT ''
+        )
+    ''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_team_invitations_status ON team_invitations(expires_at, accepted_at, revoked_at)')
+
     conn.commit()
     conn.close()
     refresh_users_registry()

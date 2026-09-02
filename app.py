@@ -1520,6 +1520,49 @@ def _admin_required():
     return None
 
 
+_INVITATION_LIFETIME = timedelta(days=7)
+
+
+def _invitation_token_hash(token):
+    return hashlib.sha256(str(token or '').encode('utf-8')).hexdigest()
+
+
+def _normalize_invited_member_name(value):
+    """Return the member-selected name and its matching account identifier."""
+    name = ' '.join(str(value or '').split())
+    if not name or len(name) > 80:
+        return None, None
+    # User ids double as isolated SQLite filenames.  Allow normal international
+    # names while excluding path separators, controls, and shell-significant
+    # punctuation rather than silently transforming a person's chosen name.
+    if not re.fullmatch(r"[\w .'-]+", name, flags=re.UNICODE) or name in {'.', '..'}:
+        return None, None
+    # Existing login routes normalize IDs with ``lower()``, so use the same
+    # canonical form here while the visible account remains the chosen name.
+    return name, name.lower()
+
+
+def _get_valid_invitation(conn, token):
+    row = conn.execute('''SELECT * FROM team_invitations
+                          WHERE token_hash=? AND COALESCE(accepted_at, '')=''
+                            AND COALESCE(revoked_at, '')='' ''',
+                       (_invitation_token_hash(token),)).fetchone()
+    if not row:
+        return None
+    try:
+        expires_at = datetime.fromisoformat(row['expires_at'])
+    except (TypeError, ValueError):
+        return None
+    if expires_at <= datetime.now(timezone.utc):
+        return None
+    return row
+
+
+def _invitation_url(token):
+    base_url = (os.environ.get('CRM_PUBLIC_URL') or request.url_root).rstrip('/')
+    return f'{base_url}/invite/{token}'
+
+
 @app.route('/api/team/members', methods=['GET'])
 @login_required
 def team_members():
@@ -1536,37 +1579,128 @@ def team_members():
 @app.route('/api/team/members', methods=['POST'])
 @login_required
 def create_team_member():
+    """Retire direct credential creation in favor of the auditable invite flow."""
     denied = _admin_required()
     if denied:
         return denied
+    return jsonify({'error': '请使用邀请链接让成员自行设置姓名和密码'}), 410
+
+
+@app.route('/api/team/invitations', methods=['GET', 'POST'])
+@login_required
+def team_invitations():
+    denied = _admin_required()
+    if denied:
+        return denied
+    conn = get_system_db()
+    try:
+        if request.method == 'GET':
+            rows = conn.execute('''SELECT id, created_by, created_at, expires_at, accepted_at,
+                                          accepted_user_id, revoked_at
+                                   FROM team_invitations ORDER BY created_at DESC''').fetchall()
+            return jsonify({'invitations': [dict(row) for row in rows]})
+        token = secrets.token_urlsafe(32)
+        invitation_id = secrets.token_hex(12)
+        created_at = datetime.now(timezone.utc)
+        expires_at = created_at + _INVITATION_LIFETIME
+        conn.execute('''INSERT INTO team_invitations
+            (id, token_hash, created_by, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?)''',
+                     (invitation_id, _invitation_token_hash(token), g.current_user,
+                      created_at.isoformat(), expires_at.isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    log_operation('CREATE', 'team_invitation', invitation_id, details='创建成员邀请链接')
+    return jsonify({'success': True, 'invitation': {
+        'id': invitation_id, 'url': _invitation_url(token), 'expires_at': expires_at.isoformat()
+    }}), 201
+
+
+@app.route('/api/team/invitations/<invitation_id>/revoke', methods=['POST'])
+@login_required
+def revoke_team_invitation(invitation_id):
+    denied = _admin_required()
+    if denied:
+        return denied
+    conn = get_system_db()
+    try:
+        cursor = conn.execute('''UPDATE team_invitations SET revoked_at=?
+                                 WHERE id=? AND COALESCE(accepted_at, '')=''
+                                   AND COALESCE(revoked_at, '')='' ''',
+                              (datetime.now(timezone.utc).isoformat(), invitation_id))
+        conn.commit()
+    finally:
+        conn.close()
+    if not cursor.rowcount:
+        return jsonify({'error': '邀请已失效、已使用或不存在'}), 404
+    log_operation('REVOKE', 'team_invitation', invitation_id, details='撤销成员邀请链接')
+    return jsonify({'success': True})
+
+
+@app.route('/api/invitations/<token>', methods=['GET'])
+def invitation_status(token):
+    conn = get_system_db()
+    try:
+        valid = _get_valid_invitation(conn, token)
+    finally:
+        conn.close()
+    if not valid:
+        return jsonify({'error': '邀请链接无效、已过期或已被使用'}), 404
+    return jsonify({'valid': True, 'expires_at': valid['expires_at']})
+
+
+@app.route('/api/invitations/<token>/accept', methods=['POST'])
+def accept_invitation(token):
     data = request.get_json(silent=True) or {}
-    username = str(data.get('username') or '').strip().lower()
-    name = str(data.get('name') or '').strip()
+    name, username = _normalize_invited_member_name(data.get('name'))
     password = str(data.get('password') or '')
-    if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{1,39}', username):
-        return jsonify({'error': '账号需为 2-40 位小写字母、数字或 ._-'}), 400
-    if not name or len(name) > 80:
-        return jsonify({'error': '请输入成员姓名'}), 400
+    if not name:
+        return jsonify({'error': '请输入有效姓名；可使用中文、字母、数字、空格、点、连字符或撇号'}), 400
     if len(password) < 8:
         return jsonify({'error': '密码至少 8 位'}), 400
     conn = get_system_db()
     try:
+        conn.execute('BEGIN IMMEDIATE')
+        invitation = _get_valid_invitation(conn, token)
+        if not invitation:
+            conn.rollback()
+            return jsonify({'error': '邀请链接无效、已过期或已被使用'}), 404
+        existing = conn.execute('SELECT 1 FROM users WHERE username=?', (username,)).fetchone()
+        if existing:
+            conn.rollback()
+            return jsonify({'error': '该姓名账号已存在，请使用能区分的姓名'}), 409
         now = _calendar_now_text()
         conn.execute('''INSERT INTO users
             (id, username, name, label, color, password_hash, role, created_by, created_at, active)
             VALUES (?, ?, ?, ?, ?, ?, 'member', ?, ?, 1)''',
                      (username, username, name, name, '#8B7355', generate_password_hash(password),
-                      g.current_user, now))
+                      invitation['created_by'], now))
+        updated = conn.execute('''UPDATE team_invitations
+                                  SET accepted_at=?, accepted_user_id=?
+                                  WHERE id=? AND COALESCE(accepted_at, '')='' ''',
+                               (datetime.now(timezone.utc).isoformat(), username, invitation['id']))
+        if not updated.rowcount:
+            conn.rollback()
+            return jsonify({'error': '邀请链接已被使用'}), 409
         conn.commit()
     except sqlite3.IntegrityError:
         conn.rollback()
-        return jsonify({'error': '账号已存在'}), 409
+        return jsonify({'error': '该姓名账号已存在，请使用能区分的姓名'}), 409
     finally:
         conn.close()
     refresh_users_registry()
     init_user_tables(username)
-    log_operation('CREATE', 'team_member', details=f'创建成员账号 {username}')
-    return jsonify({'success': True, 'member': {'username': username, 'name': name, 'role': 'member', 'active': True}}), 201
+    session.clear()
+    session['user'] = username
+    session['pin_auth_version'] = _PIN_STORE_VERSION
+    session.permanent = True
+    set_db_user(username)
+    g.current_user = username
+    log_operation('ACCEPT', 'team_invitation', invitation['id'], details=f'成员接受邀请：{name}')
+    user_info = dict(USERS[username])
+    user_info['id'] = username
+    return jsonify({'success': True, 'user': user_info}), 201
 
 
 @app.route('/api/team/members/<username>/disable', methods=['POST'])
@@ -2246,6 +2380,12 @@ def index():
             response.headers['ETag'] = APP_VERSION  # 每次重启 ETag 都不同
             return response
     return jsonify({'error': 'index.html not found', 'tried': candidates}), 404
+
+
+@app.route('/invite/<token>')
+def invitation_page(token):
+    """Serve the normal shell; its first screen verifies and accepts the invite."""
+    return index()
 
 
 @app.route('/favicon.ico')

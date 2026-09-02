@@ -33,6 +33,26 @@
   </div>
 </div>
 
+<!-- Invitation acceptance is deliberately separate from account selection. -->
+<div class="login-overlay" id="invitationOverlay" hidden>
+  <div class="login-card">
+    <div class="login-logo" aria-hidden="true"><span class="ui-icon ui-icon-sparkle"></span></div>
+    <div class="login-title">加入 Trade OS</div>
+    <div class="login-desc" id="invitationDesc">正在验证邀请链接…</div>
+    <form class="login-pin-form" id="invitationForm" hidden>
+      <label class="form-label" for="invitationName">姓名（也是登录账号）</label>
+      <input class="form-control" id="invitationName" type="text" required maxlength="80" autocomplete="name" placeholder="填写你的姓名">
+      <div class="settings-help" id="invitationAccountHint" style="margin:6px 0 12px;">账号将使用你填写的姓名</div>
+      <label class="form-label" for="invitationPassword">设置密码</label>
+      <input class="form-control" id="invitationPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位">
+      <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认密码</label>
+      <input class="form-control" id="invitationPasswordConfirm" type="password" required minlength="8" autocomplete="new-password" placeholder="再次输入密码">
+      <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号并进入</button>
+      <div class="login-error" id="invitationError" role="alert"></div>
+    </form>
+  </div>
+</div>
+
 <!-- Toast Container -->
 <div class="toast-container" id="toastContainer"></div>
 <div class="connection-status" id="connectionStatus" role="status" aria-live="polite" hidden><span class="connection-status-spinner" aria-hidden="true"></span><span id="connectionStatusText">正在连接…</span></div>
@@ -457,14 +477,12 @@
           </div>
         </div>
         <div class="card" id="teamMembersSettingsCard" style="margin-bottom:22px; display:none;">
-          <div class="card-header"><div><h3>团队成员</h3><p>邀请成员创建账号后即可进入 Trosa；管理员可以随时禁用成员账号。</p></div></div>
+          <div class="card-header"><div><h3>团队成员</h3><p>创建链接后自行转发。成员打开链接，自行设置姓名（即账号）和密码；链接仅可使用一次，7 天后失效。</p></div></div>
           <div class="card-body">
-            <form id="teamMemberForm" class="settings-inline-field" style="align-items:end; flex-wrap:wrap; gap:12px;" onsubmit="createTeamMember(event)">
-              <label>账号<input class="form-control" id="teamMemberUsername" required autocomplete="off" placeholder="例如 alice"></label>
-              <label>姓名<input class="form-control" id="teamMemberName" required autocomplete="name"></label>
-              <label>初始密码<input class="form-control" id="teamMemberPassword" type="password" required minlength="8" autocomplete="new-password"></label>
-              <button class="btn btn-sm btn-primary" type="submit">创建成员</button>
+            <form id="teamInvitationForm" class="settings-inline-field" style="align-items:end; flex-wrap:wrap; gap:12px;" onsubmit="createTeamInvitation(event)">
+              <button class="btn btn-sm btn-primary" type="submit">生成邀请链接</button>
             </form>
+            <div id="teamInvitationResult" class="settings-help" style="margin-top:12px;" hidden></div>
             <div id="teamMembersList" class="settings-help" style="margin-top:18px;"></div>
           </div>
         </div>

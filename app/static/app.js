@@ -6737,25 +6737,68 @@ async function loadTeamMembers() {
     list.innerHTML = '<div class="settings-row"><span class="label">成员</span><span class="value">状态</span></div>' +
       (data.members || []).map(function(member) {
         var active = Number(member.active) === 1 || member.active === true;
-        return '<div class="settings-row"><span class="label">' + escapeHtml(member.name || member.username) + ' · ' + escapeHtml(member.username) + '</span><span class="value">' +
+        return '<div class="settings-row"><span class="label">' + escapeHtml(member.name || member.username) + '</span><span class="value">' +
           (active ? '启用' : '已禁用') + (active && member.username !== currentUser.id ? ' <button class="btn btn-sm" type="button" onclick="disableTeamMember(\'' + escapeHtml(member.username) + '\')">禁用</button>' : '') + '</span></div>';
       }).join('');
+    loadTeamInvitations();
   } catch (error) { list.textContent = error.message || '成员列表暂时无法加载'; }
 }
 
-async function createTeamMember(event) {
-  event.preventDefault();
-  var form = document.getElementById('teamMemberForm');
+async function loadTeamInvitations() {
+  var list = document.getElementById('teamMembersList');
+  if (!list) return;
   try {
-    await api('/api/team/members', { method: 'POST', body: JSON.stringify({
-      username: document.getElementById('teamMemberUsername').value.trim(),
-      name: document.getElementById('teamMemberName').value.trim(),
-      password: document.getElementById('teamMemberPassword').value
-    })});
-    form.reset();
-    showToast('成员账号已创建', 'success');
+    var data = await api('/api/team/invitations');
+    var invitations = (data.invitations || []).filter(function(invitation) {
+      return !invitation.accepted_at && !invitation.revoked_at && new Date(invitation.expires_at) > new Date();
+    });
+    if (!invitations.length) return;
+    list.innerHTML += '<div class="settings-row"><span class="label">待接受邀请</span><span class="value">' + invitations.map(function(invitation) {
+      return '有效至 ' + escapeHtml(new Date(invitation.expires_at).toLocaleDateString()) +
+        ' <button class="btn btn-sm" type="button" onclick="revokeTeamInvitation(\'' + escapeHtml(invitation.id) + '\')">撤销</button>';
+    }).join('<br>') + '</span></div>';
+  } catch (error) {
+    // The member list remains useful if invitations happen to fail to load.
+  }
+}
+
+async function createTeamInvitation(event) {
+  event.preventDefault();
+  var form = document.getElementById('teamInvitationForm');
+  var result = document.getElementById('teamInvitationResult');
+  try {
+    var data = await api('/api/team/invitations', { method: 'POST', body: JSON.stringify({}) });
+    var url = data && data.invitation && data.invitation.url;
+    if (!url) throw new Error('邀请链接暂时无法生成');
+    result.hidden = false;
+    result.innerHTML = '<label class="form-label" for="teamInvitationUrl">请复制并发送给成员（只在此显示一次）</label>' +
+      '<div style="display:flex; gap:8px; flex-wrap:wrap;"><input class="form-control" id="teamInvitationUrl" readonly value="' + escapeHtml(url) + '" style="min-width:280px; flex:1;"><button class="btn btn-sm" type="button" onclick="copyTeamInvitationUrl()">复制链接</button></div>';
+    copyTeamInvitationUrl();
+    showToast('邀请链接已生成并复制', 'success');
     loadTeamMembers();
-  } catch (error) { showToast(error.message || '创建成员失败', 'error'); }
+  } catch (error) { showToast(error.message || '生成邀请失败', 'error'); }
+}
+
+async function copyTeamInvitationUrl() {
+  var input = document.getElementById('teamInvitationUrl');
+  if (!input) return;
+  input.select();
+  try {
+    if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(input.value);
+    else document.execCommand('copy');
+  } catch (error) {
+    // The selected, visible field is the intentional fallback for browsers
+    // that deny clipboard access.
+  }
+}
+
+async function revokeTeamInvitation(invitationId) {
+  if (!await showAppConfirm({title: '撤销邀请', message: '撤销后，这个链接将不能再用于创建账号。', submitLabel: '确认撤销'})) return;
+  try {
+    await api('/api/team/invitations/' + encodeURIComponent(invitationId) + '/revoke', {method: 'POST'});
+    showToast('邀请已撤销', 'success');
+    loadTeamMembers();
+  } catch (error) { showToast(error.message || '撤销邀请失败', 'error'); }
 }
 
 async function disableTeamMember(username) {
@@ -7189,7 +7232,17 @@ async function loadCustomerSection(tabId) {
 }
 
 // ========== AUTH ==========
+function invitationTokenFromLocation() {
+  var match = /^\/invite\/([^/]+)\/?$/.exec(window.location.pathname || '');
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
 async function checkLogin() {
+  var invitationToken = invitationTokenFromLocation();
+  if (invitationToken) {
+    showInvitationAcceptance(invitationToken);
+    return;
+  }
   try {
     var response = await fetch('/api/auth/me', { credentials: 'include' });
     var data = await response.json();
@@ -7205,6 +7258,69 @@ async function checkLogin() {
   } catch(e) {}
   showLogin();
 }
+
+async function showInvitationAcceptance(token) {
+  var overlay = document.getElementById('invitationOverlay');
+  var form = document.getElementById('invitationForm');
+  var desc = document.getElementById('invitationDesc');
+  var errorEl = document.getElementById('invitationError');
+  var loginOverlay = document.getElementById('loginOverlay');
+  if (loginOverlay) loginOverlay.style.display = 'none';
+  if (overlay) { overlay.hidden = false; overlay.style.display = 'flex'; }
+  if (form) form.hidden = true;
+  if (errorEl) errorEl.textContent = '';
+  if (desc) desc.textContent = '正在验证邀请链接…';
+  try {
+    var response = await fetch('/api/invitations/' + encodeURIComponent(token), {cache: 'no-store'});
+    var data = await response.json();
+    if (!response.ok || !data.valid) throw new Error((data && data.error) || '邀请链接无效');
+    if (desc) desc.textContent = '请设置你的姓名和密码。姓名就是登录账号。';
+    if (form) {
+      form.hidden = false;
+      form.dataset.token = token;
+      var nameInput = document.getElementById('invitationName');
+      if (nameInput) nameInput.focus();
+    }
+  } catch (error) {
+    if (desc) desc.textContent = '这个邀请链接无法使用';
+    if (errorEl) errorEl.textContent = error.message || '邀请链接无效、已过期或已被使用';
+  }
+}
+
+document.getElementById('invitationName').addEventListener('input', function(event) {
+  var hint = document.getElementById('invitationAccountHint');
+  var name = event.target.value.trim();
+  if (hint) hint.textContent = name ? '登录账号：' + name : '账号将使用你填写的姓名';
+});
+
+document.getElementById('invitationForm').addEventListener('submit', async function(event) {
+  event.preventDefault();
+  var form = event.currentTarget;
+  var errorEl = document.getElementById('invitationError');
+  var name = document.getElementById('invitationName').value.trim();
+  var password = document.getElementById('invitationPassword').value;
+  var passwordConfirm = document.getElementById('invitationPasswordConfirm').value;
+  if (password !== passwordConfirm) {
+    if (errorEl) errorEl.textContent = '两次输入的密码不一致';
+    return;
+  }
+  if (password.length < 8) {
+    if (errorEl) errorEl.textContent = '密码至少 8 位';
+    return;
+  }
+  try {
+    var data = await api('/api/invitations/' + encodeURIComponent(form.dataset.token || '') + '/accept', {
+      method: 'POST', body: JSON.stringify({name: name, password: password})
+    });
+    if (!data || !data.success) throw new Error('账号创建失败');
+    currentUser = data.user;
+    window.history.replaceState({}, '', '/');
+    document.getElementById('invitationOverlay').style.display = 'none';
+    showApp();
+  } catch (error) {
+    if (errorEl) errorEl.textContent = error.message || '暂时无法创建账号，请稍后重试';
+  }
+});
 
 function switchCustomerCompose(mode) {
   var composer = document.getElementById('followCompose');
@@ -7226,6 +7342,8 @@ function showLogin() {
   if (_loginUsersController) _loginUsersController.abort();
   _loginUsersController = typeof AbortController === 'function' ? new AbortController() : null;
   currentUser = null;
+  var invitationOverlay = document.getElementById('invitationOverlay');
+  if (invitationOverlay) { invitationOverlay.hidden = true; invitationOverlay.style.display = 'none'; }
   stopInboxAutoRefresh();
   userPreferences = null;
   document.getElementById('loginOverlay').style.display = 'flex';
