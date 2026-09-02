@@ -42,6 +42,14 @@ class TeamMembersApiTest(unittest.TestCase):
         self.assertEqual(hamid, ('hamid', 'Hamid', 'admin', 1))
         conn.close()
 
+    def test_invitation_page_uses_root_static_asset_paths(self):
+        response = self.client.get('/invite/example-token')
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('href="/style.css?', body)
+        self.assertIn('href="/visual-v2.css?', body)
+        self.assertIn('src="/app.js?', body)
+
     def test_member_accepts_one_time_invitation_and_uses_name_as_account(self):
         created = self.client.post('/api/team/invitations', json={})
         self.assertEqual(created.status_code, 201, created.get_json())
