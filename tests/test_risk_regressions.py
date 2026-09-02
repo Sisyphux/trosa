@@ -1615,6 +1615,211 @@ class CalendarAndAccessTest(unittest.TestCase):
             conn.close()
 
 
+class CustomerAiSummaryTest(unittest.TestCase):
+    """按需 AI 摘要必须兼容旧调用，并在无模型时保留事实回退。"""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.original_db_dir = db.DB_DIR
+        self.original_demo = os.environ.get('CRM_SEED_DEMO_DATA')
+        db.DB_DIR = self.tempdir.name
+        os.environ.pop('CRM_SEED_DEMO_DATA', None)
+        db.init_all_dbs()
+
+    def tearDown(self):
+        db.DB_DIR = self.original_db_dir
+        if self.original_demo is None:
+            os.environ.pop('CRM_SEED_DEMO_DATA', None)
+        else:
+            os.environ['CRM_SEED_DEMO_DATA'] = self.original_demo
+        self.tempdir.cleanup()
+
+    def _module_client_customer(self):
+        spec = importlib.util.spec_from_file_location('crm_app_customer_ai_summary_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        client = module.app.test_client()
+        login = client.post('/api/auth/login', json={'user': 'hamid'})
+        self.assertEqual(login.status_code, 200, login.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute(
+                '''INSERT INTO customers
+                   (name, company, country, profile, field, notes, attention_reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                ('SK Crafts', 'SK Crafts Limited', '英国', '采购亚克力与 PS 板材', '塑料板材', '客户询问规格和采购安排', '等待客户分享公司资料'),
+            )
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                '''INSERT INTO contacts (customer_id, name, title, email, is_primary)
+                   VALUES (?, ?, ?, ?, 1)''',
+                (customer_id, 'Sam', 'Purchasing', 'sam@example.test'),
+            )
+            conn.execute(
+                '''INSERT INTO follow_up_logs
+                   (customer_id, content, follow_date, result, next_plan, direction)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
+                (customer_id, '客户表示需要亚克力与 PS 板材，并要求分享公司资料', '2026-09-01', '等待资料确认', '', 'inbound'),
+            )
+            conn.execute(
+                '''INSERT INTO reminders (customer_id, title, remind_date, reminder_type)
+                   VALUES (?, ?, ?, 'follow_up')''',
+                (customer_id, '确认客户资料', '2026-09-05'),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return module, client, customer_id
+
+    def test_unknown_direction_from_old_client_is_accepted(self):
+        module, client, customer_id = self._module_client_customer()
+        llm_result = json.dumps({
+            'summary': '客户询问亚克力与 PS 板材。', 'needs': ['亚克力与 PS 板材'],
+            'key_facts': [], 'intent': '积极', 'mentioned_company': 'SK Crafts Limited',
+            'mentioned_contact': 'Sam', 'message_date': '2026-09-01',
+            'suggested_next_action': '', 'direction': 'inbound',
+        }, ensure_ascii=False)
+        with mock.patch.object(module, 'quick_chat', return_value=llm_result):
+            response = client.post('/api/inbox/analyze-reply', json={
+                'content': 'SK Crafts Limited: We order acrylic & PS sheets',
+                'direction': 'unknown', 'customer_id': customer_id,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['analysis']['direction'], 'inbound')
+
+    def test_customer_summary_returns_model_result_and_legacy_alias(self):
+        module, client, customer_id = self._module_client_customer()
+        model_summary = '## 客户是谁\nSK Crafts Limited 位于英国。\n\n## 已记录沟通与需求\n客户询问亚克力与 PS 板材。'
+        with mock.patch.object(module, 'quick_chat', return_value=model_summary) as mocked:
+            response = client.post(f'/api/customers/{customer_id}/ai-summary')
+            legacy = client.post(f'/api/intelligence/analyze/{customer_id}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertEqual(payload['summary'], model_summary)
+        self.assertEqual(payload['analysis'], model_summary)
+        self.assertTrue(payload['ai_available'])
+        self.assertEqual(payload['source'], 'llm')
+        self.assertIn('SK Crafts Limited', mocked.call_args_list[0].kwargs['customer_context'])
+        self.assertEqual(legacy.status_code, 200, legacy.get_json())
+        self.assertEqual(legacy.get_json()['analysis'], model_summary)
+
+    def test_customer_summary_falls_back_to_crm_facts_without_model(self):
+        module, client, customer_id = self._module_client_customer()
+        with mock.patch.object(module, 'quick_chat', return_value='[错误] 所有 LLM 后端均不可用'):
+            response = client.post(f'/api/customers/{customer_id}/ai-summary')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertFalse(payload['ai_available'])
+        self.assertEqual(payload['source'], 'crm_facts')
+        self.assertEqual(payload['summary'], payload['analysis'])
+        self.assertIn('SK Crafts Limited', payload['summary'])
+        self.assertIn('亚克力与 PS 板材', payload['summary'])
+
+    def test_customer_summary_requires_login_and_frontend_exposes_both_paths(self):
+        module, _, customer_id = self._module_client_customer()
+        anonymous = module.app.test_client()
+        self.assertEqual(anonymous.post(f'/api/customers/{customer_id}/ai-summary').status_code, 401)
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.assertIn("/api/customers/' + customerId + '/ai-summary", javascript)
+        self.assertIn("direction: requestedDirection", javascript)
+
+    def test_ai_config_status_is_safe_and_mutations_are_admin_only(self):
+        module, client, _ = self._module_client_customer()
+        safe_status = {
+            'backend': 'openai',
+            'backend_label': 'OpenAI / 兼容接口',
+            'configured': True,
+            'api_key_configured': True,
+            'base_url': 'https://api.example.test/v1',
+            'model': 'test-model',
+            'vision_configured': True,
+            'config_source': '快速接入配置',
+            'providers': [],
+        }
+        with mock.patch.object(module, 'get_ai_config_status', return_value=dict(safe_status)):
+            response = client.get('/api/ai/config')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertTrue(payload['can_edit'])
+        self.assertNotIn('api_key', payload)
+        self.assertNotIn('secret', json.dumps(payload, ensure_ascii=False).lower())
+
+        saved_status = dict(safe_status)
+        with mock.patch.object(module, 'save_ai_config', return_value=saved_status) as save:
+            response = client.put('/api/ai/config', json={
+                'backend': 'openai', 'api_key': 'do-not-return-this',
+                'base_url': 'https://api.example.test/v1', 'model': 'test-model',
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        save.assert_called_once()
+        self.assertNotIn('do-not-return-this', response.get_data(as_text=True))
+
+        member = module.app.test_client()
+        self.assertEqual(member.post('/api/auth/login', json={'user': 'amy'}).status_code, 200)
+        with mock.patch.object(module, 'get_ai_config_status', return_value=dict(safe_status)):
+            member_status = member.get('/api/ai/config')
+        self.assertEqual(member_status.status_code, 200, member_status.get_json())
+        self.assertFalse(member_status.get_json()['can_edit'])
+        self.assertEqual(member.put('/api/ai/config', json={'backend': 'openai'}).status_code, 403)
+        self.assertEqual(member.post('/api/ai/config/test', json={'backend': 'openai'}).status_code, 403)
+
+    def test_ai_config_connection_test_is_separate_and_never_gets_crm_context(self):
+        module, client, _ = self._module_client_customer()
+        with mock.patch.object(module, 'test_ai_connection', return_value={
+            'success': True, 'provider': 'openai', 'model': 'test-model'
+        }) as probe:
+            response = client.post('/api/ai/config/test', json={'backend': 'openai'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        probe.assert_called_once_with({'backend': 'openai'})
+        self.assertNotIn('customer', json.dumps(probe.call_args.args, ensure_ascii=False).lower())
+
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        self.assertIn("/api/ai/config/test", javascript)
+        self.assertIn('id="aiConfigApiKey"', html)
+        self.assertIn('AI API 快速接入', html)
+
+
+class AiEngineConfigTest(unittest.TestCase):
+    """The settings file is isolated from SQLite and never leaks its secret."""
+
+    def test_save_and_clear_private_config_refresh_runtime_without_returning_key(self):
+        import app.engine as engine
+
+        config_dir = tempfile.TemporaryDirectory()
+        config_path = os.path.join(config_dir.name, 'ai-config.env')
+        original_env = {key: os.environ.get(key) for key in engine._AI_CONFIG_KEYS}
+        try:
+            for key in engine._AI_CONFIG_KEYS:
+                os.environ.pop(key, None)
+            with mock.patch.object(engine, '_AI_CONFIG_FILE', config_path), \
+                    mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}):
+                saved = engine.save_ai_config({
+                    'backend': 'openai',
+                    'api_key': 'unit-test-secret',
+                    'base_url': 'https://api.example.test/v1',
+                    'model': 'test-model',
+                })
+                self.assertTrue(saved['api_key_configured'])
+                self.assertNotIn('unit-test-secret', json.dumps(saved, ensure_ascii=False))
+                self.assertEqual(os.stat(config_path).st_mode & 0o777, 0o600)
+                self.assertIn('unit-test-secret', Path(config_path).read_text(encoding='utf-8'))
+                self.assertEqual(engine.OPENAI_API_KEY, 'unit-test-secret')
+
+                cleared = engine.clear_ai_config()
+                self.assertFalse(cleared['api_key_configured'])
+                self.assertFalse(os.path.exists(config_path))
+                self.assertEqual(engine.OPENAI_API_KEY, '')
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            engine._runtime_ai_config()
+            config_dir.cleanup()
+
+
 class CustomerFileAttachmentTest(unittest.TestCase):
     """客户文件附件：上传、列表、预览/下载、删除和越权隔离。"""
 

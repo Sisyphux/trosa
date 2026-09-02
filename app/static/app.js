@@ -1831,8 +1831,10 @@ async function analyzeInboxReply(force) {
   panel.innerHTML = '<div class="quick-analysis-loading">AI 正在识别客户和关键信息…</div>';
   try {
     var context = _communicationConfirmContext || {};
+    var requestedDirection = ['auto', 'outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0
+      ? context.direction : 'auto';
     var result = await api('/api/inbox/analyze-reply', { method: 'POST', body: JSON.stringify({
-      content: content, direction: context.direction || 'unknown', customer_id: context.customerId || ''
+      content: content, direction: requestedDirection, customer_id: context.customerId || ''
     }) });
     if (token !== _inboxReplyAnalysisToken) return;
     _inboxReplyAnalysis = result.analysis || null;
@@ -3243,6 +3245,190 @@ async function savePersonalSettings() {
   }
 }
 
+var AI_CONFIG_PROVIDER_DEFAULTS = {
+  auto: { label: '自动选择', base_url: '', model: '', local: false },
+  deepseek: { label: 'DeepSeek', base_url: 'https://api.deepseek.com', model: 'deepseek-chat', local: false },
+  qwen: { label: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', local: false },
+  glm: { label: '智谱 GLM', base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', local: false },
+  openai: { label: 'OpenAI / 兼容接口', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini', local: false },
+  lmstudio: { label: 'LM Studio（本地）', base_url: 'http://localhost:1234', model: 'local-model', local: true },
+  ollama: { label: 'Ollama（本地）', base_url: 'http://localhost:11434', model: 'qwen2.5:7b', local: true }
+};
+var _aiConfigStatus = null;
+
+function aiConfigProviderInfo(provider) {
+  provider = provider || 'auto';
+  var fallback = AI_CONFIG_PROVIDER_DEFAULTS[provider] || AI_CONFIG_PROVIDER_DEFAULTS.auto;
+  var current = (_aiConfigStatus && _aiConfigStatus.providers || []).find(function(item) {
+    return item.id === provider;
+  });
+  return Object.assign({}, fallback, current || {});
+}
+
+function renderAiConfigStatus(status) {
+  var container = document.getElementById('aiConfigStatus');
+  if (!container || !status) return;
+  var provider = status.backend_label || '自动选择';
+  var configured = status.configured;
+  var state = configured ? '已就绪' : '尚未配置';
+  var stateClass = configured ? 'is-ready' : 'is-pending';
+  if (status.backend === 'auto') {
+    var cloudProviders = (status.providers || []).filter(function(item) {
+      return item.configured && item.api_key_configured;
+    }).map(function(item) { return item.label; });
+    var localProviders = (status.providers || []).filter(function(item) {
+      return item.local;
+    }).map(function(item) { return item.label; });
+    state = cloudProviders.length ? '自动选择 · ' + cloudProviders.join('、') :
+      (localProviders.length ? '自动选择 · 可尝试本地服务' : '自动选择 · 等待配置');
+    stateClass = cloudProviders.length ? 'is-ready' : 'is-pending';
+  } else if (status.providers) {
+    var selected = status.providers.find(function(item) { return item.id === status.backend; });
+    if (selected && selected.local) {
+      state = '本地服务 · 无需 API Key，请测试连接';
+      stateClass = 'is-pending';
+    }
+  }
+  var keyState = status.api_key_configured ? 'API Key 已保存（不会显示明文）' :
+    (status.backend === 'auto' ? '按已配置服务商自动尝试' : 'API Key 尚未配置');
+  var visionState = status.vision_configured ? '截图识别可用' : '截图识别等待视觉模型';
+  container.innerHTML = '<div class="ai-config-status-main"><span class="ai-config-status-dot ' + stateClass + '" aria-hidden="true"></span><strong>当前接口：' + escapeHtml(provider) + '</strong><span>' + escapeHtml(state) + '</span></div>' +
+    '<div class="ai-config-status-meta"><span>' + escapeHtml(keyState) + '</span><span>' + escapeHtml(visionState) + '</span><span>来源：' + escapeHtml(status.config_source || '环境变量') + '</span></div>' +
+    (!status.can_edit ? '<p class="settings-help ai-config-admin-note">只有管理员可以修改共享 AI 接口配置。</p>' : '');
+}
+
+function updateAiConfigProviderFields() {
+  var backend = document.getElementById('aiConfigBackend');
+  var apiKey = document.getElementById('aiConfigApiKey');
+  var apiKeyField = document.getElementById('aiConfigApiKeyField');
+  var baseUrl = document.getElementById('aiConfigBaseUrl');
+  var model = document.getElementById('aiConfigModel');
+  var help = document.getElementById('aiConfigHelp');
+  if (!backend || !apiKey || !baseUrl || !model) return;
+  var provider = backend.value || 'auto';
+  var info = aiConfigProviderInfo(provider);
+  var isAuto = provider === 'auto';
+  apiKey.disabled = isAuto || !!info.local;
+  baseUrl.disabled = isAuto;
+  model.disabled = isAuto;
+  if (apiKeyField) apiKeyField.hidden = isAuto;
+  apiKey.value = '';
+  apiKey.placeholder = info.local ? '本地服务无需 API Key' :
+    (info.api_key_configured ? '已配置，留空表示保留现有 Key' : '粘贴服务商 API Key');
+  baseUrl.value = isAuto ? '' : (info.base_url || AI_CONFIG_PROVIDER_DEFAULTS[provider].base_url);
+  model.value = isAuto ? '' : (info.model || AI_CONFIG_PROVIDER_DEFAULTS[provider].model);
+  if (help) {
+    help.textContent = isAuto
+      ? '自动模式会按已配置的服务商尝试；如需新增或替换 Key，请选择具体服务商。'
+      : (info.local
+        ? '本地服务不会离开当前设备；请先启动 ' + info.label.replace('（本地）', '') + '，再测试连接。'
+        : 'API Key 只保存在服务端的独立权限文件中，页面不会回显明文；修改后立即对新的 AI 请求生效。');
+  }
+}
+
+function renderAiConfigForm(status) {
+  var form = document.getElementById('aiConfigForm');
+  var backend = document.getElementById('aiConfigBackend');
+  if (!form || !backend || !status) return;
+  form.hidden = !status.can_edit;
+  backend.value = AI_CONFIG_PROVIDER_DEFAULTS[status.backend] ? status.backend : 'auto';
+  updateAiConfigProviderFields();
+}
+
+function aiConfigFormValue() {
+  return {
+    backend: (document.getElementById('aiConfigBackend') || {}).value || 'auto',
+    api_key: ((document.getElementById('aiConfigApiKey') || {}).value || '').trim(),
+    base_url: ((document.getElementById('aiConfigBaseUrl') || {}).value || '').trim(),
+    model: ((document.getElementById('aiConfigModel') || {}).value || '').trim()
+  };
+}
+
+function setAiConfigFeedback(message, type) {
+  var feedback = document.getElementById('aiConfigFeedback');
+  if (!feedback) return;
+  feedback.className = 'ai-config-feedback' + (type ? ' is-' + type : '');
+  feedback.textContent = message || '';
+}
+
+function setAiConfigBusy(busy) {
+  document.querySelectorAll('#aiConfigForm button').forEach(function(button) {
+    button.disabled = !!busy;
+  });
+}
+
+async function loadAiConfig() {
+  var status = document.getElementById('aiConfigStatus');
+  try {
+    var result = await api('/api/ai/config', { silentError: true });
+    _aiConfigStatus = result || null;
+    renderAiConfigStatus(_aiConfigStatus);
+    renderAiConfigForm(_aiConfigStatus);
+  } catch (error) {
+    if (status) status.textContent = (error && error.message) || 'AI 配置暂时无法读取';
+    var form = document.getElementById('aiConfigForm');
+    if (form) form.hidden = true;
+  }
+}
+
+async function testAiConfig() {
+  setAiConfigFeedback('正在发送最小连接测试，不会携带客户资料…');
+  setAiConfigBusy(true);
+  try {
+    var result = await api('/api/ai/config/test', {
+      method: 'POST', silentError: true, body: JSON.stringify(aiConfigFormValue())
+    });
+    if (!result || !result.success) throw new Error((result && result.error) || '连接测试失败');
+    setAiConfigFeedback('连接成功：' + (result.provider || '接口') + ' · ' + (result.model || '模型已响应'), 'success');
+  } catch (error) {
+    setAiConfigFeedback((error && error.message) || '连接测试失败，请检查配置', 'error');
+  } finally {
+    setAiConfigBusy(false);
+  }
+}
+
+async function saveAiConfig() {
+  setAiConfigFeedback('正在保存并刷新 AI 运行时配置…');
+  setAiConfigBusy(true);
+  try {
+    var result = await api('/api/ai/config', {
+      method: 'PUT', body: JSON.stringify(aiConfigFormValue())
+    });
+    _aiConfigStatus = Object.assign({}, result && result.config || {}, { can_edit: true });
+    var key = document.getElementById('aiConfigApiKey');
+    if (key) key.value = '';
+    renderAiConfigStatus(_aiConfigStatus);
+    renderAiConfigForm(_aiConfigStatus);
+    setAiConfigFeedback('已保存，新的 AI 请求会立即使用这套配置。', 'success');
+    showToast('AI API 配置已保存并生效', 'success');
+  } catch (error) {
+    setAiConfigFeedback((error && error.message) || 'AI 配置保存失败', 'error');
+  } finally {
+    setAiConfigBusy(false);
+  }
+}
+
+async function clearAiConfig() {
+  if (!await showAppConfirm({
+    title: '清除快速接入配置',
+    message: '只删除设置页保存的独立配置文件；环境文件中的 AI 配置不受影响。确定继续？',
+    submitLabel: '清除配置', danger: true
+  })) return;
+  setAiConfigBusy(true);
+  try {
+    var result = await api('/api/ai/config', { method: 'DELETE' });
+    _aiConfigStatus = Object.assign({}, result && result.config || {}, { can_edit: true });
+    renderAiConfigStatus(_aiConfigStatus);
+    renderAiConfigForm(_aiConfigStatus);
+    setAiConfigFeedback('已清除设置页配置；如仍有环境变量，系统会继续使用环境变量。', 'success');
+    showToast('快速接入配置已清除', 'success');
+  } catch (error) {
+    setAiConfigFeedback((error && error.message) || 'AI 配置清除失败', 'error');
+  } finally {
+    setAiConfigBusy(false);
+  }
+}
+
 // ========== CUSTOMERS LIST ==========
 var customerView = 'all';
 var customerPage = 1;
@@ -4408,6 +4594,7 @@ async function openEditModal(id) {
     c.external_analysis_notes = null;
     c.understanding = null;
     c.ai_recommendation = null;
+    c.ai_summary = null;
     if (requestToken !== _customerDetailLoadToken) return;
     if (!c || !c.id) throw new Error('客户资料为空');
     writeCustomerWorkspaceShell(c);
@@ -4633,9 +4820,20 @@ function renderCustomerFactsBrief(customer) {
     return '<button type="button" class="customer-gap-item" title="' + escapeHtml(gapDetail) + '" aria-label="' + escapeHtml(gapLabel + '：' + gapDetail) + '" onclick="focusCustomerGap(\'' + escapeHtml(gap.target || 'editTabBasic') + '\')"><span>' + escapeHtml(gapLabel) + '</span></button>';
   }).join('') : '<div class="customer-gap-empty">暂无缺口</div>';
   var customerLevel = customerLevelForDisplay(customer.level);
+  var aiSummary = customer.ai_summary || {};
+  var aiSummaryHtml = '';
+  if (aiSummary.status === 'loading') {
+    aiSummaryHtml = '<section class="customer-ai-summary" aria-live="polite"><div class="customer-ai-summary-head"><strong>AI 客户总结</strong><span>整理当前 CRM 记录中…</span></div><p class="customer-ai-summary-loading">正在读取客户资料；你仍可以继续编辑和记录沟通。</p></section>';
+  } else if (aiSummary.status === 'error') {
+    aiSummaryHtml = '<section class="customer-ai-summary is-error" role="alert"><div class="customer-ai-summary-head"><strong>AI 客户总结暂时失败</strong><button type="button" class="text-action" onclick="requestCustomerAiSummary()">重试</button></div><p>' + escapeHtml(aiSummary.error || '请稍后重试；客户资料和手工记录不受影响。') + '</p></section>';
+  } else if (aiSummary.summary) {
+    var aiSummarySource = aiSummary.ai_available ? '基于当前 CRM 记录生成' : '模型暂不可用，以下为 CRM 事实摘要';
+    aiSummaryHtml = '<section class="customer-ai-summary" aria-live="polite"><div class="customer-ai-summary-head"><strong>AI 客户总结</strong><span>' + escapeHtml(aiSummarySource) + '</span></div><div class="customer-ai-summary-body">' + escapeHtml(aiSummary.summary).replace(/\n/g, '<br>') + '</div><small>仅供当前工作参考；不自动写入客户资料，也不替代人工确认。</small></section>';
+  }
 
   summary.innerHTML =
-    '<div class="customer-facts-brief-head"><span class="workspace-kicker">客户当前工作</span><span class="customer-facts-brief-hint">先看最近发生什么，再决定下一步</span></div>' +
+    '<div class="customer-facts-brief-head"><div><span class="workspace-kicker">客户当前工作</span><span class="customer-facts-brief-hint">先看最近发生什么，再决定下一步</span></div><button type="button" class="text-action customer-ai-summary-trigger" onclick="requestCustomerAiSummary()"' + (aiSummary.status === 'loading' ? ' disabled aria-busy="true"' : '') + '>AI总结客户</button></div>' +
+    aiSummaryHtml +
     '<div class="customer-now-next-grid">' +
       '<section class="customer-fact-section customer-fact-now"><div class="customer-fact-section-head"><div><span class="customer-fact-label">现在</span><span class="customer-fact-label-sub">最近一次重要沟通</span></div><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabOutreach\')">时间线</button></div><div class="customer-fact-events">' + recentHtml + '</div><div class="customer-now-waiting"><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong><button type="button" class="text-action" onclick="editCustomerWaiting()">调整</button></div></section>' +
       '<section class="customer-fact-section customer-fact-next"><div class="customer-fact-section-head"><div><span class="customer-fact-label">下一步</span><span class="customer-fact-label-sub">最需要执行的一个动作</span></div><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabTasks\')">全部待办</button></div><strong class="customer-next-title">' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time class="customer-next-date">' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : '<span class="customer-next-date">尚未安排日期</span>') + '<button type="button" class="text-action customer-next-plan-link" onclick="openCustomerTaskModal()">' + (nextTask ? '调整下一步' : '安排下一步') + '</button></section>' +
@@ -4651,6 +4849,24 @@ function renderCustomerFactsBrief(customer) {
       '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">当前上下文</span><span class="customer-fact-gap-count">关键需求：' + escapeHtml(customer.field || customer.industry || '待补充') + '</span></div><p class="customer-fact-context-copy">' + renderRichText((customer.profile || customer.notes || '尚未记录当前背景；可在资料中补充。').slice(0, 360)) + '</p><small class="customer-fact-files">相关资料：' + Number(customer.file_count || 0) + ' 个文件</small></section>' +
       '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">信息缺口</span><span class="customer-fact-gap-count">' + (gaps.length ? gaps.length + ' 项待确认' : '基础字段完整') + '</span></div><div class="customer-gap-list">' + gapsHtml + '</div></section>' +
     '</div></details>';
+}
+
+async function requestCustomerAiSummary() {
+  var customerId = Number((document.getElementById('editCustomerId') || {}).value || 0);
+  if (!customerId || !_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+  if (_customerDetailCache.ai_summary && _customerDetailCache.ai_summary.status === 'loading') return;
+  _customerDetailCache.ai_summary = { status: 'loading' };
+  renderCustomerFactsBrief(_customerDetailCache);
+  try {
+    var result = await api('/api/customers/' + customerId + '/ai-summary', { method: 'POST' });
+    if (!_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+    _customerDetailCache.ai_summary = result || { summary: '', ai_available: false };
+    renderCustomerFactsBrief(_customerDetailCache);
+  } catch (e) {
+    if (!_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+    _customerDetailCache.ai_summary = { status: 'error', error: e.message || '请稍后重试；客户资料和手工记录不受影响。' };
+    renderCustomerFactsBrief(_customerDetailCache);
+  }
 }
 
 async function refreshCustomerWorkspace() {
@@ -6717,6 +6933,7 @@ async function loadSettings() {
   var teamCard = document.getElementById('teamMembersSettingsCard');
   if (teamCard) teamCard.style.display = currentUser && currentUser.role === 'admin' ? '' : 'none';
   if (currentUser && currentUser.role === 'admin') loadTeamMembers();
+  loadAiConfig();
   loadGmailIntegrationStatus();
   try {
     var sys = await api('/api/system');

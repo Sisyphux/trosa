@@ -5,6 +5,7 @@ LLM 分析引擎 - 支持 LM Studio / Ollama / OpenAI
 推荐：LM Studio（图形界面友好，OpenAI兼容API）
 """
 import os
+import sys
 import json
 import hashlib
 import difflib
@@ -13,6 +14,7 @@ import urllib.request
 import urllib.error
 import ssl
 import subprocess
+import tempfile
 from urllib.parse import urljoin, urlparse
 from html.parser import HTMLParser
 
@@ -140,6 +142,68 @@ _load_env_file()
 
 # ============ 配置（按优先级排列）============
 
+_AI_CONFIG_KEYS = (
+    'LLM_BACKEND',
+    'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL',
+    'DASHSCOPE_API_KEY', 'DASHSCOPE_BASE_URL', 'DASHSCOPE_MODEL',
+    'ZHIPU_API_KEY', 'ZHIPU_BASE_URL', 'ZHIPU_MODEL',
+    'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL',
+    'VISION_API_KEY', 'VISION_BASE_URL', 'VISION_MODEL',
+    'LM_STUDIO_URL', 'LM_STUDIO_MODEL',
+    'OLLAMA_URL', 'OLLAMA_MODEL',
+)
+_AI_CONFIG_ENV_BASELINE = {key: os.environ.get(key) for key in _AI_CONFIG_KEYS}
+
+
+def _ai_config_file_path():
+    """Return the private runtime config path used by the settings form."""
+    configured = str(os.environ.get('CRM_AI_CONFIG_FILE') or '').strip()
+    if configured:
+        return os.path.realpath(os.path.abspath(os.path.expanduser(configured)))
+    db_path = str(os.environ.get('CRM_DB_PATH') or '').strip()
+    if db_path:
+        return os.path.realpath(os.path.abspath(os.path.join(os.path.expanduser(db_path), 'ai-config.env')))
+    if getattr(sys, 'frozen', False):
+        project_root = os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.realpath(os.path.abspath(os.path.join(project_root, 'data', 'ai-config.env')))
+
+
+_AI_CONFIG_FILE = _ai_config_file_path()
+
+
+def _read_ai_config_file():
+    """Read only the allow-listed AI settings; never expose this file to HTTP."""
+    values = {}
+    if not os.path.isfile(_AI_CONFIG_FILE):
+        return values
+    try:
+        with open(_AI_CONFIG_FILE, 'r', encoding='utf-8') as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, _, value = line.partition('=')
+                key = key.strip()
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                    value = value[1:-1]
+                if key in _AI_CONFIG_KEYS:
+                    values[key] = value
+    except (OSError, UnicodeError):
+        return {}
+    return values
+
+
+def _load_ai_config_file():
+    """Apply the private settings file over environment defaults."""
+    for key, value in _read_ai_config_file().items():
+        os.environ[key] = value
+
+
+_load_ai_config_file()
+
 # --- 方案1：LM Studio（推荐，Windows 主机部署）---
 # LM Studio 默认地址，Mac 访问时改为 Windows 的 IP
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
@@ -153,12 +217,267 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-VISION_BASE_URL = os.environ.get("VISION_BASE_URL", OPENAI_BASE_URL)
-VISION_API_KEY = os.environ.get("VISION_API_KEY", OPENAI_API_KEY)
-VISION_MODEL = os.environ.get("VISION_MODEL", "gpt-4o-mini")
+VISION_BASE_URL = os.environ.get("VISION_BASE_URL") or OPENAI_BASE_URL
+VISION_API_KEY = os.environ.get("VISION_API_KEY") or OPENAI_API_KEY
+VISION_MODEL = os.environ.get("VISION_MODEL") or "gpt-4o-mini"
 
 # 选择使用哪个后端：lmstudio / ollama / openai / auto（自动检测）
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "auto")
+
+
+_AI_PROVIDERS = {
+    'deepseek': {
+        'label': 'DeepSeek', 'key': 'DEEPSEEK_API_KEY',
+        'base_url': 'DEEPSEEK_BASE_URL', 'model': 'DEEPSEEK_MODEL',
+        'default_base_url': 'https://api.deepseek.com', 'default_model': 'deepseek-chat',
+    },
+    'qwen': {
+        'label': '通义千问', 'key': 'DASHSCOPE_API_KEY',
+        'base_url': 'DASHSCOPE_BASE_URL', 'model': 'DASHSCOPE_MODEL',
+        'default_base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'default_model': 'qwen-plus',
+    },
+    'glm': {
+        'label': '智谱 GLM', 'key': 'ZHIPU_API_KEY',
+        'base_url': 'ZHIPU_BASE_URL', 'model': 'ZHIPU_MODEL',
+        'default_base_url': 'https://open.bigmodel.cn/api/paas/v4', 'default_model': 'glm-4-flash',
+    },
+    'openai': {
+        'label': 'OpenAI / 兼容接口', 'key': 'OPENAI_API_KEY',
+        'base_url': 'OPENAI_BASE_URL', 'model': 'OPENAI_MODEL',
+        'default_base_url': 'https://api.openai.com/v1', 'default_model': 'gpt-4o-mini',
+    },
+    'lmstudio': {
+        'label': 'LM Studio（本地）', 'key': '',
+        'base_url': 'LM_STUDIO_URL', 'model': 'LM_STUDIO_MODEL',
+        'default_base_url': 'http://localhost:1234', 'default_model': 'local-model',
+    },
+    'ollama': {
+        'label': 'Ollama（本地）', 'key': '',
+        'base_url': 'OLLAMA_URL', 'model': 'OLLAMA_MODEL',
+        'default_base_url': 'http://localhost:11434', 'default_model': 'qwen2.5:7b',
+    },
+}
+_AI_PROVIDER_IDS = tuple(_AI_PROVIDERS.keys())
+
+
+def _runtime_ai_config():
+    """Refresh the small AI config surface so settings changes apply immediately."""
+    global LLM_BACKEND, LM_STUDIO_URL, LM_STUDIO_MODEL, OLLAMA_BASE_URL, OLLAMA_MODEL
+    global OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, VISION_BASE_URL, VISION_API_KEY, VISION_MODEL
+    global DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+    global DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, DASHSCOPE_MODEL
+    global ZHIPU_API_KEY, ZHIPU_BASE_URL, ZHIPU_MODEL
+    _load_ai_config_file()
+    LM_STUDIO_URL = os.environ.get('LM_STUDIO_URL') or 'http://localhost:1234'
+    LM_STUDIO_MODEL = os.environ.get('LM_STUDIO_MODEL') or ''
+    OLLAMA_BASE_URL = os.environ.get('OLLAMA_URL') or 'http://localhost:11434'
+    OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL') or 'qwen2.5:7b'
+    OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY') or ''
+    OPENAI_BASE_URL = os.environ.get('OPENAI_BASE_URL') or 'https://api.openai.com/v1'
+    OPENAI_MODEL = os.environ.get('OPENAI_MODEL') or 'gpt-4o-mini'
+    VISION_BASE_URL = os.environ.get('VISION_BASE_URL') or OPENAI_BASE_URL
+    VISION_API_KEY = os.environ.get('VISION_API_KEY') or OPENAI_API_KEY
+    VISION_MODEL = os.environ.get('VISION_MODEL') or 'gpt-4o-mini'
+    DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY') or ''
+    DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL') or 'https://api.deepseek.com'
+    DEEPSEEK_MODEL = os.environ.get('DEEPSEEK_MODEL') or 'deepseek-chat'
+    DASHSCOPE_API_KEY = os.environ.get('DASHSCOPE_API_KEY') or ''
+    DASHSCOPE_BASE_URL = os.environ.get('DASHSCOPE_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    DASHSCOPE_MODEL = os.environ.get('DASHSCOPE_MODEL') or 'qwen-plus'
+    ZHIPU_API_KEY = os.environ.get('ZHIPU_API_KEY') or ''
+    ZHIPU_BASE_URL = os.environ.get('ZHIPU_BASE_URL') or 'https://open.bigmodel.cn/api/paas/v4'
+    ZHIPU_MODEL = os.environ.get('ZHIPU_MODEL') or 'glm-4-flash'
+    LLM_BACKEND = (os.environ.get('LLM_BACKEND') or 'auto').strip().lower()
+
+
+def _ai_provider_values(provider):
+    info = _AI_PROVIDERS[provider]
+    key = os.environ.get(info['key'], '') if info['key'] else ''
+    base_url = os.environ.get(info['base_url'], '') or info['default_base_url']
+    model = os.environ.get(info['model'], '') or info['default_model']
+    return key, base_url.rstrip('/'), model
+
+
+def get_ai_config_status():
+    """Return model connection metadata without returning any secret."""
+    _runtime_ai_config()
+    providers = []
+    for provider in _AI_PROVIDER_IDS:
+        info = _AI_PROVIDERS[provider]
+        key, base_url, model = _ai_provider_values(provider)
+        providers.append({
+            'id': provider,
+            'label': info['label'],
+            'configured': bool(key) if info['key'] else True,
+            'api_key_configured': bool(key) if info['key'] else False,
+            'base_url': base_url,
+            'model': model,
+            'local': provider in ('lmstudio', 'ollama'),
+        })
+    selected = LLM_BACKEND if LLM_BACKEND in _AI_PROVIDER_IDS else 'auto'
+    selected_info = next((item for item in providers if item['id'] == selected), None)
+    any_configured = any(item['configured'] for item in providers)
+    return {
+        'backend': LLM_BACKEND if LLM_BACKEND in _AI_PROVIDER_IDS or LLM_BACKEND == 'auto' else 'auto',
+        'backend_label': '自动选择' if LLM_BACKEND == 'auto' else (selected_info['label'] if selected_info else '自动选择'),
+        'configured': selected_info['configured'] if selected_info else any_configured,
+        'api_key_configured': selected_info['api_key_configured'] if selected_info else any(
+            item['api_key_configured'] for item in providers
+        ),
+        'base_url': selected_info['base_url'] if selected_info else '',
+        'model': selected_info['model'] if selected_info else '',
+        'vision_configured': bool(VISION_API_KEY),
+        'config_source': '快速接入配置' if os.path.isfile(_AI_CONFIG_FILE) else '环境变量',
+        'providers': providers,
+    }
+
+
+def _validate_ai_url(value):
+    value = str(value or '').strip().rstrip('/')
+    if not value or len(value) > 2048 or '\n' in value or '\r' in value:
+        raise ValueError('Base URL 必须是合法的 http/https 地址，且不能包含账号密码')
+    parsed = urlparse(value)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError('Base URL 必须是合法的 http/https 地址，且不能包含账号密码')
+    return value
+
+
+def _write_ai_config_file(values):
+    directory = os.path.dirname(_AI_CONFIG_FILE) or os.curdir
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    temporary_path = ''
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=directory, prefix='.ai-config-', suffix='.tmp', delete=False
+        ) as handle:
+            temporary_path = handle.name
+            handle.write('# Trade OS private AI connection settings. Managed by the Settings page.\n')
+            for key in _AI_CONFIG_KEYS:
+                if key in values:
+                    handle.write(f'{key}={values[key]}\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, _AI_CONFIG_FILE)
+        os.chmod(_AI_CONFIG_FILE, 0o600)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+
+
+def save_ai_config(config):
+    """Save one provider's settings in a private, non-SQLite runtime file."""
+    _runtime_ai_config()
+    config = config if isinstance(config, dict) else {}
+    provider = str(config.get('backend') or config.get('provider') or '').strip().lower()
+    if provider not in _AI_PROVIDER_IDS and provider != 'auto':
+        raise ValueError('请选择支持的 AI 服务商')
+    values = _read_ai_config_file()
+    values['LLM_BACKEND'] = provider
+    if provider != 'auto':
+        info = _AI_PROVIDERS[provider]
+        api_key = str(config.get('api_key') or '').strip()
+        if '\n' in api_key or '\r' in api_key or len(api_key) > 4096:
+            raise ValueError('API Key 格式或长度不正确')
+        current_key = os.environ.get(info['key'], '') if info['key'] else ''
+        if info['key'] and not api_key:
+            api_key = current_key
+        if info['key'] and not api_key:
+            raise ValueError('请输入 API Key')
+        if info['key']:
+            values[info['key']] = api_key
+        base_url = str(config.get('base_url') or '').strip()
+        if not base_url:
+            base_url = os.environ.get(info['base_url'], '') or info['default_base_url']
+        values[info['base_url']] = _validate_ai_url(base_url)
+        model = str(config.get('model') or '').strip()
+        if not model:
+            model = os.environ.get(info['model'], '') or info['default_model']
+        if '\n' in model or '\r' in model or len(model) > 200:
+            raise ValueError('模型名格式或长度不正确')
+        values[info['model']] = model
+    _write_ai_config_file(values)
+    _runtime_ai_config()
+    return get_ai_config_status()
+
+
+def clear_ai_config():
+    """Remove only the settings-page file; deployment environment variables remain intact."""
+    file_values = _read_ai_config_file()
+    if os.path.isfile(_AI_CONFIG_FILE):
+        os.remove(_AI_CONFIG_FILE)
+    # The file is loaded into os.environ for compatibility with the existing
+    # provider callers. Restore the values that existed before that overlay so
+    # clearing the settings page really takes effect without a process restart.
+    missing = object()
+    for key in file_values:
+        baseline = _AI_CONFIG_ENV_BASELINE.get(key, missing)
+        if baseline is missing or baseline is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = baseline
+    _runtime_ai_config()
+    return get_ai_config_status()
+
+
+def test_ai_connection(config=None):
+    """Send a minimal non-CRM probe to a configured backend."""
+    _runtime_ai_config()
+    config = config if isinstance(config, dict) else {}
+    provider = str(config.get('backend') or config.get('provider') or LLM_BACKEND or 'auto').strip().lower()
+    if provider == 'auto':
+        provider = next((item['id'] for item in get_ai_config_status()['providers'] if item['configured']), '')
+    if provider not in _AI_PROVIDER_IDS:
+        raise ValueError('请选择具体的 AI 服务商后再测试')
+    info = _AI_PROVIDERS[provider]
+    current_key, current_base_url, current_model = _ai_provider_values(provider)
+    api_key = str(config.get('api_key') or '').strip() or current_key
+    base_url = str(config.get('base_url') or '').strip() or current_base_url
+    model = str(config.get('model') or '').strip() or current_model
+    if info['key'] and not api_key:
+        raise ValueError('请输入 API Key')
+    base_url = _validate_ai_url(base_url)
+    try:
+        if provider == 'ollama':
+            response = requests.post(
+                f'{base_url}/api/generate',
+                json={'model': model, 'prompt': '只回复：连接成功', 'stream': False, 'options': {'num_predict': 8}},
+                timeout=20,
+            )
+        else:
+            headers = {'Content-Type': 'application/json'}
+            if provider == 'lmstudio':
+                headers['Authorization'] = 'Bearer lm-studio'
+            else:
+                headers['Authorization'] = f'Bearer {api_key}'
+            response = requests.post(
+                f'{base_url}/v1/chat/completions' if provider == 'lmstudio' else f'{base_url}/chat/completions',
+                headers=headers,
+                json={'model': model, 'messages': [{'role': 'user', 'content': '只回复：连接成功'}], 'temperature': 0, 'max_tokens': 8},
+                timeout=30,
+            )
+        response.raise_for_status()
+        payload = response.json()
+        if provider == 'ollama':
+            ok = bool(payload.get('response'))
+        else:
+            ok = bool((payload.get('choices') or [{}])[0].get('message', {}).get('content'))
+        if not ok:
+            return {'success': False, 'error': '接口已响应，但没有返回可用模型内容'}
+        return {'success': True, 'provider': provider, 'model': model}
+    except requests.exceptions.Timeout:
+        return {'success': False, 'error': '连接超时，请检查 Base URL 或本地模型服务状态'}
+    except requests.exceptions.RequestException:
+        return {'success': False, 'error': 'API 请求失败，请检查 Key、Base URL 和模型名'}
+    except (TypeError, ValueError, KeyError, IndexError):
+        return {'success': False, 'error': '接口返回格式无法识别，请检查服务商和模型类型'}
 
 
 def _call_lm_studio(prompt: str, model: str = None) -> str:
@@ -232,6 +551,7 @@ def _call_openai(prompt: str, model: str = None) -> str:
 
 def extract_text_from_image(image_data_url: str) -> str:
     """Use an OpenAI-compatible vision model to transcribe a CRM conversation screenshot."""
+    _runtime_ai_config()
     if not VISION_API_KEY:
         return "[ERROR_VISION] 未配置视觉模型。请设置 VISION_API_KEY、VISION_BASE_URL 和 VISION_MODEL。"
     if not image_data_url.startswith('data:image/') or ';base64,' not in image_data_url:
@@ -359,6 +679,7 @@ def ask_llm(prompt: str) -> str:
     - LLM_BACKEND=ollama   → 只用 Ollama
     - LLM_BACKEND=auto     → 自动尝试：DeepSeek → Qwen → GLM → OpenAI → LM Studio → Ollama
     """
+    _runtime_ai_config()
     if LLM_BACKEND == "deepseek":
         return _call_deepseek(prompt)
     if LLM_BACKEND == "qwen":
@@ -1223,4 +1544,3 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     conn.commit()
     conn.close()
     return result
-

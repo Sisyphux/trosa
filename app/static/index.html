@@ -477,6 +477,35 @@
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
         </div>
+        <div class="card ai-integration-card" id="aiIntegrationSettingsCard" style="margin-bottom:22px;" aria-labelledby="aiIntegrationTitle">
+          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>配置一次后，沟通整理和按需客户总结共用这个接口；截图识别需使用支持图片输入的视觉模型。连接测试不会携带客户资料。</p></div></div>
+          <div class="card-body">
+            <div class="ai-config-status" id="aiConfigStatus" aria-live="polite">正在读取 AI 配置…</div>
+            <div class="ai-config-form" id="aiConfigForm" hidden>
+              <div class="ai-config-grid">
+                <label>服务商<select class="form-control" id="aiConfigBackend" onchange="updateAiConfigProviderFields()">
+                  <option value="auto">自动选择</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="qwen">通义千问</option>
+                  <option value="glm">智谱 GLM</option>
+                  <option value="openai">OpenAI / 兼容接口</option>
+                  <option value="lmstudio">LM Studio（本地）</option>
+                  <option value="ollama">Ollama（本地）</option>
+                </select></label>
+                <label id="aiConfigApiKeyField">API Key<input class="form-control" id="aiConfigApiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的 Key"></label>
+                <label>Base URL<input class="form-control" id="aiConfigBaseUrl" type="url" autocomplete="url" placeholder="https://api.example.com/v1"></label>
+                <label>模型名<input class="form-control" id="aiConfigModel" type="text" autocomplete="off" placeholder="模型名称"></label>
+              </div>
+              <p class="settings-help" id="aiConfigHelp">API Key 只保存在服务端的独立权限文件中，页面不会回显明文；修改后立即对新的 AI 请求生效。</p>
+              <div class="ai-config-actions">
+                <button class="btn btn-sm" type="button" onclick="testAiConfig()">测试连接</button>
+                <button class="btn btn-sm btn-primary" type="button" onclick="saveAiConfig()">保存并立即生效</button>
+                <button class="text-action" type="button" onclick="clearAiConfig()">清除快速接入配置</button>
+              </div>
+              <div class="ai-config-feedback" id="aiConfigFeedback" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
         <div class="card" id="teamMembersSettingsCard" style="margin-bottom:22px; display:none;">
           <div class="card-header"><div><h3>团队成员</h3><p>创建链接后自行转发。成员打开链接，自行设置姓名（即账号）和密码；链接仅可使用一次，7 天后失效。</p></div></div>
           <div class="card-body">
