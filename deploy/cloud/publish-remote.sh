@@ -39,8 +39,10 @@ ARCHIVE_PATH="/tmp/$ARCHIVE_NAME"
 RELEASE_DIR="$REMOTE_ROOT/releases/$RELEASE_ID"
 PREVIOUS=$(readlink -f "$REMOTE_ROOT/current" 2>/dev/null || true)
 
+GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
+
 curl --fail --location --silent --show-error --max-time 180 \
-  "$GITHUB_REMOTE/archive/$COMMIT_SHA.tar.gz" \
+  "https://codeload.github.com/$GITHUB_REPOSITORY/tar.gz/$COMMIT_SHA" \
   -o "$ARCHIVE_PATH"
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
