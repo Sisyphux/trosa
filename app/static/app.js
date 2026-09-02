@@ -7313,8 +7313,8 @@ document.getElementById('invitationForm').addEventListener('submit', async funct
     if (errorEl) errorEl.textContent = '两次输入的密码不一致';
     return;
   }
-  if (password.length < 8) {
-    if (errorEl) errorEl.textContent = '密码至少 8 位';
+  if (!/^\d{6}$/.test(password)) {
+    if (errorEl) errorEl.textContent = '请输入 6 位数字密码';
     return;
   }
   try {

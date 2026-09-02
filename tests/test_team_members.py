@@ -56,8 +56,13 @@ class TeamMembersApiTest(unittest.TestCase):
         invitation_url = created.get_json()['invitation']['url']
         token = urlparse(invitation_url).path.rsplit('/', 1)[-1]
 
+        invalid_password = self.client.post(f'/api/invitations/{token}/accept', json={
+            'name': '李 雷', 'password': 'password-1234'
+        })
+        self.assertEqual(invalid_password.status_code, 400, invalid_password.get_json())
+
         accepted = self.client.post(f'/api/invitations/{token}/accept', json={
-            'name': '李 雷', 'password': 'correct horse battery staple'
+            'name': '李 雷', 'password': '123456'
         })
         self.assertEqual(accepted.status_code, 201, accepted.get_json())
         self.assertEqual(accepted.get_json()['user']['id'], '李 雷')
@@ -65,7 +70,7 @@ class TeamMembersApiTest(unittest.TestCase):
 
         self.client.post('/api/auth/logout')
         logged_in = self.client.post('/api/auth/login', json={
-            'user': '李 雷', 'password': 'correct horse battery staple'
+            'user': '李 雷', 'password': '123456'
         })
         self.assertEqual(logged_in.status_code, 200, logged_in.get_json())
         self.client.post('/api/auth/logout')
@@ -74,10 +79,10 @@ class TeamMembersApiTest(unittest.TestCase):
         self.assertEqual(disabled.status_code, 200)
         self.client.post('/api/auth/logout')
         self.assertEqual(self.client.post('/api/auth/login', json={
-            'user': '李 雷', 'password': 'correct horse battery staple'
+            'user': '李 雷', 'password': '123456'
         }).status_code, 400)
         self.assertEqual(self.client.post(f'/api/invitations/{token}/accept', json={
-            'name': '另一位', 'password': 'correct horse battery staple'
+            'name': '另一位', 'password': '123456'
         }).status_code, 404)
 
     def test_operation_log_records_authenticated_user(self):

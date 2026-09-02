@@ -43,10 +43,10 @@
       <label class="form-label" for="invitationName">姓名（也是登录账号）</label>
       <input class="form-control" id="invitationName" type="text" required maxlength="80" autocomplete="name" placeholder="填写你的姓名">
       <div class="settings-help" id="invitationAccountHint" style="margin:6px 0 12px;">账号将使用你填写的姓名</div>
-      <label class="form-label" for="invitationPassword">设置密码</label>
-      <input class="form-control" id="invitationPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="至少 8 位">
-      <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认密码</label>
-      <input class="form-control" id="invitationPasswordConfirm" type="password" required minlength="8" autocomplete="new-password" placeholder="再次输入密码">
+      <label class="form-label" for="invitationPassword">设置 6 位数字密码</label>
+      <input class="form-control" id="invitationPassword" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="输入 6 位数字">
+      <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认 6 位数字密码</label>
+      <input class="form-control" id="invitationPasswordConfirm" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="再次输入 6 位数字">
       <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号并进入</button>
       <div class="login-error" id="invitationError" role="alert"></div>
     </form>

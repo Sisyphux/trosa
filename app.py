@@ -1657,8 +1657,8 @@ def accept_invitation(token):
     password = str(data.get('password') or '')
     if not name:
         return jsonify({'error': '请输入有效姓名；可使用中文、字母、数字、空格、点、连字符或撇号'}), 400
-    if len(password) < 8:
-        return jsonify({'error': '密码至少 8 位'}), 400
+    if not re.fullmatch(r'\d{6}', password):
+        return jsonify({'error': '请输入 6 位数字密码'}), 400
     conn = get_system_db()
     try:
         conn.execute('BEGIN IMMEDIATE')
