@@ -1540,7 +1540,11 @@ def init_system_db():
             c.execute(f'ALTER TABLE users ADD COLUMN {column} {definition}')
     c.execute("UPDATE users SET username=id WHERE COALESCE(username, '') = ''")
     c.execute("UPDATE users SET password_hash='' WHERE password_hash IS NULL")
-    c.execute("UPDATE users SET role=CASE WHEN id='hamid' THEN 'admin' ELSE 'member' END WHERE COALESCE(role, '') = ''")
+    # Hamid is the pre-existing installation administrator. Older releases
+    # populated role as "member" (or left it empty), so normalize that legacy
+    # row during migration without changing roles of invited accounts.
+    c.execute("UPDATE users SET role='admin' WHERE id='hamid'")
+    c.execute("UPDATE users SET role='member' WHERE COALESCE(role, '') = ''")
     c.execute("UPDATE users SET active=1 WHERE active IS NULL")
     
     # 周报表
