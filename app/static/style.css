@@ -652,6 +652,7 @@ select.form-control {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: var(--background); display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
+.login-overlay[hidden] { display: none !important; }
 .login-card {
   background: var(--popover); border-radius: 16px; padding: 40px 36px 36px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.08); text-align: center; max-width: 360px; width: 90%;

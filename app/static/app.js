@@ -7287,6 +7287,15 @@ async function showInvitationAcceptance(token) {
   }
 }
 
+function returnToStandardLogin() {
+  // An invite can be opened accidentally in an already-used browser.  It must
+  // never become a dead end for an existing member or administrator.
+  window.history.replaceState({}, '', '/');
+  var overlay = document.getElementById('invitationOverlay');
+  if (overlay) { overlay.hidden = true; overlay.style.display = 'none'; }
+  checkLogin();
+}
+
 document.getElementById('invitationName').addEventListener('input', function(event) {
   var hint = document.getElementById('invitationAccountHint');
   var name = event.target.value.trim();
