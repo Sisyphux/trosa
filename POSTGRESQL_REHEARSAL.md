@@ -82,14 +82,17 @@ ssh -N -L 5433:127.0.0.1:5433 <configured-ecs-host>
 ### Trosa
 
 Use an existing consistent snapshot from Trosa's `backups/` tree.  A snapshot
-must contain `system.db`, `hamid.db`, `amy.db`, and `kelley.db`.  Copy that
-snapshot to a dedicated rehearsal input directory, for example:
+must contain `system.db` and one `<username>.db` file for every row in the
+`system.db.users` table, including inactive members.  The preflight and
+importer derive this closed set dynamically and fail if a registered member
+database is missing or an unregistered `*.db` file is present; this prevents
+an invited user or historical owner from being silently omitted.
+
+Copy that snapshot to a dedicated rehearsal input directory, for example:
 
 ```text
 <rehearsal-input>/trosa/system.db
-<rehearsal-input>/trosa/hamid.db
-<rehearsal-input>/trosa/amy.db
-<rehearsal-input>/trosa/kelley.db
+<rehearsal-input>/trosa/<every-user-from-system.db>.db
 ```
 
 Do not copy a live SQLite file together with an uncoordinated `-wal` file.  The

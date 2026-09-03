@@ -243,6 +243,35 @@ def refresh_users_registry():
             }
     USERS_LIST[:] = list(USERS.keys())
 
+
+def _known_user_ids():
+    """Return every user represented by the current SQLite installation.
+
+    ``USERS`` contains the built-in defaults, but production may also contain
+    invited or deactivated members loaded from ``system.db``. Backup and
+    restore must use the durable registry rather than silently omitting those
+    members.
+    """
+    ordered = list(USERS.keys())
+    try:
+        rows = get_registered_users(include_inactive=True)
+    except Exception:
+        rows = []
+    for row in rows:
+        user = str(row.get('username') or row.get('id') or '').strip().lower()
+        if user and user not in ordered:
+            ordered.append(user)
+    return ordered
+
+
+def _restore_source_names(directory):
+    """Discover and validate the complete DB set inside a snapshot directory."""
+    try:
+        from tools.postgres_source_inventory import discover_trosa_db_names
+    except ModuleNotFoundError:
+        from postgres_source_inventory import discover_trosa_db_names
+    return discover_trosa_db_names(directory)
+
 import threading
 from config import STORAGE_MAINTENANCE_CONFIG
 
@@ -335,7 +364,7 @@ def ensure_db_identity():
         'db_dir': DB_DIR,
         'app_root': get_app_root(),
         'last_started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'users': sorted(USERS.keys()),
+        'users': sorted(_known_user_ids()),
     })
     temporary = marker_path + '.tmp'
     with open(temporary, 'w', encoding='utf-8') as handle:
@@ -427,8 +456,8 @@ def check_integrity():
     ensure_db_dir()
     
     all_dbs = {'system.db': os.path.join(DB_DIR, 'system.db')}
-    for user in USERS:
-        all_dbs[f'{user}.db'] = get_user_db_path(user)
+    for user in _known_user_ids():
+        all_dbs[f'{user}.db'] = os.path.join(DB_DIR, f'{user}.db')
     
     for name, path in all_dbs.items():
         try:
@@ -499,7 +528,7 @@ def backup_database(reason='manual'):
         'store_id': store_id, 'db_dir': DB_DIR, 'files': [], 'attachments': []
     }
     databases = {'system.db': os.path.join(DB_DIR, 'system.db')}
-    databases.update({f'{user}.db': get_user_db_path(user) for user in USERS})
+    databases.update({f'{user}.db': os.path.join(DB_DIR, f'{user}.db') for user in _known_user_ids()})
 
     for name, source_path in databases.items():
         if not os.path.exists(source_path):
@@ -716,7 +745,27 @@ def restore_from_backup(backup_date):
         attachment_entries = manifest.get('attachments') or []
     except (OSError, ValueError, TypeError) as exc:
         return {'success': False, 'error': f'Backup manifest is invalid: {exc}'}
-    allowed = {'system.db', *(f'{user}.db' for user in USERS)}
+    expected_names, discovery_errors = _restore_source_names(backup_dir)
+    if discovery_errors:
+        return {'success': False, 'error': 'Backup source set is incomplete: ' + '; '.join(discovery_errors)}
+    allowed = set(expected_names)
+    manifest_names = [
+        entry.get('name') if isinstance(entry, dict) else ''
+        for entry in entries
+    ]
+    valid_manifest_names = [name for name in manifest_names if isinstance(name, str)]
+    if (
+        len(valid_manifest_names) != len(manifest_names)
+        or len(valid_manifest_names) != len(set(valid_manifest_names))
+        or set(valid_manifest_names) != allowed
+    ):
+        return {
+            'success': False,
+            'error': (
+                'Backup manifest source set is incomplete: '
+                f'expected {sorted(allowed)}, got {sorted(repr(name) for name in manifest_names)}'
+            ),
+        }
     files = []
     for entry in entries:
         name = entry.get('name') if isinstance(entry, dict) else ''
@@ -808,7 +857,6 @@ def list_backups():
                     files = manifest.get('files') or []
             except (OSError, ValueError, TypeError):
                 continue
-            allowed = {'system.db', *(f'{user}.db' for user in USERS)}
             names = [entry.get('name') for entry in files if isinstance(entry, dict)]
             attachments = []
             try:
@@ -822,7 +870,13 @@ def list_backups():
                 and os.path.isfile(os.path.join(snapshot_path, entry['name']))
                 for entry in attachments
             )
-            if names and all(name in allowed and os.path.isfile(os.path.join(snapshot_path, name)) for name in names) and attachments_ok:
+            expected_names, discovery_errors = _restore_source_names(snapshot_path)
+            if (
+                not discovery_errors
+                and set(names) == set(expected_names)
+                and all(name in expected_names and os.path.isfile(os.path.join(snapshot_path, name)) for name in names)
+                and attachments_ok
+            ):
                 backups.append({'date': f'{date_name}/{snapshot_name}', 'files': names,
                                 'attachments': len(attachments), 'path': f'{date_name}/{snapshot_name}',
                                 'created_at': manifest.get('created_at', ''),

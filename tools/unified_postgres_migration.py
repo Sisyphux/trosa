@@ -16,6 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.postgres_source_inventory import discover_trosa_db_names
+except ModuleNotFoundError:  # direct ``python tools/...`` invocation
+    from postgres_source_inventory import discover_trosa_db_names
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATHS = (
@@ -28,6 +33,7 @@ SCHEMA_PATHS = (
 )
 TARGET_SCHEMAS = ("identity", "core", "trosa", "sela", "audit", "trade_os_compat")
 TARGET_TABLES = (
+    "audit.schema_migrations",
     "identity.organizations",
     "identity.users",
     "core.companies",
@@ -114,10 +120,13 @@ def json_inventory(path: Path) -> dict[str, Any]:
 def source_manifest(trosa_data_dir: Path, sela_data_dir: Path) -> dict[str, Any]:
     errors: list[str] = []
     trosa: dict[str, Any] = {}
-    for name in ("system.db", "hamid.db", "amy.db", "kelley.db"):
+    trosa_names, discovery_errors = discover_trosa_db_names(trosa_data_dir)
+    errors.extend(discovery_errors)
+    for name in trosa_names:
         path = trosa_data_dir / name
         if not path.is_file():
-            errors.append(f"missing Trosa source: {path}")
+            if f"missing Trosa source: {path}" not in errors:
+                errors.append(f"missing Trosa source: {path}")
             continue
         trosa[name] = sqlite_inventory(path)
 
@@ -171,9 +180,37 @@ def postgres_connection(dsn: str):
 def apply_schema(dsn: str) -> None:
     with postgres_connection(dsn) as connection:
         with connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA IF NOT EXISTS audit")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audit.schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    sha256 TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            connection.commit()
+            applied = {
+                name: digest for name, digest in cursor.execute(
+                    "SELECT name, sha256 FROM audit.schema_migrations"
+                )
+            }
+            connection.commit()
             for schema_path in SCHEMA_PATHS:
+                name = schema_path.name
+                digest = sha256(schema_path)
+                if applied.get(name) == digest:
+                    continue
                 cursor.execute(schema_path.read_text(encoding="utf-8"))
-        connection.commit()
+                cursor.execute(
+                    """
+                    INSERT INTO audit.schema_migrations (name, sha256)
+                    VALUES (%s, %s)
+                    ON CONFLICT (name) DO UPDATE SET sha256=excluded.sha256,
+                      applied_at=now()
+                    """,
+                    (name, digest),
+                )
+                connection.commit()
 
 
 def verify_schema(dsn: str) -> dict[str, Any]:
@@ -188,10 +225,25 @@ def verify_schema(dsn: str) -> dict[str, Any]:
                 "WHERE table_type = 'BASE TABLE' AND table_schema = ANY(%s)",
                 (list(TARGET_SCHEMAS),)
             )}
+            applied = {
+                name: digest for name, digest in cursor.execute(
+                    "SELECT name, sha256 FROM audit.schema_migrations"
+                )
+            }
+    expected_migrations = {path.name: sha256(path) for path in SCHEMA_PATHS}
+    migrations = {
+        name: applied.get(name) == digest
+        for name, digest in expected_migrations.items()
+    }
     return {
         "schemas": {name: name in schemas for name in TARGET_SCHEMAS},
         "tables": {name: name in tables for name in TARGET_TABLES},
-        "ok": set(TARGET_SCHEMAS).issubset(schemas) and set(TARGET_TABLES).issubset(tables),
+        "migrations": migrations,
+        "ok": (
+            set(TARGET_SCHEMAS).issubset(schemas)
+            and set(TARGET_TABLES).issubset(tables)
+            and all(migrations.values())
+        ),
     }
 
 

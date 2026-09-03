@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Trade OS PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

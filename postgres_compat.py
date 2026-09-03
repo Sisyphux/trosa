@@ -1,10 +1,10 @@
-"""Small DB-API compatibility layer for the non-production PostgreSQL run.
+"""Small DB-API compatibility layer for the PostgreSQL-backed run.
 
 The web application still speaks the legacy SQLite-shaped repository API
 (``?`` parameters, integer compatibility ids, and ``sqlite3.Row`` access).
 This module keeps that API stable while routing every statement to the shared
-PostgreSQL schemas.  It is deliberately opt-in; production remains on the
-existing SQLite factory until an explicit cutover configuration is set.
+PostgreSQL schemas. It is deliberately opt-in; the existing SQLite factory
+remains the safe default until an explicit cutover configuration is set.
 """
 
 from __future__ import annotations

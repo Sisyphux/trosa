@@ -1,0 +1,37 @@
+name: trade-os-postgres-production
+
+services:
+  postgres:
+    image: postgres:17.11
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums
+    ports:
+      # Trosa and the local Sela tunnel are the only clients. Do not expose
+      # PostgreSQL on the ECS public interface.
+      - "127.0.0.1:${TRADE_OS_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - trade_os_postgres_production:/var/lib/postgresql/data
+      - ./backups:/backups
+    secrets:
+      - postgres_password
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 1m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+
+volumes:
+  trade_os_postgres_production:

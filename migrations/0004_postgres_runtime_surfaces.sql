@@ -132,14 +132,31 @@ SELECT id, legacy_user_id AS user_id, week_start, content, highlights, challenge
 -- On the first application these objects are the compatibility tables from
 -- 0003; on subsequent applications they are views created below.  Drop both
 -- object kinds so schema application remains repeatable.
-DROP VIEW IF EXISTS trade_os_compat.email_verifications CASCADE;
-DROP VIEW IF EXISTS trade_os_compat.email_verification_jobs CASCADE;
-DROP VIEW IF EXISTS trade_os_compat.email_domain_probes CASCADE;
-DROP VIEW IF EXISTS trade_os_compat.email_logs CASCADE;
-DROP TABLE IF EXISTS trade_os_compat.email_verifications CASCADE;
-DROP TABLE IF EXISTS trade_os_compat.email_verification_jobs CASCADE;
-DROP TABLE IF EXISTS trade_os_compat.email_domain_probes CASCADE;
-DROP TABLE IF EXISTS trade_os_compat.email_logs CASCADE;
+DO $$
+DECLARE
+    object_name text;
+    object_kind "char";
+BEGIN
+    FOREACH object_name IN ARRAY ARRAY[
+        'email_verifications', 'email_verification_jobs',
+        'email_domain_probes', 'email_logs'
+    ] LOOP
+        SELECT c.relkind INTO object_kind
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='trade_os_compat' AND c.relname=object_name;
+        IF object_kind IN ('v', 'm') THEN
+            IF object_kind='m' THEN
+                EXECUTE format('DROP MATERIALIZED VIEW %I.%I CASCADE', 'trade_os_compat', object_name);
+            ELSE
+                EXECUTE format('DROP VIEW %I.%I CASCADE', 'trade_os_compat', object_name);
+            END IF;
+        ELSIF object_kind IN ('r', 'p', 'f') THEN
+            EXECUTE format('DROP TABLE %I.%I CASCADE', 'trade_os_compat', object_name);
+        END IF;
+    END LOOP;
+END
+$$;
 CREATE OR REPLACE VIEW trade_os_compat.email_verifications AS
 SELECT id, email, normalized_email, domain, deliverability_status, confidence, address_type,
        risk_flags::text AS risk_flags, evidence::text AS evidence, mx_records::text AS mx_records,

@@ -21,6 +21,11 @@ from urllib.parse import urlparse
 import psycopg
 from psycopg.types.json import Jsonb
 
+try:
+    from tools.postgres_source_inventory import discover_trosa_db_names
+except ModuleNotFoundError:  # direct ``python tools/...`` invocation
+    from postgres_source_inventory import discover_trosa_db_names
+
 ORG_ID = uuid.uuid5(uuid.NAMESPACE_URL, "trade-os:organization")
 NS = uuid.uuid5(uuid.NAMESPACE_URL, "trade-os:unified-import")
 
@@ -225,7 +230,10 @@ class Importer:
         return method_id
 
     def import_trosa(self) -> None:
-        for db_name in ("system.db", "hamid.db", "amy.db", "kelley.db"):
+        db_names, discovery_errors = discover_trosa_db_names(self.trosa_dir)
+        if discovery_errors:
+            raise ValueError("Trosa source set is not closed: " + "; ".join(discovery_errors))
+        for db_name in db_names:
             path = self.trosa_dir / db_name
             rows = sqlite_rows(path)
             source_hash = sha256(path)

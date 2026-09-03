@@ -55,7 +55,11 @@ class IsolatedDatabaseTest(unittest.TestCase):
             conn.close()
 
     def test_restore_validates_snapshot_and_removes_stale_wal(self):
-        db.ensure_db_dir()
+        # Backups now enforce the same closed user set as production. Build a
+        # complete empty installation before adding the fixture row so this
+        # test exercises restore/WAL behavior rather than an incomplete-set
+        # rejection.
+        db.init_all_dbs()
         system_path = os.path.join(db.DB_DIR, 'system.db')
         conn = sqlite3.connect(system_path)
         conn.execute('CREATE TABLE value_store (value TEXT)')
@@ -81,9 +85,8 @@ class IsolatedDatabaseTest(unittest.TestCase):
 
     def test_restore_rejects_path_traversal_and_checksum_mismatch(self):
         self.assertFalse(db.restore_from_backup('../outside')['success'])
-        db.ensure_db_dir()
+        db.init_all_dbs()
         system_path = os.path.join(db.DB_DIR, 'system.db')
-        sqlite3.connect(system_path).close()
         snapshot = db.backup_database('test')
         snapshot_db = os.path.join(snapshot['path'], 'system.db')
         with open(snapshot_db, 'ab') as handle:

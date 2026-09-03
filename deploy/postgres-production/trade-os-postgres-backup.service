@@ -1,0 +1,11 @@
+[Unit]
+Description=Trade OS PostgreSQL verified backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/trade-os-postgres
+ExecStart=/opt/trade-os-postgres/backup.sh
+User=root
+UMask=0077
