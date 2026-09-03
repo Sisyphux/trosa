@@ -3295,6 +3295,7 @@ var AI_CONFIG_PROVIDER_DEFAULTS = {
   ollama: { label: 'Ollama（本地）', base_url: 'http://localhost:11434', model: 'qwen2.5:7b', local: true }
 };
 var _aiConfigStatus = null;
+var _aiConfigBusy = false;
 
 function aiConfigProviderInfo(provider) {
   provider = provider || 'auto';
@@ -3331,20 +3332,57 @@ function renderAiConfigStatus(status) {
     (!status.can_edit ? '<p class="settings-help ai-config-admin-note">只有管理员可以修改共享 AI 接口配置。</p>' : '');
 }
 
+function setAiModelStatus(message, type) {
+  var status = document.getElementById('aiConfigModelStatus');
+  if (!status) return;
+  status.className = 'ai-config-model-status' + (type ? ' is-' + type : '');
+  status.textContent = message || '';
+}
+
+function clearAiModelPicker() {
+  var picker = document.getElementById('aiConfigModelPicker');
+  if (!picker) return;
+  picker.innerHTML = '<option value="">读取后可选择模型</option>';
+  picker.value = '';
+  picker.hidden = true;
+  setAiModelStatus('');
+}
+
+function syncAiModelPicker() {
+  var model = document.getElementById('aiConfigModel');
+  var picker = document.getElementById('aiConfigModelPicker');
+  if (!model || !picker || picker.hidden) return;
+  var value = (model.value || '').trim();
+  picker.value = Array.prototype.some.call(picker.options, function(option) {
+    return option.value === value;
+  }) ? value : '';
+}
+
+function chooseAiModelFromList() {
+  var model = document.getElementById('aiConfigModel');
+  var picker = document.getElementById('aiConfigModelPicker');
+  if (model && picker && picker.value) model.value = picker.value;
+}
+
 function updateAiConfigProviderFields() {
   var backend = document.getElementById('aiConfigBackend');
   var apiKey = document.getElementById('aiConfigApiKey');
   var apiKeyField = document.getElementById('aiConfigApiKeyField');
   var baseUrl = document.getElementById('aiConfigBaseUrl');
   var model = document.getElementById('aiConfigModel');
+  var modelButton = document.getElementById('aiConfigModelsButton');
+  var modelPicker = document.getElementById('aiConfigModelPicker');
   var help = document.getElementById('aiConfigHelp');
   if (!backend || !apiKey || !baseUrl || !model) return;
   var provider = backend.value || 'auto';
   var info = aiConfigProviderInfo(provider);
   var isAuto = provider === 'auto';
+  clearAiModelPicker();
   apiKey.disabled = isAuto || !!info.local;
   baseUrl.disabled = isAuto;
   model.disabled = isAuto;
+  if (modelButton) modelButton.disabled = _aiConfigBusy || isAuto;
+  if (modelPicker) modelPicker.disabled = _aiConfigBusy || isAuto;
   if (apiKeyField) apiKeyField.hidden = isAuto;
   apiKey.value = '';
   apiKey.placeholder = info.local ? '本地服务无需 API Key' :
@@ -3378,6 +3416,48 @@ function aiConfigFormValue() {
   };
 }
 
+async function loadAiModels() {
+  var backend = document.getElementById('aiConfigBackend');
+  var provider = backend && backend.value || 'auto';
+  if (provider === 'auto') {
+    setAiModelStatus('请先选择具体的 AI 服务商，再读取模型列表。', 'error');
+    return;
+  }
+  var picker = document.getElementById('aiConfigModelPicker');
+  var model = document.getElementById('aiConfigModel');
+  clearAiModelPicker();
+  setAiModelStatus('正在读取模型列表…');
+  setAiConfigBusy(true);
+  try {
+    var result = await api('/api/ai/config/models', {
+      method: 'POST', silentError: true, body: JSON.stringify(aiConfigFormValue())
+    });
+    if (!result || !result.success) throw new Error((result && result.error) || '读取模型列表失败');
+    var models = Array.isArray(result.models) ? result.models : [];
+    if (!picker || !models.length) throw new Error('接口没有返回可用模型，请手动填写模型名');
+    var currentModel = model && (model.value || '').trim();
+    models.forEach(function(item) {
+      var id = typeof item === 'string' ? item : item && item.id;
+      if (!id) return;
+      var option = document.createElement('option');
+      option.value = String(id);
+      option.textContent = String(id);
+      picker.appendChild(option);
+    });
+    picker.hidden = false;
+    if (currentModel && Array.prototype.some.call(picker.options, function(option) {
+      return option.value === currentModel;
+    })) picker.value = currentModel;
+    var suffix = result.truncated ? '，仅显示前 200 个' : '';
+    setAiModelStatus('已读取 ' + models.length + ' 个模型' + suffix + '；可从下拉框选择，也可继续手动填写。', 'success');
+  } catch (error) {
+    if (picker) picker.hidden = true;
+    setAiModelStatus((error && error.message) || '读取模型列表失败，请手动填写模型名。', 'error');
+  } finally {
+    setAiConfigBusy(false);
+  }
+}
+
 function setAiConfigFeedback(message, type) {
   var feedback = document.getElementById('aiConfigFeedback');
   if (!feedback) return;
@@ -3386,9 +3466,15 @@ function setAiConfigFeedback(message, type) {
 }
 
 function setAiConfigBusy(busy) {
+  _aiConfigBusy = !!busy;
+  var backend = document.getElementById('aiConfigBackend');
+  var isAuto = !backend || (backend.value || 'auto') === 'auto';
+  if (backend) backend.disabled = _aiConfigBusy;
   document.querySelectorAll('#aiConfigForm button').forEach(function(button) {
-    button.disabled = !!busy;
+    button.disabled = _aiConfigBusy || (button.id === 'aiConfigModelsButton' && isAuto);
   });
+  var picker = document.getElementById('aiConfigModelPicker');
+  if (picker) picker.disabled = _aiConfigBusy || isAuto;
 }
 
 async function loadAiConfig() {
@@ -4471,6 +4557,8 @@ async function submitBatchComplete() {
 
 // ========== CUSTOMER EDIT MODAL ==========
 var _customerDetailCache = null;
+var _editingContactId = null;
+var _editingContactOriginal = null;
 var _customerDetailLoadToken = 0;
 var _customerDetailLoadingId = null;
 var _customerDetailController = null;
@@ -4564,6 +4652,8 @@ async function openEditModal(id) {
   if (!id) return;
   var modal = document.getElementById('customerEditModal');
   if (!modal) return;
+  _editingContactId = null;
+  _editingContactOriginal = null;
   if (_customerDetailLoadingId === id && modal.classList.contains('is-loading') && !modal.classList.contains('is-error')) return;
 
   var requestToken = ++_customerDetailLoadToken;
@@ -5196,17 +5286,163 @@ async function deleteCustomer(id) {
 }
 
 // Contacts
+var CONTACT_EDIT_FIELDS = [
+  { key: 'name', label: '姓名', type: 'text' },
+  { key: 'title', label: '职位', type: 'text' },
+  { key: 'email', label: '邮箱', type: 'email' },
+  { key: 'phone', label: '电话', type: 'tel' },
+  { key: 'whatsapp', label: 'WhatsApp', type: 'tel' },
+  { key: 'linkedin', label: '领英', type: 'text' }
+];
+
+function contactEditCard(contactId) {
+  var id = Number(contactId);
+  return Array.from(document.querySelectorAll('#contactsList [data-contact-id]')).find(function(card) {
+    return Number(card.getAttribute('data-contact-id')) === id;
+  }) || null;
+}
+
+function contactEditInputHtml(contact, contactId, field) {
+  var inputId = 'contactEdit' + field.key.charAt(0).toUpperCase() + field.key.slice(1) + contactId;
+  return '<div class="form-group contact-edit-field"><label class="form-label" for="' + inputId + '">' + field.label + '</label>' +
+    '<input class="form-control" id="' + inputId + '" type="' + field.type + '" autocomplete="off" data-contact-field="' + field.key + '" value="' + escapeHtml(contact[field.key] || '') + '"></div>';
+}
+
+function contactEditFormHtml(contact) {
+  var contactId = Number(contact.id);
+  var firstRow = CONTACT_EDIT_FIELDS.slice(0, 2).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
+  var secondRow = CONTACT_EDIT_FIELDS.slice(2, 4).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
+  var thirdRow = CONTACT_EDIT_FIELDS.slice(4, 6).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
+  return '<div class="sub-item contact-item contact-item-editing" data-contact-id="' + contactId + '">' +
+    '<form class="contact-edit-form" autocomplete="off" onsubmit="return saveContact(event,' + contactId + ')">' +
+      '<div class="contact-edit-header"><div><strong>编辑联系人</strong><span>修改后会立即同步到客户资料</span></div><button class="text-action contact-edit-cancel" type="button" onclick="cancelContactEdit(' + contactId + ')">取消编辑</button></div>' +
+      '<div class="form-row">' + firstRow + '</div>' +
+      '<div class="form-row">' + secondRow + '</div>' +
+      '<div class="form-row">' + thirdRow + '</div>' +
+      '<div class="contact-edit-actions"><button class="btn btn-primary btn-sm" type="submit">保存修改</button><span class="contact-edit-status" role="status" aria-live="polite"></span></div>' +
+  '</form>' +
+  '</div>';
+}
+
+function syncContactEditInputValues(contact) {
+  if (!contact) return;
+  var card = contactEditCard(contact.id);
+  if (!card) return;
+  CONTACT_EDIT_FIELDS.forEach(function(field) {
+    var input = card.querySelector('[data-contact-field="' + field.key + '"]');
+    if (input) input.value = contact[field.key] || '';
+  });
+}
+
 function renderContacts(contacts) {
   var el = document.getElementById('contactsList');
   if (!contacts || contacts.length === 0) { el.innerHTML = '<div class="contact-empty-state"><strong>还没有联系人</strong><span>先添加一位主要联系人，后续的沟通记录会更清晰。</span></div>'; return; }
   var html = '';
   contacts.forEach(function(c) {
+    var contactId = Number(c.id);
+    if (!contactId) return;
+    if (Number(_editingContactId) === contactId) {
+      html += contactEditFormHtml(c);
+      return;
+    }
     var displayName = escapeHtml(c.name || c.email || '(未命名)');
-    html += '<div class="sub-item"><div class="sub-item-header"><span class="sub-item-title">' + displayName + (c.is_primary ? ' <span style="font-size:0.7rem;color:var(--accent);">(主要)</span>' : '') + '</span><button class="btn btn-sm btn-danger" onclick="deleteContact(' + c.id + ')">删除</button></div><div class="sub-item-detail">' +
+    html += '<div class="sub-item contact-item" data-contact-id="' + contactId + '"><div class="sub-item-header"><span class="sub-item-title">' + displayName + (c.is_primary ? ' <span style="font-size:0.7rem;color:var(--accent);">(主要)</span>' : '') + '</span><span class="contact-item-actions">' +
+      '<button class="btn btn-sm" type="button" onclick="startContactEdit(' + contactId + ')" aria-label="编辑联系人 ' + displayName + '">编辑</button>' +
+      '<button class="btn btn-sm btn-danger" type="button" onclick="deleteContact(' + contactId + ')" aria-label="删除联系人 ' + displayName + '">删除</button></span></div><div class="sub-item-detail">' +
       (c.title ? '<div>' + escapeHtml(c.title) + '</div>' : '') + (c.email ? '<div>' + escapeHtml(c.email) + '</div>' : '') +
       (c.phone ? '<div>电话：' + escapeHtml(c.phone) + '</div>' : '') + (c.whatsapp ? '<div>WhatsApp：' + escapeHtml(c.whatsapp) + '</div>' : '') + (c.linkedin ? '<div>' + escapeHtml(c.linkedin) + '</div>' : '') + '</div></div>';
   });
   el.innerHTML = html;
+  if (_editingContactId) {
+    var editingContact = contacts.find(function(contact) { return Number(contact.id) === Number(_editingContactId); });
+    syncContactEditInputValues(editingContact);
+  }
+}
+
+function setContactEditStatus(card, message, isError) {
+  var status = card && card.querySelector('.contact-edit-status');
+  if (!status) return;
+  status.textContent = message || '';
+  status.classList.toggle('is-error', !!isError);
+}
+
+function contactEditIsDirty() {
+  if (!_editingContactId || !_editingContactOriginal) return false;
+  var card = contactEditCard(_editingContactId);
+  if (!card) return false;
+  return CONTACT_EDIT_FIELDS.some(function(field) {
+    var input = card.querySelector('[data-contact-field="' + field.key + '"]');
+    return input && input.value !== String(_editingContactOriginal[field.key] || '');
+  });
+}
+
+function startContactEdit(contactId) {
+  var id = Number(contactId);
+  if (!id || !_customerDetailCache || !Array.isArray(_customerDetailCache.contacts)) return;
+  if (_editingContactId && Number(_editingContactId) !== id) {
+    showToast('请先保存或取消当前联系人编辑', 'info');
+    return;
+  }
+  var contact = _customerDetailCache.contacts.find(function(item) { return Number(item.id) === id; });
+  if (!contact) return;
+  _editingContactId = id;
+  _editingContactOriginal = Object.assign({}, contact);
+  renderContacts(_customerDetailCache.contacts);
+  setTimeout(function() {
+    var card = contactEditCard(id);
+    var firstInput = card && card.querySelector('[data-contact-field="name"]');
+    if (firstInput) firstInput.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cancelContactEdit(contactId) {
+  var id = Number(contactId);
+  if (!_editingContactId || Number(_editingContactId) !== id) return;
+  _editingContactId = null;
+  _editingContactOriginal = null;
+  if (_customerDetailCache && Array.isArray(_customerDetailCache.contacts)) renderContacts(_customerDetailCache.contacts);
+}
+
+async function saveContact(event, contactId) {
+  if (event && event.preventDefault) event.preventDefault();
+  var id = Number(contactId);
+  var card = contactEditCard(id);
+  if (!id || !card || Number(_editingContactId) !== id) return false;
+  var data = {};
+  CONTACT_EDIT_FIELDS.forEach(function(field) {
+    var input = card.querySelector('[data-contact-field="' + field.key + '"]');
+    data[field.key] = input ? input.value.trim() : '';
+  });
+  if (!data.name && !data.email) {
+    setContactEditStatus(card, '姓名和邮箱至少填一项', true);
+    showToast('姓名和邮箱至少填一项', 'warning');
+    var nameInput = card.querySelector('[data-contact-field="name"]');
+    if (nameInput) nameInput.focus();
+    return false;
+  }
+  var saveButton = card.querySelector('button[type="submit"]');
+  card.classList.add('is-saving');
+  if (saveButton) { saveButton.disabled = true; saveButton.textContent = '保存中…'; }
+  card.querySelectorAll('input').forEach(function(input) { input.disabled = true; });
+  setContactEditStatus(card, '正在保存联系人资料…', false);
+  try {
+    var saved = await api('/api/contacts/' + id, { method: 'PUT', body: JSON.stringify(data) });
+    if (!saved) throw new Error('联系人资料未保存，请重新登录');
+    var current = _customerDetailCache && Array.isArray(_customerDetailCache.contacts)
+      ? _customerDetailCache.contacts.find(function(item) { return Number(item.id) === id; }) : null;
+    var updated = Object.assign({}, current || {}, data, { id: id });
+    if (saved && saved.contact) updated = saved.contact;
+    _editingContactId = null;
+    _editingContactOriginal = null;
+    patchCustomerWorkspaceContact(updated);
+    showToast('联系人资料已保存', 'success');
+  } catch (e) {
+    card.classList.remove('is-saving');
+    if (saveButton) { saveButton.disabled = false; saveButton.textContent = '保存修改'; }
+    card.querySelectorAll('input').forEach(function(input) { input.disabled = false; });
+    setContactEditStatus(card, e.message || '保存失败，请检查后重试', true);
+  }
+  return false;
 }
 
 function patchCustomerWorkspaceContact(contact, options) {
@@ -7159,7 +7395,8 @@ function customerModalState(id) {
   var modal = document.getElementById(id);
   if (!modal) return '';
   var fields = Array.from(modal.querySelectorAll('input, select, textarea')).filter(function(field) {
-    return field.type !== 'hidden' && field.type !== 'button' && field.type !== 'submit' && !field.disabled;
+    return field.type !== 'hidden' && field.type !== 'button' && field.type !== 'submit' && !field.disabled &&
+      !(field.closest && field.closest('.contact-edit-form'));
   });
   return JSON.stringify(fields.map(function(field) {
     return [field.id || field.name || field.className, field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value, field.files && field.files[0] ? field.files[0].name : ''];
@@ -7274,6 +7511,19 @@ function closeModal(id, force) {
   // tap on a slow phone or LAN connection.
   var customerLoading = id === 'customerEditModal' &&
     (modal.classList.contains('is-loading') || modal.classList.contains('is-error') || modal.getAttribute('aria-busy') === 'true');
+  if (!force && id === 'customerEditModal' && contactEditIsDirty()) {
+    var editingContactId = _editingContactId;
+    showAppConfirm({
+      title: '联系人修改未保存',
+      message: '联系人资料有修改，关闭会放弃这些修改。',
+      submitLabel: '放弃修改'
+    }).then(function(confirmed) {
+      if (!confirmed || Number(_editingContactId) !== Number(editingContactId)) return;
+      cancelContactEdit(editingContactId);
+      closeModal(id);
+    });
+    return false;
+  }
   if (!force && !customerLoading && modalNeedsUnsavedGuard(id) && customerModalIsDirty(id)) {
     _pendingCustomerModalClose = id;
     var subtitle = document.getElementById('unsavedChangesSubtitle');

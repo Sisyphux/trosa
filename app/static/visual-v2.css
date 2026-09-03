@@ -228,12 +228,19 @@ body {
 .ai-config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
 .ai-config-grid label { display: flex; flex-direction: column; gap: 6px; color: var(--v2-ink-soft); font-size: var(--fs-label); }
 .ai-config-grid .form-control { width: 100%; min-width: 0; }
+.ai-config-model-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ai-config-model-control > .form-control { flex: 1 1 auto; width: auto; }
+.ai-config-model-control > .btn { flex: 0 0 auto; white-space: nowrap; }
+.ai-config-model-picker { margin-top: 2px; }
+.ai-config-model-status { min-height: 1.3em; color: var(--v2-ink-muted); font-size: var(--fs-caption); line-height: 1.45; }
+.ai-config-model-status.is-success { color: var(--v2-success, #5c8c70); }
+.ai-config-model-status.is-error { color: var(--v2-danger, #a94e45); }
 .ai-config-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .ai-config-actions .text-action { margin-left: auto; }
 .ai-config-feedback { min-height: 1.4em; margin-top: 11px; color: var(--v2-ink-muted); font-size: var(--fs-caption); line-height: 1.5; }
 .ai-config-feedback.is-success { color: var(--v2-success, #5c8c70); }
 .ai-config-feedback.is-error { color: var(--v2-danger, #a94e45); }
-@media (max-width: 640px) { .ai-config-grid { grid-template-columns: 1fr; } .ai-config-actions .text-action { margin-left: 0; } }
+@media (max-width: 640px) { .ai-config-grid { grid-template-columns: 1fr; } .ai-config-model-control { flex-wrap: wrap; } .ai-config-model-control > .btn { width: 100%; } .ai-config-actions .text-action { margin-left: 0; } }
 .sidebar-identity { display: flex; align-items: center; gap: 10px; padding: 14px 10px 0; }
 .sidebar-avatar {
   display: grid;
@@ -552,6 +559,24 @@ tbody tr:hover { background: rgba(255,253,249,.43); }
 .modal-customer-workspace .workspace-contact-compose > summary { padding: 13px 2px; color: var(--v2-ink-muted); font-size: .76rem; font-weight: 600; }
 .modal-customer-workspace .workspace-contact-compose > summary::after { float: right; color: var(--v2-ink-muted); content: '手动填写'; font-size: .7rem; font-weight: 500; }
 .modal-customer-workspace .workspace-contact-compose[open] > summary::after { content: '收起'; }
+.contact-item .sub-item-header { align-items: flex-start; gap: 12px; }
+.contact-item-actions { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 4px; }
+.contact-item-actions .btn { flex: 0 0 auto; }
+.contact-item-editing { border-color: rgba(168,95,69,.34); background: rgba(255,253,249,.84); }
+.contact-edit-form { display: grid; gap: 12px; }
+.contact-edit-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.contact-edit-header strong { display: block; color: var(--v2-ink); font-size: .86rem; font-weight: 650; }
+.contact-edit-header span { display: block; margin-top: 4px; color: var(--v2-ink-muted); font-size: .74rem; line-height: 1.45; }
+.contact-edit-header .contact-edit-cancel { flex: 0 0 auto; padding: 4px 0; }
+.contact-edit-form .form-row { margin-bottom: 0; }
+.contact-edit-form .form-group { margin-bottom: 0; }
+.contact-edit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--v2-line); }
+.contact-edit-actions .btn-primary { min-width: 88px; }
+.contact-edit-status { color: var(--v2-ink-muted); font-size: .76rem; line-height: 1.45; }
+.contact-edit-status.is-error { color: var(--v2-danger); }
+.contact-item-editing.is-saving .contact-edit-header,
+.contact-item-editing.is-saving .contact-edit-actions { opacity: .72; }
+.contact-item .sub-item-detail { overflow-wrap: anywhere; }
 .modal-customer-workspace .workspace-email-import { margin-top: 0; overflow: hidden; border: 1px solid rgba(177,97,70,.34); border-radius: 14px; background: linear-gradient(115deg, rgba(184,102,72,.12), rgba(255,253,248,.74) 46%); box-shadow: inset 0 1px 0 rgba(255,255,255,.86); }
 .modal-customer-workspace .workspace-email-import > summary { padding: 15px 18px; color: var(--v2-clay); font-size: .84rem; font-weight: 700; letter-spacing: .01em; }
 .modal-customer-workspace .workspace-email-import > summary::after { float: right; color: var(--v2-clay); content: '检查并创建联系人'; font-size: .7rem; font-weight: 500; }

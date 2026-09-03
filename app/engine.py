@@ -503,6 +503,113 @@ def test_ai_connection(config=None):
         return {'success': False, 'error': '接口返回格式无法识别，请检查服务商和模型类型'}
 
 
+_AI_MODEL_LIST_LIMIT = 200
+
+
+def _ai_model_list_request(provider, base_url, api_key):
+    """Return the model-list endpoint and headers for one provider."""
+    headers = {'Accept': 'application/json'}
+    if provider == 'ollama':
+        return f'{base_url}/api/tags', headers
+    if provider == 'lmstudio':
+        headers['Authorization'] = 'Bearer lm-studio'
+        return f'{base_url}/v1/models', headers
+    headers['Authorization'] = f'Bearer {api_key}'
+    return f'{base_url}/models', headers
+
+
+def _normalize_ai_model_list(payload):
+    """Extract safe, unique model IDs from common provider response shapes."""
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = []
+        for key in ('data', 'models'):
+            candidate = payload.get(key)
+            if isinstance(candidate, list):
+                items = candidate
+                break
+    else:
+        items = []
+
+    models = []
+    seen = set()
+    for item in items:
+        if len(models) >= _AI_MODEL_LIST_LIMIT:
+            break
+        if isinstance(item, str):
+            model_id = item.strip()
+        elif isinstance(item, dict):
+            model_id = str(item.get('id') or item.get('name') or item.get('model') or '').strip()
+        else:
+            model_id = ''
+        if not model_id or len(model_id) > 200 or any(ord(char) < 32 for char in model_id):
+            continue
+        if model_id in seen:
+            continue
+        seen.add(model_id)
+        models.append({'id': model_id})
+    return models, len(models) >= _AI_MODEL_LIST_LIMIT and len(items) > _AI_MODEL_LIST_LIMIT
+
+
+def list_ai_models(config=None):
+    """Read model IDs without sending CRM content or returning credentials."""
+    _runtime_ai_config()
+    config = config if isinstance(config, dict) else {}
+    provider = str(config.get('backend') or config.get('provider') or '').strip().lower()
+    if provider == 'auto':
+        raise ValueError('请先选择具体的 AI 服务商后再读取模型')
+    if provider not in _AI_PROVIDER_IDS:
+        raise ValueError('请选择支持的 AI 服务商')
+
+    info = _AI_PROVIDERS[provider]
+    current_key, current_base_url, _ = _ai_provider_values(provider)
+    api_key = str(config.get('api_key') or '').strip() or current_key
+    if '\n' in api_key or '\r' in api_key or len(api_key) > 4096:
+        raise ValueError('API Key 格式或长度不正确')
+    if info['key'] and not api_key:
+        raise ValueError('请输入 API Key')
+    base_url = str(config.get('base_url') or '').strip() or current_base_url
+    base_url = _validate_ai_url(base_url)
+    url, headers = _ai_model_list_request(provider, base_url.rstrip('/'), api_key)
+    request_kwargs = {'headers': headers, 'timeout': 20}
+    # Local model servers should be reachable even when the desktop has a
+    # system HTTP proxy configured. Keep proxy bypass limited to loopback.
+    if provider in ('lmstudio', 'ollama') and urlparse(url).hostname in ('localhost', '127.0.0.1', '::1'):
+        request_kwargs['proxies'] = {'http': None, 'https': None}
+    try:
+        response = requests.get(url, **request_kwargs)
+        response.raise_for_status()
+        payload = response.json()
+        models, truncated = _normalize_ai_model_list(payload)
+        if not models:
+            return {
+                'success': False,
+                'error': '接口已响应，但没有发现可用模型；请确认服务状态或手动填写模型名',
+            }
+        return {
+            'success': True,
+            'provider': provider,
+            'models': models,
+            'truncated': truncated,
+        }
+    except requests.exceptions.Timeout:
+        return {'success': False, 'error': '读取模型列表超时，请检查 Base URL 或本地模型服务状态'}
+    except requests.exceptions.HTTPError as error:
+        status_code = getattr(getattr(error, 'response', None), 'status_code', None)
+        if status_code in (401, 403):
+            message = '读取模型列表被拒绝，请检查 API Key'
+        elif status_code == 404:
+            message = '当前接口没有提供模型列表，请手动填写模型名'
+        else:
+            message = '读取模型列表失败，请检查 Base URL、API Key 或服务状态'
+        return {'success': False, 'error': message}
+    except requests.exceptions.RequestException:
+        return {'success': False, 'error': '读取模型列表失败，请检查 Base URL、API Key 或服务状态'}
+    except (TypeError, ValueError, KeyError, IndexError):
+        return {'success': False, 'error': '接口返回的模型列表格式无法识别，请手动填写模型名'}
+
+
 def _call_lm_studio(prompt: str, model: str = None) -> str:
     """
     调用 LM Studio（OpenAI 兼容 API）

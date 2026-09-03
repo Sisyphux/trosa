@@ -56,6 +56,7 @@ from app.engine import (
     save_ai_config,
     clear_ai_config,
     test_ai_connection,
+    list_ai_models,
 )
 from config import EMAIL_VERIFICATION_CONFIG
 from gmail_sync import (
@@ -1580,6 +1581,20 @@ def ai_config_test():
         return denied
     try:
         result = test_ai_connection(request.get_json(silent=True) or {})
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    return jsonify(result), 200 if result.get('success') else 502
+
+
+@app.route('/api/ai/config/models', methods=['POST'])
+@login_required
+def ai_config_models():
+    """Read provider model IDs using pending settings, without CRM context."""
+    denied = _ai_config_admin_required()
+    if denied:
+        return denied
+    try:
+        result = list_ai_models(request.get_json(silent=True) or {})
     except ValueError as error:
         return jsonify({'error': str(error)}), 400
     return jsonify(result), 200 if result.get('success') else 502
@@ -8156,11 +8171,23 @@ def update_customer_contact(contact_id, data, before_commit=None):
     supplied = {key: data[key] for key in allowed if key in data}
     if not supplied:
         raise CrmWriteError('请提供至少一个可更新的联系人资料字段')
+    if 'email' in supplied:
+        supplied['email'] = _canonical_email(supplied['email'])
 
     def operation(conn, c):
         before = _snapshot_entity(conn, 'contacts', contact_id)
         if not before:
             raise CrmWriteError('联系人不存在', 404)
+        if supplied.get('email'):
+            duplicate = c.execute('''SELECT ct.id, ct.customer_id, c.company, c.name AS customer_name, c.is_deleted
+                                     FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+                                     WHERE lower(trim(ct.email))=? AND ct.id<>?
+                                     ORDER BY ct.id LIMIT 1''',
+                                  (supplied['email'], contact_id)).fetchone()
+            if duplicate and (duplicate['customer_id'] == before['customer_id'] or not duplicate['is_deleted']):
+                if duplicate['customer_id'] == before['customer_id']:
+                    raise CrmWriteError('该邮箱已属于当前客户的其他联系人', 409)
+                raise CrmWriteError(f'邮箱已属于客户：{duplicate["company"] or duplicate["customer_name"]}', 409)
         values = dict(before)
         values.update(supplied)
         c.execute('''UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?, preferred_channel=?, contact_type=?, notes=? WHERE id=?''',
@@ -8170,7 +8197,7 @@ def update_customer_contact(contact_id, data, before_commit=None):
         after = _snapshot_entity(conn, 'contacts', contact_id)
         undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
                                          [_undo_entity('contacts', contact_id, before, after)], '撤销 Agent 修改联系人资料')
-        return {'id': contact_id, 'customer_id': before['customer_id'], 'undo_token': undo_token,
+        return {'id': contact_id, 'customer_id': before['customer_id'], 'contact': after, 'undo_token': undo_token,
                 'undo_description': '撤销修改联系人资料'}
     return _run_crm_write(operation, before_commit)
 
@@ -8955,18 +8982,21 @@ def get_email_verification_jobs():
 @app.route('/api/contacts/<int:contact_id>', methods=['PUT'])
 @login_required
 def update_contact(contact_id):
-    data = request.get_json(silent=True)
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?, preferred_channel=?, contact_type=?, is_primary=?, notes=? WHERE id=?',
-              (data.get('name', ''), data.get('title', ''), data.get('email', ''),
-               data.get('phone', ''), data.get('whatsapp', ''), data.get('linkedin', ''),
-               data.get('preferred_channel', ''), data.get('contact_type', 'person'),
-               data.get('is_primary', 0), data.get('notes', ''), contact_id))
-    conn.commit()
-    conn.close()
-    log_operation('UPDATE', 'contact', contact_id, f'更新联系人: {data.get("name", "")}')
-    return jsonify({'message': '联系人更新成功'})
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        result = update_customer_contact(contact_id, data)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception as error:
+        logger.error('update_contact error: %s', error, exc_info=True)
+        return jsonify({'error': '联系人更新失败，未保存任何更改'}), 500
+    contact = result.get('contact') or {}
+    log_operation('UPDATE', 'contact', contact_id, f'更新联系人: {contact.get("name", "")}')
+    return jsonify({'message': '联系人更新成功', 'contact': contact,
+                    'undo_token': result['undo_token'],
+                    'undo_description': result['undo_description']})
 
 
 @app.route('/api/contacts/<int:contact_id>', methods=['DELETE'])
@@ -10529,24 +10559,31 @@ def system_health_check():
     except Exception as e:
         health['checks'].append({'name': '数据库完整性', 'status': 'error', 'detail': str(e)})
         health['overall'] = 'degraded'
-    # 2. 调度器
-    try:
-        marker_path = os.path.join(DB_DIR, 'active_store.json')
-        marker = {}
-        if os.path.exists(marker_path):
-            with open(marker_path, 'r', encoding='utf-8') as handle:
-                marker = json.load(handle)
-        expected_dir = os.path.realpath(os.path.join(get_app_root(), 'data'))
-        canonical = os.path.normcase(os.path.realpath(DB_DIR)) == os.path.normcase(expected_dir)
+    # 2. 活动数据仓库
+    if postgres_mode():
         health['checks'].append({
             'name': '活动数据仓库',
-            'status': 'ok' if canonical and marker.get('store_id') else 'warning',
-            'detail': f'唯一仓库 {str(marker.get("store_id", "未标记"))[:8]} · {os.path.basename(DB_DIR)}'
+            'status': 'ok',
+            'detail': '统一 PostgreSQL 业务仓库；本地 SQLite 文件不参与业务读写'
         })
-        if not canonical:
-            health['overall'] = 'degraded'
-    except Exception as e:
-        health['checks'].append({'name': '活动数据仓库', 'status': 'warning', 'detail': str(e)})
+    else:
+        try:
+            marker_path = os.path.join(DB_DIR, 'active_store.json')
+            marker = {}
+            if os.path.exists(marker_path):
+                with open(marker_path, 'r', encoding='utf-8') as handle:
+                    marker = json.load(handle)
+            expected_dir = os.path.realpath(os.path.join(get_app_root(), 'data'))
+            canonical = os.path.normcase(os.path.realpath(DB_DIR)) == os.path.normcase(expected_dir)
+            health['checks'].append({
+                'name': '活动数据仓库',
+                'status': 'ok' if canonical and marker.get('store_id') else 'warning',
+                'detail': f'唯一仓库 {str(marker.get("store_id", "未标记"))[:8]} · {os.path.basename(DB_DIR)}'
+            })
+            if not canonical:
+                health['overall'] = 'degraded'
+        except Exception as e:
+            health['checks'].append({'name': '活动数据仓库', 'status': 'warning', 'detail': str(e)})
     # 3. 调度器
     try:
         scheduler_info = get_scheduler_status()
@@ -10559,32 +10596,39 @@ def system_health_check():
         health['checks'].append({'name': '调度器', 'status': 'error', 'detail': str(e)})
         health['overall'] = 'degraded'
     # 4. 备份状态
-    try:
-        backups = list_backups()
-        latest = max(backups, key=lambda item: item.get('created_at') or item.get('date', '')) if backups else None
-        backup_status = 'ok' if latest else 'warning'
-        backup_detail = f'共 {len(backups)} 个备份 · 最新: {latest["date"] if latest else "尚未备份"}'
-        if latest and latest.get('created_at'):
-            try:
-                created_at = datetime.strptime(latest['created_at'], '%Y-%m-%d %H:%M:%S')
-                age = datetime.now() - created_at
-                backup_detail += f' · 类型: {latest.get("reason") or "未标记"}'
-                if age > timedelta(days=7):
-                    backup_status = 'warning'
-                    backup_detail += ' · 已超过 7 天，请检查定时备份'
-            except (TypeError, ValueError):
-                backup_status = 'warning'
-                backup_detail += ' · 时间清单无法解析'
+    if postgres_mode():
         health['checks'].append({
-            'name': '本机备份',
-            'status': backup_status,
-            'detail': backup_detail,
+            'name': '数据库备份',
+            'status': 'info',
+            'detail': 'PostgreSQL 模式不执行 SQLite 文件快照；正式环境需由数据库运维配置备份与恢复演练'
         })
-        if backup_status == 'warning':
+    else:
+        try:
+            backups = list_backups()
+            latest = max(backups, key=lambda item: item.get('created_at') or item.get('date', '')) if backups else None
+            backup_status = 'ok' if latest else 'warning'
+            backup_detail = f'共 {len(backups)} 个备份 · 最新: {latest["date"] if latest else "尚未备份"}'
+            if latest and latest.get('created_at'):
+                try:
+                    created_at = datetime.strptime(latest['created_at'], '%Y-%m-%d %H:%M:%S')
+                    age = datetime.now() - created_at
+                    backup_detail += f' · 类型: {latest.get("reason") or "未标记"}'
+                    if age > timedelta(days=7):
+                        backup_status = 'warning'
+                        backup_detail += ' · 已超过 7 天，请检查定时备份'
+                except (TypeError, ValueError):
+                    backup_status = 'warning'
+                    backup_detail += ' · 时间清单无法解析'
+            health['checks'].append({
+                'name': '本机备份',
+                'status': backup_status,
+                'detail': backup_detail,
+            })
+            if backup_status == 'warning':
+                health['overall'] = 'degraded'
+        except Exception as e:
+            health['checks'].append({'name': '本机备份', 'status': 'warning', 'detail': str(e)})
             health['overall'] = 'degraded'
-    except Exception as e:
-        health['checks'].append({'name': '本机备份', 'status': 'warning', 'detail': str(e)})
-        health['overall'] = 'degraded'
     # 5. 系统环境
     try:
         health['checks'].append({
@@ -10595,17 +10639,18 @@ def system_health_check():
     except:
         pass
     # 6. 用户数据
-    for user in USERS:
-        try:
-            db_path = get_user_db_path(user)
-            if os.path.exists(db_path):
-                size = os.path.getsize(db_path)
-                size_str = f'{size/1024:.1f}KB' if size < 1024*1024 else f'{size/(1024*1024):.1f}MB'
-                health['checks'].append({'name': f'{user}.db', 'status': 'ok', 'detail': size_str})
-            else:
-                health['checks'].append({'name': f'{user}.db', 'status': 'info', 'detail': '未创建'})
-        except:
-            pass
+    if not postgres_mode():
+        for user in USERS:
+            try:
+                db_path = get_user_db_path(user)
+                if os.path.exists(db_path):
+                    size = os.path.getsize(db_path)
+                    size_str = f'{size/1024:.1f}KB' if size < 1024*1024 else f'{size/(1024*1024):.1f}MB'
+                    health['checks'].append({'name': f'{user}.db', 'status': 'ok', 'detail': size_str})
+                else:
+                    health['checks'].append({'name': f'{user}.db', 'status': 'info', 'detail': '未创建'})
+            except:
+                pass
     return jsonify(health)
 
 

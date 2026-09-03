@@ -478,7 +478,7 @@
           </div>
         </div>
         <div class="card ai-integration-card" id="aiIntegrationSettingsCard" style="margin-bottom:22px;" aria-labelledby="aiIntegrationTitle">
-          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>系统内所有 AI 功能共用当前生效的这一套接口；截图识别要求模型支持图片输入。连接测试不会携带客户资料。</p></div></div>
+          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>系统内所有 AI 功能共用当前生效的这一套接口；支持的服务商可读取模型列表，也可以手动填写。截图识别要求模型支持图片输入。连接测试不会携带客户资料。</p></div></div>
           <div class="card-body">
             <div class="ai-config-status" id="aiConfigStatus" aria-live="polite">正在读取 AI 配置…</div>
             <div class="ai-config-form" id="aiConfigForm" hidden>
@@ -494,7 +494,16 @@
                 </select></label>
                 <label id="aiConfigApiKeyField">共享 API Key<input class="form-control" id="aiConfigApiKey" type="password" autocomplete="new-password" placeholder="留空表示保留已保存的 Key"></label>
                 <label>共享 Base URL<input class="form-control" id="aiConfigBaseUrl" type="url" autocomplete="url" placeholder="https://api.example.com/v1"></label>
-                <label>共享模型名<input class="form-control" id="aiConfigModel" type="text" autocomplete="off" placeholder="模型名称"></label>
+                <label>共享模型名
+                  <div class="ai-config-model-control">
+                    <input class="form-control" id="aiConfigModel" type="text" autocomplete="off" placeholder="模型名称" oninput="syncAiModelPicker()">
+                    <button class="btn btn-sm" id="aiConfigModelsButton" type="button" onclick="loadAiModels()">读取可用模型</button>
+                  </div>
+                  <select class="form-control ai-config-model-picker" id="aiConfigModelPicker" aria-label="从可用模型中选择" onchange="chooseAiModelFromList()" hidden>
+                    <option value="">读取后可选择模型</option>
+                  </select>
+                  <span class="ai-config-model-status" id="aiConfigModelStatus" aria-live="polite"></span>
+                </label>
               </div>
               <p class="settings-help" id="aiConfigHelp">API Key 只保存在服务端的独立权限文件中，页面不会回显明文；修改后立即对新的 AI 请求生效。</p>
               <div class="ai-config-actions">

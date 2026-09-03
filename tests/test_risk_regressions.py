@@ -663,6 +663,75 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(client.delete(f'/api/customers/{customer_id}/permanent').status_code, 200)
         self.assertEqual(client.get(f'/api/customers/{customer_id}').status_code, 404)
 
+    def test_contact_update_returns_saved_contact_preserves_fields_and_supports_undo(self):
+        spec = importlib.util.spec_from_file_location('crm_app_contact_update_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company) VALUES ('联系人编辑客户', 'Contact Edit Co.')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute('''INSERT INTO contacts
+                            (customer_id, name, title, email, phone, whatsapp, linkedin,
+                             preferred_channel, contact_type, is_primary, notes)
+                            VALUES (?, '原联系人', '原职位', 'original@example.com', '100', '200',
+                                    'https://linkedin.example/original', 'email', 'person', 1, '保留备注')''',
+                         (customer_id,))
+            contact_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        with mock.patch.object(module, 'schedule_safety_backup'):
+            response = client.put(f'/api/contacts/{contact_id}', json={
+                'name': '更新联系人',
+                'title': '采购负责人',
+                'email': ' UPDATED@example.com ',
+                'phone': '300',
+                'whatsapp': '400',
+                'linkedin': 'https://linkedin.example/updated',
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertEqual(payload['contact']['name'], '更新联系人')
+        self.assertEqual(payload['contact']['email'], 'updated@example.com')
+        self.assertTrue(payload['undo_token'])
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        conn.row_factory = sqlite3.Row
+        try:
+            saved = conn.execute('SELECT * FROM contacts WHERE id=?', (contact_id,)).fetchone()
+            self.assertEqual(saved['preferred_channel'], 'email')
+            self.assertEqual(saved['contact_type'], 'person')
+            self.assertEqual(saved['is_primary'], 1)
+            self.assertEqual(saved['notes'], '保留备注')
+            conn.execute("INSERT INTO contacts (customer_id, name, email) VALUES (?, '其他联系人', 'other@example.com')",
+                         (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        conflict = client.put(f'/api/contacts/{contact_id}', json={'email': 'other@example.com'})
+        self.assertEqual(conflict.status_code, 409, conflict.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            unchanged = conn.execute('SELECT email FROM contacts WHERE id=?', (contact_id,)).fetchone()
+            self.assertEqual(unchanged[0], 'updated@example.com')
+        finally:
+            conn.close()
+
+        with mock.patch.object(module, 'schedule_safety_backup'):
+            undone = client.post('/api/undo/' + payload['undo_token'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            restored = conn.execute('SELECT name, email, phone FROM contacts WHERE id=?', (contact_id,)).fetchone()
+            self.assertEqual(tuple(restored), ('原联系人', 'original@example.com', '100'))
+        finally:
+            conn.close()
+
     def test_contact_delete_checks_history_and_supports_undo(self):
         spec = importlib.util.spec_from_file_location('crm_app_contact_delete_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
@@ -1873,6 +1942,21 @@ class CustomerAiSummaryTest(unittest.TestCase):
         self.assertFalse(member_status.get_json()['can_edit'])
         self.assertEqual(member.put('/api/ai/config', json={'backend': 'openai'}).status_code, 403)
         self.assertEqual(member.post('/api/ai/config/test', json={'backend': 'openai'}).status_code, 403)
+        self.assertEqual(member.post('/api/ai/config/models', json={'backend': 'openai'}).status_code, 403)
+
+        with mock.patch.object(module, 'list_ai_models', return_value={
+            'success': True, 'provider': 'openai', 'models': [{'id': 'test-model'}],
+        }) as list_models:
+            response = client.post('/api/ai/config/models', json={
+                'backend': 'openai', 'api_key': 'pending-secret',
+                'base_url': 'https://api.example.test/v1',
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        list_models.assert_called_once_with({
+            'backend': 'openai', 'api_key': 'pending-secret',
+            'base_url': 'https://api.example.test/v1',
+        })
+        self.assertNotIn('pending-secret', response.get_data(as_text=True))
 
     def test_ai_config_connection_test_is_separate_and_never_gets_crm_context(self):
         module, client, _ = self._module_client_customer()
@@ -1959,6 +2043,93 @@ class AiEngineConfigTest(unittest.TestCase):
                 self.assertEqual(kwargs['headers']['Authorization'], 'Bearer shared-test-secret')
                 self.assertEqual(kwargs['json']['model'], 'vision-test-model')
                 self.assertEqual(kwargs['json']['messages'][0]['content'][1]['image_url']['url'], 'data:image/png;base64,AAAA')
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            engine._runtime_ai_config()
+            config_dir.cleanup()
+
+    def test_list_ai_models_reads_openai_compatible_pending_config(self):
+        import app.engine as engine
+
+        config_dir = tempfile.TemporaryDirectory()
+        config_path = os.path.join(config_dir.name, 'ai-config.env')
+        original_env = {key: os.environ.get(key) for key in engine._AI_CONFIG_KEYS}
+        try:
+            for key in engine._AI_CONFIG_KEYS:
+                os.environ.pop(key, None)
+            with mock.patch.object(engine, '_AI_CONFIG_FILE', config_path), \
+                    mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}):
+                response = mock.Mock()
+                response.json.return_value = {
+                    'object': 'list',
+                    'data': [
+                        {'id': 'model-a'}, {'id': 'model-a'}, {'id': 'model-b'},
+                        {'name': 'model-c'}, {'id': 'bad\nmodel'},
+                    ],
+                }
+                with mock.patch.object(engine.requests, 'get', return_value=response) as request:
+                    result = engine.list_ai_models({
+                        'backend': 'openai',
+                        'api_key': 'pending-secret',
+                        'base_url': 'https://api.example.test/v1',
+                    })
+                self.assertTrue(result['success'])
+                self.assertEqual(result['models'], [
+                    {'id': 'model-a'}, {'id': 'model-b'}, {'id': 'model-c'},
+                ])
+                request.assert_called_once_with(
+                    'https://api.example.test/v1/models',
+                    headers={
+                        'Accept': 'application/json',
+                        'Authorization': 'Bearer pending-secret',
+                    },
+                    timeout=20,
+                )
+                self.assertNotIn('pending-secret', json.dumps(result, ensure_ascii=False))
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            engine._runtime_ai_config()
+            config_dir.cleanup()
+
+    def test_list_ai_models_uses_ollama_tags_without_api_key(self):
+        import app.engine as engine
+
+        config_dir = tempfile.TemporaryDirectory()
+        config_path = os.path.join(config_dir.name, 'ai-config.env')
+        original_env = {key: os.environ.get(key) for key in engine._AI_CONFIG_KEYS}
+        try:
+            for key in engine._AI_CONFIG_KEYS:
+                os.environ.pop(key, None)
+            with mock.patch.object(engine, '_AI_CONFIG_FILE', config_path), \
+                    mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}):
+                response = mock.Mock()
+                response.json.return_value = {'models': [
+                    {'name': 'qwen2.5:7b', 'model': 'qwen2.5:7b'},
+                    {'name': 'llama3.2'},
+                ]}
+                with mock.patch.object(engine.requests, 'get', return_value=response) as request:
+                    result = engine.list_ai_models({
+                        'backend': 'ollama',
+                        'base_url': 'http://localhost:11434',
+                    })
+                self.assertTrue(result['success'])
+                self.assertEqual(result['models'], [
+                    {'id': 'qwen2.5:7b'}, {'id': 'llama3.2'},
+                ])
+                request.assert_called_once_with(
+                    'http://localhost:11434/api/tags',
+                    headers={'Accept': 'application/json'},
+                    timeout=20,
+                    proxies={'http': None, 'https': None},
+                )
         finally:
             for key, value in original_env.items():
                 if value is None:
