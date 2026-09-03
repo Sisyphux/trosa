@@ -1494,6 +1494,7 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     
     返回: {'checked': N, 'changed': N, 'errors': N, 'reminders_created': N}
     """
+    import sqlite3
     from datetime import datetime, timedelta
     from db import get_db, postgres_mode
     
@@ -1502,9 +1503,10 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     # Keep the legacy path for production/local SQLite, but do not let this
     # background feature silently open the old file when the unified backend
     # is explicitly enabled.
-    conn = get_db() if postgres_mode() else __import__('sqlite3').connect(db_path)
-    if not postgres_mode():
-        conn.row_factory = __import__('sqlite3').Row
+    using_postgres = postgres_mode()
+    conn = get_db() if using_postgres else sqlite3.connect(db_path)
+    if not using_postgres:
+        conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
     # 查询目标客户
@@ -1526,6 +1528,7 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     today = datetime.now().strftime('%Y-%m-%d')
     
     for customer in customers:
+        customer = dict(customer)
         if result['reminders_created'] >= max_changes:
             break
         
@@ -1554,6 +1557,8 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
                      WHERE customer_id = ? AND status = 'ok'
                      ORDER BY checked_at DESC LIMIT 1''', (customer_id,))
         last_log = c.fetchone()
+        if last_log:
+            last_log = dict(last_log)
         
         if last_log and last_log['content_hash']:
             last_hash = last_log['content_hash']
