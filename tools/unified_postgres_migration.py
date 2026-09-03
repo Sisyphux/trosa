@@ -18,8 +18,15 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = ROOT / "migrations" / "0001_unified_trade_os.sql"
-TARGET_SCHEMAS = ("identity", "core", "trosa", "sela", "audit")
+SCHEMA_PATHS = (
+    ROOT / "migrations" / "0001_unified_trade_os.sql",
+    ROOT / "migrations" / "0002_postgres_runtime.sql",
+    ROOT / "migrations" / "0003_postgres_app_compat.sql",
+    ROOT / "migrations" / "0004_postgres_runtime_surfaces.sql",
+    ROOT / "migrations" / "0005_postgres_runtime_write_fixes.sql",
+    ROOT / "migrations" / "0006_postgres_runtime_surface_writes.sql",
+)
+TARGET_SCHEMAS = ("identity", "core", "trosa", "sela", "audit", "trade_os_compat")
 TARGET_TABLES = (
     "identity.organizations",
     "identity.users",
@@ -32,6 +39,21 @@ TARGET_TABLES = (
     "sela.run_activity_events",
     "audit.import_batches",
     "audit.legacy_records",
+    "trosa.account_legacy_refs",
+    "trosa.legacy_row_refs",
+    "trosa.contact_legacy_refs",
+    "trosa.weekly_reports",
+    "trade_os_compat.app_settings",
+    "trade_os_compat.customer_file_rows",
+    "trade_os_compat.operation_log_rows",
+    "trade_os_compat.agent_proposal_rows",
+    "trade_os_compat.agent_action_rows",
+    "trade_os_compat.undo_action_rows",
+    "trade_os_compat.gmail_message_state_rows",
+    "trade_os_compat.communication_source_rows",
+    "trade_os_compat.communication_source_item_rows",
+    "trosa.email_message_receipts",
+    "trosa.email_delivery_events",
 )
 
 
@@ -40,6 +62,17 @@ def sha256(path: Path) -> str:
     with path.open("rb") as handle:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
+    return digest.hexdigest()
+
+
+def schema_sha256() -> str:
+    digest = hashlib.sha256()
+    for path in SCHEMA_PATHS:
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
     return digest.hexdigest()
 
 
@@ -116,7 +149,7 @@ def source_manifest(trosa_data_dir: Path, sela_data_dir: Path) -> dict[str, Any]
     }
     return {
         "generated_at": iso_now(),
-        "schema_sha256": sha256(SCHEMA_PATH),
+        "schema_sha256": schema_sha256(),
         "trosa": trosa,
         "sela": sela,
         "expected_counts": {"sela_candidates": candidates, "sela_feedback_events": feedback,
@@ -136,10 +169,10 @@ def postgres_connection(dsn: str):
 
 
 def apply_schema(dsn: str) -> None:
-    schema = SCHEMA_PATH.read_text(encoding="utf-8")
     with postgres_connection(dsn) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(schema)
+            for schema_path in SCHEMA_PATHS:
+                cursor.execute(schema_path.read_text(encoding="utf-8"))
         connection.commit()
 
 

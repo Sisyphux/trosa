@@ -25,8 +25,193 @@ USERS = {
 USERS_LIST = list(USERS.keys())
 
 
+def postgres_mode():
+    """Return whether this process explicitly opts into unified PostgreSQL."""
+    return (
+        os.environ.get('TRADE_OS_DATA_BACKEND', '').strip().lower() == 'postgres'
+        and bool(os.environ.get('TRADE_OS_DATABASE_URL', '').strip())
+    )
+
+
+def _postgres_dsn():
+    if not postgres_mode():
+        raise RuntimeError('TRADE_OS_DATA_BACKEND=postgres and TRADE_OS_DATABASE_URL are required')
+    return os.environ['TRADE_OS_DATABASE_URL'].strip()
+
+
+def _postgres_org_id():
+    return uuid.uuid5(uuid.NAMESPACE_URL, 'trade-os:organization')
+
+
+def _postgres_user_id(user):
+    namespace = uuid.uuid5(uuid.NAMESPACE_URL, 'trade-os:unified-import')
+    return uuid.uuid5(namespace, f'user:{user}')
+
+
+def _postgres_migration_paths():
+    root = os.path.dirname(os.path.abspath(__file__))
+    return (
+        os.path.join(root, 'migrations', '0001_unified_trade_os.sql'),
+        os.path.join(root, 'migrations', '0002_postgres_runtime.sql'),
+        os.path.join(root, 'migrations', '0003_postgres_app_compat.sql'),
+        os.path.join(root, 'migrations', '0004_postgres_runtime_surfaces.sql'),
+        os.path.join(root, 'migrations', '0005_postgres_runtime_write_fixes.sql'),
+        os.path.join(root, 'migrations', '0006_postgres_runtime_surface_writes.sql'),
+    )
+
+
+_POSTGRES_SCHEMA_SENTINELS = (
+    'identity.organizations',
+    'identity.users',
+    'core.companies',
+    'trosa.accounts',
+    'trosa.tasks',
+    'sela.prospects',
+    'audit.events',
+    'trade_os_compat.users',
+    'trade_os_compat.agent_actions',
+    'trade_os_compat.email_verifications',
+    'trade_os_compat.weekly_reports',
+    'trade_os_compat.imported_activity_rows',
+)
+
+
+def _postgres_schema_ready(cursor):
+    """Return whether the complete application compatibility surface exists."""
+    cursor.execute(
+        '''SELECT COUNT(*) = %s
+             FROM unnest(%s::text[]) AS required(object_name)
+            WHERE to_regclass(required.object_name) IS NOT NULL''',
+        (len(_POSTGRES_SCHEMA_SENTINELS), list(_POSTGRES_SCHEMA_SENTINELS)),
+    )
+    return bool(cursor.fetchone()[0])
+
+
+def init_postgres_store():
+    """Apply the runtime schema once and ensure built-in identities exist.
+
+    The rehearsal service can restart frequently.  Replaying every DDL file on
+    every start makes startup needlessly long and creates a large failure
+    window for a remote database connection.  A small schema ledger lets a
+    fresh database run all migrations while an already-complete database only
+    performs a readiness check.  The advisory lock also keeps two workers from
+    attempting the first install at the same time.
+    """
+    import psycopg
+
+    migration_paths = _postgres_migration_paths()
+    with psycopg.connect(_postgres_dsn()) as conn:
+        with conn.cursor() as cursor:
+            # ``audit`` is also used for the ledger.  Creating only this
+            # bookkeeping object is safe before the first application schema.
+            cursor.execute('CREATE SCHEMA IF NOT EXISTS audit')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS audit.schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    sha256 TEXT NOT NULL,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            ''')
+            cursor.execute("SELECT pg_advisory_lock(hashtext(%s))", ('trade-os:postgres-schema',))
+            try:
+                schema_ready = _postgres_schema_ready(cursor)
+                cursor.execute('SELECT name, sha256 FROM audit.schema_migrations')
+                applied = {name: digest for name, digest in cursor.fetchall()}
+                migration_contents = []
+                for path in migration_paths:
+                    with open(path, 'r', encoding='utf-8') as handle:
+                        contents = handle.read()
+                    migration_contents.append((os.path.basename(path), contents, hashlib.sha256(contents.encode('utf-8')).hexdigest()))
+
+                # The imported rehearsal database predates the ledger.  Its
+                # full sentinel set is checked before adopting it as the
+                # current baseline, so startup does not replay a 30-second
+                # migration batch merely to create bookkeeping rows.
+                if schema_ready and not applied:
+                    cursor.executemany(
+                        '''INSERT INTO audit.schema_migrations (name, sha256)
+                           VALUES (%s, %s) ON CONFLICT (name) DO NOTHING''',
+                        [(name, digest) for name, _, digest in migration_contents],
+                    )
+                    conn.commit()
+                else:
+                    # The setup queries above opened a transaction.  Every
+                    # migration file starts with ``BEGIN`` and ends with
+                    # ``COMMIT``, so leave the connection idle before the
+                    # first file is executed.
+                    conn.commit()
+                    for name, contents, digest in migration_contents:
+                        if applied.get(name) == digest:
+                            continue
+                        cursor.execute(contents)
+                        cursor.execute(
+                            '''INSERT INTO audit.schema_migrations (name, sha256)
+                               VALUES (%s, %s)
+                               ON CONFLICT (name) DO UPDATE SET sha256=excluded.sha256,
+                                 applied_at=now()''',
+                            (name, digest),
+                        )
+                        # Migration files contain their own transaction
+                        # boundaries.  Commit the ledger row before the next
+                        # file starts its transaction.
+                        conn.commit()
+            finally:
+                try:
+                    cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", ('trade-os:postgres-schema',))
+                    conn.commit()
+                except psycopg.Error:
+                    # Closing the connection releases the session lock if the
+                    # migration failed and PostgreSQL marked the transaction
+                    # as aborted.
+                    conn.rollback()
+            org_id = _postgres_org_id()
+            cursor.execute(
+                '''INSERT INTO identity.organizations (id, name)
+                   VALUES (%s, 'Trade OS')
+                   ON CONFLICT (id) DO UPDATE SET updated_at=now()''',
+                (org_id,),
+            )
+            for user_id, info in USERS.items():
+                role = info.get('role', 'admin' if user_id == 'hamid' else 'member')
+                cursor.execute(
+                    '''INSERT INTO identity.users
+                       (id, organization_id, legacy_user_id, username, display_name, label, color,
+                        role, active, password_hash, created_by)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, '', 'system')
+                       ON CONFLICT (organization_id, legacy_user_id) DO UPDATE SET
+                         username=COALESCE(NULLIF(identity.users.username,''), excluded.username),
+                         display_name=excluded.display_name,
+                         label=excluded.label,
+                         color=excluded.color,
+                         updated_at=now()''',
+                    (_postgres_user_id(user_id), org_id, user_id, user_id,
+                     info.get('name', user_id), info.get('label', user_id),
+                     info.get('color', '#8B7355'), role),
+                )
+                cursor.execute(
+                    '''INSERT INTO identity.memberships (organization_id, user_id, role)
+                       VALUES (%s, %s, %s) ON CONFLICT DO NOTHING''',
+                    (org_id, _postgres_user_id(user_id), role),
+                )
+        conn.commit()
+    return True
+
+
 def get_registered_users(include_inactive=True):
     """Return the system user registry, including dynamically invited members."""
+    if postgres_mode():
+        import psycopg
+        with psycopg.connect(_postgres_dsn()) as conn:
+            with conn.cursor() as cursor:
+                query = '''SELECT id, username, name, label, color, password_hash,
+                                  role, created_by, active, created_at
+                             FROM trade_os_compat.users'''
+                if not include_inactive:
+                    query += ' WHERE active = 1'
+                rows = cursor.execute(query + ' ORDER BY name, username').fetchall()
+        columns = ('id', 'username', 'name', 'label', 'color', 'password_hash',
+                   'role', 'created_by', 'active', 'created_at')
+        return [dict(zip(columns, row)) for row in rows]
     ensure_db_dir()
     path = os.path.join(DB_DIR, 'system.db')
     if not os.path.exists(path):
@@ -170,6 +355,9 @@ def ensure_db_dir():
 
 def get_system_db():
     """获取系统数据库连接（存放用户元数据、周报等）"""
+    if postgres_mode():
+        from postgres_compat import connect
+        return connect('system')
     ensure_db_dir()
     path = os.path.join(DB_DIR, 'system.db')
     conn = sqlite3.connect(path, timeout=30.0)
@@ -186,6 +374,8 @@ def get_system_db():
 
 def get_user_db_path(user):
     """获取用户数据库文件路径"""
+    if postgres_mode():
+        return 'PostgreSQL unified data base'
     if user in USERS:
         return os.path.join(DB_DIR, f'{user}.db')
     return os.path.join(DB_DIR, 'system.db')
@@ -193,6 +383,9 @@ def get_user_db_path(user):
 
 def get_db():
     """获取当前用户的数据库连接（根据线程上下文自动路由）"""
+    if postgres_mode():
+        from postgres_compat import connect
+        return connect(get_current_user() or 'hamid')
     ensure_db_dir()
     user = get_current_user()
     if user and user in USERS:
@@ -217,6 +410,19 @@ def get_db():
 
 def check_integrity():
     """检查所有数据库的完整性，返回检查结果"""
+    if postgres_mode():
+        try:
+            import psycopg
+            with psycopg.connect(_postgres_dsn()) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute('SELECT 1 FROM identity.organizations LIMIT 1')
+                    if cursor.fetchone() is None:
+                        return {'postgresql': 'organization_not_found'}
+                    cursor.execute('SELECT 1 FROM core.companies LIMIT 1')
+                    cursor.execute('SELECT 1 FROM trosa.accounts LIMIT 1')
+            return {'postgresql': 'ok'}
+        except Exception as exc:
+            return {'postgresql': f'error: {exc}'}
     results = {}
     ensure_db_dir()
     
@@ -268,6 +474,12 @@ def _sqlite_snapshot(source_path, destination_path):
 
 def backup_database(reason='manual'):
     """Create a timestamped, checksummed snapshot of databases and CRM attachments."""
+    if postgres_mode():
+        # PostgreSQL backups are owned by the database operator.  Never copy
+        # an unrelated SQLite directory just because a PG-mode request caused
+        # the legacy safety-backup timer to fire.
+        logger.info('PostgreSQL 模式跳过 SQLite 文件快照 [%s]', reason)
+        return {'backed_up': [], 'failed': [], 'path': '', 'database': 'postgresql'}
     ensure_db_dir()
     now = datetime.now()
     date_str = now.strftime('%Y-%m-%d')
@@ -1353,6 +1565,10 @@ def _migrate_customer_level_constraint(cursor):
 
 def init_user_tables(user):
     """初始化/迁移单个用户的数据库"""
+    if postgres_mode():
+        # PostgreSQL migrations are applied once at process startup.  The
+        # legacy per-user SQLite DDL and seed path must never run in PG mode.
+        return
     old_user = get_current_user()
     set_db_user(user)
     try:
@@ -1514,6 +1730,8 @@ def seed_demo_data_for_user(user):
 
 def init_system_db():
     """初始化系统数据库（用户信息、周报等）"""
+    if postgres_mode():
+        return init_postgres_store()
     conn = get_system_db()
     c = conn.cursor()
     
@@ -1607,6 +1825,17 @@ def init_system_db():
 
 def init_all_dbs():
     """初始化所有数据库"""
+    if postgres_mode():
+        ensure_db_dir()
+        ensure_db_identity()
+        init_postgres_store()
+        refresh_users_registry()
+        integrity = check_integrity()
+        for name, status in integrity.items():
+            if status != 'ok':
+                logger.warning(f'数据库完整性检查 [{name}]: {status}')
+        logger.info('PostgreSQL unified data base initialized')
+        return integrity
     ensure_db_dir()
     ensure_db_identity()
     

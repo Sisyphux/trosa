@@ -155,9 +155,9 @@ const getToday = defineTool({
 	name: "get_today",
 	label: "Get today",
 	description: "读取当前 Trosa 用户今天到期的明确待办。",
-	parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 })) }),
+	parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })) }),
 	async execute(_id, params) {
-		return gatewayToolResult(await gateway(`/api/gateway/today?limit=${params.limit || 15}`));
+		return gatewayToolResult(await gateway(`/api/gateway/today?limit=${params.limit || 50}`));
 	},
 });
 

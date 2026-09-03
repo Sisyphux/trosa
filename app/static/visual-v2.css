@@ -3387,6 +3387,21 @@ tbody td { color: var(--v2-ink-soft); }
   white-space: nowrap;
 }
 
+.global-search-preview-summary {
+  padding: 8px 12px 5px;
+  border-top: 1px solid rgba(92,82,66,.1);
+  color: var(--v2-ink-muted);
+  font-size: var(--fs-micro);
+  text-align: right;
+}
+
+mark.search-hit {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(255, 220, 135, .78);
+  color: inherit;
+}
+
 .customer-match-context {
   display: flex;
   align-items: baseline;

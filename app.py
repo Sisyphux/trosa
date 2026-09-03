@@ -25,6 +25,7 @@ import ipaddress
 import zipfile
 import tarfile
 import email
+import unicodedata
 from email import policy as email_policy
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse, urlencode
@@ -38,6 +39,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
 from db import (
     get_db, get_system_db, get_user_db_path, set_db_user, get_current_user, get_app_root,
+    postgres_mode,
     init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
     init_user_tables, refresh_users_registry,
     backup_database, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
@@ -2188,7 +2190,8 @@ def sela_integration_exclusions():
                FROM customers c
                LEFT JOIN outreach_emails o ON o.customer_id=c.id
                WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)
-               GROUP BY c.id
+               GROUP BY c.id, c.name, c.company, c.country, c.website, c.status,
+                        c.customer_type, c.last_contact, c.updated_at
                ORDER BY c.id'''
         ).fetchall()
     finally:
@@ -2724,6 +2727,162 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
         })
     return contexts
 
+
+# Search is still deliberately deterministic and local.  The values below
+# describe the order in which a person normally recognizes a customer, while
+# keeping communication and task text searchable as a lower-confidence fallback.
+_CUSTOMER_SEARCH_FIELD_RULES = (
+    ('company', '公司名称', 130),
+    ('name', '客户名称', 110),
+    ('country', '国家', 85),
+    ('field', '行业', 85),
+    ('industry', '行业', 85),
+    ('type', '客户类型', 65),
+    ('tags', '标签', 60),
+    ('notes', '客户备注', 30),
+    ('profile', '客户资料', 25),
+)
+_CUSTOMER_SEARCH_CONTEXT_WEIGHTS = {
+    'contact': 65,
+    'communication': 40,
+    'inbox': 38,
+    'task': 20,
+}
+_CUSTOMER_SEARCH_MATCH_BONUS = {1: 0, 2: 15, 3: 32}
+_CUSTOMER_SEARCH_CONTEXT_BONUS = {1: 0, 2: 8, 3: 15}
+
+
+def _search_normalize(value):
+    """Normalize only for comparison; the original display value is preserved."""
+    return unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
+
+
+def _search_match_level(value, token):
+    normalized_value = _search_normalize(value)
+    normalized_token = _search_normalize(token)
+    if not normalized_value or not normalized_token:
+        return 0
+    if normalized_value == normalized_token:
+        return 3
+    if normalized_value.startswith(normalized_token):
+        return 2
+    if normalized_token in normalized_value:
+        return 1
+    return 0
+
+
+def _customer_search_rank_data(cursor, customers, search_tokens):
+    """Return deterministic scores and bounded explanations for customer rows."""
+    if not customers or not search_tokens:
+        return {}
+
+    customer_ids = [customer['id'] for customer in customers]
+    # The context helper uses one IN clause per query.  Keep each batch below
+    # SQLite's usual bind-variable limit when a user's customer list is large.
+    contexts = {}
+    for start in range(0, len(customer_ids), 250):
+        batch_ids = customer_ids[start:start + 250]
+        contexts.update(_customer_search_match_contexts(cursor, batch_ids, search_tokens))
+
+    ranked = {}
+    for customer in customers:
+        field_entries = {}
+        token_best = {}
+        for field, label, weight in _CUSTOMER_SEARCH_FIELD_RULES:
+            value = str(customer.get(field) or '').strip()
+            if not value:
+                continue
+            # Many imported records repeat the company in both ``name`` and
+            # ``company``.  Treat that as one identity hit, not two reasons.
+            if field == 'name' and _search_normalize(value) == _search_normalize(customer.get('company')):
+                continue
+            for token in search_tokens:
+                level = _search_match_level(value, token)
+                if not level:
+                    continue
+                score = weight + _CUSTOMER_SEARCH_MATCH_BONUS[level]
+                entry = {
+                    'type': 'customer_field', 'field': field, 'label': label,
+                    'text': value[:240], 'token': token, 'score': score,
+                }
+                key = ('customer_field', field)
+                if key not in field_entries or field_entries[key]['score'] < score:
+                    field_entries[key] = entry
+                token_best[token] = max(token_best.get(token, 0), score)
+
+        context = contexts.get(customer['id'])
+        context_entry = None
+        context_score = 0
+        context_token = ''
+        if context:
+            context_text = str(context.get('content') or context.get('title') or context.get('contact_name') or '').strip()
+            base_weight = _CUSTOMER_SEARCH_CONTEXT_WEIGHTS.get(context.get('type'), 20)
+            for token in search_tokens:
+                level = _search_match_level(context_text, token)
+                if not level:
+                    continue
+                score = base_weight + _CUSTOMER_SEARCH_CONTEXT_BONUS[level]
+                if score > context_score:
+                    context_score = score
+                    context_token = token
+                token_best[token] = max(token_best.get(token, 0), score)
+            if context_score:
+                context_entry = {
+                    'type': 'context', 'context_type': context.get('type') or '',
+                    'label': context.get('label') or '相关记录', 'text': context_text[:240],
+                    'token': context_token, 'score': context_score,
+                }
+
+        entries = list(field_entries.values())
+        if context_entry:
+            entries.append(context_entry)
+        entries.sort(key=lambda entry: (-entry['score'], entry['label'], entry['text']))
+
+        best_field = max(field_entries.values(), key=lambda entry: entry['score'], default=None)
+        if best_field and best_field['score'] >= context_score:
+            selected_context = {
+                'type': 'customer_field', 'label': best_field['label'],
+                'field': best_field['field'], 'content': best_field['text'],
+                'match_token': best_field['token'], 'action': 'view',
+            }
+        elif context:
+            selected_context = dict(context)
+            if context_token:
+                selected_context['match_token'] = context_token
+        else:
+            selected_context = None
+
+        reasons = []
+        selected_label = (selected_context or {}).get('label')
+        if selected_label:
+            reasons.append(selected_label + '命中')
+        ranked[customer['id']] = {
+            'score': sum(token_best.get(token, 0) for token in search_tokens),
+            'matches': [
+                {key: value for key, value in entry.items() if key != 'score'}
+                for entry in entries[:6]
+            ],
+            'reasons': reasons[:4],
+            'context': selected_context,
+        }
+    return ranked
+
+
+def _deduplicate_customer_search_results(customers):
+    """Keep one stable customer row per normalized company in search results."""
+    unique_customers = []
+    seen_companies = set()
+    for customer in customers:
+        company_key = _search_normalize(customer.get('company') or customer.get('name'))
+        if not company_key:
+            company_key = 'customer:' + str(customer.get('id'))
+        if company_key in seen_companies:
+            continue
+        seen_companies.add(company_key)
+        unique_customers.append(customer)
+    return unique_customers
+
+
 @app.route('/api/customers', methods=['GET'])
 @login_required
 def get_customers():
@@ -2797,7 +2956,7 @@ def get_customers():
     cleaned_search = re.sub(r'[，,；;]+', ' ', cleaned_search).strip()
     page_value = request.args.get('page', '').strip()
     try:
-        per_page = min(max(int(request.args.get('per_page', 30) or 30), 10), 100)
+        per_page = min(max(int(request.args.get('per_page', 30) or 30), 5), 100)
         page = max(int(page_value or 1), 1)
     except ValueError:
         per_page, page = 30, 1
@@ -2887,9 +3046,15 @@ def get_customers():
         view not in ('', 'all') or days_min or days_max or last_from or last_to or next_state
     )
     # Keep the legacy unpaged API response for callers that omit ``page``.
-    database_pagination = bool(page_value) and not requires_python_filtering
+    # Search results need to be ranked before slicing into pages.  The query
+    # remains bounded for normal customer views, while search loads its
+    # candidate set and applies one stable relevance order below.
+    database_pagination = bool(page_value) and not requires_python_filtering and not cleaned_search
     if database_pagination:
-        count_query = query.replace('SELECT * FROM customers', 'SELECT COUNT(*) FROM customers', 1)
+        # SQLite ignores ORDER BY for a scalar COUNT, while PostgreSQL rejects
+        # the ungrouped sort columns.  Count the same filtered relation
+        # without ordering.
+        count_query = query.split(' ORDER BY ', 1)[0].replace('SELECT * FROM customers', 'SELECT COUNT(*) FROM customers', 1)
         c.execute(count_query, params)
         total = c.fetchone()[0]
         query += ' LIMIT ? OFFSET ?'
@@ -2914,10 +3079,17 @@ def get_customers():
         for cust in customers:
             cust['last_contact'] = last_contacts.get(cust['id'], '')
 
-        c.execute(f'''SELECT customer_id, MIN(remind_date) AS next_task_date, title AS next_task_title
-                      FROM reminders
-                      WHERE is_done = 0 AND customer_id IN ({placeholders})
-                      GROUP BY customer_id''', customer_ids)
+        # SQLite historically allowed selecting ``title`` beside the grouped
+        # MIN(remind_date), but PostgreSQL correctly rejects that ambiguous
+        # aggregate.  Resolve the title with the same stable date/id order so
+        # both backends return the task that owns the computed next date.
+        c.execute(f'''SELECT r.customer_id, MIN(r.remind_date) AS next_task_date,
+                             (SELECT r2.title FROM reminders r2
+                              WHERE r2.customer_id = r.customer_id AND r2.is_done = 0
+                              ORDER BY r2.remind_date ASC, r2.id ASC LIMIT 1) AS next_task_title
+                      FROM reminders r
+                      WHERE r.is_done = 0 AND r.customer_id IN ({placeholders})
+                      GROUP BY r.customer_id''', customer_ids)
         next_tasks = {row['customer_id']: dict(row) for row in c.fetchall()}
 
         c.execute(f'''SELECT o.customer_id, o.sent_date, o.reply_status
@@ -3050,15 +3222,28 @@ def get_customers():
             interpreted_filters.append({'scheduled': '已有下一步', 'none': '尚无下一步', 'overdue': '下一步已逾期'}.get(next_state, next_state))
 
         interpreted_filters = list(dict.fromkeys(interpreted_filters))
-        for cust in customers:
-            reasons = []
-            if cleaned_search:
-                reasons.append('匹配搜索内容')
-            reasons.extend(interpreted_filters[:4])
-            cust['match_reasons'] = reasons
-        search_contexts = _customer_search_match_contexts(c, [cust['id'] for cust in customers], search_tokens)
-        for cust in customers:
-            cust['match_context'] = search_contexts.get(cust['id'])
+        if cleaned_search:
+            search_rank_data = _customer_search_rank_data(c, customers, search_tokens)
+            for cust in customers:
+                rank_data = search_rank_data.get(cust['id'], {})
+                cust['search_matches'] = rank_data.get('matches', [])
+                cust['match_context'] = rank_data.get('context')
+                reasons = list(interpreted_filters[:4])
+                cust['match_reasons'] = list(dict.fromkeys(reasons))[:6]
+                cust['_search_score'] = rank_data.get('score', 0)
+            # The SQL order remains the stable tie-breaker (pinned customers,
+            # then the requested date/name order) when relevance is equal.
+            customers.sort(key=lambda item: -item.get('_search_score', 0))
+            customers = _deduplicate_customer_search_results(customers)
+            for cust in customers:
+                cust.pop('_search_score', None)
+        else:
+            for cust in customers:
+                reasons = []
+                reasons.extend(interpreted_filters[:4])
+                cust['match_reasons'] = reasons
+                cust['search_matches'] = []
+                cust['match_context'] = None
 
     if not database_pagination:
         total = len(customers)
@@ -6797,7 +6982,7 @@ def _pi_agent_enabled():
 
 
 def _pi_agent_session_path():
-    """Create a private, per-browser Pi session file path."""
+    """Return the legacy session path for compatibility; current Pi turns do not use it."""
     session_id = session.get('trosa_pi_session_id')
     if not isinstance(session_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', session_id):
         session_id = secrets.token_urlsafe(24)
@@ -6860,11 +7045,13 @@ def _parse_pi_json_events(stdout):
 
 
 def _run_pi_agent(message, request_id='', context=None):
-    """Run one Pi turn with only Trosa/file tools and return a chat payload.
+    """Run one isolated Pi turn with only Trosa tools and return a chat payload.
 
     Pi is intentionally a subprocess boundary.  The Flask process never gives
     it a database path or a general shell tool; the extension calls the
-    authenticated Gateway over loopback and enforces the configured file root.
+    authenticated Gateway over loopback.  Each request starts without a
+    persisted Pi conversation so a previous question cannot become context for
+    the current one.
     """
     executable = str(os.environ.get('TROSA_PI_EXECUTABLE') or '').strip() or shutil.which('pi')
     extension = os.path.abspath(os.environ.get(
@@ -6898,7 +7085,7 @@ def _run_pi_agent(message, request_id='', context=None):
         '-e', extension,
         '--provider', str(os.environ.get('TROSA_PI_PROVIDER') or 'deepseek').strip(),
         '--model', str(os.environ.get('TROSA_PI_MODEL') or 'deepseek/deepseek-v4-flash').strip(),
-        '--session', _pi_agent_session_path(),
+        '--no-session',
         '--system-prompt', system_prompt,
         '-p', user_prompt,
     ]
@@ -9356,15 +9543,18 @@ def _discover_user_excel_path(user):
     """Recover a per-user source pointer from that user's auditable import history."""
     if user not in USERS:
         return None
-    conn = sqlite3.connect(get_user_db_path(user), timeout=10.0)
+    previous_user = get_current_user()
+    set_db_user(user)
+    conn = get_db()
     try:
         rows = conn.execute('''SELECT source_name FROM import_batches
                                WHERE imported_count > 0 OR skipped_count > 0
                                ORDER BY imported_at DESC, id DESC''').fetchall()
-    except sqlite3.Error:
+    except Exception:
         rows = []
     finally:
         conn.close()
+        set_db_user(previous_user)
     for (source_name,) in rows:
         for directory in (os.path.join(UPLOAD_DIR, user), UPLOAD_DIR):
             candidate = os.path.join(directory, source_name)
@@ -10144,8 +10334,9 @@ def _calendar_user_from_token(token):
 def _calendar_feed_data(user):
     """Return the same actionable reminder set used by the signed-in calendar."""
     today = _calendar_today()
-    conn = sqlite3.connect(get_user_db_path(user), timeout=30.0)
-    conn.row_factory = sqlite3.Row
+    previous_user = get_current_user()
+    set_db_user(user)
+    conn = get_db()
     try:
         active = conn.execute('''
             SELECT r.id, r.customer_id, r.title, r.content, r.reason,
@@ -10162,6 +10353,7 @@ def _calendar_feed_data(user):
         ''', (today.isoformat(),)).fetchall()
     finally:
         conn.close()
+        set_db_user(previous_user)
     rows = [dict(row) for row in active]
     last_changed = max((row.get('changed_at') or '' for row in rows), default='2000-01-01 00:00:00')
     return {

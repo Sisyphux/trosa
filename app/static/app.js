@@ -708,6 +708,7 @@ function syncGlobalPageTools(page) {
 var _globalSearchResults = [];
 var _customerSearchResultById = {};
 var _globalSearchActiveIndex = 0;
+var _globalSearchTotal = 0;
 var _globalSearchPreviewTimer = null;
 var _globalSearchPreviewToken = 0;
 var _globalSearchPreviewController = null;
@@ -716,15 +717,45 @@ function hideGlobalSearchPreview() {
   var preview = document.getElementById('globalSearchPreview');
   var input = document.getElementById('globalPageSearch');
   if (preview) preview.classList.remove('show');
-  if (input) input.setAttribute('aria-expanded', 'false');
+  if (input) {
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+  }
 }
 
-function renderGlobalSearchPreview(customers) {
+function escapeSearchRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightSearchText(value, query) {
+  var text = String(value || '');
+  var tokens = Array.from(new Set(String(query || '').trim().split(/\s+/).filter(Boolean)))
+    .sort(function(a, b) { return b.length - a.length; });
+  if (!text || !tokens.length) return escapeHtml(text);
+  var matcher;
+  try {
+    matcher = new RegExp(tokens.map(escapeSearchRegExp).join('|'), 'gi');
+  } catch (ignore) {
+    return escapeHtml(text);
+  }
+  var result = '';
+  var lastIndex = 0;
+  text.replace(matcher, function(match, offset) {
+    result += escapeHtml(text.slice(lastIndex, offset));
+    result += '<mark class="search-hit">' + escapeHtml(match) + '</mark>';
+    lastIndex = offset + match.length;
+    return match;
+  });
+  return result + escapeHtml(text.slice(lastIndex));
+}
+
+function renderGlobalSearchPreview(customers, total) {
   var preview = document.getElementById('globalSearchPreview');
   var input = document.getElementById('globalPageSearch');
   if (!preview || !input) return;
   preview.innerHTML = '';
   _globalSearchResults = customers || [];
+  _globalSearchTotal = Math.max(Number(total || 0), _globalSearchResults.length);
   _customerSearchResultById = {};
   _globalSearchResults.forEach(function(customer) {
     _customerSearchResultById[Number(customer.id)] = customer;
@@ -740,22 +771,27 @@ function renderGlobalSearchPreview(customers) {
       var button = document.createElement('button');
       button.type = 'button';
       button.className = 'global-search-result' + (index === 0 ? ' is-active' : '');
+      button.id = 'global-search-result-' + customer.id;
       button.setAttribute('role', 'option');
       button.setAttribute('aria-selected', index === 0 ? 'true' : 'false');
+      button.setAttribute('aria-posinset', String(index + 1));
+      button.setAttribute('aria-setsize', String(_globalSearchTotal || _globalSearchResults.length));
       var company = customer.company || customer.name || '未命名客户';
       var secondary = customer.country || customer.field || '';
-      var detail = [customer.field, customer.primary_contact_name, customer.email].filter(Boolean).join(' · ');
+      var detail = [customer.field, customer.primary_contact_name, customer.primary_contact_email].filter(Boolean).join(' · ');
       var match = customer.match_context || {};
-      var matchText = [match.label, match.content || match.title || match.contact_name, match.date ? formatDate(match.date) : ''].filter(Boolean).join(' · ');
+      var matchLabels = match.label ? [match.label] : [];
+      var matchText = match.content || match.title || match.contact_name || detail;
       var name = document.createElement('strong');
-      name.textContent = company;
+      name.innerHTML = highlightSearchText(company, input.value);
       var meta = document.createElement('span');
       meta.textContent = secondary;
       var small = document.createElement('small');
-      small.textContent = matchText || detail || '打开客户工作区';
-      if (match.type === 'inbox' && match.action === 'record') {
-        small.textContent = matchText + ' · 点击确认并记录';
-      }
+      var smallParts = [];
+      if (matchLabels.length) smallParts.push(escapeHtml(matchLabels.join('、') + '命中'));
+      if (matchText) smallParts.push(highlightSearchText(matchText, input.value));
+      if (match.date) smallParts.push(escapeHtml(formatDate(match.date)));
+      small.innerHTML = smallParts.join(' · ') || '打开客户详情';
       button.appendChild(name);
       button.appendChild(meta);
       button.appendChild(small);
@@ -764,8 +800,15 @@ function renderGlobalSearchPreview(customers) {
       preview.appendChild(button);
     });
   }
+  if (_globalSearchResults.length) {
+    var summary = document.createElement('div');
+    summary.className = 'global-search-preview-summary';
+    summary.textContent = '共 ' + _globalSearchTotal + ' 个客户 · 按回车查看全部';
+    preview.appendChild(summary);
+  }
   preview.classList.add('show');
   input.setAttribute('aria-expanded', 'true');
+  if (_globalSearchResults.length) input.setAttribute('aria-activedescendant', 'global-search-result-' + _globalSearchResults[0].id);
 }
 
 function setGlobalSearchActive(index) {
@@ -775,6 +818,10 @@ function setGlobalSearchActive(index) {
     var active = itemIndex === _globalSearchActiveIndex;
     item.classList.toggle('is-active', active);
     item.setAttribute('aria-selected', active ? 'true' : 'false');
+    if (active) {
+      var input = document.getElementById('globalPageSearch');
+      if (input) input.setAttribute('aria-activedescendant', item.id);
+    }
   });
 }
 
@@ -793,7 +840,7 @@ async function loadGlobalSearchPreview(query) {
       signal: _globalSearchPreviewController ? _globalSearchPreviewController.signal : undefined
     });
     if (token !== _globalSearchPreviewToken) return;
-    renderGlobalSearchPreview((data && data.customers) || []);
+    renderGlobalSearchPreview((data && data.customers) || [], data && data.total);
   } catch (error) {
     if (token === _globalSearchPreviewToken && (!error || error.name !== 'AbortError')) renderGlobalSearchPreview([]);
   }
@@ -805,18 +852,14 @@ function scheduleGlobalSearchPreview() {
   var form = input && input.closest('.global-page-search');
   if (form) form.classList.toggle('has-query', !!query);
   _globalSearchResults = [];
+  _globalSearchTotal = 0;
   _globalSearchActiveIndex = 0;
   clearTimeout(_globalSearchPreviewTimer);
   _globalSearchPreviewTimer = setTimeout(function() { loadGlobalSearchPreview(query); }, 180);
 }
 
 function openGlobalSearchResult(customerId) {
-  var customer = _customerSearchResultById[Number(customerId)] || _globalSearchResults.find(function(item) { return Number(item.id) === Number(customerId); });
   hideGlobalSearchPreview();
-  if (customer && customer.match_context) {
-    openSearchMatchContext(customer);
-    return;
-  }
   switchPage('customers');
   setTimeout(function() { openEditModal(customerId); }, 0);
 }
@@ -851,18 +894,15 @@ function openSearchMatchContext(customer) {
 
 function submitGlobalPageSearch(event) {
   if (event) event.preventDefault();
-  var source = document.getElementById('globalPageSearch');
-  var query = source ? source.value.trim() : '';
-  if (_globalSearchResults.length) {
-    openGlobalSearchResult(_globalSearchResults[_globalSearchActiveIndex].id);
-    return;
+  var customerModal = document.getElementById('customerEditModal');
+  if (customerModal && customerModal.classList.contains('show') && !customerModalIsDirty('customerEditModal')) {
+    closeModal('customerEditModal');
   }
   hideGlobalSearchPreview();
   switchPage('customers');
   setTimeout(function() {
     var input = document.getElementById('globalPageSearch');
     if (input) input.focus();
-    loadCustomers();
   }, 0);
 }
 
@@ -3268,20 +3308,14 @@ function aiConfigProviderInfo(provider) {
 function renderAiConfigStatus(status) {
   var container = document.getElementById('aiConfigStatus');
   if (!container || !status) return;
-  var provider = status.backend_label || '自动选择';
+  var provider = status.active_backend_label || status.backend_label || '自动选择';
   var configured = status.configured;
   var state = configured ? '已就绪' : '尚未配置';
   var stateClass = configured ? 'is-ready' : 'is-pending';
   if (status.backend === 'auto') {
-    var cloudProviders = (status.providers || []).filter(function(item) {
-      return item.configured && item.api_key_configured;
-    }).map(function(item) { return item.label; });
-    var localProviders = (status.providers || []).filter(function(item) {
-      return item.local;
-    }).map(function(item) { return item.label; });
-    state = cloudProviders.length ? '自动选择 · ' + cloudProviders.join('、') :
-      (localProviders.length ? '自动选择 · 可尝试本地服务' : '自动选择 · 等待配置');
-    stateClass = cloudProviders.length ? 'is-ready' : 'is-pending';
+    var active = (status.providers || []).find(function(item) { return item.id === status.active_backend; });
+    state = active ? (active.local ? '共用当前本地连接 · 请测试' : '共用当前连接 · 已就绪') : '等待配置';
+    stateClass = active && !active.local ? 'is-ready' : 'is-pending';
   } else if (status.providers) {
     var selected = status.providers.find(function(item) { return item.id === status.backend; });
     if (selected && selected.local) {
@@ -3290,8 +3324,8 @@ function renderAiConfigStatus(status) {
     }
   }
   var keyState = status.api_key_configured ? 'API Key 已保存（不会显示明文）' :
-    (status.backend === 'auto' ? '按已配置服务商自动尝试' : 'API Key 尚未配置');
-  var visionState = status.vision_configured ? '截图识别可用' : '截图识别等待视觉模型';
+    (status.backend === 'auto' ? '当前共享连接无需显示 Key' : 'API Key 尚未配置');
+  var visionState = status.vision_configured ? '截图识别复用当前模型（需支持图片）' : '截图识别等待共享接口';
   container.innerHTML = '<div class="ai-config-status-main"><span class="ai-config-status-dot ' + stateClass + '" aria-hidden="true"></span><strong>当前接口：' + escapeHtml(provider) + '</strong><span>' + escapeHtml(state) + '</span></div>' +
     '<div class="ai-config-status-meta"><span>' + escapeHtml(keyState) + '</span><span>' + escapeHtml(visionState) + '</span><span>来源：' + escapeHtml(status.config_source || '环境变量') + '</span></div>' +
     (!status.can_edit ? '<p class="settings-help ai-config-admin-note">只有管理员可以修改共享 AI 接口配置。</p>' : '');
@@ -3319,7 +3353,7 @@ function updateAiConfigProviderFields() {
   model.value = isAuto ? '' : (info.model || AI_CONFIG_PROVIDER_DEFAULTS[provider].model);
   if (help) {
     help.textContent = isAuto
-      ? '自动模式会按已配置的服务商尝试；如需新增或替换 Key，请选择具体服务商。'
+      ? '自动模式只会从已配置连接中选择一套共享连接；如需新增或替换 Key，请选择具体服务商。'
       : (info.local
         ? '本地服务不会离开当前设备；请先启动 ' + info.label.replace('（本地）', '') + '，再测试连接。'
         : 'API Key 只保存在服务端的独立权限文件中，页面不会回显明文；修改后立即对新的 AI 请求生效。');
@@ -3628,6 +3662,7 @@ function renderCustomerTable(tbodyId, customers, type) {
     });
   }
   var rows = [];
+  var searchQuery = type === 'existing' ? getCustomerSearchQuery() : '';
   customers.forEach(function(c) {
     var selId = type === 'existing' ? 'custSel_' + c.id : 'newSel_' + c.id;
     var company = c.company || c.name || '未命名公司';
@@ -3645,8 +3680,8 @@ function renderCustomerTable(tbodyId, customers, type) {
     var matchReasons = (c.match_reasons || []).length ? '<div class="customer-match-reasons">' + c.match_reasons.map(function(reason) { return '<span>' + escapeHtml(reason) + '</span>'; }).join('') + '</div>' : '';
     var issuesHtml = (c.data_quality_issues || []).length ? '<div class="customer-quality-issues">' + c.data_quality_issues.map(function(issue) { return '<span>' + escapeHtml(issue) + '</span>'; }).join('') + '</div>' : '';
     var matchContext = c.match_context || {};
-    var matchContextText = [matchContext.label, matchContext.content || matchContext.title || matchContext.contact_name, matchContext.date ? formatDate(matchContext.date) : ''].filter(Boolean).join(' · ');
-    var matchContextHtml = matchContextText ? '<div class="customer-match-context"><strong>' + escapeHtml(matchContext.label || '搜索命中') + '</strong><span>' + escapeHtml(matchContextText.replace((matchContext.label || '') + ' · ', '')) + '</span></div>' : '';
+    var matchContextDetail = [matchContext.content || matchContext.title || matchContext.contact_name, matchContext.date ? formatDate(matchContext.date) : ''].filter(Boolean).join(' · ');
+    var matchContextHtml = matchContextDetail ? '<div class="customer-match-context"><strong>' + escapeHtml((matchContext.label || '搜索') + '命中') + '</strong><span>' + highlightSearchText(matchContextDetail, searchQuery) + '</span></div>' : '';
     var matchContextAction = matchContext.type === 'inbox' && matchContext.action === 'record'
       ? '<button type="button" class="text-action customer-search-context-action" onclick="openCustomerSearchContext(' + c.id + ')">记录进展</button>' : '';
     var selected = type === 'existing' && selectedCustomers.has(Number(c.id));
@@ -3656,9 +3691,10 @@ function renderCustomerTable(tbodyId, customers, type) {
     var actions = customerView === 'archived'
       ? '<button class="customer-action" onclick="restoreArchivedCustomer(' + c.id + ')" title="恢复" aria-label="恢复">' + uiIcon('archive') + '</button>'
       : '<button class="customer-action" onclick="openEditModal(' + c.id + ')" title="查看与编辑" aria-label="查看与编辑">' + uiIcon('open') + '</button><button class="customer-action customer-action-archive" onclick="deleteCustomer(' + c.id + ')" title="归档" aria-label="归档">' + uiIcon('archive') + '</button>';
+    var companyHtml = searchQuery ? highlightSearchText(company, searchQuery) : escapeHtml(company);
     rows.push({ id: c.id, html: '<article class="customer-row-card' + (isPinned ? ' customer-row-priority customer-light-on' : ' customer-light-off') + '" data-customer-id="' + c.id + '" tabindex="0">' +
       selectCell +
-      '<div class="customer-company-cell" data-label="客户"><div class="customer-company-heading">' + dragHandle + customerLightControl(c.id, isPinned, 'customer-list-light') + '<button class="customer-name-button" onclick="openEditModal(' + c.id + ')">' + escapeHtml(company) + '</button></div>' + relationshipBadge + (person ? '<small>' + escapeHtml(person) + '</small>' : '') + updatedText + tagsHtml + issuesHtml + matchReasons + matchContextHtml + matchContextAction + '</div>' +
+      '<div class="customer-company-cell" data-label="客户"><div class="customer-company-heading">' + dragHandle + customerLightControl(c.id, isPinned, 'customer-list-light') + '<button class="customer-name-button" onclick="openEditModal(' + c.id + ')">' + companyHtml + '</button></div>' + relationshipBadge + (person ? '<small>' + (searchQuery ? highlightSearchText(person, searchQuery) : escapeHtml(person)) + '</small>' : '') + updatedText + tagsHtml + issuesHtml + matchReasons + matchContextHtml + matchContextAction + '</div>' +
       '<div class="customer-muted" data-label="国家" data-customer-column="country">' + escapeHtml(c.country || '-') + '</div>' +
       '<div class="customer-muted" data-label="类型" data-customer-column="type">' + escapeHtml(c.type || '-') + '</div>' +
       '<div class="customer-muted" data-label="行业" data-customer-column="field">' + escapeHtml(c.field || c.industry || '-') + '</div>' +

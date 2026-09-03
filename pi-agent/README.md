@@ -2,7 +2,7 @@
 
 这是 Trosa 聊天入口使用的 Pi 运行时配置，不是 MCP，也不直接访问 SQLite。
 
-`trosa-tools.ts` 是 Pi 扩展：CRM 读写全部走已认证的 `/api/gateway/*`，本地文件只通过受边界保护的只读工具读取。Flask 负责为 Hamid 聊天请求生成隔离的 Pi 会话文件，并从 Pi JSON 事件中提取最终回复和 action id/Undo 信息。
+`trosa-tools.ts` 是 Pi 扩展：CRM 读写全部走已认证的 `/api/gateway/*`。Hamid 默认入口不注册本地文件工具；Flask 为每个聊天请求启动一个无历史的 Pi turn，并从 Pi JSON 事件中提取最终回复和 action id/Undo 信息。
 
 ## 运行时配置
 
@@ -10,7 +10,7 @@
 - `TROSA_PI_EXECUTABLE=/usr/local/bin/pi`：Pi 可执行文件绝对路径，默认从 PATH 查找。
 - `TROSA_PI_PROVIDER=deepseek`、`TROSA_PI_MODEL=deepseek/deepseek-v4-flash`：模型选择。密钥由 Pi 的认证文件或对应 provider 的环境变量提供，不写入仓库。
 - `TROSA_PI_HOME=/var/lib/trade-os/pi-home`：可选的 Pi 认证/缓存目录。ECS 的 systemd 启用了 `ProtectHome`，生产环境应把 Pi 的认证文件放在这个由 `tradeos` 用户独占的目录，而不是用户家目录。
-- `TROSA_PI_SESSION_DIR=/var/lib/trade-os/pi-sessions`：Pi 会话目录，由 `tradeos` 用户独占。
+- `TROSA_PI_SESSION_DIR=/var/lib/trade-os/pi-sessions`：旧版 Pi 会话目录，由 `tradeos` 用户独占；当前 Flask 聊天入口不读取持久会话历史。
 - `TROSA_PI_WORKFILES_ROOT=`：可选的只读本地工作文件夹。Hamid 的 CRM 助理默认不注册任何文件工具；只有经过单独审查后同时设置 `TROSA_PI_ALLOW_WORKFILES=true` 才能启用，且不得指向运行数据、代码仓库或凭证目录。
 - `TROSA_GATEWAY_URL=http://127.0.0.1:8080`、`TROSA_GATEWAY_TOKEN=`：Hamid 绑定且至少拥有 `crm:read,crm:write` 的 personal access token。只放在服务环境文件中，绝不写入 Git。
 
@@ -20,7 +20,7 @@
 TROSA_PI_AGENT_ENABLED=true \
 TROSA_GATEWAY_URL=http://127.0.0.1:8080 \
 TROSA_PI_MODEL=deepseek/deepseek-v4-flash \
-pi --mode json --no-builtin-tools --no-context-files --no-extensions \
+pi --mode json --no-builtin-tools --no-context-files --no-extensions --no-session \
   -e ./pi-agent/trosa-tools.ts \
   --system-prompt "$(<./pi-agent/system-prompt.md)" \
   -p "我今天有什么要做？"
@@ -44,7 +44,7 @@ node ./pi-agent/trosa-mcp-server.mjs
 Pi 0.84.1 没有内置 MCP client，因此本仓库附带了仅用于验证的 `trosa-mcp-client.ts` 扩展：
 
 ```bash
-pi --no-builtin-tools --no-context-files --no-extensions \
+pi --no-builtin-tools --no-context-files --no-extensions --no-session \
   -e ./pi-agent/trosa-mcp-client.ts -p "我今天有什么要做？"
 ```
 
@@ -61,7 +61,7 @@ export DEEPSEEK_API_KEY=... # 或使用已配置的 Pi provider 认证
 ./pi-agent/trosa-hamid -p "查看我的今日待办"
 ```
 
-启动器固定使用 Hamid Gateway token、Trosa stdio MCP extension 与 Hamid 系统提示；关闭内置工具、上下文文件、自动扩展和会话保存，并从临时目录运行。因此它没有 shell、`read` 或本地 SQLite / `data/` 访问能力。`TROSA_PI_MCP_ENV_FILE` 可指定替代的私有 MCP 环境文件。
+启动器固定使用 Hamid Gateway token、Trosa stdio MCP extension 与 Hamid 系统提示；关闭内置工具、上下文文件、自动扩展和会话保存，并从临时目录运行。因此它没有 shell、`read` 或本地 SQLite / `data/` 访问能力。`TROSA_PI_MCP_ENV_FILE` 可指定替代的私有 MCP 环境文件。Pi Desktop 中已有的通用 coding 会话不会自动变成 CRM 上下文；请重启扩展后新建 Trosa 会话，旧会话会被隔离并提示不要继续继承旧工具结果。
 
 Today 是确定性读取，不需要等待模型：
 

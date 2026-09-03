@@ -1,8 +1,7 @@
 """
-LLM 分析引擎 - 支持 LM Studio / Ollama / OpenAI
+LLM 分析引擎 - 所有 AI 功能共用一个当前生效的连接
 
-优先级：LM Studio > Ollama > OpenAI
-推荐：LM Studio（图形界面友好，OpenAI兼容API）
+支持 LM Studio / Ollama / DeepSeek / 通义千问 / 智谱 GLM / OpenAI 兼容 API。
 """
 import os
 import sys
@@ -153,6 +152,7 @@ _AI_CONFIG_KEYS = (
     'OLLAMA_URL', 'OLLAMA_MODEL',
 )
 _AI_CONFIG_ENV_BASELINE = {key: os.environ.get(key) for key in _AI_CONFIG_KEYS}
+_AI_CONFIG_FILE_LOADED_VALUES = {}
 
 
 def _ai_config_file_path():
@@ -198,8 +198,18 @@ def _read_ai_config_file():
 
 def _load_ai_config_file():
     """Apply the private settings file over environment defaults."""
-    for key, value in _read_ai_config_file().items():
+    global _AI_CONFIG_FILE_LOADED_VALUES
+    missing = object()
+    for key in _AI_CONFIG_FILE_LOADED_VALUES:
+        baseline = _AI_CONFIG_ENV_BASELINE.get(key, missing)
+        if baseline is missing or baseline is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = baseline
+    values = _read_ai_config_file()
+    for key, value in values.items():
         os.environ[key] = value
+    _AI_CONFIG_FILE_LOADED_VALUES = values
 
 
 _load_ai_config_file()
@@ -298,6 +308,18 @@ def _ai_provider_values(provider):
     return key, base_url.rstrip('/'), model
 
 
+def _resolve_ai_provider():
+    """Resolve the one provider shared by all AI features in this process."""
+    _runtime_ai_config()
+    if LLM_BACKEND in _AI_PROVIDER_IDS:
+        return LLM_BACKEND
+    for provider in ('deepseek', 'qwen', 'glm', 'openai', 'lmstudio', 'ollama'):
+        key, _, _ = _ai_provider_values(provider)
+        if key or provider in ('lmstudio', 'ollama'):
+            return provider
+    return ''
+
+
 def get_ai_config_status():
     """Return model connection metadata without returning any secret."""
     _runtime_ai_config()
@@ -317,16 +339,24 @@ def get_ai_config_status():
     selected = LLM_BACKEND if LLM_BACKEND in _AI_PROVIDER_IDS else 'auto'
     selected_info = next((item for item in providers if item['id'] == selected), None)
     any_configured = any(item['configured'] for item in providers)
+    active_backend = _resolve_ai_provider()
+    shared_configured = bool(active_backend)
+    active_info = next((item for item in providers if item['id'] == active_backend), None)
     return {
         'backend': LLM_BACKEND if LLM_BACKEND in _AI_PROVIDER_IDS or LLM_BACKEND == 'auto' else 'auto',
         'backend_label': '自动选择' if LLM_BACKEND == 'auto' else (selected_info['label'] if selected_info else '自动选择'),
+        'active_backend': active_backend,
+        'active_backend_label': active_info['label'] if active_info else '',
         'configured': selected_info['configured'] if selected_info else any_configured,
         'api_key_configured': selected_info['api_key_configured'] if selected_info else any(
             item['api_key_configured'] for item in providers
         ),
         'base_url': selected_info['base_url'] if selected_info else '',
         'model': selected_info['model'] if selected_info else '',
-        'vision_configured': bool(VISION_API_KEY),
+        # Screenshot recognition uses the same selected connection. The
+        # model still has to support image input; the status deliberately
+        # describes configuration, not capability.
+        'vision_configured': bool(VISION_API_KEY) or shared_configured,
         'config_source': '快速接入配置' if os.path.isfile(_AI_CONFIG_FILE) else '环境变量',
         'providers': providers,
     }
@@ -379,8 +409,10 @@ def save_ai_config(config):
     provider = str(config.get('backend') or config.get('provider') or '').strip().lower()
     if provider not in _AI_PROVIDER_IDS and provider != 'auto':
         raise ValueError('请选择支持的 AI 服务商')
-    values = _read_ai_config_file()
-    values['LLM_BACKEND'] = provider
+    # The settings page intentionally keeps one active connection. Existing
+    # provider-specific environment variables remain supported as deployment
+    # fallbacks, but the private settings file does not accumulate old Keys.
+    values = {'LLM_BACKEND': provider}
     if provider != 'auto':
         info = _AI_PROVIDERS[provider]
         api_key = str(config.get('api_key') or '').strip()
@@ -410,19 +442,10 @@ def save_ai_config(config):
 
 def clear_ai_config():
     """Remove only the settings-page file; deployment environment variables remain intact."""
-    file_values = _read_ai_config_file()
     if os.path.isfile(_AI_CONFIG_FILE):
         os.remove(_AI_CONFIG_FILE)
-    # The file is loaded into os.environ for compatibility with the existing
-    # provider callers. Restore the values that existed before that overlay so
-    # clearing the settings page really takes effect without a process restart.
-    missing = object()
-    for key in file_values:
-        baseline = _AI_CONFIG_ENV_BASELINE.get(key, missing)
-        if baseline is missing or baseline is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = baseline
+    # Reloading restores the environment values that existed before the
+    # settings-page overlay, so clearing takes effect without a restart.
     _runtime_ai_config()
     return get_ai_config_status()
 
@@ -550,27 +573,83 @@ def _call_openai(prompt: str, model: str = None) -> str:
 
 
 def extract_text_from_image(image_data_url: str) -> str:
-    """Use an OpenAI-compatible vision model to transcribe a CRM conversation screenshot."""
+    """Use the shared AI connection to transcribe a CRM conversation screenshot."""
     _runtime_ai_config()
-    if not VISION_API_KEY:
-        return "[ERROR_VISION] 未配置视觉模型。请设置 VISION_API_KEY、VISION_BASE_URL 和 VISION_MODEL。"
     if not image_data_url.startswith('data:image/') or ';base64,' not in image_data_url:
         return "[ERROR_VISION] 图片格式无效"
-    url = f"{VISION_BASE_URL.rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {VISION_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": VISION_MODEL,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "请逐行识别这张客户沟通截图中的文字。保留联系人/公司、日期时间、邮箱电话、消息正文和数字规格。只输出识别出的文字，不要分析或补充。"},
-            {"type": "image_url", "image_url": {"url": image_data_url}},
-        ]}],
-        "temperature": 0,
-        "max_tokens": 3000,
-    }
+    # Keep an explicitly configured legacy vision triplet working for older
+    # deployments, but let the settings page or any explicit shared LLM
+    # configuration take precedence so new installs really use one connection.
+    legacy_vision_key = str(os.environ.get('VISION_API_KEY') or '').strip()
+    provider = _resolve_ai_provider()
+    shared_configured = os.path.isfile(_AI_CONFIG_FILE) or (
+        str(os.environ.get('LLM_BACKEND') or '').strip().lower() in _AI_PROVIDER_IDS
+    ) or any(str(os.environ.get(name) or '').strip() for name in (
+        'DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'ZHIPU_API_KEY', 'OPENAI_API_KEY',
+    ))
+    if legacy_vision_key and not shared_configured:
+        provider = 'openai'
+        api_key = legacy_vision_key
+        base_url = str(os.environ.get('VISION_BASE_URL') or OPENAI_BASE_URL).strip().rstrip('/')
+        model = str(os.environ.get('VISION_MODEL') or OPENAI_MODEL).strip()
+    elif provider:
+        api_key, base_url, model = _ai_provider_values(provider)
+    else:
+        return "[ERROR_VISION] 未配置共享 AI 接口。请先在设置中完成 AI API 快速接入。"
+    if provider not in ('lmstudio', 'ollama') and not api_key:
+        return "[ERROR_VISION] 当前共享 AI 接口未配置 API Key。"
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        if provider == 'ollama':
+            image_base64 = image_data_url.split(';base64,', 1)[1]
+            response = requests.post(
+                f"{base_url.rstrip('/')}/api/chat",
+                json={
+                    'model': model,
+                    'messages': [{
+                        'role': 'user',
+                        'content': '请逐行识别这张客户沟通截图中的文字。保留联系人/公司、日期时间、邮箱电话、消息正文和数字规格。只输出识别出的文字，不要分析或补充。',
+                        'images': [image_base64],
+                    }],
+                    'stream': False,
+                    'options': {'temperature': 0, 'num_predict': 3000},
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = (payload.get('message') or {}).get('content') or payload.get('response')
+        else:
+            headers = {'Authorization': 'Bearer lm-studio' if provider == 'lmstudio' else f'Bearer {api_key}',
+                       'Content-Type': 'application/json'}
+            endpoint = f"{base_url.rstrip('/')}/v1/chat/completions" if provider == 'lmstudio' \
+                else f"{base_url.rstrip('/')}/chat/completions"
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json={
+                    'model': model,
+                    'messages': [{
+                        'role': 'user',
+                        'content': [
+                            {'type': 'text', 'text': '请逐行识别这张客户沟通截图中的文字。保留联系人/公司、日期时间、邮箱电话、消息正文和数字规格。只输出识别出的文字，不要分析或补充。'},
+                            {'type': 'image_url', 'image_url': {'url': image_data_url}},
+                        ],
+                    }],
+                    'temperature': 0,
+                    'max_tokens': 3000,
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            content = (payload.get('choices') or [{}])[0].get('message', {}).get('content')
+        if not content:
+            return "[ERROR_VISION] 当前共享模型没有返回识别文字；请确认模型支持图片输入。"
+        return str(content)
+    except requests.exceptions.ConnectionError:
+        return "[ERROR_VISION] 无法连接当前共享 AI 接口。"
+    except requests.exceptions.Timeout:
+        return "[ERROR_VISION] 视觉识别连接超时，请检查接口或模型状态。"
     except Exception as exc:
         return f"[ERROR_VISION] {exc}"
 
@@ -677,7 +756,7 @@ def ask_llm(prompt: str) -> str:
     - LLM_BACKEND=openai   → 只用 OpenAI
     - LLM_BACKEND=lmstudio → 只用 LM Studio
     - LLM_BACKEND=ollama   → 只用 Ollama
-    - LLM_BACKEND=auto     → 自动尝试：DeepSeek → Qwen → GLM → OpenAI → LM Studio → Ollama
+    - LLM_BACKEND=auto     → 兼容模式：先选出一套可用连接，并让所有 AI 功能共用它
     """
     _runtime_ai_config()
     if LLM_BACKEND == "deepseek":
@@ -699,41 +778,30 @@ def ask_llm(prompt: str) -> str:
             return result
         return result.replace("[ERROR_OLLAMA]", "[错误] 无法连接到 Ollama。请确认 Ollama 已启动。")
 
-    # === auto 模式：自动尝试所有后端（国产优先）===
-    # 1. DeepSeek
-    result = _call_deepseek(prompt)
-    if not result.startswith("[ERROR"):
-        return result
-    # 2. 通义千问
-    result = _call_qwen(prompt)
-    if not result.startswith("[ERROR"):
-        return result
-    # 3. 智谱 GLM
-    result = _call_glm(prompt)
-    if not result.startswith("[ERROR"):
-        return result
-    # 4. OpenAI
-    result = _call_openai(prompt)
-    if not result.startswith("[ERROR"):
-        return result
-    # 5. LM Studio
-    result = _call_lm_studio(prompt)
-    if not result.startswith("[ERROR"):
-        return result
-    # 6. Ollama
-    result = _call_ollama(prompt)
-    if not result.startswith("[ERROR"):
-        return result
+    # === auto 模式：只解析出一套共享连接，不在不同 AI 功能之间轮换服务商 ===
+    provider = _resolve_ai_provider()
+    if provider == "deepseek":
+        return _call_deepseek(prompt)
+    if provider == "qwen":
+        return _call_qwen(prompt)
+    if provider == "glm":
+        return _call_glm(prompt)
+    if provider == "openai":
+        return _call_openai(prompt)
+    if provider == "lmstudio":
+        result = _call_lm_studio(prompt)
+        if not result.startswith("[ERROR"):
+            return result
+        return result.replace("[ERROR_LM_STUDIO]", "[错误] 无法连接到 LM Studio。请确认 LM Studio 已启动并加载了模型。")
+    if provider == "ollama":
+        result = _call_ollama(prompt)
+        if not result.startswith("[ERROR"):
+            return result
+        return result.replace("[ERROR_OLLAMA]", "[错误] 无法连接到 Ollama。请确认 Ollama 已启动。")
 
     return (
-        "[错误] 所有 LLM 后端均不可用。\n\n"
-        "请至少配置以下之一：\n"
-        "• **DeepSeek**（推荐）：设置环境变量 DEEPSEEK_API_KEY\n"
-        "• **通义千问**：设置环境变量 DASHSCOPE_API_KEY\n"
-        "• **智谱 GLM**：设置环境变量 ZHIPU_API_KEY\n"
-        "• **OpenAI**：设置环境变量 OPENAI_API_KEY\n"
-        "• **LM Studio**：在本地启动 LM Studio\n"
-        "• **Ollama**：运行 ollama serve"
+        "[错误] 尚未配置共享 AI 接口。\n\n"
+        "请在「设置 → AI API 快速接入」选择一套 API，或启动 LM Studio / Ollama。"
     )
 
 
@@ -1420,19 +1488,23 @@ def check_website_changes_by_level(db_path: str, levels: list, max_changes: int 
     按客户等级分层检查官网变化
     
     参数:
-        db_path: SQLite 数据库路径
+        db_path: SQLite 数据库路径；PostgreSQL 演练模式下由当前用户连接工厂决定数据源
         levels: 要检查的客户等级列表，如 ['A', 'B'] 或 ['C+']
         max_changes: 最大变化提醒数
     
     返回: {'checked': N, 'changed': N, 'errors': N, 'reminders_created': N}
     """
-    import sqlite3
     from datetime import datetime, timedelta
+    from db import get_db, postgres_mode
     
     result = {'checked': 0, 'changed': 0, 'errors': 0, 'reminders_created': 0}
     
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    # Keep the legacy path for production/local SQLite, but do not let this
+    # background feature silently open the old file when the unified backend
+    # is explicitly enabled.
+    conn = get_db() if postgres_mode() else __import__('sqlite3').connect(db_path)
+    if not postgres_mode():
+        conn.row_factory = __import__('sqlite3').Row
     c = conn.cursor()
     
     # 查询目标客户

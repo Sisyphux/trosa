@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 import requests
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.engine import ask_llm
+from app.engine import ask_llm, get_ai_config_status
 from db import (
     USERS,
     get_current_user,
@@ -535,11 +535,19 @@ def _find_match(user, message):
 def _ai_configured():
     if not _truthy(os.environ.get('GMAIL_AI_SUMMARIZE', 'true')):
         return False
-    if str(os.environ.get('LLM_BACKEND') or '').strip().lower() in {'lmstudio', 'ollama'}:
-        return True
-    return any(str(os.environ.get(name) or '').strip() for name in (
-        'DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'ZHIPU_API_KEY', 'OPENAI_API_KEY',
-    ))
+    try:
+        # Use the same runtime source as the interactive AI features, including
+        # the private settings-page file. This keeps Gmail summaries in the
+        # single shared AI connection instead of maintaining a second check.
+        return bool(get_ai_config_status().get('configured'))
+    except Exception:
+        # Keep Gmail synchronization resilient if the optional AI status probe
+        # itself is unavailable.
+        if str(os.environ.get('LLM_BACKEND') or '').strip().lower() in {'lmstudio', 'ollama'}:
+            return True
+        return any(str(os.environ.get(name) or '').strip() for name in (
+            'DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'ZHIPU_API_KEY', 'OPENAI_API_KEY',
+        ))
 
 
 def _fallback_summary(message):

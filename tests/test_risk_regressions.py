@@ -907,6 +907,91 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(communication_customer['match_context']['activity_type'], 'email')
         self.assertEqual(communication_customer['match_context']['direction'], 'inbound')
 
+    def test_customer_search_prioritizes_identity_before_records_and_paginates(self):
+        """Customer identity matches must outrank communication and task text."""
+        spec = importlib.util.spec_from_file_location('crm_app_search_rank_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("""INSERT INTO customers
+                         (name, company, created_at, updated_at, is_deleted)
+                         VALUES ('Regal Buyer', 'Regal Plastics', '2026-08-01', '2026-08-01', 0)""")
+            identity_customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO reminders
+                         (customer_id, title, remind_date, is_done, reminder_type, created_at)
+                         VALUES (?, '联系 Regal Plastics', '2026-09-09', 0, 'manual', '2026-08-01')""",
+                         (identity_customer_id,))
+
+            conn.execute("""INSERT INTO customers
+                         (name, company, created_at, updated_at, is_deleted)
+                         VALUES ('Quote Timeline Buyer', 'Quote Timeline Co.', '2026-08-02', '2026-08-02', 0)""")
+            communication_customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO follow_up_logs
+                         (customer_id, content, follow_date, activity_type, direction, created_at)
+                         VALUES (?, '报价已发出，等待客户确认', '2026-08-02', 'email', 'outbound', '2026-08-02')""",
+                         (communication_customer_id,))
+
+            conn.execute("""INSERT INTO customers
+                         (name, company, created_at, updated_at, is_deleted)
+                         VALUES ('Quote Task Buyer', 'Quote Task Co.', '2026-08-03', '2026-08-03', 0)""")
+            task_customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO reminders
+                         (customer_id, title, remind_date, is_done, reminder_type, created_at)
+                         VALUES (?, '报价', '2026-09-03', 0, 'manual', '2026-08-03')""",
+                         (task_customer_id,))
+
+            conn.execute("""INSERT INTO customers
+                         (name, company, field, created_at, updated_at, is_deleted)
+                         VALUES ('Plastic Field Buyer', 'Plastic Field Co.', '塑料分销', '2026-08-04', '2026-08-04', 0)""")
+            for index in range(5):
+                conn.execute("""INSERT INTO customers
+                             (name, company, field, created_at, updated_at, is_deleted)
+                             VALUES (?, ?, '塑料分销', '2026-08-05', '2026-08-05', 0)""",
+                             (f'Plastic Extra Buyer {index + 1}', f'Plastic Extra Co. {index + 1}'))
+            conn.execute("""INSERT INTO customers
+                         (name, company, field, created_at, updated_at, is_deleted)
+                         VALUES ('Plastic Duplicate Buyer', 'Plastic Field Co.', '塑料分销', '2026-08-06', '2026-08-06', 0)""")
+
+            conn.execute("""INSERT INTO customers
+                         (name, company, created_at, updated_at, is_deleted)
+                         VALUES ('Archived Regal', 'Regal Archived Co.', '2026-08-06', '2026-08-06', 1)""")
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+
+        identity_search = client.get('/api/customers?search=Regal&page=1&per_page=5')
+        self.assertEqual(identity_search.status_code, 200, identity_search.get_json())
+        identity_data = identity_search.get_json()
+        self.assertEqual(identity_data['total'], 1)
+        identity_customer = identity_data['customers'][0]
+        self.assertEqual(identity_customer['id'], identity_customer_id)
+        self.assertEqual(identity_customer['match_context']['type'], 'customer_field')
+        self.assertEqual(identity_customer['match_context']['label'], '公司名称')
+        self.assertEqual(identity_customer['search_matches'][0]['label'], '公司名称')
+
+        record_search = client.get('/api/customers?search=报价&page=1&per_page=5')
+        self.assertEqual(record_search.status_code, 200, record_search.get_json())
+        record_data = record_search.get_json()
+        self.assertEqual(record_data['total'], 2)
+        self.assertEqual(record_data['customers'][0]['id'], communication_customer_id)
+        self.assertEqual(record_data['customers'][0]['match_context']['type'], 'communication')
+        self.assertEqual(record_data['customers'][1]['id'], task_customer_id)
+        self.assertEqual(record_data['customers'][1]['match_context']['type'], 'task')
+
+        paged_search = client.get('/api/customers?search=塑料&page=2&per_page=5')
+        self.assertEqual(paged_search.status_code, 200, paged_search.get_json())
+        paged_data = paged_search.get_json()
+        self.assertEqual(paged_data['total'], 6)
+        self.assertEqual(paged_data['pages'], 2)
+        self.assertEqual(len(paged_data['customers']), 1)
+        self.assertEqual(len({item['id'] for item in paged_data['customers']}), 1)
+        all_search = client.get('/api/customers?search=塑料&page=1&per_page=100').get_json()
+        self.assertEqual(len({(item.get('company') or item.get('name')).casefold() for item in all_search['customers']}), 6)
+
     def test_batch_today_follow_up_removes_uncontacted_inbox_signal(self):
         """Clicking "今天跟进" in Inbox must clear the 新客户待跟进 signal immediately.
 
@@ -1356,6 +1441,32 @@ class CalendarAndAccessTest(unittest.TestCase):
         runtime_env = run.call_args.kwargs['env']
         self.assertEqual(runtime_env['TROSA_GATEWAY_TOKEN'], 'test-token')
         self.assertNotIn('CRM_SESSION_SECRET', runtime_env)
+
+    def test_pi_runtime_starts_each_chat_turn_without_legacy_session_history(self):
+        spec = importlib.util.spec_from_file_location('crm_app_pi_isolated_turn_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        pi_events = json.dumps({
+            'type': 'message_end',
+            'message': {
+                'role': 'assistant',
+                'content': [{'type': 'text', 'text': '当前入口不处理文件搜索。'}],
+                'stopReason': 'stop',
+            },
+        })
+        fake_completed = mock.Mock(returncode=0, stdout=pi_events, stderr='')
+        with mock.patch.dict(os.environ, {
+            'TROSA_PI_AGENT_ENABLED': 'true',
+            'TROSA_PI_GATEWAY_TOKEN': 'test-token',
+            'TROSA_PI_EXECUTABLE': sys.executable,
+            'TROSA_PI_EXTENSION': str(ROOT / 'pi-agent' / 'trosa-tools.ts'),
+            'TROSA_PI_SYSTEM_PROMPT': str(ROOT / 'pi-agent' / 'system-prompt.md'),
+        }, clear=False), mock.patch.object(module.subprocess, 'run', return_value=fake_completed) as run:
+            response, status = module._run_pi_agent('检查一下 Excel 文件', request_id='pi-isolated-turn-test')
+        self.assertEqual(status, 200, response)
+        command = run.call_args.args[0]
+        self.assertIn('--no-session', command)
+        self.assertNotIn('--session', command)
 
     def _legacy_pi_runtime_failure_is_reported_without_claiming_a_crm_write(self):
         spec = importlib.util.spec_from_file_location('crm_app_pi_runtime_failure_test', ROOT / 'app.py')
@@ -1810,6 +1921,44 @@ class AiEngineConfigTest(unittest.TestCase):
                 self.assertFalse(cleared['api_key_configured'])
                 self.assertFalse(os.path.exists(config_path))
                 self.assertEqual(engine.OPENAI_API_KEY, '')
+        finally:
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            engine._runtime_ai_config()
+            config_dir.cleanup()
+
+    def test_image_recognition_reuses_the_shared_connection(self):
+        import app.engine as engine
+
+        config_dir = tempfile.TemporaryDirectory()
+        config_path = os.path.join(config_dir.name, 'ai-config.env')
+        original_env = {key: os.environ.get(key) for key in engine._AI_CONFIG_KEYS}
+        try:
+            for key in engine._AI_CONFIG_KEYS:
+                os.environ.pop(key, None)
+            with mock.patch.object(engine, '_AI_CONFIG_FILE', config_path), \
+                    mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}):
+                os.environ['VISION_API_KEY'] = 'legacy-vision-secret'
+                engine.save_ai_config({
+                    'backend': 'openai',
+                    'api_key': 'shared-test-secret',
+                    'base_url': 'https://api.example.test/v1',
+                    'model': 'vision-test-model',
+                })
+                response = mock.Mock()
+                response.json.return_value = {'choices': [{'message': {'content': '识别成功'}}]}
+                with mock.patch.object(engine.requests, 'post', return_value=response) as request:
+                    result = engine.extract_text_from_image('data:image/png;base64,AAAA')
+                self.assertEqual(result, '识别成功')
+                request.assert_called_once()
+                args, kwargs = request.call_args
+                self.assertEqual(args[0], 'https://api.example.test/v1/chat/completions')
+                self.assertEqual(kwargs['headers']['Authorization'], 'Bearer shared-test-secret')
+                self.assertEqual(kwargs['json']['model'], 'vision-test-model')
+                self.assertEqual(kwargs['json']['messages'][0]['content'][1]['image_url']['url'], 'data:image/png;base64,AAAA')
         finally:
             for key, value in original_env.items():
                 if value is None:
