@@ -11,7 +11,7 @@
 - Trosa 生产服务：`trade-os.service` 已启用且运行中，当前 release 为 `/opt/trade-os/releases/20260903041038`；进程环境已确认 `CRM_ENV=production`、`CRM_DB_PATH=/var/lib/trade-os`、`TRADE_OS_DATA_BACKEND=postgres`、`TRADE_OS_DATABASE_URL=postgresql://tradeos_app@127.0.0.1:5432/tradeos` 与权限 600 的 `PGPASSFILE`。
 - Trosa 最终 SQLite 快照：`/var/lib/trade-os/backups/2026-09-03/133856_037053`。动态闭集包含 `system.db` 与 6 个注册用户库，7/7 完整性通过；该快照保留用于回滚。
 - sela 最终源快照：`/Users/luoxin/Library/Application Support/Sela/postgres-source-snapshots/20260903T053710Z`。候选 1,032 条、反馈 3,049 条、活动 6,196 行（SQLite `integrity_check=ok`）、Run manifest 352 份；冻结快照与最终 PostgreSQL 导入源一致。
-- PostgreSQL 目标：`postgres:17.11`，仅监听 ECS `127.0.0.1:5432`，容器 healthy；6 个迁移已应用，迁移文件哈希与 `audit.schema_migrations` 全部一致。
+- PostgreSQL 目标：`postgres:17.11`，仅监听 ECS `127.0.0.1:5432`，容器 healthy；当前切换基线已应用 6 个迁移，本地待发布版本新增 `0007_postgres_runtime_hardening.sql`，发布/重启后应核对 7 个迁移及文件哈希与 `audit.schema_migrations` 全部一致。
 - 最终导入报告：`/opt/trade-os-postgres/reports/import-report-cutover-20260903T052117Z.json`，`result=passed`、`issues=[]`；最终 sela 活动快照哈希为 `84d34adf5cb56b3f48d39ccc5a33ac1a07c3d6362089ae2ff8d6de434b31ed46`。候选库随后从清洁 dump 恢复并完成 restore-check，避免重复导入产生额外审计行。
 - 目标计数：`core.companies=1817`、`core.people=1447`、`core.contact_methods=1785`、`trosa.accounts=1334`、`trosa.tasks=2818`、`trosa.timeline_events=3826`、`trosa.outreach_messages=483`、`sela.prospects=1032`、`sela.prospect_events=3049`、`sela.run_activity_events=6196`、`sela.search_memory_entries=532`、`audit.legacy_records=37418`。
 - 关系闸门：孤儿引用 `0`、重复 primary domain `0`、迁移问题 `0`、残留 restore-check 数据库 `0`；共享活跃公司 `541`。

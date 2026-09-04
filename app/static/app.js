@@ -1623,7 +1623,7 @@ function showInboxTaskUndoToast(taskId) {
 
 async function archiveInboxItem(key, customerId, itemType) {
   try {
-    await api('/api/inbox/archive', { method: 'POST', body: JSON.stringify({ dedupe_key: key, customer_id: customerId, item_type: itemType }) });
+    await api('/api/inbox/archive', { method: 'POST', body: JSON.stringify({ dedupe_key: key, customer_id: customerId || null, item_type: itemType }) });
     showToast('已归档', 'success');
     loadInbox();
   } catch (e) {}
@@ -1631,7 +1631,7 @@ async function archiveInboxItem(key, customerId, itemType) {
 
 async function snoozeInboxItem(key, customerId, itemType) {
   try {
-    var result = await api('/api/inbox/snooze', { method: 'POST', body: JSON.stringify({ dedupe_key: key, customer_id: customerId, item_type: itemType || 'ai_suggestion', days: 7 }) });
+    var result = await api('/api/inbox/snooze', { method: 'POST', body: JSON.stringify({ dedupe_key: key, customer_id: customerId || null, item_type: itemType || 'ai_suggestion', days: 7 }) });
     showToast('已推迟到 ' + formatChineseDate(result.snoozed_until), 'success');
     loadInbox();
   } catch(e) {}

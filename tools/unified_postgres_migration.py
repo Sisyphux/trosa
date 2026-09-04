@@ -30,6 +30,7 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0004_postgres_runtime_surfaces.sql",
     ROOT / "migrations" / "0005_postgres_runtime_write_fixes.sql",
     ROOT / "migrations" / "0006_postgres_runtime_surface_writes.sql",
+    ROOT / "migrations" / "0007_postgres_runtime_hardening.sql",
 )
 TARGET_SCHEMAS = ("identity", "core", "trosa", "sela", "audit", "trade_os_compat")
 TARGET_TABLES = (

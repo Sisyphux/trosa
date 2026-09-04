@@ -57,6 +57,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0004_postgres_runtime_surfaces.sql'),
         os.path.join(root, 'migrations', '0005_postgres_runtime_write_fixes.sql'),
         os.path.join(root, 'migrations', '0006_postgres_runtime_surface_writes.sql'),
+        os.path.join(root, 'migrations', '0007_postgres_runtime_hardening.sql'),
     )
 
 
@@ -128,12 +129,20 @@ def init_postgres_store():
                 # current baseline, so startup does not replay a 30-second
                 # migration batch merely to create bookkeeping rows.
                 if schema_ready and not applied:
+                    # Older imported stores may already contain the complete
+                    # schema but predate the migration ledger.  Adopt the
+                    # historical migrations as a baseline, then still execute
+                    # the newest forward migration so a compatibility fix is
+                    # not silently marked as applied without running.
+                    baseline = migration_contents[:-1]
                     cursor.executemany(
                         '''INSERT INTO audit.schema_migrations (name, sha256)
                            VALUES (%s, %s) ON CONFLICT (name) DO NOTHING''',
-                        [(name, digest) for name, _, digest in migration_contents],
+                        [(name, digest) for name, _, digest in baseline],
                     )
                     conn.commit()
+                    applied = {name: digest for name, _, digest in baseline}
+                    migration_contents = migration_contents[-1:]
                 else:
                     # The setup queries above opened a transaction.  Every
                     # migration file starts with ``BEGIN`` and ends with

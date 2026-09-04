@@ -21,7 +21,7 @@ docker compose up -d
 ./status.sh
 ```
 
-Apply the six canonical migrations and import only from verified, immutable
+Apply the seven canonical migrations and import only from verified, immutable
 source snapshots. Do not point the importer at `/var/lib/trade-os` while the
 SQLite service is running.
 

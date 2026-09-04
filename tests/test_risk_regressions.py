@@ -1827,6 +1827,213 @@ class CalendarAndAccessTest(unittest.TestCase):
             conn.close()
 
 
+class InputBoundaryRegressionTest(unittest.TestCase):
+    """Typed compatibility inputs fail safely before a business write."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.original_db_dir = db.DB_DIR
+        self.original_demo = os.environ.get('CRM_SEED_DEMO_DATA')
+        db.DB_DIR = self.tempdir.name
+        os.environ.pop('CRM_SEED_DEMO_DATA', None)
+        db.init_all_dbs()
+
+    def tearDown(self):
+        db.DB_DIR = self.original_db_dir
+        if self.original_demo is None:
+            os.environ.pop('CRM_SEED_DEMO_DATA', None)
+        else:
+            os.environ['CRM_SEED_DEMO_DATA'] = self.original_demo
+        self.tempdir.cleanup()
+
+    def _load_module(self, name):
+        spec = importlib.util.spec_from_file_location(name, ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _client_and_customer(self, module):
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        response = client.post('/api/customers', json={
+            'name': '边界测试客户', 'company': 'Boundary Input Co.',
+        })
+        self.assertEqual(response.status_code, 201, response.get_json())
+        return client, response.get_json()['id']
+
+    def test_malformed_dates_are_rejected_before_any_write(self):
+        module = self._load_module('crm_app_input_dates_test')
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        invalid_create = client.post('/api/customers', json={
+            'name': '不应写入', 'company': 'Invalid Date Co.', 'last_contact': 'not-a-date',
+        })
+        self.assertEqual(invalid_create.status_code, 400, invalid_create.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM customers WHERE company='Invalid Date Co.'").fetchone()[0], 0)
+        finally:
+            conn.close()
+
+        created = client.post('/api/customers', json={
+            'name': '日期边界客户', 'company': 'Date Boundary Co.', 'next_follow_up': '2026-09-10',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+        bad_update = client.put(f'/api/customers/{customer_id}', json={'next_follow_up': '2026-99-01'})
+        self.assertEqual(bad_update.status_code, 400, bad_update.get_json())
+
+        bad_batch = client.post('/api/customers/batch/next_follow_up', json={
+            'ids': [customer_id], 'value': 'not-a-date',
+        })
+        self.assertEqual(bad_batch.status_code, 400, bad_batch.get_json())
+
+        task = client.post(f'/api/customers/{customer_id}/tasks', json={
+            'title': '有效待办', 'due_date': '2026-09-12',
+        })
+        self.assertEqual(task.status_code, 201, task.get_json())
+        task_id = task.get_json()['id']
+        bad_complete = client.put(f'/api/reminders/{task_id}', json={
+            'activity_content': '不应完成', 'next_task': '下一步', 'next_follow_up': 'bad-date',
+        })
+        self.assertEqual(bad_complete.status_code, 400, bad_complete.get_json())
+        bad_edit = client.patch(f'/api/reminders/{task_id}', json={'remind_date': 'bad-date'})
+        self.assertEqual(bad_edit.status_code, 400, bad_edit.get_json())
+        bad_reschedule = client.post(f'/api/reminders/{task_id}/reschedule', json={'remind_date': 'bad-date'})
+        self.assertEqual(bad_reschedule.status_code, 400, bad_reschedule.get_json())
+
+        bad_outreach = client.post(f'/api/customers/{customer_id}/outreach', json={
+            'subject': '不应写入', 'sent_date': 'bad-date',
+        })
+        self.assertEqual(bad_outreach.status_code, 400, bad_outreach.get_json())
+        valid_outreach = client.post(f'/api/customers/{customer_id}/outreach', json={
+            'subject': '有效开发信', 'sent_date': '2026-09-01',
+        })
+        self.assertEqual(valid_outreach.status_code, 201, valid_outreach.get_json())
+        outreach_id = valid_outreach.get_json()['outreach']['id']
+        bad_reply_date = client.put(f'/api/outreach/{outreach_id}', json={'reply_date': 'bad-date'})
+        self.assertEqual(bad_reply_date.status_code, 400, bad_reply_date.get_json())
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''INSERT INTO follow_up_logs
+                         (customer_id, content, follow_date, activity_type, direction, source, created_at)
+                         VALUES (?, '已有沟通', '2026-09-01', 'follow_up', 'outbound', 'test', '2026-09-01')''',
+                         (customer_id,))
+            log_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        bad_history = client.put(f'/api/follow-history/{log_id}', json={'follow_date': 'bad-date'})
+        self.assertEqual(bad_history.status_code, 400, bad_history.get_json())
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            reminder = conn.execute('SELECT is_done, remind_date FROM reminders WHERE id=?', (task_id,)).fetchone()
+            self.assertEqual(tuple(reminder), (0, '2026-09-12'))
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs WHERE content=?', ('不应完成',)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT reply_date FROM outreach_emails WHERE id=?', (outreach_id,)).fetchone()[0], '')
+            self.assertEqual(conn.execute('SELECT follow_date FROM follow_up_logs WHERE id=?', (log_id,)).fetchone()[0], '2026-09-01')
+        finally:
+            conn.close()
+
+        extension = client.post('/api/extension/communications', json={
+            'customer_id': customer_id, 'content': '扩展日期也不应写入',
+            'follow_date': 'bad-date', 'messages': [{'text': '消息', 'time': '2026-09-04'}],
+        })
+        self.assertEqual(extension.status_code, 400, extension.get_json())
+
+    def test_typed_ids_are_normalized_or_rejected_without_500(self):
+        module = self._load_module('crm_app_input_ids_test')
+        client, customer_id = self._client_and_customer(module)
+
+        archived = client.post('/api/inbox/archive', json={
+            'dedupe_key': 'boundary-archive', 'item_type': 'customer_reply', 'customer_id': '',
+        })
+        self.assertEqual(archived.status_code, 200, archived.get_json())
+        snooze_bad = client.post('/api/inbox/snooze', json={
+            'dedupe_key': 'boundary-snooze', 'item_type': 'ai_suggestion',
+            'customer_id': '', 'days': 'not-an-int',
+        })
+        self.assertEqual(snooze_bad.status_code, 400, snooze_bad.get_json())
+        snoozed = client.post('/api/inbox/snooze', json={
+            'dedupe_key': 'boundary-snooze', 'item_type': 'ai_suggestion',
+            'customer_id': '', 'days': 7,
+        })
+        self.assertEqual(snoozed.status_code, 200, snoozed.get_json())
+        reply = client.post('/api/inbox/reply', json={'customer_id': '', 'content': '回复'})
+        self.assertEqual(reply.status_code, 400, reply.get_json())
+        suggestion = client.post('/api/inbox/resolve-suggestion', json={
+            'dedupe_key': f'ai_suggestion:{customer_id}:x', 'customer_id': 'not-an-id',
+            'reason': 'waiting_reply',
+        })
+        self.assertEqual(suggestion.status_code, 400, suggestion.get_json())
+
+        malformed_batch_requests = (
+            ('/api/customers/batch/status', {'ids': [''], 'value': '跟进中'}),
+            ('/api/customers/batch/level', {'ids': [''], 'value': 'B'}),
+            ('/api/customers/batch/next_follow_up', {'ids': [''], 'value': '2026-09-10'}),
+            ('/api/customers/batch/follow_history', {'ids': [''], 'content': '批量记录'}),
+            ('/api/customers/batch/delete', {'ids': ['']}),
+            ('/api/customers/priority/order', {'ids': ['']}),
+            ('/api/reminders/batch/complete', {'ids': ['']}),
+            ('/api/reminders/today/order', {'ids': ['']}),
+        )
+        for path, payload in malformed_batch_requests:
+            response = client.post(path, json=payload)
+            self.assertEqual(response.status_code, 400, (path, response.get_json()))
+
+        contact = client.post(f'/api/customers/{customer_id}/contacts', json={
+            'name': '空开关联系人', 'email': 'blank-flag@example.com', 'is_primary': '',
+        })
+        self.assertEqual(contact.status_code, 201, contact.get_json())
+        contact_id = contact.get_json()['contact_id']
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT is_primary FROM contacts WHERE id=?', (contact_id,)).fetchone()[0], 0)
+            self.assertIsNone(conn.execute('SELECT customer_id FROM inbox_items WHERE dedupe_key=?', ('boundary-archive',)).fetchone()[0])
+            self.assertIsNone(conn.execute('SELECT customer_id FROM inbox_items WHERE dedupe_key=?', ('boundary-snooze',)).fetchone()[0])
+        finally:
+            conn.close()
+
+        second = client.post('/api/customers', json={'name': '第二客户', 'company': 'Second Boundary Co.'})
+        self.assertEqual(second.status_code, 201, second.get_json())
+        cross_customer = client.post(f"/api/customers/{second.get_json()['id']}/follow_history", json={
+            'activity_content': '不应关联其他客户联系人', 'contact_id': contact_id,
+        })
+        self.assertEqual(cross_customer.status_code, 400, cross_customer.get_json())
+
+    def test_static_compatibility_and_diagnostic_404(self):
+        module = self._load_module('crm_app_static_boundary_test')
+        client = module.app.test_client()
+        self.assertEqual(client.get('/').status_code, 200)
+        for path in (
+            '/app.js', '/static/app.js', '/style.css', '/visual-v2.css',
+            '/icons/phosphor/check.svg', '/assets/workspace-tree-lines-v2.webp', '/favicon.ico',
+        ):
+            response = client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            body = response.data
+            response.close()
+            self.assertGreater(len(body), 0, path)
+        with self.assertLogs(module.logger, level='WARNING') as captured:
+            missing = client.get('/static/definitely-missing.js')
+        self.assertEqual(missing.status_code, 404)
+        missing.close()
+        self.assertTrue(any('definitely-missing.js' in line for line in captured.output))
+
+    def test_postgres_hardening_migration_is_registered_and_restores_ids(self):
+        migration = (ROOT / 'migrations' / '0007_postgres_runtime_hardening.sql').read_text(encoding='utf-8')
+        self.assertIn('compat_legacy_bigint', migration)
+        self.assertIn("e.payload->>'contact_id'", migration)
+        self.assertIn("e.payload->>'related_task_id'", migration)
+        self.assertIn("o.legacy_payload->>'contact_id'", migration)
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0007_postgres_runtime_hardening.sql')
+        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
+        self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
+
+
 class CustomerAiSummaryTest(unittest.TestCase):
     """按需 AI 摘要必须兼容旧调用，并在无模型时保留事实回退。"""
 

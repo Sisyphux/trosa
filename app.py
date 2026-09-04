@@ -593,6 +593,15 @@ def handle_500(e):
     logger.error(f'500 error: {e}', exc_info=True)
     return jsonify({'error': f'服务器内部错误: {str(e)}'}), 500
 
+
+@app.errorhandler(404)
+def handle_404(e):
+    # Keep missing assets diagnosable without emitting a traceback for every
+    # stale browser URL or crawler probe.
+    logger.warning('HTTP 404: %s %s', request.method, request.path)
+    return jsonify({'error': str(e)}), 404
+
+
 @app.errorhandler(Exception)
 def handle_exception(e):
     if isinstance(e, HTTPException):
@@ -2682,6 +2691,12 @@ def favicon():
     return send_from_directory(app.static_folder, 'icons/phosphor/sparkle.svg', mimetype='image/svg+xml')
 
 
+@app.route('/static/<path:filename>')
+def legacy_static_asset(filename):
+    """Keep cached pages using the former /static/ asset prefix working."""
+    return send_from_directory(app.static_folder, filename)
+
+
 # ========== 客户 API ==========
 # 以下所有路由通过 get_db() 自动路由到当前用户数据库
 
@@ -3527,13 +3542,13 @@ def update_customer_priority(customer_id):
 @login_required
 def save_customer_priority_order():
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     raw_ids = data.get('ids') or []
     try:
-        customer_ids = list(dict.fromkeys(int(value) for value in raw_ids))
-    except (TypeError, ValueError):
+        customer_ids = _normalize_id_list(raw_ids, '排序列表')
+    except CrmWriteError:
         return jsonify({'error': '排序数据无效'}), 400
-    if not customer_ids:
-        return jsonify({'error': '排序列表不能为空'}), 400
 
     conn = get_db()
     c = conn.cursor()
@@ -4763,16 +4778,23 @@ def restore_customer_file(customer_id, file_id):
 @login_required
 def create_customer():
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     customer_name = str(data.get('name') or '').strip()
     company_name = str(data.get('company') or '').strip()
     if not customer_name and not company_name:
         return jsonify({'error': '请至少填写客户名称或公司名称'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     country = normalize_country(data.get('country', ''))
     customer_level = _normalize_customer_level(data.get('level', 'C'))
     contacts = _merge_contact_candidates(data.get('contacts') or [])
+    try:
+        last_contact = _normalize_optional_date(data.get('last_contact'), '上次联系日期')
+        next_follow_up = _normalize_optional_date(data.get('next_follow_up'), '下次跟进日期')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    conn = get_db()
+    c = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     # Prevent the most expensive duplicate mistakes before writing anything.
     website = normalize_website(data.get('website'))
@@ -4813,8 +4835,8 @@ def create_customer():
     ''', (data.get('name', ''), data.get('company', ''), country, customer_level,
           data.get('type', ''), normalize_website(data.get('website')), data.get('profile', ''),
           data.get('field', ''), data.get('status', '未建联'), data.get('notes', ''),
-          data.get('system_notes', ''), data.get('last_contact', ''),
-          data.get('next_follow_up', ''), data.get('customer_type', 'existing'),
+          data.get('system_notes', ''), last_contact,
+          next_follow_up, data.get('customer_type', 'existing'),
           data.get('industry', ''), data.get('company_size', ''),
           data.get('annual_revenue', ''), data.get('tags', ''), 'manual', now, now))
     customer_id = c.lastrowid
@@ -4830,7 +4852,7 @@ def create_customer():
                    (contact.get('whatsapp') or '').strip(), (contact.get('linkedin') or '').strip(),
                    (contact.get('preferred_channel') or '').strip(), contact.get('contact_type') or 'person',
                    1 if index == 0 else 0, (contact.get('notes') or '').strip(), now))
-    manual_next_follow = data.get('next_follow_up', '')
+    manual_next_follow = next_follow_up
     if manual_next_follow:
         task_title = (data.get('task_title') or f'联系 {data.get("name", "客户")}').strip()
         _merge_or_create_reminder(c, customer_id, task_title, task_title,
@@ -4858,6 +4880,8 @@ def create_customer():
 def update_customer(customer_id):
     try:
         data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            data = {}
         conn = get_db()
         c = conn.cursor()
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -4872,10 +4896,19 @@ def update_customer(customer_id):
             row['id']: _snapshot_entity(conn, 'reminders', row['id'])
             for row in c.execute('SELECT id FROM reminders WHERE customer_id=?', (customer_id,)).fetchall()
         }
-        old_date = existing.get('next_follow_up', '') or ''
         customer_name = data.get('name', existing.get('name', ''))
         old_manual = existing.get('manual_next_follow', 0) or 0
-        new_next_follow = data.get('next_follow_up', old_date)
+        try:
+            old_date = _normalize_optional_date(existing.get('next_follow_up', ''), '下次跟进日期')
+            last_contact = _normalize_optional_date(
+                data.get('last_contact', existing.get('last_contact', '')), '上次联系日期'
+            )
+            new_next_follow = _normalize_optional_date(
+                data.get('next_follow_up', old_date), '下次跟进日期'
+            )
+        except CrmWriteError as error:
+            conn.close()
+            return jsonify({'error': error.message}), error.status
         is_manual_date = 1 if (new_next_follow and new_next_follow != old_date) else old_manual
         # 保留原有状态，只有明确传入才更新
         new_status = data.get('status', existing.get('status', ''))
@@ -4892,10 +4925,10 @@ def update_customer(customer_id):
               normalize_website(data.get('website', existing.get('website', ''))), data.get('profile', existing.get('profile', '')),
               data.get('field', existing.get('field', '')), new_status,
               data.get('notes', existing.get('notes', '')), data.get('system_notes', existing.get('system_notes', '')),
-              data.get('last_contact', existing.get('last_contact', '')), new_next_follow, is_manual_date, auto_customer_type,
+              last_contact, new_next_follow, is_manual_date, auto_customer_type,
               data.get('industry', existing.get('industry', '')), data.get('company_size', existing.get('company_size', '')),
               data.get('annual_revenue', existing.get('annual_revenue', '')), data.get('tags', existing.get('tags', '')), now, customer_id))
-        new_date = data.get('next_follow_up', '')
+        new_date = new_next_follow if 'next_follow_up' in data else ''
         if new_date and new_date != old_date:
             c.execute('UPDATE reminders SET is_done = 1 WHERE customer_id = ? AND is_done = 0 AND reminder_type = ?', (customer_id, 'follow_up'))
             task_title = (data.get('task_title') or f'联系 {customer_name}').strip()
@@ -4968,11 +5001,17 @@ def delete_customer(customer_id):
 @app.route('/api/customers/batch/status', methods=['POST'])
 @login_required
 def batch_update_status():
-    data = request.get_json(silent=True)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     ids = data.get('ids', [])
     value = data.get('value', '')
-    if not ids or not value:
+    if not value:
         return jsonify({'error': '缺少参数'}), 400
+    try:
+        ids = _normalize_id_list(ids, '客户列表')
+    except CrmWriteError:
+        return jsonify({'error': '客户列表无效'}), 400
     conn = get_db()
     c = conn.cursor()
     c.execute(f'SELECT name FROM customers WHERE id IN ({",".join("?" * len(ids))})', ids)
@@ -4988,11 +5027,17 @@ def batch_update_status():
 @app.route('/api/customers/batch/level', methods=['POST'])
 @login_required
 def batch_update_level():
-    data = request.get_json(silent=True)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     ids = data.get('ids', [])
     value = data.get('value', '')
-    if not ids or not value:
+    if not value:
         return jsonify({'error': '缺少参数'}), 400
+    try:
+        ids = _normalize_id_list(ids, '客户列表')
+    except CrmWriteError:
+        return jsonify({'error': '客户列表无效'}), 400
     value = _normalize_customer_level(value, fallback='')
     if not value:
         return jsonify({'error': '等级必须是 A-D，可选 + 或 -'}), 400
@@ -5011,11 +5056,18 @@ def batch_update_level():
 @app.route('/api/customers/batch/next_follow_up', methods=['POST'])
 @login_required
 def batch_update_next_follow_up():
-    data = request.get_json(silent=True)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     ids = data.get('ids', [])
     value = data.get('value', '')
-    if not ids or not value:
+    if not value:
         return jsonify({'error': '缺少参数'}), 400
+    try:
+        ids = _normalize_id_list(ids, '客户列表')
+        value = _normalize_required_date(value, '下次跟进日期')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     c.execute(f'SELECT id, name FROM customers WHERE id IN ({",".join("?" * len(ids))})', ids)
@@ -5056,22 +5108,27 @@ def batch_add_follow_history():
     - 更新 customers.last_contact 与 next_follow_up（基于剩余未完成提醒的最小日期）
     """
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     ids = data.get('ids', [])
-    content = (data.get('content') or '').strip()
-    if not ids:
-        return jsonify({'error': '缺少客户参数'}), 400
+    content = str(data.get('content') or '').strip()
+    try:
+        ids = _normalize_id_list(ids, '客户列表')
+    except CrmWriteError:
+        return jsonify({'error': '客户列表无效'}), 400
     if not content:
         return jsonify({'error': '请填写跟进内容'}), 400
-    result = (data.get('result') or '').strip()
-    activity_type = (data.get('activity_type') or 'follow_up').strip()
-    direction = (data.get('direction') or 'unknown').strip()
+    result = str(data.get('result') or '').strip()
+    activity_type = str(data.get('activity_type') or 'follow_up').strip()
+    direction = str(data.get('direction') or 'unknown').strip()
     if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
         return jsonify({'error': '信息方向无效'}), 400
-    follow_date = (data.get('follow_date') or _calendar_today().isoformat()).strip()
     try:
-        datetime.strptime(follow_date, '%Y-%m-%d')
-    except ValueError:
-        return jsonify({'error': '沟通日期格式无效'}), 400
+        follow_date = _normalize_required_date(
+            data.get('follow_date') or _calendar_today().isoformat(), '沟通日期'
+        )
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     placeholders = ','.join('?' for _ in ids)
@@ -5124,10 +5181,14 @@ def batch_add_follow_history():
 @app.route('/api/customers/batch/delete', methods=['POST'])
 @login_required
 def batch_delete_customers():
-    data = request.get_json(silent=True)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     ids = data.get('ids', [])
-    if not ids:
-        return jsonify({'error': '缺少参数'}), 400
+    try:
+        ids = _normalize_id_list(ids, '客户列表')
+    except CrmWriteError:
+        return jsonify({'error': '客户列表无效'}), 400
     conn = get_db()
     c = conn.cursor()
     c.execute(f'SELECT name FROM customers WHERE id IN ({",".join("?" * len(ids))})', ids)
@@ -5736,9 +5797,14 @@ def get_inbox_counts():
 @login_required
 def add_inbox_reply():
     data = request.get_json(silent=True) or {}
-    customer_id = data.get('customer_id')
-    content = (data.get('content') or '').strip()
-    if not customer_id or not content:
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号', allow_empty=False)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    content = str(data.get('content') or '').strip()
+    if not content:
         return jsonify({'error': '请选择客户并粘贴回复内容'}), 400
     conn = get_db()
     c = conn.cursor()
@@ -5946,9 +6012,14 @@ def extract_inbox_image():
 @login_required
 def archive_inbox_item():
     data = request.get_json(silent=True) or {}
-    key = (data.get('dedupe_key') or '').strip()
-    item_type = (data.get('item_type') or '').strip()
-    customer_id = data.get('customer_id')
+    if not isinstance(data, dict):
+        data = {}
+    key = str(data.get('dedupe_key') or '').strip()
+    item_type = str(data.get('item_type') or '').strip()
+    try:
+        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     if not key or not item_type:
         return jsonify({'error': '无效的 Inbox 条目'}), 400
     conn = get_db()
@@ -5971,10 +6042,15 @@ def archive_inbox_item():
 @login_required
 def snooze_inbox_item():
     data = request.get_json(silent=True) or {}
-    key = (data.get('dedupe_key') or '').strip()
-    customer_id = data.get('customer_id')
-    item_type = (data.get('item_type') or 'ai_suggestion').strip()
-    days = min(max(int(data.get('days') or 7), 1), 90)
+    if not isinstance(data, dict):
+        data = {}
+    key = str(data.get('dedupe_key') or '').strip()
+    item_type = str(data.get('item_type') or 'ai_suggestion').strip()
+    try:
+        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号')
+        days = _normalize_bounded_int(data.get('days'), '推迟天数', 7, 1, 90)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     if not key:
         return jsonify({'error': '无效的 Inbox 条目'}), 400
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -5997,10 +6073,11 @@ def snooze_inbox_item():
 def resolve_inbox_suggestion():
     """Close the current suggestion with a business reason until its signal changes."""
     data = request.get_json(silent=True) or {}
-    key = (data.get('dedupe_key') or '').strip()
-    customer_id = data.get('customer_id')
-    reason = (data.get('reason') or '').strip()
-    note = (data.get('note') or '').strip()[:500]
+    if not isinstance(data, dict):
+        data = {}
+    key = str(data.get('dedupe_key') or '').strip()
+    reason = str(data.get('reason') or '').strip()
+    note = str(data.get('note') or '').strip()[:500]
     reason_labels = {
         'no_next_plan': '最近还没有下一步计划',
         'waiting_reply': '等待客户回复',
@@ -6008,7 +6085,11 @@ def resolve_inbox_suggestion():
         'not_investing_now': '当前不投入',
         'custom': '其他实际情况',
     }
-    if not key or not customer_id or reason not in reason_labels:
+    try:
+        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号', allow_empty=False)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    if not key or reason not in reason_labels:
         return jsonify({'error': '无效的下一步计划状态'}), 400
     if not key.startswith(f'ai_suggestion:{customer_id}:'):
         return jsonify({'error': '无效的 AI 建议'}), 400
@@ -7675,23 +7756,21 @@ def get_development_reminders():
 def save_today_reminder_order():
     """Persist the user's attention order for the currently due task list."""
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     raw_ids = data.get('ids') or []
     try:
-        reminder_ids = list(dict.fromkeys(int(value) for value in raw_ids))
-    except (TypeError, ValueError):
+        reminder_ids = _normalize_id_list(raw_ids, '排序列表')
+    except CrmWriteError:
         return jsonify({'error': '排序数据无效'}), 400
-    if not reminder_ids:
-        return jsonify({'error': '排序列表不能为空'}), 400
 
     raw_expected_ids = data.get('expected_ids')
     expected_ids = None
     if raw_expected_ids is not None:
         try:
-            expected_ids = list(dict.fromkeys(int(value) for value in raw_expected_ids))
-        except (TypeError, ValueError):
+            expected_ids = _normalize_id_list(raw_expected_ids, '排序前的待办快照')
+        except CrmWriteError:
             return jsonify({'error': '排序前的待办快照无效'}), 400
-        if not expected_ids:
-            return jsonify({'error': '排序前的待办快照不能为空'}), 400
 
     today = _calendar_today().isoformat()
     conn = get_db()
@@ -7769,10 +7848,13 @@ def get_upcoming_reminders():
 @app.route('/api/reminders/batch/complete', methods=['POST'])
 @login_required
 def batch_complete_reminders():
-    data = request.get_json(silent=True)
-    ids = data.get('ids', [])
-    if not ids:
-        return jsonify({'error': '缺少参数'}), 400
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        ids = _normalize_id_list(data.get('ids', []), '待办列表')
+    except CrmWriteError:
+        return jsonify({'error': '待办列表无效'}), 400
     conn = get_db()
     c = conn.cursor()
     now = _calendar_now_text()
@@ -7812,15 +7894,18 @@ def get_reminder(reminder_id):
 def edit_reminder(reminder_id):
     """Edit an open task while preserving a conflict-aware undo snapshot."""
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     allowed = ('title', 'content', 'reason', 'remind_date')
     provided = {field for field in allowed if field in data}
     if not provided:
         return jsonify({'error': '没有提供需要修改的待办字段'}), 400
+    provided_remind_date = None
     if 'remind_date' in provided:
         try:
-            datetime.strptime(str(data.get('remind_date') or '').strip(), '%Y-%m-%d')
-        except ValueError:
-            return jsonify({'error': '请提供 YYYY-MM-DD 格式的日期'}), 400
+            provided_remind_date = _normalize_required_date(data.get('remind_date'), '待办日期')
+        except CrmWriteError as error:
+            return jsonify({'error': error.message}), error.status
 
     conn = get_db()
     c = conn.cursor()
@@ -7831,11 +7916,16 @@ def edit_reminder(reminder_id):
     customer_id = before['customer_id']
     customer_before = _snapshot_entity(conn, 'customers', customer_id)
     now = _calendar_now_text()
+    try:
+        existing_remind_date = _normalize_required_date(before.get('remind_date'), '待办日期')
+    except CrmWriteError as error:
+        conn.close()
+        return jsonify({'error': error.message}), error.status
     values = {
         'title': str(data.get('title') if 'title' in provided else before.get('title') or '').strip(),
         'content': str(data.get('content') if 'content' in provided else before.get('content') or '').strip(),
         'reason': str(data.get('reason') if 'reason' in provided else before.get('reason') or '').strip(),
-        'remind_date': str(data.get('remind_date') if 'remind_date' in provided else before.get('remind_date') or '').strip(),
+        'remind_date': provided_remind_date or existing_remind_date,
     }
     if 'title' in provided and 'content' not in provided:
         values['content'] = values['title']
@@ -7868,6 +7958,90 @@ class CrmWriteError(Exception):
         self.status = status
 
 
+def _normalize_optional_date(value, label='日期'):
+    """Normalize a legacy date field before it reaches a typed database column."""
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    try:
+        parsed = (datetime.strptime(raw, '%Y-%m-%d') if len(raw) == 10
+                  else datetime.fromisoformat(raw.replace('Z', '+00:00')))
+    except (TypeError, ValueError, OverflowError):
+        raise CrmWriteError(f'{label}格式无效，应为 YYYY-MM-DD')
+    return parsed.date().isoformat()
+
+
+def _normalize_required_date(value, label='日期'):
+    normalized = _normalize_optional_date(value, label)
+    if not normalized:
+        raise CrmWriteError(f'{label}不能为空')
+    return normalized
+
+
+def _normalize_positive_id(value, label='编号', allow_empty=True):
+    """Convert JSON ids to positive integers and turn optional blanks into NULL."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        if allow_empty:
+            return None
+        raise CrmWriteError(f'{label}不能为空')
+    if isinstance(value, bool):
+        raise CrmWriteError(f'{label}无效')
+    if isinstance(value, float) and not value.is_integer():
+        raise CrmWriteError(f'{label}无效')
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise CrmWriteError(f'{label}无效')
+    if normalized <= 0:
+        raise CrmWriteError(f'{label}无效')
+    return normalized
+
+
+def _normalize_id_list(value, label='编号列表'):
+    if not isinstance(value, list) or not value:
+        raise CrmWriteError(f'{label}不能为空')
+    normalized = []
+    seen = set()
+    for item in value:
+        item_id = _normalize_positive_id(item, label, allow_empty=False)
+        if item_id not in seen:
+            normalized.append(item_id)
+            seen.add(item_id)
+    if not normalized:
+        raise CrmWriteError(f'{label}不能为空')
+    return normalized
+
+
+def _normalize_bounded_int(value, label, default, minimum, maximum):
+    """Parse a bounded integer parameter without leaking conversion errors."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        normalized = default
+    else:
+        if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+            raise CrmWriteError(f'{label}无效')
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError, OverflowError):
+            raise CrmWriteError(f'{label}无效')
+    if normalized < minimum or normalized > maximum:
+        raise CrmWriteError(f'{label}必须在 {minimum} 到 {maximum} 之间')
+    return normalized
+
+
+def _normalize_binary_flag(value, label='开关', default=0):
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return int(value)
+    if isinstance(value, str) and value.strip().lower() in ('0', 'false', 'no', 'off'):
+        return 0
+    if isinstance(value, str) and value.strip().lower() in ('1', 'true', 'yes', 'on'):
+        return 1
+    raise CrmWriteError(f'{label}无效')
+
+
 def _run_crm_write(operation, before_commit=None):
     """Run one core CRM action atomically, with an optional same-transaction hook."""
     conn = get_db()
@@ -7895,12 +8069,14 @@ def _validate_direction(value):
 def complete_customer_task(reminder_id, data, before_commit=None):
     """Complete one task and record its factual outcome in one transaction."""
     data = data or {}
+    if not isinstance(data, dict):
+        data = {}
     activity_content = str(data.get('activity_content') or data.get('result') or '').strip()
     activity_result = str(data.get('activity_result') or '').strip()
     activity_type = str(data.get('activity_type') or 'follow_up').strip()
     direction = _validate_direction(data.get('direction'))
     next_task = str(data.get('next_task') or '').strip()
-    next_follow_date = str(data.get('next_follow_up') or '').strip()
+    next_follow_date = _normalize_optional_date(data.get('next_follow_up'), '下一步日期')
     is_reported = 1 if data.get('is_reported') else 0
     if next_task and not next_follow_date:
         raise CrmWriteError('安排下一步时需要选择日期')
@@ -8001,11 +8177,12 @@ def complete_reminder(reminder_id):
 def reschedule_reminder(reminder_id):
     """Move an open reminder without completing it or creating a synthetic activity."""
     data = request.get_json(silent=True) or {}
-    remind_date = str(data.get('remind_date') or '').strip()
     try:
-        datetime.strptime(remind_date, '%Y-%m-%d')
-    except ValueError:
-        return jsonify({'error': '请提供 YYYY-MM-DD 格式的日期'}), 400
+        remind_date = _normalize_required_date(
+            data.get('remind_date') if isinstance(data, dict) else None, '待办日期'
+        )
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     before = _snapshot_entity(conn, 'reminders', reminder_id)
@@ -8128,43 +8305,33 @@ def get_follow_history(customer_id):
 def record_customer_communication(customer_id, data, before_commit=None):
     """Record a verified communication, its task consequences and Inbox resolution atomically."""
     data = data or {}
+    if not isinstance(data, dict):
+        data = {}
     activity_content = str(data.get('activity_content') or data.get('content') or '').strip()
     activity_result = str(data.get('activity_result') or data.get('result') or '').strip()
     activity_type = str(data.get('activity_type') or 'follow_up').strip()
     direction = _validate_direction(data.get('direction'))
     next_task = str(data.get('next_task') or data.get('next_plan') or '').strip()
-    next_follow_date = str(data.get('next_follow_up') or '').strip()
+    next_follow_date = _normalize_optional_date(data.get('next_follow_up'), '下一步日期')
     if not activity_content:
         raise CrmWriteError('请填写发生了什么')
     if next_task and not next_follow_date:
         raise CrmWriteError('安排下一步时需要选择日期')
-    follow_date = str(data.get('follow_date') or _calendar_today().isoformat()).strip()
-    try:
-        datetime.strptime(follow_date, '%Y-%m-%d')
-    except ValueError:
-        raise CrmWriteError('沟通日期格式无效')
-    raw_inbox_item_id = data.get('inbox_item_id')
-    try:
-        inbox_item_id = int(raw_inbox_item_id) if raw_inbox_item_id else None
-    except (TypeError, ValueError):
-        raise CrmWriteError('Inbox 条目无效')
-
-    raw_contact_id = data.get('contact_id')
-    if raw_contact_id is None or (isinstance(raw_contact_id, str) and not raw_contact_id.strip()):
-        contact_id = None
-    else:
-        try:
-            contact_id = int(raw_contact_id)
-        except (TypeError, ValueError):
-            raise CrmWriteError('联系人无效')
-        if contact_id <= 0:
-            raise CrmWriteError('联系人无效')
+    follow_date = _normalize_required_date(
+        data.get('follow_date') or _calendar_today().isoformat(), '沟通日期'
+    )
+    inbox_item_id = _normalize_positive_id(data.get('inbox_item_id'), 'Inbox 条目')
+    contact_id = _normalize_positive_id(data.get('contact_id'), '联系人')
 
     def operation(conn, c):
         customer = c.execute('''SELECT id FROM customers
                                 WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
         if not customer:
             raise CrmWriteError('客户不存在', 404)
+        if contact_id and not c.execute(
+                'SELECT id FROM contacts WHERE id=? AND customer_id=?',
+                (contact_id, customer_id)).fetchone():
+            raise CrmWriteError('所选联系人不属于当前客户')
         customer_before = _snapshot_entity(conn, 'customers', customer_id)
         related_reminders_before = {}
         inbox_item = None
@@ -8282,15 +8449,13 @@ def record_customer_communication(customer_id, data, before_commit=None):
 def create_customer_follow_up_task(customer_id, data, before_commit=None):
     """Create or merge a dated follow-up task, refresh rollups and keep an undo snapshot."""
     data = data or {}
+    if not isinstance(data, dict):
+        data = {}
     title = str(data.get('title') or '').strip()
-    due_date = str(data.get('due_date') or '').strip()
+    due_date = _normalize_optional_date(data.get('due_date'), '待办日期')
     reason = str(data.get('reason') or '').strip()
     if not title or not due_date:
         raise CrmWriteError('任务动作和日期不能为空')
-    try:
-        datetime.strptime(due_date, '%Y-%m-%d')
-    except ValueError:
-        raise CrmWriteError('待办日期格式无效')
 
     def operation(conn, c):
         if not c.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)',
@@ -8329,18 +8494,26 @@ def create_customer_follow_up_task(customer_id, data, before_commit=None):
 def update_customer_follow_up_task(reminder_id, data, before_commit=None):
     """Update one open task using the same transaction, refresh and undo rules as the UI."""
     data = data or {}
+    if not isinstance(data, dict):
+        data = {}
     allowed = ('title', 'content', 'reason', 'remind_date')
     provided = {field for field in allowed if field in data}
     if not provided:
         raise CrmWriteError('没有提供需要修改的待办字段')
-    if 'remind_date' in provided:
-        try: datetime.strptime(str(data.get('remind_date') or '').strip(), '%Y-%m-%d')
-        except ValueError: raise CrmWriteError('请提供 YYYY-MM-DD 格式的日期')
+    provided_remind_date = (
+        _normalize_required_date(data.get('remind_date'), '待办日期')
+        if 'remind_date' in provided else None
+    )
     def operation(conn, c):
         before = _snapshot_entity(conn, 'reminders', reminder_id)
         if not before or before.get('is_done'): raise CrmWriteError('待办不存在或已经完成', 404)
         customer_id, customer_before, now = before['customer_id'], _snapshot_entity(conn, 'customers', before['customer_id']), _calendar_now_text()
+        try:
+            existing_remind_date = _normalize_required_date(before.get('remind_date'), '待办日期')
+        except CrmWriteError:
+            raise
         values = {key: str(data.get(key) if key in provided else before.get(key) or '').strip() for key in allowed}
+        values['remind_date'] = provided_remind_date or existing_remind_date
         if 'title' in provided and 'content' not in provided: values['content'] = values['title']
         c.execute('UPDATE reminders SET title=?, content=?, reason=?, remind_date=?, updated_at=? WHERE id=?',
                   (values['title'], values['content'], values['reason'], values['remind_date'], now, reminder_id))
@@ -8635,28 +8808,29 @@ def _extension_message_fingerprint(message):
 def extension_save_communications():
     """Write only user-confirmed, not-yet-imported browser messages."""
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     customer_id = data.get('customer_id')
     messages = data.get('messages') if isinstance(data.get('messages'), list) else []
     content = str(data.get('content') or '').strip()
-    if not customer_id or not content or not messages:
+    if not content or not messages:
         return jsonify({'error': '客户、发生了什么和消息范围均不能为空'}), 400
     try:
-        customer_id = int(customer_id)
-    except (TypeError, ValueError):
-        return jsonify({'error': '客户编号无效'}), 400
+        customer_id = _normalize_positive_id(customer_id, '客户编号', allow_empty=False)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     customer = c.execute('SELECT id, name, company FROM customers WHERE id=? AND COALESCE(is_deleted,0)=0', (customer_id,)).fetchone()
     if not customer:
         conn.close()
         return jsonify({'error': '客户不存在或已归档'}), 404
-    contact_id = data.get('contact_id')
-    if contact_id not in (None, ''):
-        try:
-            contact_id = int(contact_id)
-        except (TypeError, ValueError):
-            conn.close()
-            return jsonify({'error': '联系人编号无效'}), 400
+    try:
+        contact_id = _normalize_positive_id(data.get('contact_id'), '联系人编号')
+    except CrmWriteError as error:
+        conn.close()
+        return jsonify({'error': error.message}), error.status
+    if contact_id:
         contact = c.execute('SELECT id FROM contacts WHERE id=? AND customer_id=?',
                             (contact_id, customer_id)).fetchone()
         if not contact:
@@ -8684,7 +8858,11 @@ def extension_save_communications():
         conn.close()
         return jsonify({'success': True, 'duplicate': True, 'new_message_count': 0, 'message': '这些消息已经存入 Trade OS'})
     now = _calendar_now_text()
-    follow_date = str(data.get('follow_date') or now[:10])[:10]
+    try:
+        follow_date = _normalize_required_date(data.get('follow_date') or now[:10], '沟通日期')
+    except CrmWriteError as error:
+        conn.close()
+        return jsonify({'error': error.message}), error.status
     direction = str(data.get('direction') or 'unknown')
     if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
         direction = 'unknown'
@@ -8789,24 +8967,33 @@ def sanitize_mark_html(s):
 @login_required
 def update_follow_history(log_id):
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT id, customer_id, activity_type FROM follow_up_logs WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (log_id,))
+    c.execute('SELECT id, customer_id, activity_type, follow_date FROM follow_up_logs WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (log_id,))
     existing = c.fetchone()
     if not existing:
         conn.close()
         return jsonify({'error': '记录不存在'}), 404
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    direction = (data.get('direction') or 'unknown').strip()
+    try:
+        follow_date = _normalize_required_date(
+            data.get('follow_date', existing['follow_date']), '沟通日期'
+        )
+    except CrmWriteError as error:
+        conn.close()
+        return jsonify({'error': error.message}), error.status
+    direction = str(data.get('direction') or 'unknown').strip()
     if direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
         conn.close()
         return jsonify({'error': '信息方向无效'}), 400
-    activity_type = (data.get('activity_type') or existing['activity_type'] or 'follow_up').strip()
+    activity_type = str(data.get('activity_type') or existing['activity_type'] or 'follow_up').strip()
     if not activity_type or len(activity_type) > 80:
         conn.close()
         return jsonify({'error': '沟通方式不能为空，且不能超过 80 个字符'}), 400
     c.execute('UPDATE follow_up_logs SET follow_date=?, activity_type=?, direction=?, content=?, result=?, next_plan=?, updated_at=? WHERE id=?',
-              (data.get('follow_date', ''), activity_type, direction,
+              (follow_date, activity_type, direction,
                sanitize_mark_html(data.get('content', '')),
                sanitize_mark_html(data.get('result', '')),
                sanitize_mark_html(data.get('next_plan', '')),
@@ -9041,6 +9228,13 @@ def export_contacts_csv():
 @login_required
 def add_contact(customer_id):
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        data = dict(data)
+        data['is_primary'] = _normalize_binary_flag(data.get('is_primary'), '主要联系人')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -9271,12 +9465,18 @@ def get_outreach_emails(customer_id):
 @login_required
 def add_outreach_email(customer_id):
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        sent_date = _normalize_optional_date(data.get('sent_date'), '发送日期')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     c.execute('INSERT INTO outreach_emails (customer_id, subject, content, sent_date, reply_status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
               (customer_id, data.get('subject', ''), data.get('content', ''),
-               data.get('sent_date', ''), data.get('reply_status', 'pending'), now))
+               sent_date, data.get('reply_status', 'pending'), now))
     outreach_id = c.lastrowid
     # 发送开发信即完成当前的新客户开发节点。保留待办历史，但不要让
     # 15/30/60 天的自动开发节点继续把客户留在待办中。
@@ -9285,7 +9485,6 @@ def add_outreach_email(customer_id):
                    AND reminder_type LIKE 'outreach_%' ''',
               (now, customer_id))
     # 开发信也是一种客户联系，更新 last_contact 以避免发送后客户卡片仍显示旧日期。
-    sent_date = (data.get('sent_date', '') or '')[:10]
     if sent_date:
         c.execute('''UPDATE customers
                      SET customer_type='existing',
@@ -9322,11 +9521,17 @@ def add_outreach_email(customer_id):
 @app.route('/api/outreach/<int:outreach_id>', methods=['PUT'])
 @login_required
 def update_outreach_email(outreach_id):
-    data = request.get_json(silent=True)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    try:
+        reply_date = _normalize_optional_date(data.get('reply_date'), '回复日期')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
     conn = get_db()
     c = conn.cursor()
     c.execute('UPDATE outreach_emails SET reply_status=?, reply_content=?, reply_date=? WHERE id=?',
-              (data.get('reply_status', 'pending'), data.get('reply_content', ''), data.get('reply_date', ''), outreach_id))
+              (data.get('reply_status', 'pending'), data.get('reply_content', ''), reply_date, outreach_id))
     conn.commit()
     conn.close()
     log_operation('UPDATE', 'outreach', outreach_id, f'更新开发信回复状态: {data.get("reply_status", "")}')
