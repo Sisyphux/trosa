@@ -780,7 +780,6 @@ function renderGlobalSearchPreview(customers, total) {
       var secondary = customer.country || customer.field || '';
       var detail = [customer.field, customer.primary_contact_name, customer.primary_contact_email].filter(Boolean).join(' · ');
       var match = customer.match_context || {};
-      var matchLabels = match.label ? [match.label] : [];
       var matchText = match.content || match.title || match.contact_name || detail;
       var name = document.createElement('strong');
       name.innerHTML = highlightSearchText(company, input.value);
@@ -788,7 +787,6 @@ function renderGlobalSearchPreview(customers, total) {
       meta.textContent = secondary;
       var small = document.createElement('small');
       var smallParts = [];
-      if (matchLabels.length) smallParts.push(escapeHtml(matchLabels.join('、') + '命中'));
       if (matchText) smallParts.push(highlightSearchText(matchText, input.value));
       if (match.date) smallParts.push(escapeHtml(formatDate(match.date)));
       small.innerHTML = smallParts.join(' · ') || '打开客户详情';
@@ -2117,7 +2115,7 @@ async function saveInboxReply() {
         activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
         activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
         next_task: nextTask, next_follow_up: nextDate,
-        inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || ''
+        inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
       });
       await api('/api/agent/proposals/' + context.agentProposalId, { method: 'PUT', body: JSON.stringify(proposalPayload) });
       await api('/api/agent/proposals/' + context.agentProposalId + '/confirm', { method: 'POST' });
@@ -2135,7 +2133,7 @@ async function saveInboxReply() {
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
           follow_date: followDate, next_task: nextTask, next_follow_up: nextDate,
-          source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || ''
+          source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
         })
       });
     }
@@ -3767,7 +3765,7 @@ function renderCustomerTable(tbodyId, customers, type) {
     var issuesHtml = (c.data_quality_issues || []).length ? '<div class="customer-quality-issues">' + c.data_quality_issues.map(function(issue) { return '<span>' + escapeHtml(issue) + '</span>'; }).join('') + '</div>' : '';
     var matchContext = c.match_context || {};
     var matchContextDetail = [matchContext.content || matchContext.title || matchContext.contact_name, matchContext.date ? formatDate(matchContext.date) : ''].filter(Boolean).join(' · ');
-    var matchContextHtml = matchContextDetail ? '<div class="customer-match-context"><strong>' + escapeHtml((matchContext.label || '搜索') + '命中') + '</strong><span>' + highlightSearchText(matchContextDetail, searchQuery) + '</span></div>' : '';
+    var matchContextHtml = matchContextDetail ? '<div class="customer-match-context"><span>' + highlightSearchText(matchContextDetail, searchQuery) + '</span></div>' : '';
     var matchContextAction = matchContext.type === 'inbox' && matchContext.action === 'record'
       ? '<button type="button" class="text-action customer-search-context-action" onclick="openCustomerSearchContext(' + c.id + ')">记录进展</button>' : '';
     var selected = type === 'existing' && selectedCustomers.has(Number(c.id));

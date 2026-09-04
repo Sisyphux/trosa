@@ -846,6 +846,35 @@ class CalendarAndAccessTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_recording_communication_with_empty_contact_id_stores_null(self):
+        """An unlinked communication must not send an empty string to typed databases."""
+        spec = importlib.util.spec_from_file_location('crm_app_empty_contact_id_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, date('now'), date('now'))",
+                         ('未关联联系人', '空联系人测试客户'))
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        response = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '记录一条未关联联系人的沟通', 'activity_type': 'follow_up',
+            'direction': 'outbound', 'follow_date': '2026-09-04', 'contact_id': ''
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        activity_id = response.get_json()['id']
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertIsNone(conn.execute('SELECT contact_id FROM follow_up_logs WHERE id=?',
+                                           (activity_id,)).fetchone()[0])
+        finally:
+            conn.close()
+
     def test_inbox_capture_context_and_failed_confirmation_keep_item_open(self):
         """Browser captures retain reliable context and resolve only after confirmation."""
         spec = importlib.util.spec_from_file_location('crm_app_inbox_capture_context_test', ROOT / 'app.py')

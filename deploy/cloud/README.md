@@ -55,6 +55,8 @@ deploy/cloud/backup-workbench.sh
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及
 CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
+只读状态检查优先走 Workbench 控制面，即使本地配置了 SSH 主机别名；这样本机 SSH
+暂时无法握手时，工作台仍有机会读取网站和服务器状态。
 当目标实例无法通过 SSH 连接、Workbench 降级到 Session Manager（SSM）模式时，脚本会
 通过一次短生命周期的交互式 Shell 读取同样的状态；这是因为 Workbench 的 SSM 模式不支持
 非交互式 `exec`。会话结束后立即关闭，不保留后台终端。

@@ -27,6 +27,7 @@ import tarfile
 import email
 import unicodedata
 from email import policy as email_policy
+from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse, urlencode
 from concurrent.futures import ThreadPoolExecutor
@@ -276,6 +277,7 @@ def _prospecting_integration_user():
             '/api/integrations/sela/exclusions',
         }),
         (request.method == 'POST' and request.path == '/api/integrations/sela/sync'),
+        (request.method == 'POST' and request.path == '/api/integrations/sela/reply'),
     )
     return 'hamid' if any(allowed) else ''
 
@@ -2425,6 +2427,211 @@ def sela_integration_sync():
 
     schedule_safety_backup('sela_integration_sync')
     return jsonify(response_body)
+
+
+class _SelaReplyReplay(Exception):
+    """Abort a racing reply write and return the original idempotent result."""
+
+    def __init__(self, response_body):
+        super().__init__('sela reply already applied')
+        self.response_body = response_body
+
+
+def _sela_reply_follow_date(value):
+    raw = str(value or '').strip()
+    if raw:
+        try:
+            return datetime.fromisoformat(raw.replace('Z', '+00:00')).date().isoformat()
+        except ValueError:
+            pass
+        try:
+            return parsedate_to_datetime(raw).date().isoformat()
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return datetime.now().date().isoformat()
+
+
+@app.route('/api/integrations/sela/reply', methods=['POST'])
+@login_required
+def sela_integration_reply():
+    """Record one matched sela reply and its safe next-action route.
+
+    This endpoint never creates a customer.  The caller must provide the
+    customer id already linked to the exact sela candidate by the outbound
+    integration.  Timeline and optional reminder creation share Trosa's
+    normal atomic communication writer.
+    """
+    if request.content_length and request.content_length > 1024 * 1024:
+        return jsonify({'success': False, 'error': '回复同步请求过大'}), 413
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': '回复同步请求必须是 JSON 对象'}), 400
+
+    candidate_id = str(payload.get('candidate_id') or '').strip()
+    idempotency_key = str(
+        request.headers.get('X-Idempotency-Key') or payload.get('idempotency_key') or ''
+    ).strip()
+    body_key = str(payload.get('idempotency_key') or '').strip()
+    if body_key and idempotency_key != body_key:
+        return jsonify({'success': False, 'error': '幂等键不一致'}), 400
+    if not candidate_id or len(candidate_id) > 128 or not idempotency_key or len(idempotency_key) > 200:
+        return jsonify({'success': False, 'error': 'candidate_id 和幂等键不能为空'}), 400
+    reply = payload.get('reply')
+    action = payload.get('action')
+    if not isinstance(reply, dict) or not isinstance(action, dict):
+        return jsonify({'success': False, 'error': '缺少 reply 或 action'}), 400
+    body = str(reply.get('body') or '').strip()
+    subject = str(reply.get('subject') or '').strip()
+    if not body and not subject:
+        return jsonify({'success': False, 'error': '回复正文和主题不能同时为空'}), 400
+    if len(body) > 20000:
+        return jsonify({'success': False, 'error': '回复正文过长'}), 400
+    try:
+        trosa_id = int(payload.get('trosa_id'))
+    except (TypeError, ValueError):
+        return jsonify({
+            'success': True, 'status': 'REVIEW', 'reason': 'TROSA_LINK_MISSING',
+            'candidate_id': candidate_id,
+        })
+    if trosa_id <= 0:
+        return jsonify({'success': True, 'status': 'REVIEW', 'reason': 'TROSA_LINK_INVALID', 'candidate_id': candidate_id})
+
+    hash_payload = dict(payload)
+    hash_payload.pop('idempotency_key', None)
+    request_hash = _sela_sync_hash(hash_payload)
+
+    # Fast idempotency response and exact-link preflight happen before the
+    # shared communication writer opens its own transaction.
+    conn = get_db()
+    try:
+        receipt = conn.execute(
+            '''SELECT request_sha256, response_json FROM integration_sync_receipts
+               WHERE integration=? AND idempotency_key=? LIMIT 1''',
+            (_SELA_SYNC_INTEGRATION, idempotency_key),
+        ).fetchone()
+        if receipt:
+            if receipt['request_sha256'] != request_hash:
+                return jsonify({'success': False, 'error': '幂等键已对应另一份请求'}), 409
+            return jsonify(json.loads(receipt['response_json']))
+        customer = conn.execute(
+            '''SELECT id, company, external_source, external_id
+               FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''',
+            (trosa_id,),
+        ).fetchone()
+        if not customer:
+            return jsonify({
+                'success': True, 'status': 'REVIEW', 'reason': 'TROSA_CUSTOMER_NOT_FOUND',
+                'candidate_id': candidate_id, 'trosa_id': trosa_id,
+            })
+        if (
+            str(customer['external_source'] or '').strip() != _SELA_SYNC_INTEGRATION
+            or str(customer['external_id'] or '').strip() != candidate_id
+        ):
+            return jsonify({
+                'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_LINK_MISMATCH',
+                'candidate_id': candidate_id, 'trosa_id': trosa_id,
+            })
+    finally:
+        conn.close()
+
+    route = str(action.get('route') or '').strip().upper()
+    intent = str(action.get('intent') or '').strip().upper()
+    action_name = str(action.get('name') or '').strip()[:120]
+    reason = str(action.get('reason') or '').strip()[:1000]
+    next_task = action.get('next_task') if isinstance(action.get('next_task'), dict) else None
+    next_title = str((next_task or {}).get('title') or '').strip()[:200]
+    next_date = str((next_task or {}).get('due_date') or '').strip()
+    if next_title and not next_date:
+        return jsonify({'success': False, 'error': '下一步任务缺少日期'}), 400
+    if next_date:
+        try:
+            datetime.strptime(next_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'success': False, 'error': '下一步任务日期格式无效'}), 400
+
+    received_at = str(reply.get('received_at') or '').strip()
+    follow_date = _sela_reply_follow_date(received_at)
+    activity_content = (
+        '客户通过 Gmail 回复\n'
+        f'主题：{subject}\n'
+        f'发件人：{str(reply.get("from") or "").strip()}\n'
+        f'消息 ID：{str(reply.get("message_id") or "").strip()}\n'
+        f'正文：\n{body}'
+    )[:30000]
+    activity_result = f'sela 自动路由：{action_name or route or "REPLY"}；意图：{intent or "UNKNOWN"}'
+    if reason:
+        activity_result += f'；{reason}'
+    outbound = action.get('outbound') if isinstance(action.get('outbound'), dict) else {}
+    if outbound.get('message_id'):
+        activity_result += f'；已发送资料回复 Gmail message_id：{str(outbound.get("message_id"))[:200]}'
+
+    def before_commit(transaction, cursor, result):
+        existing = cursor.execute(
+            '''SELECT request_sha256, response_json FROM integration_sync_receipts
+               WHERE integration=? AND idempotency_key=? LIMIT 1''',
+            (_SELA_SYNC_INTEGRATION, idempotency_key),
+        ).fetchone()
+        if existing:
+            if existing['request_sha256'] != request_hash:
+                raise CrmWriteError('幂等键已对应另一份请求', 409)
+            raise _SelaReplyReplay(json.loads(existing['response_json']))
+        response_body = {
+            'success': True,
+            'status': 'SYNCED',
+            'schema_version': _SELA_SYNC_SCHEMA_VERSION,
+            'candidate_id': candidate_id,
+            'trosa_id': trosa_id,
+            'activity_id': result.get('id'),
+            'task_id': result.get('task_id'),
+            'route': route,
+            'intent': intent,
+            'action': action_name,
+            'idempotency_key': idempotency_key,
+        }
+        now = _sela_sync_now()
+        cursor.execute(
+            '''INSERT INTO integration_sync_receipts
+               (integration, idempotency_key, request_sha256, candidate_id,
+                customer_id, response_json, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (_SELA_SYNC_INTEGRATION, idempotency_key, request_hash, candidate_id,
+             trosa_id, json.dumps(response_body, ensure_ascii=False), now, now),
+        )
+
+    try:
+        result = record_customer_communication(trosa_id, {
+            'activity_content': activity_content,
+            'activity_result': activity_result,
+            'activity_type': 'customer_reply',
+            'direction': 'inbound',
+            'follow_date': follow_date,
+            'next_task': next_title,
+            'next_follow_up': next_date,
+            'source': 'sela_reply_engine',
+            'is_reported': True,
+        }, before_commit=before_commit)
+    except _SelaReplyReplay as replay:
+        return jsonify(replay.response_body)
+    except CrmWriteError as error:
+        return jsonify({'success': False, 'error': error.message}), error.status
+    except Exception:
+        logger.exception('sela integration reply failed for candidate %s', candidate_id)
+        return jsonify({'success': False, 'error': '回复时间线事务失败，请稍后重试'}), 500
+
+    schedule_safety_backup('sela_integration_reply')
+    return jsonify({
+        'success': True,
+        'status': 'SYNCED',
+        'schema_version': _SELA_SYNC_SCHEMA_VERSION,
+        'candidate_id': candidate_id,
+        'trosa_id': trosa_id,
+        'activity_id': result.get('id'),
+        'task_id': result.get('task_id'),
+        'route': route,
+        'intent': intent,
+        'action': action_name,
+        'idempotency_key': idempotency_key,
+    })
 
 
 # ========== 首页 ==========
@@ -7942,6 +8149,17 @@ def record_customer_communication(customer_id, data, before_commit=None):
     except (TypeError, ValueError):
         raise CrmWriteError('Inbox 条目无效')
 
+    raw_contact_id = data.get('contact_id')
+    if raw_contact_id is None or (isinstance(raw_contact_id, str) and not raw_contact_id.strip()):
+        contact_id = None
+    else:
+        try:
+            contact_id = int(raw_contact_id)
+        except (TypeError, ValueError):
+            raise CrmWriteError('联系人无效')
+        if contact_id <= 0:
+            raise CrmWriteError('联系人无效')
+
     def operation(conn, c):
         customer = c.execute('''SELECT id FROM customers
                                 WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
@@ -7980,13 +8198,13 @@ def record_customer_communication(customer_id, data, before_commit=None):
                      (customer_id, content, follow_date, result, next_plan, activity_type, direction,
                       contact_id, related_task_id, source, is_reported, created_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (customer_id, sanitize_mark_html(activity_content), follow_date,
-                   sanitize_mark_html(activity_result), sanitize_mark_html(next_task), activity_type, direction,
-                   data.get('contact_id'), completed_reminder_id, data.get('source', 'manual'),
-                   1 if data.get('is_reported') else 0, now))
+                      (customer_id, sanitize_mark_html(activity_content), follow_date,
+                       sanitize_mark_html(activity_result), sanitize_mark_html(next_task), activity_type, direction,
+                       contact_id, completed_reminder_id, data.get('source', 'manual'),
+                       1 if data.get('is_reported') else 0, now))
         activity_id = c.lastrowid
         if inbox_item and inbox_item['item_type'] == 'gmail_capture':
-            attach_gmail_capture_to_activity(c, inbox_item, activity_id, customer_id, data.get('contact_id'))
+            attach_gmail_capture_to_activity(c, inbox_item, activity_id, customer_id, contact_id)
         if completed_reminder_id:
             c.execute('''UPDATE reminders SET is_done=1, completed_at=?, source_activity_id=?
                          WHERE id=? AND is_done=0''', (now, activity_id, completed_reminder_id))

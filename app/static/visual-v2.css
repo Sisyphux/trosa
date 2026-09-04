@@ -3438,12 +3438,6 @@ mark.search-hit {
   line-height: 1.4;
 }
 
-.customer-match-context strong {
-  flex: 0 0 auto;
-  color: var(--v2-moss);
-  font-weight: 650;
-}
-
 .customer-match-context span {
   min-width: 0;
   overflow: hidden;
