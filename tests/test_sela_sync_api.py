@@ -106,6 +106,27 @@ class SelaSyncApiTest(unittest.TestCase):
             headers=self.request_headers(key or body.get('idempotency_key')),
         )
 
+    def add_customer_with_contact(self, email='', phone=''):
+        conn = self.hamid_db()
+        cursor = conn.execute(
+            '''INSERT INTO customers
+               (name, company, website, status, customer_type, import_source)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            ('Acrílicos S.A.', 'Acrílicos S.A.', 'https://www.acrilicos.com/',
+             '未建联', 'new', 'research'),
+        )
+        customer_id = cursor.lastrowid
+        if email or phone:
+            conn.execute(
+                '''INSERT INTO contacts
+                   (customer_id, name, email, phone, created_at)
+                   VALUES (?, ?, ?, ?, datetime('now', 'localtime'))''',
+                (customer_id, 'Ana Silva', email, phone),
+            )
+        conn.commit()
+        conn.close()
+        return customer_id
+
     def test_health_requires_token_and_reports_ready_schema(self):
         self.assertEqual(self.client.get('/api/integrations/sela/health').status_code, 401)
         response = self.client.get(
@@ -118,12 +139,13 @@ class SelaSyncApiTest(unittest.TestCase):
         self.assertTrue(body['data_version'])
 
     def test_sync_is_atomic_and_replaying_same_event_is_safe(self):
+        self.add_customer_with_contact(email='info@acrilicos.com')
         body = payload()
         first = self.post_sync(body)
         self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
         first_body = first.get_json()
         self.assertEqual(first_body['status'], 'SYNCED')
-        self.assertTrue(first_body['created'])
+        self.assertFalse(first_body['created'])
 
         second = self.post_sync(body)
         self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
@@ -158,27 +180,18 @@ class SelaSyncApiTest(unittest.TestCase):
 
         response = self.post_sync(payload('candidate-domain'))
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.get_json()['status'], 'SYNCED')
-        self.assertTrue(response.get_json()['created'])
+        self.assertEqual(response.get_json()['status'], 'REVIEW')
+        self.assertEqual(response.get_json()['reason'], 'IDENTITY_MATCH_REQUIRED')
 
         conn = self.hamid_db()
         try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 2)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 0)
         finally:
             conn.close()
 
     def test_existing_exact_identity_is_linked_without_duplicate_customer(self):
-        conn = self.hamid_db()
-        cursor = conn.execute(
-            '''INSERT INTO customers
-               (name, company, website, status, customer_type, import_source)
-               VALUES (?, ?, ?, ?, ?, ?)''',
-            ('Acrílicos S.A.', 'Acrílicos S.A.', 'https://www.acrilicos.com/',
-             '未建联', 'new', 'research'),
-        )
-        existing_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+        existing_id = self.add_customer_with_contact(email='info@acrilicos.com')
 
         response = self.post_sync(payload('candidate-existing'))
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
@@ -195,6 +208,7 @@ class SelaSyncApiTest(unittest.TestCase):
             conn.close()
 
     def test_exclusion_snapshot_supports_conditional_get(self):
+        self.add_customer_with_contact(email='info@acrilicos.com')
         response = self.post_sync(payload('candidate-etag'))
         self.assertEqual(response.status_code, 200)
 
@@ -212,6 +226,82 @@ class SelaSyncApiTest(unittest.TestCase):
         )
         self.assertEqual(second.status_code, 304)
         self.assertEqual(second.get_data(), b'')
+
+    def test_unique_phone_identity_links_existing_customer_without_creation(self):
+        existing_id = self.add_customer_with_contact(phone='+55 11 9999-8888')
+        body = payload('candidate-phone')
+        body['contact']['email'] = ''
+        body['contact']['phone'] = '+551199998888'
+        response = self.post_sync(body)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'SYNCED')
+        self.assertFalse(response.get_json()['created'])
+        self.assertEqual(response.get_json()['trosa_id'], existing_id)
+
+    def test_unmatched_candidate_is_review_only(self):
+        response = self.post_sync(payload('candidate-unmatched'))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertEqual(body['status'], 'REVIEW')
+        self.assertEqual(body['reason'], 'IDENTITY_MATCH_REQUIRED')
+
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM integration_sync_receipts').fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_ambiguous_exact_email_is_review_only(self):
+        conn = self.hamid_db()
+        for name in ('A', 'B'):
+            cursor = conn.execute(
+                'INSERT INTO customers(name, company, import_source) VALUES (?, ?, ?)',
+                (name, name, 'manual'),
+            )
+            conn.execute(
+                'INSERT INTO contacts(customer_id, name, email) VALUES (?, ?, ?)',
+                (cursor.lastrowid, name, 'info@acrilicos.com'),
+            )
+        conn.commit()
+        conn.close()
+
+        response = self.post_sync(payload('candidate-ambiguous'))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertEqual(body['status'], 'REVIEW')
+        self.assertEqual(body['reason'], 'MULTIPLE_TROSA_MATCHES')
+        self.assertEqual(len(body['trosa_ids']), 2)
+
+    def test_external_link_conflicting_exact_email_requires_review(self):
+        conn = self.hamid_db()
+        linked = conn.execute(
+            '''INSERT INTO customers(name, company, external_source, external_id)
+               VALUES ('Linked', 'Linked', 'sela', 'candidate-linked')'''
+        ).lastrowid
+        other = conn.execute(
+            '''INSERT INTO customers(name, company, external_source, external_id)
+               VALUES ('Other', 'Other', '', '')'''
+        ).lastrowid
+        conn.execute(
+            'INSERT INTO contacts(customer_id, name, email) VALUES (?, ?, ?)',
+            (other, 'Other', 'info@acrilicos.com'),
+        )
+        conn.commit()
+        conn.close()
+
+        body = payload('candidate-linked')
+        response = self.post_sync(body)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'REVIEW')
+        self.assertEqual(response.get_json()['reason'], 'EXTERNAL_IDENTITY_CONFLICT')
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 0)
+        finally:
+            conn.close()
 
 
 if __name__ == '__main__':

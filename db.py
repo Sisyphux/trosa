@@ -1,6 +1,9 @@
-"""
-客户跟进提醒系统 - 数据库模型与初始化（多用户版）
-SQLite 本地存储，每人独立数据库，支持自动备份与恢复
+"""Database access, migrations, and compatibility boundaries for Trosa.
+
+PostgreSQL is the formal ECS runtime store.  The SQLite implementation stays
+available for isolated development, legacy import/rehearsal, and an explicitly
+approved rollback environment; it must never be mistaken for the production
+writer when PostgreSQL mode is enabled.
 """
 import sqlite3
 import sys
@@ -13,6 +16,12 @@ import hashlib
 import time
 import uuid
 from datetime import datetime, timedelta
+
+from postgres_schema_contract import (
+    REQUIRED_TABLES,
+    REQUIRED_VIEWS,
+    schema_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,34 +67,21 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0005_postgres_runtime_write_fixes.sql'),
         os.path.join(root, 'migrations', '0006_postgres_runtime_surface_writes.sql'),
         os.path.join(root, 'migrations', '0007_postgres_runtime_hardening.sql'),
+        os.path.join(root, 'migrations', '0008_postgres_runtime_integrity_hardening.sql'),
+        os.path.join(root, 'migrations', '0009_postgres_final_integrity_boundaries.sql'),
+        os.path.join(root, 'migrations', '0010_postgres_user_scoped_external_ids.sql'),
+        os.path.join(root, 'migrations', '0011_postgres_compat_identity_guards.sql'),
+        os.path.join(root, 'migrations', '0012_postgres_legacy_email_ids.sql'),
+        os.path.join(root, 'migrations', '0013_postgres_company_match_boundaries.sql'),
     )
 
 
-_POSTGRES_SCHEMA_SENTINELS = (
-    'identity.organizations',
-    'identity.users',
-    'core.companies',
-    'trosa.accounts',
-    'trosa.tasks',
-    'sela.prospects',
-    'audit.events',
-    'trade_os_compat.users',
-    'trade_os_compat.agent_actions',
-    'trade_os_compat.email_verifications',
-    'trade_os_compat.weekly_reports',
-    'trade_os_compat.imported_activity_rows',
-)
+_POSTGRES_SCHEMA_SENTINELS = REQUIRED_TABLES + REQUIRED_VIEWS
 
 
 def _postgres_schema_ready(cursor):
     """Return whether the complete application compatibility surface exists."""
-    cursor.execute(
-        '''SELECT COUNT(*) = %s
-             FROM unnest(%s::text[]) AS required(object_name)
-            WHERE to_regclass(required.object_name) IS NOT NULL''',
-        (len(_POSTGRES_SCHEMA_SENTINELS), list(_POSTGRES_SCHEMA_SENTINELS)),
-    )
-    return bool(cursor.fetchone()[0])
+    return bool(schema_status(cursor)['ok'])
 
 
 def init_postgres_store():
@@ -150,6 +146,11 @@ def init_postgres_store():
                     # first file is executed.
                     conn.commit()
                     for name, contents, digest in migration_contents:
+                        if name in applied and applied[name] != digest:
+                            raise RuntimeError(
+                                f'Historical PostgreSQL migration {name} changed after it was applied; '
+                                'add a new forward migration instead of replaying it'
+                            )
                         if applied.get(name) == digest:
                             continue
                         cursor.execute(contents)
@@ -164,6 +165,10 @@ def init_postgres_store():
                         # boundaries.  Commit the ledger row before the next
                         # file starts its transaction.
                         conn.commit()
+                if not _postgres_schema_ready(cursor):
+                    raise RuntimeError(
+                        'PostgreSQL schema is incomplete; refusing to start with a partial compatibility surface'
+                    )
             finally:
                 try:
                     cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", ('trade-os:postgres-schema',))
@@ -192,6 +197,9 @@ def init_postgres_store():
                          display_name=excluded.display_name,
                          label=excluded.label,
                          color=excluded.color,
+                         role=identity.users.role,
+                         active=identity.users.active,
+                         status=CASE WHEN identity.users.active THEN 'active' ELSE 'inactive' END,
                          updated_at=now()''',
                     (_postgres_user_id(user_id), org_id, user_id, user_id,
                      info.get('name', user_id), info.get('label', user_id),
@@ -199,7 +207,12 @@ def init_postgres_store():
                 )
                 cursor.execute(
                     '''INSERT INTO identity.memberships (organization_id, user_id, role)
-                       VALUES (%s, %s, %s) ON CONFLICT DO NOTHING''',
+                       VALUES (%s, %s, %s)
+                       ON CONFLICT (organization_id, user_id) DO UPDATE SET
+                         role=identity.memberships.role,
+                         status=CASE WHEN (SELECT active FROM identity.users
+                                             WHERE id=identity.memberships.user_id)
+                                     THEN 'active' ELSE 'inactive' END ''',
                     (org_id, _postgres_user_id(user_id), role),
                 )
         conn.commit()
@@ -239,17 +252,36 @@ def get_registered_users(include_inactive=True):
 
 
 def refresh_users_registry():
-    """Merge system.db users into the legacy in-memory routing registry."""
-    for row in get_registered_users():
+    """Load active registered users into the in-memory routing registry.
+
+    Inactive members remain durable records for audit and backup, but must
+    not become routable application identities.  This also prevents a stale
+    deactivated account left by an earlier migration from being resurrected
+    merely because the shared PostgreSQL registry still contains its row.
+    """
+    registered_rows = get_registered_users(include_inactive=True)
+    # Keep import-time defaults usable before the first database initialization,
+    # but once a durable registry exists its active flag is authoritative for
+    # every account, including the three historical built-ins.
+    if not registered_rows:
+        USERS_LIST[:] = list(USERS.keys())
+        return
+    active_usernames = set()
+    for row in registered_rows:
         username = (row.get('username') or row.get('id') or '').strip().lower()
-        if username:
-            USERS[username] = {
-                'name': row.get('name') or username,
-                'label': row.get('label') or row.get('name') or username,
-                'color': row.get('color') or '#8B7355',
-                'role': row.get('role') or ('admin' if username == 'hamid' else 'member'),
-                'active': bool(row.get('active', 1)),
-            }
+        if not username or not bool(row.get('active', 1)):
+            continue
+        active_usernames.add(username)
+        USERS[username] = {
+            'name': row.get('name') or username,
+            'label': row.get('label') or row.get('name') or username,
+            'color': row.get('color') or '#8B7355',
+            'role': row.get('role') or ('admin' if username == 'hamid' else 'member'),
+            'active': True,
+        }
+    for username in list(USERS):
+        if username not in active_usernames:
+            USERS.pop(username, None)
     USERS_LIST[:] = list(USERS.keys())
 
 
@@ -453,11 +485,28 @@ def check_integrity():
             import psycopg
             with psycopg.connect(_postgres_dsn()) as conn:
                 with conn.cursor() as cursor:
+                    if not _postgres_schema_ready(cursor):
+                        return {'postgresql': 'schema_incomplete'}
                     cursor.execute('SELECT 1 FROM identity.organizations LIMIT 1')
                     if cursor.fetchone() is None:
                         return {'postgresql': 'organization_not_found'}
                     cursor.execute('SELECT 1 FROM core.companies LIMIT 1')
                     cursor.execute('SELECT 1 FROM trosa.accounts LIMIT 1')
+                    cursor.execute('''
+                        SELECT EXISTS (
+                            SELECT 1
+                              FROM trosa.account_legacy_refs ref
+                              LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                             WHERE account.id IS NULL
+                            UNION ALL
+                            SELECT 1
+                              FROM trosa.contact_legacy_refs ref
+                              LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                             WHERE account.id IS NULL
+                        )
+                    ''')
+                    if cursor.fetchone()[0]:
+                        return {'postgresql': 'orphaned_legacy_reference'}
             return {'postgresql': 'ok'}
         except Exception as exc:
             return {'postgresql': f'error: {exc}'}
@@ -511,13 +560,16 @@ def _sqlite_snapshot(source_path, destination_path):
 
 
 def backup_database(reason='manual'):
-    """Create a timestamped, checksummed snapshot of databases and CRM attachments."""
+    """Create a SQLite snapshot, or explicitly defer to PostgreSQL operations."""
     if postgres_mode():
         # PostgreSQL backups are owned by the database operator.  Never copy
         # an unrelated SQLite directory just because a PG-mode request caused
         # the legacy safety-backup timer to fire.
         logger.info('PostgreSQL 模式跳过 SQLite 文件快照 [%s]', reason)
-        return {'backed_up': [], 'failed': [], 'path': '', 'database': 'postgresql'}
+        return {
+            'backed_up': [], 'failed': [], 'path': '', 'database': 'postgresql',
+            'managed_externally': True,
+        }
     ensure_db_dir()
     now = datetime.now()
     date_str = now.strftime('%Y-%m-%d')
@@ -718,16 +770,19 @@ def run_startup_maintenance():
 
 
 def run_scheduled_local_backup():
-    """Create the daily local recovery point, independent of user writes.
+    """Create the daily SQLite recovery point when SQLite is the active store.
 
-    The application keeps one writable SQLite store.  This job only creates a
-    versioned snapshot beside it; it never changes the active store or starts
-    a second writer.  Serialising with restore prevents a scheduled snapshot
-    from observing a partially restored data directory.
+    In PostgreSQL mode the database operator owns logical backups, so this
+    compatibility scheduler is a deliberate no-op and never creates a fake
+    SQLite backup.  In SQLite mode the job only creates a versioned snapshot
+    beside the active store; it never changes the active store or starts a
+    second writer.
     """
     with _restore_lock:
         result = backup_database('scheduled_local')
-    if result.get('failed'):
+    if result.get('database') == 'postgresql':
+        logger.info('PostgreSQL 模式跳过本机 SQLite 定时快照；请使用正式 PostgreSQL 备份链路')
+    elif result.get('failed'):
         logger.error('定时本机备份失败: %s', result['failed'])
     else:
         logger.info('定时本机备份完成: %s', result.get('path', ''))
@@ -738,6 +793,13 @@ def run_scheduled_local_backup():
 
 def restore_from_backup(backup_date):
     """Restore one checksummed database and attachment snapshot."""
+    if postgres_mode():
+        return {
+            'success': False,
+            'error': '正式运行使用 PostgreSQL；SQLite 快照不能通过应用恢复。请使用已验证的 PostgreSQL dump 与附件 bundle。',
+            'database': 'postgresql',
+            'managed_externally': True,
+        }
     normalized = str(backup_date).replace('\\', '/').strip('/')
     parts = normalized.split('/')
     if not normalized or '..' in parts or any(not part for part in parts):
@@ -1571,6 +1633,94 @@ def _merge_duplicate_contact_emails(cursor):
     return merged_count
 
 
+def _quarantine_duplicate_external_identities(cursor):
+    """Keep legacy duplicate integration keys without blocking startup.
+
+    The unique indexes below were added after some older databases already
+    existed.  Preserve every row, keep the lowest id as the canonical
+    identity, and suffix later duplicates with a recoverable marker before
+    SQLite tries to build the unique indexes.
+    """
+    quarantined = 0
+    for table_name in ('customers', 'outreach_emails'):
+        rows = cursor.execute(
+            f'''SELECT id, external_source, external_id FROM {table_name}
+                WHERE trim(COALESCE(external_source, '')) <> ''
+                  AND trim(COALESCE(external_id, '')) <> ''
+                ORDER BY id'''
+        ).fetchall()
+        owners = {}
+        for row_id, source, external_id in rows:
+            key = (str(source).strip(), str(external_id).strip())
+            survivor_id = owners.setdefault(key, row_id)
+            if survivor_id == row_id:
+                continue
+            original_id = str(external_id).strip()
+            candidate_id = f'{original_id}#duplicate:{row_id}'
+            suffix = 2
+            while cursor.execute(
+                f'SELECT 1 FROM {table_name} WHERE external_source=? AND external_id=? LIMIT 1',
+                (source, candidate_id),
+            ).fetchone():
+                candidate_id = f'{original_id}#duplicate:{row_id}-{suffix}'
+                suffix += 1
+            cursor.execute(
+                f'UPDATE {table_name} SET external_id=? WHERE id=?',
+                (candidate_id, row_id),
+            )
+            if table_name == 'customers':
+                cursor.execute(
+                    '''UPDATE customers
+                       SET system_notes=trim(
+                           COALESCE(system_notes, '') ||
+                           CASE WHEN trim(COALESCE(system_notes, ''))='' THEN '' ELSE char(10) END ||
+                           ?
+                       )
+                       WHERE id=?''',
+                    (f'外部身份键重复，已隔离；原键={source}:{original_id}；保留记录={survivor_id}',
+                     row_id),
+                )
+            quarantined += 1
+    return quarantined
+
+
+def _quarantine_duplicate_unmatched_hashes(cursor):
+    """Preserve repeated legacy unmatched rows before adding their index."""
+    quarantined = 0
+    rows = cursor.execute(
+        '''SELECT id, unmatched_hash FROM import_unmatched_customers
+           WHERE trim(COALESCE(unmatched_hash, '')) <> ''
+           ORDER BY id'''
+    ).fetchall()
+    owners = {}
+    for row_id, unmatched_hash in rows:
+        original_hash = str(unmatched_hash).strip()
+        survivor_id = owners.setdefault(original_hash, row_id)
+        if survivor_id == row_id:
+            continue
+        candidate_hash = f'{original_hash}#duplicate:{row_id}'
+        suffix = 2
+        while cursor.execute(
+            'SELECT 1 FROM import_unmatched_customers WHERE unmatched_hash=? LIMIT 1',
+            (candidate_hash,),
+        ).fetchone():
+            candidate_hash = f'{original_hash}#duplicate:{row_id}-{suffix}'
+            suffix += 1
+        cursor.execute(
+            '''UPDATE import_unmatched_customers
+               SET unmatched_hash=?,
+                   reason=trim(
+                       COALESCE(reason, '') ||
+                       CASE WHEN trim(COALESCE(reason, ''))='' THEN '' ELSE char(10) END ||
+                       ?
+                   )
+               WHERE id=?''',
+            (candidate_hash, f'未匹配事实键重复，已隔离；原键={original_hash}；保留记录={survivor_id}', row_id),
+        )
+        quarantined += 1
+    return quarantined
+
+
 def _migrate_customer_level_constraint(cursor):
     """Allow +/- customer grades while preserving the existing customer rows.
 
@@ -1662,6 +1812,12 @@ def init_user_tables(user):
         merged_contacts = _merge_duplicate_contact_emails(c)
         if merged_contacts:
             logger.info(f'{user}: 已合并 {merged_contacts} 条重复邮箱联系人')
+        quarantined_external_ids = _quarantine_duplicate_external_identities(c)
+        if quarantined_external_ids:
+            logger.warning(f'{user}: 已隔离 {quarantined_external_ids} 条重复外部身份键')
+        quarantined_unmatched_hashes = _quarantine_duplicate_unmatched_hashes(c)
+        if quarantined_unmatched_hashes:
+            logger.warning(f'{user}: 已隔离 {quarantined_unmatched_hashes} 条重复未匹配事实键')
 
         # 旧提醒继续可用；新代码优先读取 title，旧数据用 content 回填。
         c.execute("UPDATE reminders SET title = content WHERE title IS NULL OR title = ''")

@@ -28,13 +28,13 @@ class PostgresSourceInventoryTests(unittest.TestCase):
         directory, root = self._source_dir([
             ("hamid", "hamid", 1),
             ("emma", "emma", 1),
-            ("kelly", "kelly", 0),
+            ("carl", "carl", 0),
         ])
         try:
             names, errors = discover_trosa_db_names(root)
         finally:
             directory.cleanup()
-        self.assertEqual(names, ["system.db", "hamid.db", "emma.db", "kelly.db"])
+        self.assertEqual(names, ["system.db", "hamid.db", "emma.db", "carl.db"])
         self.assertEqual(errors, [])
 
     def test_fails_closed_for_missing_and_unregistered_databases(self):

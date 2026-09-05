@@ -16,13 +16,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# Keep the documented ``python tools/unified_postgres_migration.py`` entry
+# point independent of the caller's PYTHONPATH.  The schema contract lives at
+# the project root, while Python puts ``tools/`` (not the project root) first
+# on sys.path for a direct script invocation.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 try:
     from tools.postgres_source_inventory import discover_trosa_db_names
 except ModuleNotFoundError:  # direct ``python tools/...`` invocation
     from postgres_source_inventory import discover_trosa_db_names
 
+from postgres_schema_contract import (
+    REQUIRED_COLUMNS,
+    REQUIRED_FUNCTIONS,
+    REQUIRED_INDEXES,
+    REQUIRED_SCHEMAS,
+    REQUIRED_TABLES,
+    REQUIRED_TRIGGERS,
+    REQUIRED_VIEWS,
+    schema_status,
+)
 
-ROOT = Path(__file__).resolve().parents[1]
+
 SCHEMA_PATHS = (
     ROOT / "migrations" / "0001_unified_trade_os.sql",
     ROOT / "migrations" / "0002_postgres_runtime.sql",
@@ -31,37 +49,20 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0005_postgres_runtime_write_fixes.sql",
     ROOT / "migrations" / "0006_postgres_runtime_surface_writes.sql",
     ROOT / "migrations" / "0007_postgres_runtime_hardening.sql",
+    ROOT / "migrations" / "0008_postgres_runtime_integrity_hardening.sql",
+    ROOT / "migrations" / "0009_postgres_final_integrity_boundaries.sql",
+    ROOT / "migrations" / "0010_postgres_user_scoped_external_ids.sql",
+    ROOT / "migrations" / "0011_postgres_compat_identity_guards.sql",
+    ROOT / "migrations" / "0012_postgres_legacy_email_ids.sql",
+    ROOT / "migrations" / "0013_postgres_company_match_boundaries.sql",
 )
-TARGET_SCHEMAS = ("identity", "core", "trosa", "sela", "audit", "trade_os_compat")
-TARGET_TABLES = (
-    "audit.schema_migrations",
-    "identity.organizations",
-    "identity.users",
-    "core.companies",
-    "core.contact_methods",
-    "trosa.accounts",
-    "trosa.timeline_events",
-    "sela.prospects",
-    "sela.prospect_events",
-    "sela.run_activity_events",
-    "audit.import_batches",
-    "audit.legacy_records",
-    "trosa.account_legacy_refs",
-    "trosa.legacy_row_refs",
-    "trosa.contact_legacy_refs",
-    "trosa.weekly_reports",
-    "trade_os_compat.app_settings",
-    "trade_os_compat.customer_file_rows",
-    "trade_os_compat.operation_log_rows",
-    "trade_os_compat.agent_proposal_rows",
-    "trade_os_compat.agent_action_rows",
-    "trade_os_compat.undo_action_rows",
-    "trade_os_compat.gmail_message_state_rows",
-    "trade_os_compat.communication_source_rows",
-    "trade_os_compat.communication_source_item_rows",
-    "trosa.email_message_receipts",
-    "trosa.email_delivery_events",
-)
+TARGET_SCHEMAS = REQUIRED_SCHEMAS
+TARGET_TABLES = REQUIRED_TABLES
+TARGET_VIEWS = REQUIRED_VIEWS
+TARGET_COLUMNS = REQUIRED_COLUMNS
+TARGET_INDEXES = REQUIRED_INDEXES
+TARGET_FUNCTIONS = REQUIRED_FUNCTIONS
+TARGET_TRIGGERS = REQUIRED_TRIGGERS
 
 
 def sha256(path: Path) -> str:
@@ -196,9 +197,23 @@ def apply_schema(dsn: str) -> None:
                 )
             }
             connection.commit()
+            expected = {path.name: sha256(path) for path in SCHEMA_PATHS}
+            ledger_current = bool(applied) and all(
+                applied.get(name) == digest for name, digest in expected.items()
+            )
+            if ledger_current and not schema_status(cursor)["ok"]:
+                raise RuntimeError(
+                    "migration ledger is current but the PostgreSQL schema contract is incomplete; "
+                    "repair/verify the database before serving traffic"
+                )
             for schema_path in SCHEMA_PATHS:
                 name = schema_path.name
                 digest = sha256(schema_path)
+                if name in applied and applied[name] != digest:
+                    raise RuntimeError(
+                        f"Historical PostgreSQL migration {name} changed after it was applied; "
+                        "add a new forward migration instead of replaying it"
+                    )
                 if applied.get(name) == digest:
                     continue
                 cursor.execute(schema_path.read_text(encoding="utf-8"))
@@ -212,38 +227,48 @@ def apply_schema(dsn: str) -> None:
                     (name, digest),
                 )
                 connection.commit()
+            if not schema_status(cursor)["ok"]:
+                raise RuntimeError("PostgreSQL schema contract is incomplete after migration")
 
 
 def verify_schema(dsn: str) -> dict[str, Any]:
     with postgres_connection(dsn) as connection:
         with connection.cursor() as cursor:
-            schemas = {row[0] for row in cursor.execute(
-                "SELECT schema_name FROM information_schema.schemata "
-                "WHERE schema_name = ANY(%s)", (list(TARGET_SCHEMAS),)
-            )}
-            tables = {f"{schema}.{name}" for schema, name in cursor.execute(
-                "SELECT table_schema, table_name FROM information_schema.tables "
-                "WHERE table_type = 'BASE TABLE' AND table_schema = ANY(%s)",
-                (list(TARGET_SCHEMAS),)
-            )}
-            applied = {
-                name: digest for name, digest in cursor.execute(
-                    "SELECT name, sha256 FROM audit.schema_migrations"
-                )
-            }
+            contract = schema_status(cursor)
+            cursor.execute("SELECT to_regclass(%s)", ("audit.schema_migrations",))
+            has_ledger = cursor.fetchone()[0] is not None
+            applied = {}
+            if has_ledger:
+                cursor.execute("SELECT name, sha256 FROM audit.schema_migrations")
+                applied = {name: digest for name, digest in cursor.fetchall()}
+            integrity: dict[str, int] = {}
+            if contract["tables"].get("trosa.account_legacy_refs") and contract["tables"].get("trosa.accounts"):
+                cursor.execute("""
+                    SELECT count(*) FROM trosa.account_legacy_refs ref
+                    LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                    WHERE account.id IS NULL
+                """)
+                integrity["orphan_account_legacy_refs"] = cursor.fetchone()[0]
+            if contract["tables"].get("trosa.contact_legacy_refs") and contract["tables"].get("trosa.accounts"):
+                cursor.execute("""
+                    SELECT count(*) FROM trosa.contact_legacy_refs ref
+                    LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                    WHERE account.id IS NULL
+                """)
+                integrity["orphan_contact_legacy_refs"] = cursor.fetchone()[0]
     expected_migrations = {path.name: sha256(path) for path in SCHEMA_PATHS}
     migrations = {
         name: applied.get(name) == digest
         for name, digest in expected_migrations.items()
     }
     return {
-        "schemas": {name: name in schemas for name in TARGET_SCHEMAS},
-        "tables": {name: name in tables for name in TARGET_TABLES},
+        **contract,
         "migrations": migrations,
+        "data_integrity": integrity,
         "ok": (
-            set(TARGET_SCHEMAS).issubset(schemas)
-            and set(TARGET_TABLES).issubset(tables)
+            contract["ok"]
             and all(migrations.values())
+            and all(value == 0 for value in integrity.values())
         ),
     }
 

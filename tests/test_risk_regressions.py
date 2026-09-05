@@ -3,12 +3,15 @@ import hashlib
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
+import subprocess
 import tempfile
 import time
 import unittest
 import zipfile
+import uuid
 from unittest import mock
 from pathlib import Path
 
@@ -16,8 +19,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import db
+from postgres_compat import _translate_sql
 import scheduler
 from ical_gen import build_icalendar
+from tools.unified_postgres_import import (
+    compat_dedupe_key, compat_uuid, clean, legacy_bool, legacy_int, parse_time,
+    sela_evidence_entries,
+)
 
 
 class IsolatedDatabaseTest(unittest.TestCase):
@@ -51,6 +59,69 @@ class IsolatedDatabaseTest(unittest.TestCase):
         conn = sqlite3.connect(db.get_user_db_path('hamid'))
         try:
             self.assertGreater(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_duplicate_external_identities_are_quarantined_before_unique_indexes(self):
+        db.init_all_dbs()
+        path = db.get_user_db_path('hamid')
+        conn = sqlite3.connect(path)
+        conn.execute('DROP INDEX idx_customers_external_identity')
+        conn.execute('DROP INDEX idx_outreach_external_identity')
+        conn.execute('DROP INDEX idx_import_unmatched_hash')
+        conn.execute(
+            '''INSERT INTO customers(name, company, external_source, external_id)
+               VALUES ('A', 'A', 'sela', 'candidate-duplicate')'''
+        )
+        conn.execute(
+            '''INSERT INTO customers(name, company, external_source, external_id)
+               VALUES ('B', 'B', 'sela', 'candidate-duplicate')'''
+        )
+        conn.execute(
+            '''INSERT INTO outreach_emails(customer_id, subject, external_source, external_id)
+               VALUES (1, 'One', 'sela', 'outreach-duplicate')'''
+        )
+        conn.execute(
+            '''INSERT INTO outreach_emails(customer_id, subject, external_source, external_id)
+               VALUES (1, 'Two', 'sela', 'outreach-duplicate')'''
+        )
+        conn.execute(
+            '''INSERT INTO import_unmatched_customers
+               (unmatched_hash, customer_name, reason)
+               VALUES ('unmatched-duplicate', 'A', 'old')'''
+        )
+        conn.execute(
+            '''INSERT INTO import_unmatched_customers
+               (unmatched_hash, customer_name, reason)
+               VALUES ('unmatched-duplicate', 'B', 'old')'''
+        )
+        conn.commit()
+        conn.close()
+
+        db.init_user_tables('hamid')
+        conn = sqlite3.connect(path)
+        try:
+            customer_ids = [row[0] for row in conn.execute(
+                "SELECT external_id FROM customers WHERE external_source='sela' ORDER BY id"
+            ).fetchall()]
+            outreach_ids = [row[0] for row in conn.execute(
+                "SELECT external_id FROM outreach_emails WHERE external_source='sela' ORDER BY id"
+            ).fetchall()]
+            unmatched_hashes = [row[0] for row in conn.execute(
+                "SELECT unmatched_hash FROM import_unmatched_customers ORDER BY id"
+            ).fetchall()]
+            self.assertEqual(customer_ids[0], 'candidate-duplicate')
+            self.assertTrue(customer_ids[1].startswith('candidate-duplicate#duplicate:'))
+            self.assertEqual(outreach_ids[0], 'outreach-duplicate')
+            self.assertTrue(outreach_ids[1].startswith('outreach-duplicate#duplicate:'))
+            self.assertEqual(unmatched_hashes[0], 'unmatched-duplicate')
+            self.assertTrue(unmatched_hashes[1].startswith('unmatched-duplicate#duplicate:'))
+            note = conn.execute(
+                "SELECT system_notes FROM customers WHERE external_id LIKE 'candidate-duplicate#duplicate:%'"
+            ).fetchone()[0]
+            self.assertIn('外部身份键重复', note)
+            index_names = {row[1] for row in conn.execute('PRAGMA index_list(customers)').fetchall()}
+            self.assertIn('idx_customers_external_identity', index_names)
         finally:
             conn.close()
 
@@ -106,6 +177,17 @@ class IsolatedDatabaseTest(unittest.TestCase):
         self.assertTrue(listed['created_at'])
         self.assertEqual(set(listed['files']), {'system.db', 'hamid.db', 'amy.db', 'kelley.db'})
 
+    def test_postgres_mode_never_reports_or_restores_a_sqlite_backup(self):
+        with mock.patch.object(db, 'postgres_mode', return_value=True):
+            backup = db.backup_database('postgres-test')
+            self.assertEqual(backup['database'], 'postgresql')
+            self.assertTrue(backup['managed_externally'])
+            self.assertEqual(backup['path'], '')
+            self.assertEqual(db.run_scheduled_local_backup()['database'], 'postgresql')
+            restored = db.restore_from_backup('2026-01-01/000000')
+            self.assertFalse(restored['success'])
+            self.assertTrue(restored['managed_externally'])
+
     def test_scheduler_registers_daily_local_backup_job(self):
         fake_scheduler = mock.Mock()
         fake_scheduler.running = False
@@ -148,6 +230,22 @@ class CalendarAndAccessTest(unittest.TestCase):
 
     def test_scheduler_uses_shanghai_time(self):
         self.assertEqual(str(scheduler.SCHEDULER_TIMEZONE), 'Asia/Shanghai')
+
+    def test_postgres_backup_routes_do_not_expose_sqlite_operations(self):
+        spec = importlib.util.spec_from_file_location('crm_app_postgres_backup_routes_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        with mock.patch.object(module, 'postgres_mode', return_value=True):
+            manual = client.post('/api/backup')
+            self.assertEqual(manual.status_code, 409)
+            self.assertTrue(manual.get_json()['managed_externally'])
+            listed = client.get('/api/backup/list')
+            self.assertEqual(listed.status_code, 200)
+            self.assertEqual(listed.get_json()['backups'], [])
+            restored = client.post('/api/backup/restore', json={'date': '2026-01-01/000000'})
+            self.assertEqual(restored.status_code, 409)
 
     def test_overview_routes_require_login(self):
         spec = importlib.util.spec_from_file_location('crm_app_for_test', ROOT / 'app.py')
@@ -2004,6 +2102,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         })
         self.assertEqual(cross_customer.status_code, 400, cross_customer.get_json())
 
+
     def test_static_compatibility_and_diagnostic_404(self):
         module = self._load_module('crm_app_static_boundary_test')
         client = module.app.test_client()
@@ -2029,9 +2128,243 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0007_postgres_runtime_hardening.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0013_postgres_company_match_boundaries.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
+
+    def test_postgres_integrity_hardening_is_registered(self):
+        migration = (ROOT / 'migrations' / '0008_postgres_runtime_integrity_hardening.sql').read_text(encoding='utf-8')
+        self.assertIn('compat_dedupe_key', migration)
+        self.assertIn('trosa.compat_time', migration)
+        self.assertIn('pg_advisory_xact_lock', migration)
+        self.assertIn('company_id=CASE WHEN coalesce(core.contact_methods.person_id,excluded.person_id)', migration)
+        self.assertIn('username text NOT NULL DEFAULT', migration)
+        self.assertIn('web_fetched_at text NOT NULL DEFAULT', migration)
+        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
+        self.assertIn('0008_postgres_runtime_integrity_hardening.sql', tool_source)
+
+    def test_production_applied_postgres_migrations_keep_immutable_hashes(self):
+        # These are the hashes recorded by the read-only ECS audit. Any future
+        # schema change must be a new forward migration, never an edit to one
+        # of the seven migrations already applied in production.
+        expected = {
+            '0001_unified_trade_os.sql': '59073dc1493174b6f84feb9c26c68fafece348da917294e4963d00b72ac89ab0',
+            '0002_postgres_runtime.sql': '2ae2780ed33a210b202977f0a28b1b0a9842ea620fda1a22491ca0cc66c020f6',
+            '0003_postgres_app_compat.sql': '0be9840cd8af7e21778ad85164fbcf195cc356c631461cf59a1c8e2d2e3d85b8',
+            '0004_postgres_runtime_surfaces.sql': 'b562bfed7ebebafbab6dd79537740ddeefafff0b3b0fdac1e096c60156932523',
+            '0005_postgres_runtime_write_fixes.sql': '086e52bb1c9f41ff706b08b463820b6f49e83bb9f80f225b6b76bf1c22f58c2f',
+            '0006_postgres_runtime_surface_writes.sql': '9f4db2576d8ab46dcbc8e8e7a0d57251fffda46ad7abe51d9aae2fb9598211b2',
+            '0007_postgres_runtime_hardening.sql': '955d2c0fd9038d5c238ff47d64004ba8c84f7e7af8340d0eb53717debfcb85e1',
+        }
+        for name, digest in expected.items():
+            actual = hashlib.sha256((ROOT / 'migrations' / name).read_bytes()).hexdigest()
+            self.assertEqual(actual, digest, name)
+
+    def test_legacy_import_values_are_not_silently_coerced(self):
+        self.assertEqual(clean(0), '0')
+        self.assertEqual(clean(False), 'False')
+        self.assertEqual(legacy_int('12'), 12)
+        self.assertIsNone(legacy_int(True))
+        self.assertIsNone(legacy_int('2.5'))
+        self.assertFalse(legacy_bool('0'))
+        self.assertTrue(legacy_bool('yes'))
+        self.assertTrue(legacy_bool('', True))
+        self.assertEqual(compat_dedupe_key('amy', 'ai_suggestion:1:hold'), 'compat:amy:ai_suggestion:1:hold')
+        digest = hashlib.md5('agent-gateway:amy:write:create_task:key-1'.encode()).hexdigest()
+        self.assertEqual(compat_uuid('agent-gateway:amy:write:create_task:key-1'), uuid.UUID(digest))
+        parsed = parse_time('2026-09-04T12:00:00')
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.utcoffset().total_seconds(), 8 * 60 * 60)
+        utc_parsed = parse_time('2026-09-04 12:00:00+00:00')
+        self.assertIsNotNone(utc_parsed)
+        self.assertEqual(utc_parsed.utcoffset().total_seconds(), 0)
+
+    def test_postgres_final_integrity_boundaries_are_registered(self):
+        migration = (ROOT / 'migrations' / '0009_postgres_final_integrity_boundaries.sql').read_text(encoding='utf-8')
+        for marker in (
+            'integration_sync_receipt_rows', 'team_invitations_write', 'source_batch_id',
+            'pg_advisory_xact_lock', 'email_message_receipts', 'email_delivery_events',
+            'agent_gateway_idempotency', 'agent-proposal:', 'agent-gateway:',
+            'Conflicting integration_sync_receipts rows',
+        ):
+            self.assertIn(marker, migration)
+        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
+        self.assertIn('0009_postgres_final_integrity_boundaries.sql', tool_source)
+
+    def test_postgres_external_provider_keys_are_user_scoped(self):
+        migration = (ROOT / 'migrations' / '0010_postgres_user_scoped_external_ids.sql').read_text(encoding='utf-8')
+        for marker in (
+            'legacy_user_id', 'trosa_email_receipts_org_user_provider_idx',
+            'trosa_communication_items_org_user_fp_idx',
+            'gmail-receipt:', 'communication-item:',
+            'organization_id,legacy_user_id,provider_message_id',
+            'organization_id,legacy_user_id,source_fingerprint',
+        ):
+            self.assertIn(marker, migration)
+        importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
+        self.assertIn('compat_uuid(f"gmail-receipt:{user}:{provider}")', importer)
+        self.assertIn('compat_uuid(f"communication-item:{user}:{fingerprint}")', importer)
+
+    def test_postgres_legacy_identity_updates_cannot_duplicate_rows(self):
+        migration = (ROOT / 'migrations' / '0009_postgres_final_integrity_boundaries.sql').read_text(encoding='utf-8')
+        for marker in (
+            'integration receipt identity is immutable',
+            'gateway idempotency identity is immutable',
+            'agent action identity is immutable',
+            'undo action identity is immutable',
+            'weekly report identity is immutable',
+            'imported activity hash already belongs to another row',
+            'unmatched customer hash already belongs to another row',
+            'imported activity audit hash already belongs to another row',
+            'unmatched customer audit hash already belongs to another row',
+            'communication source identity is immutable',
+            'communication source item identity is immutable',
+        ):
+            self.assertIn(marker, migration)
+
+    def test_postgres_final_compat_identity_guards_cover_legacy_views(self):
+        migration = (ROOT / 'migrations' / '0011_postgres_compat_identity_guards.sql').read_text(encoding='utf-8')
+        for marker in (
+            'research report identity is immutable',
+            'external analysis note identity is immutable',
+            'customer understanding identity is immutable',
+            'AI recommendation identity is immutable',
+            'user identity is immutable',
+            'email verification identity is immutable',
+            'email verification job identity is immutable',
+            'email domain probe identity is immutable',
+            'email log identity is immutable',
+        ):
+            self.assertIn(marker, migration)
+        importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
+        self.assertIn('company_id=case when coalesce(core.contact_methods.person_id,excluded.person_id)', importer)
+
+    def test_postgres_schema_contract_covers_external_identity_columns(self):
+        contract = (ROOT / 'postgres_schema_contract.py').read_text(encoding='utf-8')
+        for marker in (
+            '("trosa.email_verifications", "legacy_id")',
+            '("trosa.email_verification_jobs", "legacy_id")',
+            '("trosa.email_domain_probes", "legacy_id")',
+            '("trosa.email_logs", "legacy_key")',
+            'trosa_email_verification_legacy_idx',
+            'trosa_email_verification_job_legacy_idx',
+            'trosa_email_domain_probe_legacy_idx',
+            'trosa_email_logs_legacy_key_idx',
+        ):
+            self.assertIn(marker, contract)
+
+    def test_postgres_legacy_email_ids_are_projected_and_user_scoped(self):
+        migration = (ROOT / 'migrations' / '0012_postgres_legacy_email_ids.sql').read_text(encoding='utf-8')
+        for marker in (
+            'coalesce(legacy_id,id) AS id',
+            "legacy_key ~ '^[0-9]+$'",
+            "compat_next_id('email_verifications'",
+            "compat_next_id('email_verification_jobs'",
+            "compat_next_id('email_domain_probes'",
+            "compat_next_id('email_logs'",
+            'email verification % is not visible for user %',
+            'email log % is not visible for user %',
+            "legacy:ambiguous:'||s.id::text",
+        ):
+            self.assertIn(marker, migration)
+
+    def test_postgres_migration_ledger_refuses_historical_replay(self):
+        for path in (ROOT / 'db.py', ROOT / 'tools' / 'unified_postgres_migration.py'):
+            source = path.read_text(encoding='utf-8')
+            self.assertIn('Historical PostgreSQL migration', source)
+            self.assertIn('add a new forward migration', source)
+
+    def test_postgres_migration_cli_works_without_pythonpath(self):
+        env = os.environ.copy()
+        env.pop('PYTHONPATH', None)
+        result = subprocess.run(
+            [sys.executable, str(ROOT / 'tools' / 'unified_postgres_migration.py'), '--help'],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('usage:', result.stdout.lower())
+
+    def test_importer_routes_ambiguous_company_matches_to_review(self):
+        importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
+        self.assertIn('AMBIGUOUS_COMPANY_MATCH', importer)
+        self.assertIn('COMPANY_MATCH_REVIEW', importer)
+        self.assertIn('company-candidate:{source_key}', importer)
+        self.assertIn('source_identity=f"trosa:{user}:customer:{legacy_customer_id}"', importer)
+        self.assertIn('source_identity=f"sela:candidate:{candidate_id}"', importer)
+        self.assertIn("identity_status=case when excluded.identity_status='review'", importer)
+
+    def test_postgres_compat_company_matching_requires_exact_domain(self):
+        migration = (ROOT / 'migrations' / '0013_postgres_company_match_boundaries.sql').read_text(encoding='utf-8')
+        for marker in (
+            'CREATE OR REPLACE FUNCTION trosa.compat_customers_write()',
+            'v_domain_match_count',
+            'company-candidate:',
+            'identity_status',
+            "CASE WHEN v_match_review THEN 'review' ELSE 'imported' END",
+            'Name + country is a candidate signal',
+        ):
+            self.assertIn(marker, migration)
+        self.assertNotIn('normalized_name=v_normalized_name', migration)
+        self.assertNotIn('ORDER BY d.is_primary DESC, d.created_at ASC', migration)
+        self.assertIn('0013_postgres_company_match_boundaries.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
+
+    def test_importer_covers_every_legacy_user_table(self):
+        importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
+        declared = {
+            match.group(1)
+            for match in re.finditer(r'CREATE TABLE IF NOT EXISTS (\w+)', '\n'.join(db.USER_TABLE_SQL))
+        }
+        handled = {
+            match.group(1)
+            for match in re.finditer(r'rows\.get\("([a-z_]+)"', importer)
+        }
+        self.assertFalse(declared - handled)
+
+    def test_sela_evidence_shapes_are_preserved_as_separate_rows(self):
+        entries = sela_evidence_entries({
+            'evidence': '[{"type":"directory","url":"https://example.test","text":"proof"}]',
+            'website': 'https://fallback.test',
+        })
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['evidence_type'], 'directory')
+        self.assertEqual(entries[0]['source_url'], 'https://example.test')
+        fallback = sela_evidence_entries({'website': 'https://fallback.test'})
+        self.assertEqual(fallback[0]['source_url'], 'https://fallback.test')
+
+
+class PostgresCompatibilityRegressionTest(unittest.TestCase):
+    """SQLite-shaped writes must remain valid against PostgreSQL views."""
+
+    def test_conflict_clauses_are_removed_for_every_writable_compat_view(self):
+        statements = (
+            "INSERT INTO customer_understandings (customer_id, version) VALUES (?, ?) "
+            "ON CONFLICT(customer_id) DO UPDATE SET version=excluded.version",
+            "INSERT INTO inbox_items (item_type, dedupe_key) VALUES (?, ?) "
+            "ON CONFLICT(dedupe_key) DO UPDATE SET status='resolved'",
+            "INSERT OR IGNORE INTO contacts (customer_id, name) VALUES (?, ?)",
+            "INSERT INTO trade_os_compat.customer_files (customer_id, original_name) VALUES (?, ?) "
+            "ON CONFLICT(id) DO NOTHING",
+            "INSERT INTO integration_sync_receipts (integration, idempotency_key) VALUES (?, ?) "
+            "ON CONFLICT(integration, idempotency_key) DO NOTHING",
+            "INSERT INTO team_invitations (id, token_hash, created_by) VALUES (?, ?, ?) "
+            "ON CONFLICT(id) DO NOTHING",
+        )
+        for statement in statements:
+            translated = _translate_sql(statement)
+            self.assertNotRegex(translated, r"\bON\s+CONFLICT\b", statement)
+            self.assertNotIn("?", translated)
+            self.assertIn("%s", translated)
+
+    def test_real_compatibility_tables_keep_conflict_semantics(self):
+        translated = _translate_sql(
+            "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+        )
+        self.assertRegex(translated, r"\bON\s+CONFLICT\b")
 
 
 class CustomerAiSummaryTest(unittest.TestCase):

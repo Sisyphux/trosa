@@ -42,6 +42,39 @@ class TeamMembersApiTest(unittest.TestCase):
         self.assertEqual(hamid, ('hamid', 'Hamid', 'admin', 1))
         conn.close()
 
+    def test_inactive_member_stays_durable_but_is_not_routable(self):
+        conn = sqlite3.connect(Path(db.DB_DIR) / 'system.db')
+        conn.execute(
+            '''INSERT INTO users
+               (id, username, name, label, color, role, created_by, active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 0)''',
+            ('retired-member', 'retired-member', 'Retired Member',
+             'Retired Member', '#666', 'member', 'system'),
+        )
+        conn.commit()
+        conn.close()
+
+        db.refresh_users_registry()
+
+        self.assertIn(
+            'retired-member',
+            {row['username'] for row in db.get_registered_users(include_inactive=True)},
+        )
+        self.assertNotIn('retired-member', db.USERS)
+        self.assertNotIn('retired-member', db.USERS_LIST)
+
+    def test_disabled_builtin_is_not_resurrected_on_registry_refresh(self):
+        conn = sqlite3.connect(Path(db.DB_DIR) / 'system.db')
+        conn.execute("UPDATE users SET active=0 WHERE username='amy'")
+        conn.commit()
+        conn.close()
+
+        db.refresh_users_registry()
+
+        self.assertNotIn('amy', db.USERS)
+        self.assertNotIn('amy', db.USERS_LIST)
+        self.assertIn('amy', {row['username'] for row in db.get_registered_users(include_inactive=True)})
+
     def test_invitation_page_uses_root_static_asset_paths(self):
         response = self.client.get('/invite/example-token')
         body = response.get_data(as_text=True)

@@ -19,15 +19,24 @@ if [[ -z "${TRADE_OS_SSH_HOST:-}" && -r "$ENV_FILE" ]]; then
   source "$ENV_FILE"
 fi
 
-prefer_workbench="$(/usr/bin/printenv TRADE_OS_PREFER_WORKBENCH || true)"
-ssh_host="$(/usr/bin/printenv TRADE_OS_SSH_HOST || true)"
+# Values read from workbench.env are shell variables, not necessarily exported
+# environment variables.  Read them directly so backup/publish/status callers
+# can reliably use the configured SSH fallback when Workbench is unavailable.
+prefer_workbench="${TRADE_OS_PREFER_WORKBENCH:-}"
+ssh_host="${TRADE_OS_SSH_HOST:-}"
 if [[ "$prefer_workbench" != "1" && -n "$ssh_host" ]]; then
   ssh_bin="$(command -v ssh || true)"
   if [[ -z "$ssh_bin" ]]; then
     printf 'SSH client not found in PATH\n' >&2
     exit 127
   fi
-  exec "$ssh_bin" -o BatchMode=yes -o ConnectTimeout=10 "$ssh_host" "$remote_command"
+  # Some intermediate SSH paths close a quiet long-running command before
+  # pg_dump, pg_restore, or a migration has finished.  Keep the transport
+  # observable without changing the remote command: decode it on ECS, run it
+  # as a child, and emit a bounded heartbeat until it exits.
+  command_payload="$(printf '%s' "$remote_command" | base64 | tr -d '\n')"
+  ssh_command="printf '%s' '$command_payload' | base64 -d | bash & child=\$!; while kill -0 \$child 2>/dev/null; do printf 'TROSA_MANAGER_COMMAND_RUNNING\\n'; sleep 1; done; wait \$child"
+  exec "$ssh_bin" -T -o BatchMode=yes -o ConnectTimeout=10 "$ssh_host" "$ssh_command"
 fi
 
 workbench_bin=$(command -v workbench || true)

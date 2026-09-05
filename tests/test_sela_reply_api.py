@@ -101,6 +101,20 @@ class SelaReplyApiTest(unittest.TestCase):
 
     def test_reply_writes_inbound_timeline_and_dated_task_idempotently(self):
         outbound = outbound_payload()
+        conn = self.hamid_db()
+        cursor = conn.execute(
+            '''INSERT INTO customers(name, company, website, status, customer_type, import_source)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            ('Acrílicos S.A.', 'Acrílicos S.A.', 'https://acrilicos.com/',
+             '未建联', 'new', 'research'),
+        )
+        conn.execute(
+            '''INSERT INTO contacts(customer_id, name, email)
+               VALUES (?, ?, ?)''',
+            (cursor.lastrowid, 'Ana Silva', 'ana@acrilicos.com'),
+        )
+        conn.commit()
+        conn.close()
         first_outbound = self.post_outbound(outbound)
         self.assertEqual(first_outbound.status_code, 200, first_outbound.get_data(as_text=True))
         trosa_id = first_outbound.get_json()['trosa_id']

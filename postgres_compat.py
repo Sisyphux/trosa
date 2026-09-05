@@ -3,8 +3,8 @@
 The web application still speaks the legacy SQLite-shaped repository API
 (``?`` parameters, integer compatibility ids, and ``sqlite3.Row`` access).
 This module keeps that API stable while routing every statement to the shared
-PostgreSQL schemas. It is deliberately opt-in; the existing SQLite factory
-remains the safe default until an explicit cutover configuration is set.
+PostgreSQL schemas. SQLite is retained only for isolated development,
+rehearsal, and an explicitly approved rollback environment.
 """
 
 from __future__ import annotations
@@ -30,9 +30,14 @@ _INSERT_TABLE = re.compile(r"^\s*INSERT\s+(?:INTO\s+)?(?:OR\s+\w+\s+)?([\w.]+)",
 _PSYCOPG_PLACEHOLDER_OR_PERCENT = re.compile(r"%(?![%sbt])", re.IGNORECASE)
 _COMPAT_VIEW_INSERT = re.compile(
     r"^\s*INSERT\s+INTO\s+(?:trade_os_compat\.)?"
-    r"(users|email_verifications|email_verification_jobs|email_domain_probes|email_logs|"
-    r"gmail_message_states|communication_sources|communication_source_items|email_delivery_events|"
-    r"import_batches|imported_activity_rows|import_unmatched_customers|weekly_reports)\b",
+    r"(users|customers|contacts|reminders|follow_up_logs|outreach_emails|research_reports|"
+    r"external_analysis_notes|customer_understandings|ai_recommendations|inbox_items|"
+    r"web_monitor_logs|customer_files|email_verifications|email_verification_jobs|"
+    r"email_domain_probes|email_logs|gmail_message_states|communication_sources|"
+    r"communication_source_items|email_delivery_events|import_batches|imported_activity_rows|"
+    r"import_unmatched_customers|weekly_reports|team_invitations|"
+    r"integration_sync_receipts|operation_logs|agent_proposals|"
+    r"agent_gateway_idempotency|agent_actions|undo_actions)\b",
     re.IGNORECASE,
 )
 

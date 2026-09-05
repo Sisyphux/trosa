@@ -47,6 +47,9 @@ def discover_trosa_db_names(data_dir: Path) -> tuple[list[str], list[str]]:
         if not identity_columns:
             return names, [f"Trosa users table has no username/id column: {system_path}"]
         select_sql = "select " + ", ".join(identity_columns) + " from users"
+        # PostgreSQL compatibility routing normalizes owner keys to lower
+        # case.  Treat ``Amy.db`` and ``amy.db`` as the same source owner so
+        # the importer cannot silently merge two SQLite stores into one user.
         seen_users: set[str] = set()
         for row in connection.execute(select_sql).fetchall():
             values = [row[index] for index in range(len(identity_columns))]
@@ -57,10 +60,11 @@ def discover_trosa_db_names(data_dir: Path) -> tuple[list[str], list[str]]:
             if not _SAFE_USER_FILE.fullmatch(user):
                 errors.append(f"Trosa user is not a safe database filename: {user!r}")
                 continue
-            if user in seen_users:
+            user_key = user.casefold()
+            if user_key in seen_users:
                 errors.append(f"Trosa system.db contains duplicate user: {user}")
                 continue
-            seen_users.add(user)
+            seen_users.add(user_key)
             names.append(f"{user}.db")
         if not seen_users:
             errors.append(f"Trosa system.db contains no usable users: {system_path}")
