@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import db
+import postgres_schema_contract as postgres_contract
 from postgres_compat import _translate_sql
 import scheduler
 from ical_gen import build_icalendar
@@ -2252,6 +2253,31 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             'trosa_email_logs_legacy_key_idx',
         ):
             self.assertIn(marker, contract)
+
+    def test_postgres_schema_contract_accepts_a_complete_surface(self):
+        class CompleteContractCursor:
+            def __init__(self):
+                self.position = 0
+
+            def execute(self, *_args, **_kwargs):
+                self.position += 1
+
+            def fetchall(self):
+                responses = (
+                    [(name,) for name in postgres_contract.REQUIRED_SCHEMAS],
+                    ([(name, 'r') for name in postgres_contract.REQUIRED_TABLES]
+                     + [(name, 'v') for name in postgres_contract.REQUIRED_VIEWS]),
+                    list(postgres_contract.REQUIRED_COLUMNS),
+                    [(f'{relation}.{name}', True, list(columns))
+                     for relation, name, columns in postgres_contract.REQUIRED_INDEXES],
+                    [(name, True) for name in postgres_contract.REQUIRED_FUNCTIONS],
+                    [(name,) for name in postgres_contract.REQUIRED_TRIGGERS],
+                )
+                return responses[self.position - 1]
+
+        status = postgres_contract.schema_status(CompleteContractCursor())
+        self.assertTrue(status['ok'])
+        self.assertTrue(all(status['schemas'].values()))
 
     def test_postgres_legacy_email_ids_are_projected_and_user_scoped(self):
         migration = (ROOT / 'migrations' / '0012_postgres_legacy_email_ids.sql').read_text(encoding='utf-8')

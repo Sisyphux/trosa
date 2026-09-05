@@ -211,7 +211,8 @@ def schema_status(cursor: Any) -> dict[str, Any]:
            WHERE schema_name = ANY(%s)""",
         (list(REQUIRED_SCHEMAS),),
     )
-    schemas = {row[0] for row in cursor.fetchall()}
+    present_schemas = {row[0] for row in cursor.fetchall()}
+    schemas = {name: name in present_schemas for name in REQUIRED_SCHEMAS}
 
     expected_relations = list(REQUIRED_TABLES + REQUIRED_VIEWS)
     cursor.execute(
@@ -291,7 +292,7 @@ def schema_status(cursor: Any) -> dict[str, Any]:
     triggers = {name: name in present_triggers for name in REQUIRED_TRIGGERS}
 
     return {
-        "schemas": {name: name in schemas for name in REQUIRED_SCHEMAS},
+        "schemas": schemas,
         "tables": tables,
         "views": views,
         "columns": columns,
