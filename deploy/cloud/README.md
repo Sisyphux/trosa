@@ -55,14 +55,14 @@ deploy/cloud/backup-workbench.sh
 
 ## Hamid Pi CRM 助理
 
-Pi 是 Trosa 的受限日常操作入口：它只有 Gateway 工具，没有 shell、文件或数据库访问权限。首次启用先在 ECS 安装锁定版本的 Node 与 Pi：
+Pi 是 Trosa Agent Gateway 的 CRM 调用方。Gateway 只验证 `hamid-pi`、绑定 Hamid 数据并记录 CRM 操作；不限制 Pi 的原生 shell、文件、搜索、编码或调试能力。首次启用先在 ECS 安装锁定版本的 Node 与 Pi：
 
 ```bash
 sudo /opt/trade-os/current/deploy/cloud/install-pi-runtime.sh
 ```
 
-然后由已登录的 Hamid 在 Trosa 的「Agent Gateway token」页面新建一个仅含
-`crm:read,crm:write` 的 `hamid-pi` token。把 token 和下列非业务运行参数写入
+然后由已登录的 Hamid 在 Trosa 的「Agent Gateway token」页面新建一个含
+`crm:read,crm:write` 的 `hamid-pi` token。把 token 和下列运行参数写入
 `/etc/trade-os/trade-os.env`（权限保持 600），再重启 `trade-os`：
 
 ```text
@@ -75,7 +75,7 @@ TROSA_GATEWAY_URL=http://127.0.0.1:8080
 TROSA_PI_GATEWAY_TOKEN=<Hamid 的新 token>
 ```
 
-不要把 token 写入仓库、release、命令历史或 sela。验证必须先用 Pi 读取真实 Today，再由用户提供一条真实业务事实做一次可撤销写入；不得用虚构客户沟通作为生产验收材料。
+不要把 token 写入仓库、release、命令历史或 sela。Gateway token 的明文唯一来源是 `/etc/trade-os/trade-os.env`；数据库只保存 SHA-256 hash。模型凭证唯一来源是 `/var/lib/trade-os/ai-config.env`，由 Trosa AI 配置加载并传给 Pi。验证必须先用 Pi 读取真实 Today，再由用户提供一条真实业务事实做一次可撤销写入；不得用虚构客户沟通作为生产验收材料。
 
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及

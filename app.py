@@ -7256,6 +7256,7 @@ def _gateway_direct_write(action, data, idempotency_key):
             raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
         action_id = 'agact_' + secrets.token_urlsafe(18)
         related_type, related_id = {
+            'create_contact': ('contact', result.get('id')),
             'record_communication': ('follow_up_log', result.get('id')),
             'create_task': ('reminder', result.get('id')),
             'complete_task': ('reminder', payload.get('task_id')),
@@ -7287,6 +7288,10 @@ def _gateway_direct_write(action, data, idempotency_key):
         if not isinstance(customer_id, int):
             raise CrmWriteError('记录沟通需要 customer_id')
         result = record_customer_communication(customer_id, payload, before_commit=receipt_hook)
+    elif action == 'create_contact':
+        if not isinstance(customer_id, int):
+            raise CrmWriteError('新增联系人需要 customer_id')
+        result = create_customer_contact(customer_id, payload, before_commit=receipt_hook)
     elif action == 'create_task':
         if not isinstance(customer_id, int):
             raise CrmWriteError('创建待办需要 customer_id')
@@ -7444,11 +7449,12 @@ _PI_AGENT_CALL_LOCK = threading.Lock()
 
 
 def _pi_runtime_environment(gateway_token, request_id):
-    """Build a least-privilege environment for the external Pi process.
+    """Build Pi's runtime environment without turning a CRM token into a runtime sandbox.
 
-    The web service environment also contains session, integration and backup
-    secrets that Pi never needs.  Keep only runtime basics, the selected model
-    credential (when one is configured), and the explicit Trosa tool boundary.
+    The child receives only the model credential it needs plus its Gateway
+    credential; this avoids leaking unrelated service secrets.  Its native
+    search, file, coding and shell capabilities remain Pi capabilities, not
+    Gateway-token permissions.
     """
     environment = {}
     for name in ('PATH', 'LANG', 'LC_ALL', 'TMPDIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
@@ -7553,13 +7559,10 @@ def _parse_pi_json_events(stdout):
 
 
 def _run_pi_agent(message, request_id='', context=None):
-    """Run one isolated Pi turn with only Trosa tools and return a chat payload.
+    """Run one isolated Pi turn with its native tools and the Trosa Gateway.
 
-    Pi is intentionally a subprocess boundary.  The Flask process never gives
-    it a database path or a general shell tool; the extension calls the
-    authenticated Gateway over loopback.  Each request starts without a
-    persisted Pi conversation so a previous question cannot become context for
-    the current one.
+    The Gateway authorizes only CRM calls.  Pi keeps its normal runtime tools;
+    the subprocess environment deliberately omits unrelated service secrets.
     """
     executable = str(os.environ.get('TROSA_PI_EXECUTABLE') or '').strip() or shutil.which('pi')
     extension = os.path.abspath(os.environ.get(
@@ -7589,7 +7592,7 @@ def _run_pi_agent(message, request_id='', context=None):
     request_id = str(request_id or secrets.token_urlsafe(16)).strip()[:160]
     env = _pi_runtime_environment(gateway_token, request_id)
     command = [
-        executable, '--mode', 'json', '--no-builtin-tools', '--no-context-files', '--no-extensions',
+        executable, '--mode', 'json',
         '-e', extension,
         '--provider', str(os.environ.get('TROSA_PI_PROVIDER') or 'deepseek').strip(),
         '--model', str(os.environ.get('TROSA_PI_MODEL') or 'deepseek/deepseek-v4-flash').strip(),
@@ -8751,6 +8754,49 @@ def update_customer_follow_up_task(reminder_id, data, before_commit=None):
             [_undo_entity('reminders', reminder_id, before, after), _undo_entity('customers', customer_id, customer_before, customer_after)],
             f'撤销待办修改：{before.get("title") or before.get("content") or "待办"}')
         return {'id': reminder_id, 'customer_id': customer_id, 'task': after, 'undo_token': undo_token, 'undo_description': '撤销待办修改'}
+    return _run_crm_write(operation, before_commit)
+
+
+def create_customer_contact(customer_id, data, before_commit=None):
+    """Create or merge a contact through the shared reversible CRM writer."""
+    data = dict(data or {})
+    data['is_primary'] = _normalize_binary_flag(data.get('is_primary'), '主要联系人')
+    allowed = ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin', 'preferred_channel', 'contact_type', 'is_primary', 'notes')
+    data = {key: data[key] for key in allowed if key in data}
+    email = _canonical_email(data.get('email'))
+
+    def operation(conn, c):
+        if not c.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+            raise CrmWriteError('客户不存在', 404)
+        if email:
+            duplicate = c.execute('''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted
+                                     FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+                                     WHERE lower(trim(ct.email))=? ORDER BY ct.id LIMIT 1''', (email,)).fetchone()
+            if duplicate and duplicate['customer_id'] != customer_id and not duplicate['is_deleted']:
+                raise CrmWriteError(f'邮箱已属于客户：{duplicate["company"] or duplicate["customer_name"]}', 409)
+            if duplicate and duplicate['customer_id'] == customer_id:
+                before = dict(duplicate)
+                merged = _merge_contact_candidates([before, data])[0]
+                c.execute('''UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?, preferred_channel=?, contact_type=?, is_primary=?, notes=? WHERE id=?''',
+                          (merged.get('name', ''), merged.get('title', ''), email, merged.get('phone', ''), merged.get('whatsapp', ''),
+                           merged.get('linkedin', ''), merged.get('preferred_channel', ''), merged.get('contact_type') or 'person',
+                           merged.get('is_primary', 0), merged.get('notes', ''), duplicate['id']))
+                after = _snapshot_entity(conn, 'contacts', duplicate['id'])
+                undo_token = _create_undo_action(conn, 'MERGE_CONTACT', 'contact', duplicate['id'],
+                                                 [_undo_entity('contacts', duplicate['id'], before, after)], '撤销 Agent 合并联系人')
+                return {'id': duplicate['id'], 'customer_id': customer_id, 'contact': after, 'duplicate': True,
+                        'undo_token': undo_token, 'undo_description': '撤销合并联系人'}
+        c.execute('''INSERT INTO contacts (customer_id, name, title, email, phone, whatsapp, linkedin, preferred_channel, contact_type, is_primary, notes, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (customer_id, data.get('name', ''), data.get('title', ''), email, data.get('phone', ''), data.get('whatsapp', ''),
+                   data.get('linkedin', ''), data.get('preferred_channel', ''), data.get('contact_type', 'person'),
+                   data.get('is_primary', 0), data.get('notes', ''), _calendar_now_text()))
+        contact_id = c.lastrowid
+        after = _snapshot_entity(conn, 'contacts', contact_id)
+        undo_token = _create_undo_action(conn, 'CREATE_CONTACT', 'contact', contact_id,
+                                         [_undo_entity('contacts', contact_id, None, after)], '撤销新增联系人')
+        return {'id': contact_id, 'customer_id': customer_id, 'contact': after,
+                'undo_token': undo_token, 'undo_description': '撤销新增联系人'}
     return _run_crm_write(operation, before_commit)
 
 

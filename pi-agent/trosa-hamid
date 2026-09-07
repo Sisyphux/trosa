@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Start the Hamid-only Trosa assistant through the stdio MCP boundary.
-# This is intentionally separate from the generic `pi` coding-agent command.
+# Start Hamid's Pi through the Trosa Gateway extension.  The Gateway governs
+# only CRM identity/data scope; Pi otherwise retains its native capabilities.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,10 +40,6 @@ exec pi \
   --provider "$PI_PROVIDER" \
   --model "$PI_MODEL" \
   --thinking off \
-  --no-builtin-tools \
-  --no-context-files \
-  --no-extensions \
-  --no-session \
   -e "$SCRIPT_DIR/trosa-mcp-client.ts" \
   --system-prompt "$(<"$SCRIPT_DIR/system-prompt.md")" \
   "$@"

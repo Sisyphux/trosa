@@ -1634,8 +1634,8 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(response.get_json()['operations'][0]['action_id'], 'agact_test_runtime_1234567890')
         command = run.call_args.args[0]
         self.assertIn('--mode', command)
-        self.assertIn('--no-builtin-tools', command)
-        self.assertIn('--no-context-files', command)
+        self.assertNotIn('--no-builtin-tools', command)
+        self.assertNotIn('--no-context-files', command)
         self.assertIn(str(ROOT / 'pi-agent' / 'trosa-tools.ts'), command)
         self.assertNotIn('--api-key', command)
         runtime_env = run.call_args.kwargs['env']
@@ -2129,7 +2129,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0013_postgres_company_match_boundaries.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0014_postgres_customer_priority_recovery.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
 
@@ -2337,6 +2337,14 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertNotIn('normalized_name=v_normalized_name', migration)
         self.assertNotIn('ORDER BY d.is_primary DESC, d.created_at ASC', migration)
         self.assertIn('0013_postgres_company_match_boundaries.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
+
+    def test_postgres_customer_priority_is_imported_and_recovered(self):
+        migration = (ROOT / 'migrations' / '0014_postgres_customer_priority_recovery.sql').read_text(encoding='utf-8')
+        importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
+        self.assertIn('compat_customers_priority_write', migration)
+        self.assertIn("legacy_payload->>'is_pinned'", migration)
+        self.assertIn('NEW.pinned_order', migration)
+        self.assertIn('is_pinned,pinned_order', importer)
 
     def test_importer_covers_every_legacy_user_table(self):
         importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')

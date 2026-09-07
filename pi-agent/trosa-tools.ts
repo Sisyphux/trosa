@@ -92,6 +92,7 @@ function gatewayToolResult(result: GatewayResponse) {
 		const action = data.action;
 		if (action) {
 			const labels: Record<string, string> = {
+				create_contact: "新增联系人",
 				record_communication: "记录客户沟通",
 				create_task: "创建跟进提醒",
 				complete_task: "完成客户待办",
@@ -185,6 +186,27 @@ const getInbox = defineTool({
 	},
 });
 
+const getContacts = defineTool({
+	name: "get_contacts", label: "Get contacts",
+	description: "读取已确认客户的全部联系人。",
+	parameters: Type.Object({ customer_id: Type.Integer({ minimum: 1 }) }),
+	async execute(_id, params) { return gatewayToolResult(await gateway(`/api/gateway/customers/${params.customer_id}/contacts`)); },
+});
+
+const getOpenTasks = defineTool({
+	name: "get_open_tasks", label: "Get open tasks",
+	description: "读取当前 Hamid 工作区的待办，可按已确认客户筛选。",
+	parameters: Type.Object({ customer_id: Type.Optional(Type.Integer({ minimum: 1 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 })) }),
+	async execute(_id, params) { const query = new URLSearchParams({ limit: String(params.limit || 15) }); if (params.customer_id) query.set("customer_id", String(params.customer_id)); return gatewayToolResult(await gateway(`/api/gateway/tasks?${query}`)); },
+});
+
+const getRecentActions = defineTool({
+	name: "get_recent_actions", label: "Get recent CRM actions",
+	description: "读取当前 Gateway identity 的近期 CRM 操作及撤销状态。",
+	parameters: Type.Object({ limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 })) }),
+	async execute(_id, params) { return gatewayToolResult(await gateway(`/api/gateway/actions/recent?limit=${params.limit || 15}`)); },
+});
+
 const recordCommunication = defineTool({
 	name: "record_communication",
 	label: "Record communication",
@@ -226,6 +248,14 @@ const createTask = defineTool({
 	},
 });
 
+const createContact = defineTool({
+	name: "create_contact", label: "Create contact",
+	description: "为已确认客户新增联系人；相同邮箱会按 CRM 规则合并，结果可撤销。",
+	parameters: Type.Object({ customer_id: Type.Integer({ minimum: 1 }), name: Type.Optional(Type.String({ maxLength: 200 })), title: Type.Optional(Type.String({ maxLength: 200 })), email: Type.Optional(Type.String({ maxLength: 320 })), phone: Type.Optional(Type.String({ maxLength: 100 })), whatsapp: Type.Optional(Type.String({ maxLength: 100 })), linkedin: Type.Optional(Type.String({ maxLength: 500 })), preferred_channel: Type.Optional(Type.String({ maxLength: 100 })), contact_type: Type.Optional(Type.String({ maxLength: 100 })), is_primary: Type.Optional(Type.Boolean()), notes: Type.Optional(Type.String({ maxLength: 4000 })) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { const { customer_id, ...contact } = params; return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "create_contact", customer_id, payload: { ...contact, source: "pi_agent" } }, true, idempotencyKey("create_contact", toolCallId))); },
+});
+
 const completeTask = defineTool({
 	name: "complete_task",
 	label: "Complete task",
@@ -237,6 +267,46 @@ const completeTask = defineTool({
 		const payload = { action: "complete_task", customer_id: params.customer_id || null, payload: { task_id: params.task_id, completion_context: text(params.completion_context), source: "pi_agent" } };
 		return gatewayToolResult(await gateway("/api/gateway/actions", "POST", payload, true, idempotencyKey("complete_task", toolCallId)));
 	},
+});
+
+const updateTask = defineTool({
+	name: "update_task", label: "Update task",
+	description: "修改一个已经读取并确认的待办。",
+	parameters: Type.Object({ task_id: Type.Integer({ minimum: 1 }), title: Type.Optional(Type.String({ maxLength: 300 })), content: Type.Optional(Type.String({ maxLength: 1000 })), reason: Type.Optional(Type.String({ maxLength: 1000 })), remind_date: Type.Optional(Type.String()) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { const { task_id, ...changes } = params; return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "update_task", payload: { task_id, ...changes, source: "pi_agent" } }, true, idempotencyKey("update_task", toolCallId))); },
+});
+
+const updateCustomer = defineTool({
+	name: "update_customer", label: "Update customer",
+	description: "更新已确认客户的普通资料字段。",
+	parameters: Type.Object({ customer_id: Type.Integer({ minimum: 1 }), name: Type.Optional(Type.String({ maxLength: 200 })), company: Type.Optional(Type.String({ maxLength: 300 })), country: Type.Optional(Type.String({ maxLength: 100 })), website: Type.Optional(Type.String({ maxLength: 500 })), field: Type.Optional(Type.String({ maxLength: 200 })), industry: Type.Optional(Type.String({ maxLength: 200 })), profile: Type.Optional(Type.String({ maxLength: 4000 })), notes: Type.Optional(Type.String({ maxLength: 4000 })), tags: Type.Optional(Type.String({ maxLength: 1000 })) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { const { customer_id, ...changes } = params; return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "update_customer", customer_id, payload: { ...changes, source: "pi_agent" } }, true, idempotencyKey("update_customer", toolCallId))); },
+});
+
+const updateContact = defineTool({
+	name: "update_contact", label: "Update contact",
+	description: "更新已确认联系人的普通资料字段。",
+	parameters: Type.Object({ contact_id: Type.Integer({ minimum: 1 }), name: Type.Optional(Type.String({ maxLength: 200 })), title: Type.Optional(Type.String({ maxLength: 200 })), email: Type.Optional(Type.String({ maxLength: 320 })), phone: Type.Optional(Type.String({ maxLength: 100 })), whatsapp: Type.Optional(Type.String({ maxLength: 100 })), linkedin: Type.Optional(Type.String({ maxLength: 500 })), preferred_channel: Type.Optional(Type.String({ maxLength: 100 })), contact_type: Type.Optional(Type.String({ maxLength: 100 })), notes: Type.Optional(Type.String({ maxLength: 4000 })) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "update_contact", payload: { ...params, source: "pi_agent" } }, true, idempotencyKey("update_contact", toolCallId))); },
+});
+
+const resolveInbox = defineTool({
+	name: "resolve_inbox", label: "Resolve Inbox item",
+	description: "处理一个已读取的 Inbox 项，可撤销。",
+	parameters: Type.Object({ inbox_item_id: Type.Integer({ minimum: 1 }), resolution_note: Type.Optional(Type.String({ maxLength: 1000 })) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "resolve_inbox", payload: { ...params, source: "pi_agent" } }, true, idempotencyKey("resolve_inbox", toolCallId))); },
+});
+
+const assignInboxCustomer = defineTool({
+	name: "assign_inbox_customer", label: "Assign Inbox customer",
+	description: "将已读取的未归属 Inbox 项关联到已确认客户，保持该项打开以便后续记录沟通。",
+	parameters: Type.Object({ inbox_item_id: Type.Integer({ minimum: 1 }), customer_id: Type.Integer({ minimum: 1 }) }),
+	executionMode: "sequential",
+	async execute(toolCallId, params) { return gatewayToolResult(await gateway("/api/gateway/actions", "POST", { action: "assign_inbox_customer", customer_id: params.customer_id, payload: { inbox_item_id: params.inbox_item_id, source: "pi_agent" } }, true, idempotencyKey("assign_inbox_customer", toolCallId))); },
 });
 
 const undoAction = defineTool({
@@ -309,8 +379,8 @@ const readWorkFile = defineTool({
 });
 
 export default function (pi: ExtensionAPI) {
-	const tools = [searchCustomers, getCustomer, getToday, searchActivity, getInbox, recordCommunication, createTask, completeTask, undoAction];
-	if (WORKFILES_ENABLED) tools.push(searchWorkFiles, readWorkFile);
+	const tools = [searchCustomers, getCustomer, getToday, searchActivity, getInbox, getContacts, getOpenTasks, getRecentActions,
+		recordCommunication, createTask, createContact, completeTask, updateTask, updateCustomer, updateContact, resolveInbox, assignInboxCustomer, undoAction];
 	for (const tool of tools) {
 		pi.registerTool(tool);
 	}
