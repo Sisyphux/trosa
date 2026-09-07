@@ -1,6 +1,6 @@
 # ECS + Workbench 发布流程
 
-Trade OS 使用一台持久磁盘 ECS、一个 Waitress 进程、一个 SQLite 写入源和一个 Cloudflare Tunnel。不要启动第二个 Trade OS 实例，也不要把 `data/`、`.env` 或 `.venv` 上传到发布包。ECS 主机防火墙只允许 SSH，应用只监听 `127.0.0.1:8080`。
+Trade OS 使用一台持久磁盘 ECS、一个 Waitress 进程、一个 PostgreSQL 写入源和一个 Cloudflare Tunnel。不要启动第二个 Trade OS 实例，也不要把 `data/`、`.env` 或 `.venv` 上传到发布包。ECS 主机防火墙只允许 SSH，应用只监听 `127.0.0.1:8080`；PostgreSQL 只监听 ECS `127.0.0.1:5432`。
 
 首次配置：
 
@@ -16,9 +16,10 @@ deploy/cloud/bootstrap-workbench.sh
 sudo systemctl enable --now trade-os cloudflared
 ```
 
-当前正式入口为 `https://app.trosa.space`。生产数据位于 ECS 的
-`/var/lib/trade-os`，由 `tradeos` 用户独占写入；Tunnel 凭据只保存在
-`/etc/cloudflared/`，不会进入代码仓库。
+当前正式入口为 `https://app.trosa.space`。正式业务数据位于 ECS 的
+PostgreSQL（`/opt/trade-os-postgres`），应用通过 systemd drop-in 注入的
+DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史回滚材料。Tunnel
+凭据只保存在 `/etc/cloudflared/`，不会进入代码仓库。
 
 ## 与 sela 的稳定同步契约
 
@@ -28,7 +29,7 @@ sudo systemctl enable --now trade-os cloudflared
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
 - `POST /api/integrations/sela/sync`：单条已确认外联事件的事务写入。
 
-`sela-v1` 的写入接口会在一个 SQLite 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
+`sela-v1` 的写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
 
 发布和验收顺序：
 
@@ -56,7 +57,8 @@ deploy/cloud/backup-workbench.sh
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及
 CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
 只读状态检查优先走 Workbench 控制面，即使本地配置了 SSH 主机别名；这样本机 SSH
-暂时无法握手时，工作台仍有机会读取网站和服务器状态。
+暂时无法握手时，工作台仍有机会读取网站和服务器状态。如果 Workbench 非交互请求临时失败，脚本会先使用已配置的 SSH
+主机别名回退，再尝试旧版 Workbench 的交互式会话，避免把控制面短暂错误显示成服务器故障。
 当目标实例无法通过 SSH 连接、Workbench 降级到 Session Manager（SSM）模式时，脚本会
 通过一次短生命周期的交互式 Shell 读取同样的状态；这是因为 Workbench 的 SSM 模式不支持
 非交互式 `exec`。会话结束后立即关闭，不保留后台终端。
@@ -72,9 +74,11 @@ deploy/cloud/logs-workbench.sh
 
 `publish-workbench.sh` 会读取本地当前 `HEAD` 和 GitHub `origin`，让 ECS 通过 SSM 下载该 commit 的公开归档，解压到新的 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。发布包来自已推送的 commit，不包含本机未提交修改，也不上传本地数据、密钥或虚拟环境。
 
-`backup-workbench.sh` 会在 ECS 使用 SQLite 在线备份生成应用级一致性副本，打包数据库、附件和
-manifest，下载到 Mac 的 `~/Library/Application Support/trosa/backups/`，核对 SHA-256 后保留最近
-14 天的归档。它不创建阿里云 ECS 系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建 ECS。
+`backup-workbench.sh` 会调用 ECS PostgreSQL 生产目录的 verified logical dump，核对 dump
+的 SHA-256 和 `pg_restore --list`，再把数据库 dump、客户附件和 manifest 打包下载到 Mac 的
+`~/Library/Application Support/trosa/backups/`，核对 bundle SHA-256 后保留最近 14 天的归档。
+它不创建阿里云 ECS 系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建 ECS。应用在
+PostgreSQL 模式下不会把旧 SQLite 目录伪装成备份，也不会通过备份 API 恢复 SQLite 文件。
 
 ## 私有浏览器桌面
 

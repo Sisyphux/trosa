@@ -59,7 +59,7 @@
 <div class="connection-status" id="connectionStatus" role="status" aria-live="polite" hidden><span class="connection-status-spinner" aria-hidden="true"></span><span id="connectionStatusText">正在连接…</span></div>
 
 <!-- Sidebar Toggle (Mobile) -->
-<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" aria-expanded="false" aria-controls="sidebar">
+<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" title="打开导航" aria-expanded="false" aria-controls="sidebar">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
 </button>
 
@@ -96,10 +96,10 @@
     <details class="sidebar-tools">
       <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
-        <button type="button" onclick="switchPage('newpool')">新客户</button>
-        <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
-        <button type="button" onclick="switchPage('history')">全部记录</button>
-        <button type="button" onclick="switchPage('logs')">操作日志</button>
+        <button type="button" onclick="switchPage('newpool')" aria-label="打开新客户" title="打开新客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">新客户</span></button>
+        <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
+        <button type="button" onclick="switchPage('history')" aria-label="打开全部记录" title="打开全部记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">全部记录</span></button>
+        <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">操作日志</span></button>
       </div>
     </details>
     <div class="account-section">
@@ -440,7 +440,7 @@
         <div class="ov-hero-inner">
           <div class="ov-hero-top">
             <div>
-              <div class="ov-hero-title">本周工作</div>
+              <div class="ov-hero-title">本周沟通</div>
             </div>
             <div class="ov-hero-date" id="overviewDateLabel"></div>
           </div>

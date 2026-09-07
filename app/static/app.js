@@ -69,6 +69,19 @@ function uiIcon(name) {
   return '<span class="ui-icon ui-icon-' + name + '" aria-hidden="true"></span>';
 }
 
+function applyHoverLabels(root) {
+  var scope = root && root.querySelectorAll ? root : document;
+  var selector = 'button[aria-label], a[aria-label], [role="button"][aria-label], [role="menuitem"][aria-label], input[aria-label]';
+  var controls = [];
+  if (scope.matches && scope.matches(selector)) controls.push(scope);
+  scope.querySelectorAll(selector).forEach(function(control) { controls.push(control); });
+  controls.forEach(function(control) {
+    if (control.getAttribute('title')) return;
+    var label = (control.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    if (label) control.setAttribute('title', label);
+  });
+}
+
 var _ICON_ONLY_ACTIONS = {
   '关闭': ['close', '关闭'], '取消': ['close', '取消'], '删除': ['trash', '删除'],
   '编辑': ['edit', '编辑'], '快速编辑': ['edit', '快速编辑'], '导出邮箱': ['mail', '导出邮箱'],
@@ -95,6 +108,9 @@ var _INLINE_ICON_ACTIONS = {
 function applyIconButtons(root) {
   var scope = root && root.querySelectorAll ? root : document;
   scope.querySelectorAll('button:not([data-iconified])').forEach(function(button) {
+    // 更多工具菜单已经在 HTML 中提供了同一套图标和文字标签；只在
+    // 紧凑侧栏用 CSS 隐藏文字，避免动态 iconify 把菜单变成图标/文字混排。
+    if (button.closest && button.closest('.sidebar-tools-menu')) return;
     var accessibleLabel = (button.getAttribute('aria-label') || button.getAttribute('title') || '').trim();
     var inlineIcon = _INLINE_ICON_ACTIONS[accessibleLabel];
     if (inlineIcon && button.querySelector('svg')) {
@@ -117,13 +133,14 @@ function applyIconButtons(root) {
 
 function initIconButtons() {
   applyIconButtons(document);
+  applyHoverLabels(document);
   var observer = new MutationObserver(function(mutations) {
     mutations.forEach(function(mutation) {
       mutation.addedNodes.forEach(function(node) {
         if (node.nodeType !== 1) return;
         if (node.matches && node.matches('button')) applyIconButtons({ querySelectorAll: function() { return [node]; } });
-        if (!node.querySelector || !node.querySelector('button')) return;
-        applyIconButtons(node);
+        if (node.querySelector && node.querySelector('button')) applyIconButtons(node);
+        applyHoverLabels(node);
       });
     });
   });
@@ -1005,7 +1022,9 @@ function toggleSidebar() {
   var isOpen = sidebar.classList.toggle('open');
   if (toggle) {
     toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    toggle.setAttribute('aria-label', isOpen ? '关闭导航' : '打开导航');
+    var label = isOpen ? '关闭导航' : '打开导航';
+    toggle.setAttribute('aria-label', label);
+    toggle.setAttribute('title', label);
   }
 }
 
@@ -1376,6 +1395,7 @@ function isInboxCommunicationCapture(item) {
 }
 
 function inboxCategory(item) {
+  if (item.item_type === 'sela_follow_up') return 'sela_follow_up';
   if (item.item_type === 'customer_reply') return 'new_reply';
   if (isInboxCommunicationCapture(item)) return 'capture';
   if (item.item_type === 'uncontacted_follow_up') return 'uncontacted';
@@ -1390,6 +1410,7 @@ function inboxCategory(item) {
 }
 
 var INBOX_CATEGORY_LABELS = {
+  sela_follow_up: 'sela 跟进建议',
   new_reply: '客户有新回复',
   capture: '待归属沟通',
   waiting: '待二次开发',
@@ -1400,7 +1421,7 @@ var INBOX_CATEGORY_LABELS = {
   silent: '长期沉默',
   other_suggestion: '其他建议'
 };
-var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'waiting', 'uncontacted', 'new_customer', 'no_next', 'research', 'silent', 'other_suggestion', 'other'];
+var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_follow_up', 'waiting', 'uncontacted', 'new_customer', 'no_next', 'research', 'silent', 'other_suggestion', 'other'];
 var _inboxExpanded = new Set();
 
 function toggleInboxItem(key) {
@@ -1476,7 +1497,7 @@ function renderInbox(counts) {
       _inboxGroupCustomerIds[cat + '::' + country] = ids;
       html += '<div class="inbox-country-group">';
       html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
-      if (ids.length > 0) {
+      if (ids.length > 0 && cat !== 'sela_follow_up') {
         html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupTodayFollow(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">今天跟进</button>';
         html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupExportEmails(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">导出邮箱</button>';
       }
@@ -1500,7 +1521,9 @@ function renderInboxItemHtml(item) {
     : escapeHtml(name);
 
   var mainAction = '';
-  if (item.item_type === 'customer_reply') {
+  if (item.item_type === 'sela_follow_up' && /^sela_proposal:\d+$/.test(item.dedupe_key || '')) {
+    mainAction = '<button class="btn btn-sm btn-primary" onclick="openSelaFollowUpReview(' + Number(item.dedupe_key.split(':')[1]) + ')">核对跟进建议</button>';
+  } else if (item.item_type === 'customer_reply') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
   } else if (isInboxCommunicationCapture(item)) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
@@ -1554,7 +1577,7 @@ function renderInboxItemHtml(item) {
       body = '<p>' + escapeHtml(item.content || item.title || '') + '</p>';
     }
     var inlineDecision = '';
-    if (customerId && item.item_type !== 'customer_reply') {
+    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_follow_up') {
       var suggestedTitle = item.suggested_action || item.title || '联系客户并确认进展';
       var taskDate = new Date(); taskDate.setDate(taskDate.getDate() + 1);
       inlineDecision = '<div class="inbox-inline-decision">' +
@@ -1743,6 +1766,95 @@ async function openInboxSuggestionTask(customerId) {
   var date = new Date();
   date.setDate(date.getDate() + 7);
   document.getElementById('customerTaskDate').value = localDateString(date);
+}
+
+
+var _selaReviewProposal = null;
+var SELA_FOLLOW_UP_LABELS = {
+  title: '下一步动作', due_date: '执行日期', reason: '安排原因', content: '实际沟通内容', follow_date: '沟通日期',
+  direction: '方向（inbound / outbound / two_way / unknown）', activity_type: '沟通渠道',
+  next_task: '后续动作', next_follow_up: '后续日期', task_id: '对应待办编号', result: '沟通结果',
+  country: '国家', website: '网站', field: '业务领域', industry: '行业', profile: '客户概况', notes: '备注'
+};
+async function openSelaFollowUpReview(id) {
+  try {
+    var response = await api('/api/agent/proposals/' + id);
+    var proposal = response.proposal;
+    if (!proposal || proposal.status !== 'pending') { showToast('这项建议已处理'); await loadInbox(); return; }
+    _selaReviewProposal = proposal;
+    _modalSaveHandlers.selaFollowUpModal = function() { submitSelaFollowUpReview(true); };
+    var modal = document.getElementById('selaFollowUpModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'selaFollowUpModal'; modal.className = 'modal-overlay';
+      modal.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="selaReviewTitle">' +
+        '<div class="modal-header"><h3 id="selaReviewTitle">核对 sela 跟进建议</h3><button class="btn btn-sm" onclick="closeModal(\'selaFollowUpModal\')">关闭</button></div>' +
+        '<div class="modal-body" id="selaReviewBody"></div><div class="modal-footer">' +
+        '<button class="btn" onclick="submitSelaFollowUpReview(false)">取消这项建议</button>' +
+        '<button class="btn btn-primary" onclick="submitSelaFollowUpReview(true)">确认保存</button></div></div>';
+      modal.addEventListener('keydown', function(event) {
+        if (event.key !== 'Tab') return;
+        var controls = Array.from(modal.querySelectorAll('button:not(:disabled), textarea:not(:disabled)'));
+        var first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
+      document.body.appendChild(modal);
+    }
+    document.getElementById('selaReviewTitle').textContent = '核对跟进建议 · ' + (proposal.customer_name || '客户 #' + proposal.customer_id);
+    var payload = proposal.payload || {};
+    var body = document.getElementById('selaReviewBody'); body.textContent = '';
+    var intro = document.createElement('p'); intro.textContent = '请核对来源和将要保存的内容；确认后才会更新客户记录。'; body.appendChild(intro);
+    var assessment = document.createElement('p'); assessment.textContent = payload._sela_assessment || ''; body.appendChild(assessment);
+    (payload._sela_evidence || []).forEach(function(evidence) {
+      var quote = document.createElement('blockquote'); quote.textContent = evidence.source + '：' + evidence.quote; body.appendChild(quote);
+    });
+    Object.keys(payload).forEach(function(key) {
+      if (!SELA_FOLLOW_UP_LABELS[key]) return;
+      var label = document.createElement('label'); label.className = 'form-group'; label.textContent = SELA_FOLLOW_UP_LABELS[key];
+      var input = document.createElement('textarea'); input.className = 'form-control'; input.dataset.selaField = key;
+      input.value = payload[key] == null ? '' : String(payload[key]); input.rows = 3;
+      if (key === 'task_id') input.readOnly = true;
+      label.appendChild(input); body.appendChild(label);
+    });
+    openModal('selaFollowUpModal');
+  } catch (error) { showToast(error.message || '无法读取跟进建议', 'error'); }
+}
+function showSelaFollowUpUndo(token) {
+  var toast = document.createElement('div'); toast.className = 'toast success toast-with-action';
+  var text = document.createElement('span'); text.textContent = '跟进已保存'; toast.appendChild(text);
+  var button = document.createElement('button'); button.type = 'button'; button.textContent = '撤销'; toast.appendChild(button);
+  button.onclick = async function() {
+    button.disabled = true;
+    try { await api('/api/undo/' + encodeURIComponent(token), {method: 'POST'}); toast.remove(); showToast('已撤销业务变更'); await loadInbox(); }
+    catch (error) { button.disabled = false; showToast(error.message || '无法撤销', 'error'); }
+  };
+  document.getElementById('toastContainer').appendChild(toast);
+  setTimeout(function() { if (toast.isConnected) toast.remove(); }, 15000);
+}
+async function submitSelaFollowUpReview(confirmWrite) {
+  if (!_selaReviewProposal) return;
+  var proposal = _selaReviewProposal;
+  var buttons = document.querySelectorAll('#selaFollowUpModal button');
+  buttons.forEach(function(button) { button.disabled = true; });
+  try {
+    if (confirmWrite) {
+      var payload = Object.assign({}, proposal.payload);
+      document.querySelectorAll('#selaReviewBody [data-sela-field]').forEach(function(input) {
+        if (input.dataset.selaField !== 'task_id') payload[input.dataset.selaField] = input.value;
+      });
+      await api('/api/agent/proposals/' + proposal.id, {method: 'PUT', body: JSON.stringify(payload)});
+      var result = await api('/api/agent/proposals/' + proposal.id + '/confirm', {method: 'POST'});
+      showToast('跟进已保存');
+      if (result.undo_token) showSelaFollowUpUndo(result.undo_token);
+    } else {
+      await api('/api/agent/proposals/' + proposal.id + '/cancel', {method: 'POST'});
+      showToast('已取消建议');
+    }
+    markModalClean('selaFollowUpModal'); closeModal('selaFollowUpModal'); _selaReviewProposal = null;
+    await loadInbox();
+  } catch (error) { showToast(error.message || '保存失败，请重试', 'error'); }
+  finally { buttons.forEach(function(button) { button.disabled = false; }); }
 }
 
 var _communicationConfirmContext = null;
@@ -7625,6 +7737,7 @@ document.addEventListener('keydown', function(e) {
     if (toggle) {
       toggle.setAttribute('aria-expanded', 'false');
       toggle.setAttribute('aria-label', '打开导航');
+      toggle.setAttribute('title', '打开导航');
       toggle.focus({ preventScroll: true });
     }
   }
@@ -8051,7 +8164,8 @@ var OV = {
   _weeklyLoadToken: 0,
   _detailToken: 0,
   _detailController: null,
-  _weeklyMembers: {}
+  _weeklyMembers: {},
+  _weeklyFilter: 'all'
 };
 
 function getWeekStart(offset) {
@@ -8075,6 +8189,46 @@ function weeklyMemberShell(uid) {
   return '<section class="weekly-person is-loading" data-weekly-member="' + uid + '" style="--person-color:' + color + '">' +
     '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div></header>' +
     '<div class="weekly-member-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>正在读取已选择内容</span></div></section>';
+}
+
+function weeklyMemberIds() {
+  return Object.keys(OV.labels);
+}
+
+function defaultWeeklyMember() {
+  var memberIds = weeklyMemberIds();
+  if (typeof currentUser !== 'undefined' && currentUser && OV.labels[currentUser]) return currentUser;
+  return memberIds[0] || '';
+}
+
+function renderWeeklyMemberNavigator() {
+  var root = document.getElementById('weeklyTeamOverview');
+  if (!root) return;
+  var memberIds = weeklyMemberIds();
+  if (!OV.labels[OV._weeklyFilter]) OV._weeklyFilter = defaultWeeklyMember();
+  var activeFilter = OV._weeklyFilter;
+  var filters = '';
+  memberIds.forEach(function(uid) {
+    var isActive = activeFilter === uid;
+    var filterValue = escapeHtml(JSON.stringify(String(uid)));
+    var color = OV.colors[uid] || '#8B7355';
+    filters += '<button type="button" class="weekly-member-filter' + (isActive ? ' is-active' : '') + '" data-weekly-filter="' + escapeHtml(uid) + '" aria-pressed="' + isActive + '" style="--member-color:' + color + '" onclick="setWeeklyMemberFilter(' + filterValue + ')"><i aria-hidden="true">' + escapeHtml((OV.labels[uid] || uid).slice(0, 1)) + '</i><span>' + escapeHtml(OV.labels[uid]) + '</span></button>';
+  });
+  root.innerHTML = '<div class="weekly-team-summary" aria-live="polite"><span>本周沟通</span><strong>' + escapeHtml(OV.labels[activeFilter] || '客户沟通') + ' 的客户记录</strong></div><div class="weekly-team-index" aria-label="选择负责人的周报">' + filters + '</div>';
+}
+
+function setWeeklyMemberFilter(uid) {
+  if (!OV.labels[uid]) return;
+  OV._weeklyFilter = uid;
+  var board = document.getElementById('weeklyMemberContent');
+  if (board) board.innerHTML = weeklyMemberShell(uid);
+  renderWeeklyMemberNavigator();
+  Array.from(document.querySelectorAll('.weekly-member-filter')).some(function(button) {
+    if (button.dataset.weeklyFilter !== OV._weeklyFilter) return false;
+    button.focus({ preventScroll: true });
+    return true;
+  });
+  loadWeeklyMember(uid);
 }
 
 function weeklyLocalCacheKey(uid, weekStart) {
@@ -8117,6 +8271,7 @@ function renderWeeklyMember(uid, data, error, options) {
     }
     section.classList.remove('is-loading');
     section.innerHTML = '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div></header><div class="weekly-member-error" role="alert"><strong>这位成员的周报加载失败</strong><button type="button" onclick="loadWeeklyMember(\'' + uid + '\')">重试</button></div>';
+    renderWeeklyMemberNavigator();
     return;
   }
   var reps = data.reported_customers || [];
@@ -8144,6 +8299,7 @@ function renderWeeklyMember(uid, data, error, options) {
   });
   if (reportPagination.has_next) html += '<button class="btn btn-sm weekly-load-more" type="button" onclick="loadMoreWeeklyMembers(\'' + uid + '\')">显示更多客户</button>';
   section.classList.remove('is-loading'); section.innerHTML = html;
+  renderWeeklyMemberNavigator();
 }
 
 async function loadWeeklyMember(uid, loadToken) {
@@ -8187,20 +8343,27 @@ async function loadMoreWeeklyMembers(uid) {
 async function loadOverview() {
   var loadToken = ++OV._weeklyLoadToken;
   OV._weeklyMembers = {};
+  OV._weeklyFilter = '';
   var ws = getWeekStart(overviewWeekOffset);
   document.getElementById('overviewDateLabel').textContent = formatWeekLabel(ws);
   try {
     var userData = await api('/api/auth/users');
     var activeUsers = (userData.users || []).filter(function(user) { return user.id; });
     if (loadToken !== OV._weeklyLoadToken) return;
-    activeUsers.forEach(function(user) {
-      OV.labels[user.id] = user.name || user.id;
-      OV.colors[user.id] = user.color || '#8B7355';
-    });
+    if (activeUsers.length) {
+      OV.labels = {};
+      OV.colors = {};
+      activeUsers.forEach(function(user) {
+        OV.labels[user.id] = user.name || user.id;
+        OV.colors[user.id] = user.color || '#8B7355';
+      });
+    }
   } catch (error) { /* retain the legacy three-member fallback */ }
   if (loadToken !== OV._weeklyLoadToken) return;
-  document.getElementById('ovReports').innerHTML = '<div class="weekly-board">' + Object.keys(OV.labels).map(weeklyMemberShell).join('') + '</div>';
-  Object.keys(OV.labels).forEach(function(uid) { loadWeeklyMember(uid, loadToken); });
+  OV._weeklyFilter = defaultWeeklyMember();
+  document.getElementById('ovReports').innerHTML = '<div class="weekly-team-overview" id="weeklyTeamOverview"></div><div class="weekly-board" id="weeklyMemberContent">' + (OV._weeklyFilter ? weeklyMemberShell(OV._weeklyFilter) : '') + '</div>';
+  renderWeeklyMemberNavigator();
+  if (OV._weeklyFilter) loadWeeklyMember(OV._weeklyFilter, loadToken);
 }
 
 function showOverviewCustomerLoading(owner) {

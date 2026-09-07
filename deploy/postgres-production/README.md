@@ -1,8 +1,8 @@
 # Trade OS production PostgreSQL target
 
-This directory is the production database target for the eventual cutover.
-It is separate from `deploy/postgres-rehearsal/` and must never share its
-Docker volume, database name, password, or port.
+This directory is the production PostgreSQL target after the cutover. It is
+separate from `deploy/postgres-rehearsal/` and must never share its Docker
+volume, database name, password, or port.
 
 The service binds PostgreSQL to `127.0.0.1:5432` on the ECS host. Trosa uses
 that loopback endpoint directly. The local sela service reaches the same
@@ -21,9 +21,11 @@ docker compose up -d
 ./status.sh
 ```
 
-Apply the seven canonical migrations and import only from verified, immutable
-source snapshots. Do not point the importer at `/var/lib/trade-os` while the
-SQLite service is running.
+Apply the ordered migrations and import only from verified, immutable source
+snapshots. The running Trosa service uses PostgreSQL through the systemd
+drop-in at `/etc/systemd/system/trade-os.service.d/postgres.conf`; do not
+point the importer at `/var/lib/trade-os` as if it were the production
+database.
 
 After import, create a logical backup and run a restore check:
 
@@ -32,7 +34,9 @@ After import, create a logical backup and run a restore check:
 ./restore-check.sh backups/<verified-dump>.dump
 ```
 
-The dump must also be copied to an independent host or object store before a
-production cutover. A local Docker volume alone is not a disaster-recovery
-plan. The existing SQLite snapshot remains the application rollback source
-until the PostgreSQL cutover has passed its observation window.
+The dump must also be copied to an independent host or object store. A local
+Docker volume alone is not a disaster-recovery plan. The workbench backup
+wrapper packages this verified logical dump together with the file attachments
+under `/var/lib/trade-os/uploads/customer_files`; a PostgreSQL dump alone does
+not contain those files. SQLite files are retained only for isolated legacy
+rehearsal or explicitly approved rollback work, not as the active data source.

@@ -24,11 +24,13 @@ fi
 # can reliably use the configured SSH fallback when Workbench is unavailable.
 prefer_workbench="${TRADE_OS_PREFER_WORKBENCH:-}"
 ssh_host="${TRADE_OS_SSH_HOST:-}"
-if [[ "$prefer_workbench" != "1" && -n "$ssh_host" ]]; then
+
+run_ssh_command() {
+  local ssh_bin command_payload ssh_command
   ssh_bin="$(command -v ssh || true)"
   if [[ -z "$ssh_bin" ]]; then
     printf 'SSH client not found in PATH\n' >&2
-    exit 127
+    return 127
   fi
   # Some intermediate SSH paths close a quiet long-running command before
   # pg_dump, pg_restore, or a migration has finished.  Keep the transport
@@ -36,7 +38,12 @@ if [[ "$prefer_workbench" != "1" && -n "$ssh_host" ]]; then
   # as a child, and emit a bounded heartbeat until it exits.
   command_payload="$(printf '%s' "$remote_command" | base64 | tr -d '\n')"
   ssh_command="printf '%s' '$command_payload' | base64 -d | bash & child=\$!; while kill -0 \$child 2>/dev/null; do printf 'TROSA_MANAGER_COMMAND_RUNNING\\n'; sleep 1; done; wait \$child"
-  exec "$ssh_bin" -T -o BatchMode=yes -o ConnectTimeout=10 "$ssh_host" "$ssh_command"
+  "$ssh_bin" -T -o BatchMode=yes -o ConnectTimeout=10 "$ssh_host" "$ssh_command"
+}
+
+if [[ "$prefer_workbench" != "1" && -n "$ssh_host" ]]; then
+  run_ssh_command
+  exit $?
 fi
 
 workbench_bin=$(command -v workbench || true)
@@ -60,8 +67,22 @@ if [[ "$prefer_workbench" == "1" ]]; then
     exit 0
   else
     exec_status=$?
-    printf 'Workbench 非交互检查失败（退出码 %s），改用交互式会话重试。\n' "$exec_status" >&2
+    printf 'Workbench 非交互检查失败（退出码 %s），先尝试已配置的 SSH 回退。\n' "$exec_status" >&2
     printf '%s\n' "$output" >&2
+    # Status checks intentionally try Workbench first so they still work when
+    # the local SSH port is unavailable. If the control-plane request fails,
+    # use the configured SSH alias before entering the slower interactive
+    # compatibility path. This keeps a transient Workbench API failure from
+    # making the read-only monitoring page wait for (and then lose) a shell.
+    if [[ -n "$ssh_host" ]]; then
+      printf '改用已配置的 SSH 回退读取状态。\n' >&2
+      if run_ssh_command; then
+        exit 0
+      else
+        ssh_status=$?
+        printf 'SSH 回退失败（退出码 %s），继续尝试 Workbench 交互式会话。\n' "$ssh_status" >&2
+      fi
+    fi
   fi
 fi
 

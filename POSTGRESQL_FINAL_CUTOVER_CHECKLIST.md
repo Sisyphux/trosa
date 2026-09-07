@@ -20,6 +20,17 @@
 - sela 生产服务：`com.luoxin.sela.local` LaunchAgent 已 bootstrap 且 running，进程环境确认 `SELA_DATA_BACKEND=postgres`、本地 SSH tunnel DSN 与权限 600 的 `PGPASSFILE`；PostgreSQL tunnel LaunchAgent running，自动重连逻辑已安装。`/api/health`、`/api/candidates`、`/api/activity`、`/api/home`、`/api/run/status` 全部 HTTP 200，读写烟雾标记已精确清理，v2 mode 仍为 off。
 - 公网验收：ECS `cloudflared.service` 已 enabled/active，systemd 配置为 `Restart=always`；在发现 Cloudflare 1033 时重新拉起后，Tunnel 注册连接，`https://app.trosa.space/api/network/ping` 已恢复 HTTP 200。1033 是 Tunnel 可达性症状，不是 PostgreSQL 数据错误。
 
+## 2026-09-05 数据库切换后审计追加
+
+本节是对上面 2026-09-03 切换记录的后续审计，不改写当时的历史事实。
+
+- 已重新从当前 ECS 运行链路确认正式数据源：`trade-os.service` 通过 systemd drop-in 注入 `TRADE_OS_DATA_BACKEND=postgres`、`TRADE_OS_DATABASE_URL` 和权限 600 的 `PGPASSFILE`；PostgreSQL 17.11 由 ECS 本机容器提供，仅监听 `127.0.0.1:5432`。本机缺少 `psql`/PostgreSQL 服务只说明开发机没有本地客户端或服务，不影响正式库 PostgreSQL 验收。
+- 当前正式库的 `audit.schema_migrations` 已核对为 `0001`—`0007`；工作区新增的 `0008`—`0013` 是前向修复，尚未发布到 ECS。本地历史迁移 `0001` 已恢复为生产已记录的不可变 SHA-256，新增字段保留在后续迁移中，避免新版本因历史迁移 hash 漂移而拒绝启动。
+- 已只读核对正式库的外键、唯一/主键有效性、孤儿引用、用户范围引用、重复 legacy key、Sela 幂等事实与 `KELLY`/`KELLEY` 数据边界。未发现 KELLY 独有业务数据；工作区 rehearsal 源、manifest、配置、测试和活动代码已统一为 KELLEY。正式库中的 inactive `kelly` identity 行未删除，以保留审计边界，但没有业务行引用且不再可路由。
+- 已修复的发布前风险包括：空字符串 typed bigint 写入导致沟通记录事务失败；跨用户/外部身份的非唯一自动合并；禁用用户在重启时被内置账号重新激活；PostgreSQL 模式误生成或恢复 SQLite 备份；以及迁移历史 hash 被后续改写。公司无域名的跨用户历史共享只标记为 `review`，不拆分、不删除；同名同国家的历史重复也保留待人工判断。
+- 本轮工作区验证通过：Python 单元测试 137 个、Python 编译、前端语法、浏览器扩展 4 组测试、备份/恢复脚本语法和 `git diff --check`。ECS 只做了只读运行与数据审计，没有修改正式数据、正式备份或发布工作区未上线迁移。
+- 仍需在下一次受控发布窗口完成的验收：将 `0008`—`0013` 应用到正式库；在真实 PostgreSQL 上执行应用迁移后的写入—回滚、Sela 幂等写入、备份 bundle（dump + 附件）及隔离恢复演练；再核对迁移 ledger、约束、索引、业务计数和健康接口。未完成这些步骤前，不能把工作区新增修复宣称为已在正式库生效。
+
 ## 已执行的生产切换
 
 1. 冻结并核对最终 sela 与 Trosa 快照，保留旧 SQLite/JSON 运行素材。

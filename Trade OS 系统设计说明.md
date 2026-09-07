@@ -32,7 +32,7 @@ Trade OS 保存一段客户关系的长期上下文，让业务员随时回答�
 | 联系人 | `contacts` | 归属于客户，同邮箱在客户内去重 |
 | 记录 | `follow_up_logs`、`outreach_emails` | 保存日期、内容、方向和来源 |
 | 待办 | `reminders` | 包含具体动作和日期 |
-| 文件 | `customer_files` + `uploads/customer_files/` | 元数据入库并记录 SHA256，二进制落盘；SQLite 快照不含文件本体 |
+| 文件 | `customer_files` + `uploads/customer_files/` | 元数据入 PostgreSQL 并记录 SHA256，二进制落盘；逻辑数据库 dump 不含文件本体，备份 bundle 必须同时包含附件 |
 | Inbox | `inbox_items` 及动态查询 | 处理后离开，不代替时间线 |
 | 分析备注 | `research_reports`、`ai_recommendations` | 与事实分开展示，保留来源 |
 
@@ -79,20 +79,24 @@ Flask 应用与接口（app.py）
         ├─ 邮箱复核（email_verifier.py）
         └─ 可选模型与网站读取（app/engine.py）
                 ↓
-本地 SQLite 目录（data/ 或 CRM_DB_PATH）
+PostgreSQL（ECS 正式唯一业务源）
+        ├─ identity / core / trosa / sela / audit
+        └─ 兼容层：旧 SQLite 形状的 API
+文件存储（/var/lib/trade-os/uploads/）
 ```
 
-当前三位用户各有独立业务数据库，`system.db` 保存系统级数据。应用采用单进程运行，符合当前低并发规模。
+当前三位用户通过统一 PostgreSQL 中的 `identity.memberships` 和兼容引用隔离数据；不再把用户数据库作为正式运行时的物理分片。应用采用单进程运行，符合当前低并发规模。
 
 ## 6. 数据单源与交换
 
-SQLite 目录是唯一业务事实源：
+正式业务事实源是 PostgreSQL：
 
-- `hamid.db`、`amy.db`、`kelley.db` 保存个人业务数据。
-- `system.db` 保存系统级设置和共享元数据。
-- `uploads/` 保存导入来源和审计材料。
-- `backups/` 保存带清单和哈希的一致性快照。
-- `active_store.json` 标识当前安装正在使用的数据仓库。
+- `identity` 保存组织、用户和成员关系。
+- `core` 保存公司、联系人和规范化身份。
+- `trosa` 保存客户工作区、时间线、待办、Inbox 与兼容引用。
+- `sela` / `audit` 保存外联同步和来源审计。
+- `/var/lib/trade-os/uploads/` 保存客户附件与导入来源；`CRM_DB_PATH` 只属于 SQLite 隔离/回滚边界。
+- SQLite 隔离/回滚目录中的 `active_store.json` 只标识该副本，不代表 ECS 正式数据源。
 
 Excel 承担导入、导出和历史恢复。导入记录保存原文件、工作表、单元格和内容指纹；无法可靠匹配的内容进入审阅流程。
 
@@ -104,12 +108,12 @@ Apple 日历通过个人 ICS 地址读取当前待办。它是只读订阅通道
 
 系统使用以下保护链路：
 
-1. SQLite 使用 WAL、外键和耐久写入设置。
-2. 数据修改后延迟创建一致性安全快照。
-3. 快照记录文件大小、SHA-256 和仓库标识。
-4. 恢复前验证清单、允许的文件名、哈希和 SQLite 完整性。
-5. 恢复动作先创建当前数据的安全快照。
-6. 近期快照按保留策略清理，手工恢复点单独保留。
+1. PostgreSQL 使用外键、唯一约束、索引和事务；兼容层将旧用户作用域映射到统一 schema。
+2. 数据修改后由正式备份链路生成一致性 logical dump，并打包附件。
+3. 备份记录文件清单、SHA-256，并在 PostgreSQL 容器内执行 `pg_restore --list` 验证。
+4. 恢复前验证 bundle 清单、哈希、数据库 restore-check 和附件路径。
+5. 恢复动作先创建当前 PostgreSQL dump 和附件 bundle 的安全副本。
+6. 近期 bundle 按保留策略清理，手工恢复点单独保留。
 7. 客户日常删除采用可恢复归档。
 
 本地快照用于快速恢复。正式部署还需要把备份复制到加密的异地介质并定期演练恢复。

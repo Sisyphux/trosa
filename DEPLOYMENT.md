@@ -1,6 +1,6 @@
 # Trade OS 上线指南（家庭服务器 + Cloudflare Tunnel）
 
-云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端仍保持单台主机、单个 SQLite 写入进程；Workbench 用于受控查看、发布已推送的代码和执行 systemd 运维命令。
+云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端保持单台主机、单个 PostgreSQL 写入进程；Workbench 用于受控查看、发布已推送的代码和执行 systemd 运维命令。
 
 ## 日常代码发布
 
@@ -18,18 +18,18 @@ deploy/cloud/publish-workbench.sh
 
 ## 运行角色
 
-- **主机（当前 ECS）**：唯一允许运行 Trade OS 与写入 `CRM_DB_PATH` 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
+- **主机（当前 ECS）**：唯一允许运行 Trade OS 与写入正式 PostgreSQL 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
 - **公司 Mac**：不保存、不合并、不写入业务数据库；只在公司网络上提供 `http://192.168.0.58:8080` 只读周报入口。
 - **备用机**：保留同版本代码、Python 环境、`cloudflared` 安装与不含密钥的环境模板；平时不启动 Trade OS，不挂载或同步正在使用的数据目录。
-- **备份副本**：每天从主机生成带校验清单的 SQLite 快照，再加密复制到外接 SSD 和一处异地存储。Time Machine 可作为整机恢复补充，不能替代这份可独立校验的业务备份。
+- **备份副本**：从主机生成带校验清单的 PostgreSQL logical dump + 客户附件 bundle，再加密复制到外接 SSD 和一处异地存储。Time Machine 可作为整机恢复补充，不能替代这份可独立校验的业务备份。
 
-SQLite 不支持两台主机同时写同一数据目录。发生主机故障时，先确认主机已停止，再在备用机恢复最近一次校验通过的快照、更新 Tunnel 运行位置并启动服务；恢复后的备用机成为新的唯一主机。
+PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故障时，先确认原主机与 Tunnel 已停止，再在备用机恢复最近一次校验通过的 dump 和附件 bundle、更新 Tunnel 运行位置并启动服务；恢复后的备用机成为新的唯一 writer。
 
 ## 上线前
 
 ### 公司局域网只读周报入口
 
-正式应用和 SQLite 全部留在 ECS。公司 Mac 安装 `com.tradeos.weekly-lan` 后会常驻等待网络变化：只有本机真正取得 `192.168.0.58` 时才监听 8080；离开公司、关机或失去该地址后入口自动消失。它只转发应用外壳、周报汇总和周报客户详情，任何写入请求及其他 CRM 接口都在 Mac 和 ECS 两端拒绝。
+正式应用和 PostgreSQL 全部留在 ECS。公司 Mac 安装 `com.tradeos.weekly-lan` 后会常驻等待网络变化：只有本机真正取得 `192.168.0.58` 时才监听 8080；离开公司、关机或失去该地址后入口自动消失。它只转发应用外壳、周报汇总和周报客户详情，任何写入请求及其他 CRM 接口都在 Mac 和 ECS 两端拒绝。
 
 1. 确认公司路由器将 `192.168.0.58` 固定分配给这台 Mac，且没有把 8080 转发到互联网。
 2. 在 Mac 项目目录执行 `deploy/macos/install-weekly-lan.sh`。首次安装会创建仅本机可读的随机密钥，并输出对应的 SHA-256 摘要。
@@ -42,7 +42,7 @@ SQLite 不支持两台主机同时写同一数据目录。发生主机故障时�
 
 当前项目提供 `deploy/macos/` 中的正式运行文件：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于登录后自动启动服务。正式环境安装在 `~/Library/Application Support/TradeOS/runtime/`，避开 macOS 对桌面目录的自动启动限制；原项目的 `data/` 指向该目录中的唯一业务数据。它们只会在最终切换时启用，准备期间继续使用现有本地启动器。
 
-- 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；三位用户的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 `CRM_DB_PATH/system.db`。
+- 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；三位用户的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 PostgreSQL 兼容设置表（按当前用户作用域隔离）。
 - 只有执行灾难回退并让 Mac 再次成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`。ECS 正常运行期间不得启动这套旧服务。
 - 生产服务将唯一业务数据保存在 `~/Library/Application Support/TradeOS/runtime/data/`；项目根目录的 `data/` 仅为指向该位置的链接，不复制、不合并、不创建第二份日常数据库。
 - 日常开发始终在桌面项目目录完成。完成并验证修改后，运行 `deploy/macos/publish-production.sh`，它会同步代码和静态资源、重启正式服务并检查本机健康状态；不会同步或删除 `data/`、私密设置、日志或 Python 运行环境。
@@ -83,12 +83,17 @@ SQLite 不支持两台主机同时写同一数据目录。发生主机故障时�
    CRM_ENV=production
    CRM_SESSION_SECRET=至少32字符的随机值
    CRM_PUBLIC_URL=https://trade.example.com
+   # Formal ECS runtime is injected by the systemd PostgreSQL drop-in.
+   TRADE_OS_DATA_BACKEND=postgres
+   TRADE_OS_DATABASE_URL=postgresql://tradeos_app@127.0.0.1:5432/tradeos
+   PGPASSFILE=/etc/trade-os/postgres.pgpass
+   # CRM_DB_PATH is retained only for attachment/import/legacy boundaries.
    CRM_DB_PATH=/var/lib/trade-os
    ```
 
    使用 `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` 生成会话密钥，并将环境文件权限设为 `600`。用户首次进入生产登录页时创建自己的 6 位访问码；本地开发模式仍可选择账号后直接进入。
 
-3. AI、官网监控和邮箱 SMTP 复核均为可选能力。核心 CRM 上线验收不要求模型密钥。上线后管理员也可在「设置 → AI API 快速接入」填写并测试共享模型；设置页会把密钥保存到 `CRM_DB_PATH/ai-config.env`（权限 600），不会写入 SQLite。仍可使用 `/etc/trade-os/trade-os.env` 环境变量方式，修改环境文件后重启服务。
+3. AI、官网监控和邮箱 SMTP 复核均为可选能力。核心 CRM 上线验收不要求模型密钥。上线后管理员也可在「设置 → AI API 快速接入」填写并测试共享模型；设置页会把密钥保存到 `/var/lib/trade-os/ai-config.env`（权限 600），不会写入 PostgreSQL。仍可使用 `/etc/trade-os/trade-os.env` 环境变量方式，修改环境文件后重启服务。
 
 4. 将 `deploy/trade-os.service` 复制到 `/etc/systemd/system/`，按实际账号、项目目录、虚拟环境和数据目录调整：
 
@@ -114,20 +119,20 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 
 ## 数据目录
 
-`CRM_DB_PATH` 指向唯一可写的业务数据目录，里面包含用户数据库、系统数据库、导入来源、仓库标识和本地快照。
+`CRM_DB_PATH` 在正式 ECS 上不是 PostgreSQL 数据目录；它只指向附件、导入来源和历史 SQLite 回滚材料。正式业务表和事务位于 PostgreSQL。
 
 - 数据目录使用本机持久磁盘。
-- 同一数据目录只允许一个 Trade OS 应用进程写入。
+- PostgreSQL 生产库只允许一个正式 Trade OS writer；附件目录也只由正式服务写入。
 - 数据目录不放进 iCloud、Dropbox 或其他文件级实时同步文件夹。
 - 代码更新与数据迁移分开操作。
 
 ## 备份和恢复
 
-应用保持一个唯一可写主数据库，不会把本机快照当作第二个运行中的数据库。除写入后的安全快照外，正式服务的定时调度器每天 **02:15（Asia/Shanghai）** 创建一个独立的本机历史快照；即使当天没有客户修改，也会产生恢复点。快照包含 `system.db`、三位成员数据库和客户附件，写入清单并校验 SHA-256 与 SQLite `integrity_check`。任务错过后，应用重启可在 7 天内补执行；任务失败只记录失败状态，不切换主库。
+应用保持一个唯一可写 PostgreSQL 主数据库，不会把 SQLite 文件当作第二个运行中的数据库。正式备份脚本生成一致性 logical dump，执行 `pg_restore --list` 验证，再和客户附件打包并核对 SHA-256；不依赖应用内的 SQLite 快照定时器。任务失败只记录失败状态，不切换主库。
 
-本机快照用于快速恢复误删和错误操作，但与主数据库仍在同一台 Mac、同一数据目录下，不能抵御整机或磁盘损坏。正式上线还需要异地备份：
+本机 bundle 用于快速恢复误删和错误操作，但与主数据库仍可能位于同一台 ECS，不能抵御整机或磁盘损坏。正式上线还需要异地备份：
 
-1. 每天把 `CRM_DB_PATH/backups/` 加密复制到外接盘或可信对象存储。
+1. 每天运行 `deploy/cloud/backup-workbench.sh`，把 PostgreSQL dump、附件和 manifest 加密复制到外接盘或可信对象存储。
 2. 至少保留 30 天，建议与应用的 90 天本地保留策略配合。
 3. 每月在测试目录恢复一次。
 4. 恢复前先保留当前版本；恢复后核对数据库完整性、客户数、最近沟通和待办。
@@ -142,10 +147,10 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 - 在未配置模型密钥的情况下，可创建客户、记录沟通、安排待办、处理 Inbox、导入 Excel、打开日历并创建恢复快照。
 - Apple 日历个人订阅只返回对应用户的未完成待办。
 - 重启服务器后 `trade-os` 与 `cloudflared` 自动恢复。
-- 异地备份已完成一次真实恢复演练。
+- 异地 PostgreSQL dump 与附件 bundle 已完成一次真实恢复演练。
 - 主机断电或故障后，备用机可依据最近一次校验通过的快照恢复为唯一主机；没有两台主机同时运行或写入同一数据目录。
 - 如启用 AI、官网监控或 SMTP 复核，再单独验收其网络、密钥、失败降级和数据范围。
 
 ## 当前容量边界
 
-SQLite 与单进程服务适合当前三人低并发使用。出现高频同时编辑、十几位以上用户、异地高可用或多应用实例需求时，应迁移到 PostgreSQL，并重新设计任务锁、会话和备份策略。
+PostgreSQL 与单进程服务适合当前三人低并发使用。出现高频同时编辑、十几位以上用户、异地高可用或多应用实例需求时，再评估托管化、高可用、读写分离和备份恢复自动化。

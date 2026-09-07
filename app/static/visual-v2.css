@@ -4795,6 +4795,98 @@ html.motion-lite .modal-customer-workspace > .modal-body {
   #page-overview .ov-hero-week button { flex: 1 !important; }
 }
 
+/* Weekly communication is read one owner at a time. The owner navigator is
+   deliberately quiet: it selects a chapter instead of comparing colleagues. */
+#page-overview .weekly-team-overview {
+  display: grid;
+  grid-template-columns: minmax(190px, .42fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 20px 32px;
+  margin-bottom: 32px;
+  padding: 0 2px 18px;
+  border-bottom: 1px solid var(--v2-line);
+}
+.weekly-team-summary { display: grid; gap: 4px; }
+.weekly-team-summary span {
+  color: var(--v2-ink-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .04em;
+}
+.weekly-team-summary strong {
+  color: var(--v2-ink);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.weekly-team-index {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 1px 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(98,94,85,.28) transparent;
+}
+.weekly-member-filter {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px 0 12px;
+  border: 1px solid rgba(73,63,51,.13);
+  border-radius: 10px;
+  background: rgba(255,253,248,.48);
+  color: var(--v2-ink-soft);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
+}
+.weekly-member-filter i {
+  display: inline-flex;
+  width: 19px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--member-color) 16%, var(--v2-paper-strong));
+  color: color-mix(in srgb, var(--member-color) 82%, var(--v2-ink));
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+.weekly-member-filter:hover,
+.weekly-member-filter:focus-visible {
+  border-color: rgba(168,95,69,.32);
+  background: rgba(255,253,248,.88);
+  color: var(--v2-ink);
+  outline: none;
+}
+.weekly-member-filter:focus-visible { box-shadow: 0 0 0 3px rgba(168,95,69,.18); }
+.weekly-member-filter.is-active {
+  border-color: rgba(168,95,69,.18);
+  background: rgba(239,225,216,.76);
+  color: var(--v2-clay);
+}
+#page-overview .weekly-board {
+  display: block !important;
+  width: min(920px, 100%) !important;
+  margin-right: auto !important;
+}
+@media (max-width: 1080px) {
+  #page-overview .weekly-team-overview { grid-template-columns: 1fr; gap: 14px; }
+  #page-overview .weekly-board { width: 100% !important; }
+}
+@media (max-width: 620px) {
+  #page-overview .weekly-team-overview { margin-bottom: 26px; padding-bottom: 16px; }
+  .weekly-team-summary strong { font-size: 15px; }
+  .weekly-team-index { margin-inline: -2px; }
+}
+
 /* Customer detail is a reading surface. Keep the document opaque so the
    customer list and its texture cannot bleed through the long-form content. */
 .modal-customer-workspace {
@@ -5007,4 +5099,63 @@ html.motion-lite .customer-gap-item { transition: none; }
   .customer-secondary-grid .customer-fact-status,
   .customer-secondary-grid .customer-fact-context,
   .customer-secondary-grid .customer-fact-gaps { grid-column: auto; }
+}
+
+/* 更多工具：展开侧栏保留清楚的图标+文字，紧凑侧栏收敛为同尺寸图标按钮。 */
+.sidebar-tools-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-tools-menu button .ui-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+@media (min-width: 821px) {
+  .sidebar-tools-menu {
+    align-items: center;
+  }
+  .sidebar-tools-menu button {
+    display: inline-grid;
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 12px;
+    place-items: center;
+  }
+  .sidebar-tools-menu button .sidebar-tool-label {
+    display: none;
+  }
+  .sidebar-tools-menu button .ui-icon {
+    width: 21px;
+    height: 21px;
+  }
+}
+
+/* 逾期日期的状态高光填满日期栏，文字仍保持右对齐，不扩大为警报色整行。 */
+#page-dashboard .today-task-date {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+#page-dashboard .today-task-date.overdue {
+  border-radius: 10px;
+}
+
+/* sela review uses the existing Inbox and modal, including narrow screens. */
+#selaFollowUpModal .modal { background: var(--bg-100, #faf8f4); }
+#selaReviewBody .form-group { display: block; margin: 16px 0; }
+#selaReviewBody textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
+#selaReviewBody blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
+.inbox-group[data-category="sela_follow_up"],
+.inbox-group[data-category="sela_follow_up"] .inbox-item-row { min-width: 0; max-width: 100%; }
+@media (max-width: 600px) {
+  .inbox-group[data-category="sela_follow_up"] .inbox-item-row { flex-wrap: wrap; }
+  .inbox-group[data-category="sela_follow_up"] .inbox-summary-why { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
+  #page-inbox .command-shelf { min-width: 0; max-width: 100%; box-sizing: border-box; }
+  #selaFollowUpModal .modal-footer { flex-wrap: wrap; }
 }

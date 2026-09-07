@@ -1,6 +1,6 @@
 # Trosa 长期维护计划
 
-> 更新：2026-08-30。依据当前仓库、ECS 只读状态和一次真实核心流程审计整理。任务 1 的 Customer、Today、Inbox 共同确认入口、任务 2 的 Customer“现在 / 下一步”首屏收敛，以及任务 3 的 Inbox / Search 上下文续接，已在隔离本地环境完成并通过回归；尚未发布 ECS，未修改正式数据。本文仍是下一阶段的维护入口，不是重构方案。
+> 更新：2026-09-05。依据当前仓库、ECS 只读运行链路、正式 PostgreSQL 只读审计和一次真实核心流程审计整理。任务 1 的 Customer、Today、Inbox 共同确认入口、任务 2 的 Customer“现在 / 下一步”首屏收敛，以及任务 3 的 Inbox / Search 上下文续接，已在隔离本地环境完成并通过回归；尚未发布本轮未提交修复，未修改正式数据。本文仍是下一阶段的维护入口，不是重构方案。
 
 ## 先读这一页
 
@@ -17,12 +17,14 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
                                       ↓
                                Waitress / Flask（serve.py、app.py）
                                       ↓
-                         /var/lib/trade-os 的唯一 SQLite 写入源
+                         PostgreSQL（127.0.0.1:5432，正式唯一业务写入源）
+                              ↓
+                    /var/lib/trade-os/uploads（附件与来源文件）
 ```
 
 - 正式入口：`https://app.trosa.space`。
-- 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，以 `tradeos` 用户写入 `/var/lib/trade-os`。
-- 2026-08-30 的只读检查：`trade-os=active`、`cloudflared=active`、本机健康接口=`ok`、`sela_sync_api=sela-v1`。服务进程约 64 MB；根分区使用 28%；可用内存约 267 MB、未使用 swap。Tunnel 日志有已自动恢复的 QUIC 握手超时，应用当前健康。
+- 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
+- 2026-09-05 的只读检查：`trade-os=active/running`、`cloudflared=active`、服务进程实际 backend=`postgres`、PostgreSQL=`17.11`、应用健康状态=`ok`。本机没有 `psql` 或 Docker CLI 只说明开发机工具不完整，不影响 ECS 上的正式 PostgreSQL 验收。
 - 发布不是 GitHub Push 自动触发：代码先推送，再由 `deploy/cloud/publish-workbench.sh` 让 ECS 拉取同一 commit、健康检查并原子切换 release。当前 ECS release 名为 `sela-sync-20260827030834`；发布前应再次核对它与待发布 commit 的关系。
 - 当前工作区已有未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
 
@@ -32,10 +34,10 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 |---|---|---|
 | Web 与业务编排 | `app.py` 是 Flask 路由、业务规则、权限、undo 和编排中心；`serve.py` 启动生产进程。 | 不因文件大而拆分；改动优先局限在已有端点和函数。 |
 | 前端 | `app/static/index.html`、`app/static/app.js`、`style.css` / `visual-v2.css` 是单页应用。 | 核心工作流改动先做局部状态更新，避免整页或整客户对象重载。 |
-| 业务数据 | 每位用户独立 SQLite：`hamid.db`、`amy.db`、`kelley.db`；`system.db` 存账户和系统设置。关键表是 `customers`、`contacts`、`follow_up_logs`、`reminders`、`inbox_items`。 | `CRM_DB_PATH` 是唯一事实源；不删除历史字段、不把 Excel 变成同步源。 |
+| 业务数据 | PostgreSQL 的 `identity`、`core`、`trosa`、`sela`、`audit` 是正式事实源；兼容层通过用户作用域映射旧 `customers`、`contacts`、`follow_up_logs`、`reminders`、`inbox_items` 形状。 | `TRADE_OS_DATABASE_URL` 是正式写入边界；`CRM_DB_PATH` 仅用于 SQLite 隔离/导入演练/明确批准的回滚，不把 Excel 变成同步源。 |
 | 关系闭环 | 客户/联系人 → 沟通事实 → 明确待办 → Today/日历 → 新事实。 | 沟通可以没有下一步；待办必须有动作和日期。 |
-| 保护与恢复 | `db.py` 负责初始化、增量迁移、SQLite 完整性、备份恢复和来源审计；`undo_actions` 保存冲突感知的操作快照。 | 改写入逻辑时必须保留用户隔离、来源、操作日志、undo 与一致性备份。 |
-| Sela | 通过 Bearer token 调用 `/api/integrations/sela/health`、`/exclusions`、`/sync`；`sela-v1` 在一个事务中精确匹配身份、记录已确认外联，并以幂等键防重。 | Sela 不直接读写 SQLite；多重命中或身份冲突必须返回 `REVIEW`，不能猜测归属。 |
+| 保护与恢复 | `db.py` 负责 PostgreSQL 启动迁移、兼容层和来源审计；正式备份由 PostgreSQL logical dump + 附件 bundle 完成，`undo_actions` 保存冲突感知的操作快照。 | 改写入逻辑时必须保留用户隔离、来源、操作日志、undo、外键/唯一约束与可恢复备份。 |
+| Sela | 通过 Bearer token 调用 `/api/integrations/sela/health`、`/exclusions`、`/sync`；`sela-v1` 在一个 PostgreSQL 事务中精确匹配身份、记录已确认外联，并以幂等键防重。 | Sela 不直接读写 PostgreSQL 或 SQLite；多重命中或身份冲突必须返回 `REVIEW`，不能猜测归属。 |
 
 ### 已冻结或不应扩张的旧能力
 
@@ -107,7 +109,7 @@ Sela/扩展提供的准确来源、时间、渠道、联系人和原文只做预
 
 **验证**
 
-- 在隔离 SQLite 副本中覆盖：只记录事实、记录并完成到期待办、记录并创建下一步、补录旧日期、Inbox 回复、重复提交、撤销。
+- 在隔离 SQLite 副本中覆盖：只记录事实、记录并完成到期待办、记录并创建下一步、补录旧日期、Inbox 回复、重复提交、撤销；PostgreSQL 关键读写另须在真实/隔离 PostgreSQL 中验收。
 - 确认每种路径最多新增一条沟通、一条明确待办；Today、时间线和 Inbox 的结果一致。
 - 无模型配置时完整可用；AI 失败时保留人工表单。
 - 回归 Sela 幂等同步、浏览器扩展精确匹配和三用户隔离。
@@ -198,7 +200,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 ## 开工前与每次发布的最小检查
 
 1. **先保存基线**：记录 `git status --short`，确认不触碰现有 `deploy/cloud/` 未提交运维修改。
-2. **在隔离数据目录验证**：设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。
+2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
 3. **使用项目依赖跑回归**：根目录使用 `.venv`，由 `requirements.txt` 固定 Python 依赖；浏览器扩展在 `browser-extension/` 中执行 `npm install`，由 `package-lock.json` 固定测试依赖。不要使用系统 Python 或为了让测试绿而放宽测试。
 4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search。
 5. **发布前只读 ECS 状态**：运行 `deploy/cloud/status-workbench.sh`，确认 app、tunnel、health、`sela-v1` 和资源状态。
@@ -207,10 +209,10 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 ## 绝对不能破坏的能力
 
 - 未配置 AI 时，客户、联系人、沟通、待办、Today、Inbox、Search、日历、导入导出和备份恢复仍完整可用。
-- 写入只落到当前已认证用户的 SQLite；跨用户只读接口只返回白名单字段。
+- 写入只落到当前已认证用户在 PostgreSQL 中的组织作用域；跨用户只读接口只返回白名单字段。
 - 自动身份匹配只接受规范化后的唯一精确邮箱/手机号；名称、昵称、公司简称和不完整电话只可成为候选。
 - 沟通记录是事实，不必强制生成下一步；新待办必须同时有明确动作和日期。
-- Sela、浏览器扩展和 Agent 只经过受限业务 API；写入可追溯、可去重、可撤销或保留审计，不得直连 SQLite。
+- Sela、浏览器扩展和 Agent 只经过受限业务 API；写入可追溯、可去重、可撤销或保留审计，不得直连 PostgreSQL 或 SQLite。
 - 客户历史、附件、导入来源、备份清单和恢复流程不可因界面简化而被丢弃。
 
 ## 明天直接开始

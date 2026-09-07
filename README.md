@@ -11,17 +11,17 @@ Flask 应用（app.py）
         ↓
 业务规则与接口
         ↓
-本地 SQLite 唯一数据仓库（data/ 或 CRM_DB_PATH）
-        ├─ system.db
-        ├─ hamid.db / amy.db / kelley.db
-        ├─ backups/  一致性快照
-        └─ uploads/  导入文件与审计来源
+ECS PostgreSQL（正式唯一业务写入源，127.0.0.1:5432）
+        ├─ identity / core / trosa / sela / audit
+        └─ 兼容层：保留旧 SQLite 形状的 API，不再创建个人 SQLite 主库
+        ↓
+/var/lib/trade-os/uploads/  客户附件与导入来源
 ```
 
 - 核心闭环：客户与联系人 → 沟通记录 → 明确待办 → 到期执行 → 新记录。
 - 核心页面：今天、Inbox、客户、本周工作；完整日历、全部记录和操作日志从场景入口进入。
-- 数据存储：SQLite 是业务数据的唯一事实源。Excel 用于导入、导出和历史恢复。
-- 数据保护：写入后延迟生成一致性快照；正式服务每天 02:15（Asia/Shanghai）再生成一个不依赖当天写入的本机历史快照。恢复前先保存当前版本，并校验备份清单和数据库完整性。所有快照都只是恢复副本，不会成为第二个写入源。
+- 数据存储：正式 ECS 使用 PostgreSQL 作为业务数据唯一事实源；SQLite 仅用于隔离开发、历史导入/演练和明确批准的回滚材料。Excel 用于导入、导出和历史恢复。
+- 数据保护：正式备份由 PostgreSQL logical dump 加客户附件 bundle 组成，并在独立位置做 SHA-256 与 restore-check；应用不会在 PostgreSQL 模式下伪造 SQLite 快照。恢复前先保存当前版本，任何时刻只允许一个写入源。
 - Apple 日历：通过个人 ICS 订阅读取待办，只同步日历事件，不复制 CRM 数据库。
 - AI：可关闭的按需辅助模块，用于整理、分析和问答。关闭或未配置模型时，客户、记录、待办、Inbox、日历、导入导出和备份恢复保持完整可用。
 - iCloud：当前运行链路不包含 iCloud 数据库拉取、推送或冲突合并。
@@ -30,7 +30,7 @@ Flask 应用（app.py）
 
 ```text
 app.py                 Web 应用、接口与业务编排
-db.py                  SQLite、迁移、快照、恢复与数据来源审计
+db.py                  PostgreSQL 运行入口、SQLite 兼容/演练、迁移与来源审计
 app/engine.py          可选的模型调用与网站内容处理
 scheduler.py           到期提醒、可选监控和后台任务
 ical_gen.py            个人 ICS 日历订阅
