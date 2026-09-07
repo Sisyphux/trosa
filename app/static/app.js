@@ -6107,6 +6107,10 @@ async function addFollowHistory() {
     if (saved.next_step) {
       _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]).sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
     }
+    // `current_next_step` drives the summary label, while `next_task` is its
+    // fallback. Keep both views together so a completed task cannot leave its
+    // old date visible beside “没有明确下一步”.
+    _customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null;
     _customerDetailCache.last_contact = saved.recent_contact_date || _customerDetailCache.last_contact;
     _customerDetailCache.next_follow_up = saved.next_follow_up || '';
     _customerDetailCache.attention_reason = saved.current_waiting || '';

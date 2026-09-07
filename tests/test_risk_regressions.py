@@ -2366,6 +2366,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('recentFactFromCommunication(activity)', javascript)
         self.assertIn('recent_facts: _customerDetailCache.recent_facts', javascript)
         self.assertIn("_customerDetailCache.current_next_step = saved.next_step", handler)
+        self.assertIn("_customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null", handler)
 
     def test_importer_covers_every_legacy_user_table(self):
         importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
