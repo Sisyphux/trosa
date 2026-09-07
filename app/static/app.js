@@ -5125,6 +5125,10 @@ async function refreshCustomerWorkspace() {
   renderCustomerNextTask(customer.reminders || []);
   renderCustomerTasks(customer.tasks, customer.automatic_reminders);
   document.getElementById('editNextFollowUp').value = customer.next_follow_up || '';
+  if (_customerWorkspaceCache[customerId]) {
+    _customerWorkspaceCache[customerId].summary = summary;
+    _customerWorkspaceCache[customerId].savedAt = Date.now();
+  }
 }
 
 async function copyCustomerContext(mode) {
@@ -5905,6 +5909,25 @@ async function refreshCustomerTimeline() {
   renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails, _customerDetailCache.research);
 }
 
+function syncCustomerWorkspaceAfterCommunication(customerId) {
+  customerId = Number(customerId);
+  if (!customerId || !_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+  var cached = _customerWorkspaceCache[customerId];
+  if (!cached) return;
+  cached.summary = Object.assign({}, cached.summary || {}, {
+    last_contact: _customerDetailCache.last_contact || '',
+    next_follow_up: _customerDetailCache.next_follow_up || '',
+    next_task: (_customerDetailCache.reminders || [])[0] || null,
+    attention_reason: _customerDetailCache.attention_reason || '',
+    attention_state: _customerDetailCache.attention_state || ''
+  });
+  cached.timeline = Object.assign({}, cached.timeline || {}, {
+    items: _customerDetailCache.timeline_items || [],
+    pagination: _customerDetailCache.timeline_pagination || {}
+  });
+  cached.savedAt = Date.now();
+}
+
 function renderFollowTimeline(followLogs, outreachEmails, research) {
   var el = document.getElementById('outreachList');
   var items = [];
@@ -6072,9 +6095,11 @@ async function addFollowHistory() {
     renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails, _customerDetailCache.research);
     renderCustomerNextTask(_customerDetailCache.reminders || []);
     renderCustomerFactsBrief(_customerDetailCache);
+    syncCustomerWorkspaceAfterCommunication(id);
     // 客户详情可能是从 Today 打开的。后端已经完成了到期待办，
     // 这里刷新底层工作台，让关闭详情后不会留下旧的今日事项。
-    if (currentPage === 'dashboard' && saved.completed_task) loadDashboard();
+    if (currentPage === 'dashboard') loadDashboard();
+    else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     return true;
   } catch(e) { return false; }
   finally {

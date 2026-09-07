@@ -2356,6 +2356,14 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("button.dataset.submitting = 'true'", handler)
         self.assertIn("button.disabled = true", handler)
 
+    def test_saved_communication_refreshes_its_open_workspace_and_parent_list(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        handler = javascript[javascript.index('async function addFollowHistory()'):javascript.index('async function saveCustomerWorkspaceAndExit()')]
+        self.assertIn('syncCustomerWorkspaceAfterCommunication(id)', handler)
+        self.assertIn("if (currentPage === 'dashboard') loadDashboard();", handler)
+        self.assertIn("else if (currentPage === 'customers') loadCustomers({ preservePosition: true });", handler)
+        self.assertIn('function syncCustomerWorkspaceAfterCommunication(customerId)', javascript)
+
     def test_importer_covers_every_legacy_user_table(self):
         importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
         declared = {
