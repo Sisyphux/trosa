@@ -5909,9 +5909,27 @@ async function refreshCustomerTimeline() {
   renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails, _customerDetailCache.research);
 }
 
-function syncCustomerWorkspaceAfterCommunication(customerId) {
+function recentFactFromCommunication(activity) {
+  activity = activity || {};
+  return {
+    type: 'follow', id: activity.id, date: activity.follow_date || activity.date || '',
+    activity_type: activity.activity_type || '', content: activity.content || '',
+    result: activity.result || '', source: '沟通记录', source_detail: activity.activity_type || '沟通记录'
+  };
+}
+
+function syncCustomerWorkspaceAfterCommunication(customerId, activity) {
   customerId = Number(customerId);
   if (!customerId || !_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+  // The workspace summary is deliberately cached while its tabs are open.
+  // A successful write must therefore update the summary too, not only the
+  // timeline, otherwise the "现在 / 下一步" card keeps showing pre-save data
+  // until the entire browser page is reloaded.
+  var newFact = recentFactFromCommunication(activity);
+  var existingFacts = Array.isArray(_customerDetailCache.recent_facts) ? _customerDetailCache.recent_facts : [];
+  _customerDetailCache.recent_facts = [newFact].concat(existingFacts.filter(function(fact) {
+    return !(String(fact.type || '') === 'follow' && Number(fact.id) === Number(newFact.id));
+  })).slice(0, 3);
   var cached = _customerWorkspaceCache[customerId];
   if (!cached) return;
   cached.summary = Object.assign({}, cached.summary || {}, {
@@ -5919,7 +5937,9 @@ function syncCustomerWorkspaceAfterCommunication(customerId) {
     next_follow_up: _customerDetailCache.next_follow_up || '',
     next_task: (_customerDetailCache.reminders || [])[0] || null,
     attention_reason: _customerDetailCache.attention_reason || '',
-    attention_state: _customerDetailCache.attention_state || ''
+    attention_state: _customerDetailCache.attention_state || '',
+    current_next_step: _customerDetailCache.current_next_step || {},
+    recent_facts: _customerDetailCache.recent_facts
   });
   cached.timeline = Object.assign({}, cached.timeline || {}, {
     items: _customerDetailCache.timeline_items || [],
@@ -6091,11 +6111,15 @@ async function addFollowHistory() {
     _customerDetailCache.next_follow_up = saved.next_follow_up || '';
     _customerDetailCache.attention_reason = saved.current_waiting || '';
     _customerDetailCache.attention_state = saved.attention && saved.attention.state !== 'planned' ? saved.attention.state : '';
+    _customerDetailCache.current_next_step = saved.next_step ? {
+      label: saved.next_step.title || saved.next_step.content || '没有明确下一步',
+      date: saved.next_step.remind_date || '', source: '待办记录'
+    } : { label: '没有明确下一步', date: '', source: '系统事实' };
     document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up;
     renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails, _customerDetailCache.research);
     renderCustomerNextTask(_customerDetailCache.reminders || []);
+    syncCustomerWorkspaceAfterCommunication(id, activity);
     renderCustomerFactsBrief(_customerDetailCache);
-    syncCustomerWorkspaceAfterCommunication(id);
     // 客户详情可能是从 Today 打开的。后端已经完成了到期待办，
     // 这里刷新底层工作台，让关闭详情后不会留下旧的今日事项。
     if (currentPage === 'dashboard') loadDashboard();
