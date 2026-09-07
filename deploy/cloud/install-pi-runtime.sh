@@ -11,13 +11,18 @@ NODE_ARCHIVE="node-$NODE_VERSION-linux-x64.tar.xz"
 NODE_BASE="https://nodejs.org/dist/$NODE_VERSION"
 PI_PREFIX="$ROOT/npm"
 RELEASE_DIR="${TROSA_PI_RELEASE_DIR:-/opt/trade-os/current}"
+PI_HOME="${TROSA_PI_HOME:-/var/lib/trade-os/pi-home}"
 
 case "$NODE_VERSION" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "Invalid Node version" >&2; exit 2;; esac
 case "$PI_VERSION" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "Invalid Pi version" >&2; exit 2;; esac
 case "$ROOT" in /opt/trade-os/*) ;; *) echo "Runtime root must stay under /opt/trade-os" >&2; exit 2;; esac
 case "$RELEASE_DIR" in /opt/trade-os/*) ;; *) echo "Release directory must stay under /opt/trade-os" >&2; exit 2;; esac
+case "$PI_HOME" in /var/lib/trade-os/*) ;; *) echo "Pi home must stay under /var/lib/trade-os" >&2; exit 2;; esac
 
 install -d -m 0755 -o root -g root "$ROOT"
+install -d -m 0700 -o tradeos -g tradeos "$PI_HOME"
+chown -R tradeos:tradeos "$PI_HOME"
+chmod 0700 "$PI_HOME"
 temporary="$(mktemp -d /tmp/trosa-pi-runtime.XXXXXX)"
 cleanup() { rm -rf "$temporary"; }
 trap cleanup EXIT
