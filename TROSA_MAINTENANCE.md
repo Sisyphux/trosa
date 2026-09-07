@@ -25,8 +25,8 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 - 正式入口：`https://app.trosa.space`。
 - 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
 - 2026-09-05 的只读检查：`trade-os=active/running`、`cloudflared=active`、服务进程实际 backend=`postgres`、PostgreSQL=`17.11`、应用健康状态=`ok`。本机没有 `psql` 或 Docker CLI 只说明开发机工具不完整，不影响 ECS 上的正式 PostgreSQL 验收。
-- 发布不是 GitHub Push 自动触发：代码先推送，再由 `deploy/cloud/publish-workbench.sh` 让 ECS 拉取同一 commit、健康检查并原子切换 release。当前 ECS release 名为 `sela-sync-20260827030834`；发布前应再次核对它与待发布 commit 的关系。
-- 当前工作区已有未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
+- 普通代码任务完成后默认由 `deploy/cloud/auto-publish.sh` 自动验证、提交、推送 `main`，再由 `publish-workbench.sh` 让 ECS 拉取同一 commit、健康检查并原子切换 release。当前 ECS release 名为 `sela-sync-20260827030834`；发布前仍应核对状态和待发布 commit 的关系。数据库敏感改动先备份；疑似破坏性迁移需明确确认。
+- 工作区可能存在用户未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
 
 ### 核心架构地图
 
@@ -203,8 +203,9 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
 3. **使用项目依赖跑回归**：根目录使用 `.venv`，由 `requirements.txt` 固定 Python 依赖；浏览器扩展在 `browser-extension/` 中执行 `npm install`，由 `package-lock.json` 固定测试依赖。不要使用系统 Python 或为了让测试绿而放宽测试。
 4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search。
-5. **发布前只读 ECS 状态**：运行 `deploy/cloud/status-workbench.sh`，确认 app、tunnel、health、`sela-v1` 和资源状态。
-6. **发布后事实检查**：健康接口、三位用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
+5. **自动发布入口**：普通代码任务使用 `deploy/cloud/auto-publish.sh --message ... -- FILE...`；它会执行本地回归、发布前只读 ECS 状态、提交、推送、原子发布和公网健康检查。不得用 `git add .` 混入无关修改。
+6. **数据库改动保护**：涉及 schema、迁移或导入边界时，自动入口先执行 PostgreSQL logical dump + 附件 bundle 备份；疑似破坏性 SQL 不自动执行。
+7. **发布后事实检查**：健康接口、三位用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
 
 ## 绝对不能破坏的能力
 

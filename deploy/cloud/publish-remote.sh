@@ -34,6 +34,17 @@ case "$GITHUB_REMOTE" in
   *) printf 'Invalid GitHub remote: %s\n' "$GITHUB_REMOTE" >&2; exit 2 ;;
 esac
 
+if ! command -v flock >/dev/null 2>&1; then
+  printf 'flock is required to serialize ECS releases.\n' >&2
+  exit 1
+fi
+LOCK_PATH="$REMOTE_ROOT/.trosa-publish.lock"
+exec 9>"$LOCK_PATH"
+if ! flock -n 9; then
+  printf 'Another ECS release is already running.\n' >&2
+  exit 75
+fi
+
 ARCHIVE_NAME="trosa-$COMMIT_SHA.tar.gz"
 ARCHIVE_PATH="/tmp/$ARCHIVE_NAME"
 RELEASE_DIR="$REMOTE_ROOT/releases/$RELEASE_ID"

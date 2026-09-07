@@ -41,13 +41,24 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
 
-代码同步与云端发布是两个动作：单独执行 `git push` 或在 GitHub Desktop 点击 Push，只会更新 GitHub，不会触发 ECS。日常开发应在服务器工作台的“更新网站”页面点击“保存并同步上线”，由工作台按“提交当前修改 → 推送 GitHub → 通过 SSM 发布同一个 commit → 健康检查”的顺序完成。若已经从编辑器或 GitHub Desktop 手动推送，则再运行 `publish-workbench.sh`，它会发布当前本地 `HEAD`；当前仓库是公开的 `Sisyphux/trosa`，因此 ECS 可以直接下载对应 commit 的 GitHub 归档。仓库目前没有配置 GitHub Actions 或 Webhook 自动部署。
+代码同步与云端发布现在由 `auto-publish.sh` 串联：Codex 在任务完成并通过本地验证后，显式传入本次改动文件，脚本自动提交到 `main`、推送公开的 `Sisyphux/trosa`，读取发布前 ECS 状态，再通过 SSM 发布同一个 commit 并检查公网健康。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
+
+日常自动入口：
+
+```bash
+deploy/cloud/auto-publish.sh --message "说明本次变化" -- FILE1 FILE2
+```
+
+脚本不会使用 `git add .`，会拒绝运行数据、密钥、本地环境文件和已跟踪的其他未暂存修改；数据库敏感改动会先运行 `backup-workbench.sh`。`--dry-run` 只执行本地回归、只读 ECS 状态和远程基线检查，不会备份、提交、推送或发布。
+
+底层 `publish-workbench.sh` 仍可用于发布已提交且已推送的本地 `HEAD`；当前仓库公开，因此 ECS 可以直接下载对应 commit 的 GitHub 归档。仓库目前没有 GitHub Actions 或 Webhook 自动部署。
 
 日常操作：
 
 ```bash
 deploy/cloud/status-workbench.sh
 deploy/cloud/logs-workbench.sh
+deploy/cloud/auto-publish.sh --message "说明本次变化" -- FILE1 FILE2
 deploy/cloud/publish-workbench.sh
 deploy/cloud/rollback-workbench.sh
 deploy/cloud/backup-workbench.sh
@@ -96,7 +107,7 @@ deploy/cloud/rollback-workbench.sh
 deploy/cloud/logs-workbench.sh
 ```
 
-`publish-workbench.sh` 会读取本地当前 `HEAD` 和 GitHub `origin`，让 ECS 通过 SSM 下载该 commit 的公开归档，解压到新的 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。发布包来自已推送的 commit，不包含本机未提交修改，也不上传本地数据、密钥或虚拟环境。
+`auto-publish.sh` 是日常入口；`publish-workbench.sh` 是底层发布器。底层发布器让 ECS 通过 SSM 下载指定 commit 的公开归档，解压到新的 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。ECS 发布锁保证同一时间只有一个 release 在切换。发布包来自已推送的 commit，不包含本机未提交修改，也不上传本地数据、密钥或虚拟环境。
 
 `backup-workbench.sh` 会调用 ECS PostgreSQL 生产目录的 verified logical dump，核对 dump
 的 SHA-256 和 `pg_restore --list`，再把数据库 dump、客户附件和 manifest 打包下载到 Mac 的

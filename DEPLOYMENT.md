@@ -4,15 +4,31 @@
 
 ## 日常代码发布
 
-当前推荐流程是在服务器工作台的“更新网站”页面点击“保存并同步上线”。它会先把当前修改提交到本地 Git，再推送到 `Sisyphux/trosa`，然后通过 ECS Session Manager（SSM）让云服务器下载并发布同一个 commit，最后检查应用健康状态。这样 GitHub 和正式服务器保持同一版本。
+默认流程是：代码任务完成并通过自动验证后，由 Codex 调用
+`deploy/cloud/auto-publish.sh`，自动完成“提交 → 推送 `main` → ECS 发布 →
+公网健康检查”。不需要再手动进入服务器，也不需要逐次确认上线。
 
-单独执行 `git push` 或使用 GitHub Desktop 的 Push，只会更新 GitHub，不会自动更新 ECS。手动推送后，在同一个本地项目目录运行：
+自动入口要求显式列出本次任务涉及的文件，避免把用户的其他修改带进发布：
 
 ```bash
-deploy/cloud/publish-workbench.sh
+deploy/cloud/auto-publish.sh \
+  --message "说明本次变化" -- \
+  app.py app/static/app.js
 ```
 
-该脚本只发布本地 `HEAD` 对应的、已经推送到公开 GitHub 仓库的 commit；它不会发布未提交的文件。当前仓库没有 GitHub Actions 或 Webhook，因此“推送后自动发布”目前指服务器工作台的“保存并同步上线”流程，而不是任意 GitHub Push 事件触发的云端流水线。
+它会使用项目 `.venv` 执行 Python 回归、Python/JavaScript 语法检查和浏览器扩展回归；发布前读取 ECS 状态，普通改动直接发布。涉及 PostgreSQL schema、迁移或导入边界的改动会先执行已校验的数据库和附件备份；检测到疑似破坏性 SQL 时默认停止，只有明确确认并设置
+`TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB=1` 才会继续。
+
+ECS 发布失败时保留 GitHub commit，但发布脚本自动恢复上一份应用 release；如果 ECS 本机健康而公网健康检查暂时失败，不会因可能的 Cloudflare Tunnel/网络抖动自动回滚，而是报告需要处理。明确说“只本地运行”“不要上线”或“只诊断”时，不调用自动入口。
+
+需要预览流程但不产生外部写入时，可运行：
+
+```bash
+deploy/cloud/auto-publish.sh --dry-run \
+  --message "预览本次发布" -- app.py
+```
+
+底层 `deploy/cloud/publish-workbench.sh` 仍保留，用于已经存在的 commit 的单独发布和故障处理；单独 `git push` 只更新 GitHub，不保证 ECS 已上线。
 
 当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为阿里云 ECS；应用通过 Cloudflare Tunnel 提供公网入口。公司 Mac 不再运行第二套 Trade OS，只在连接公司网络并取得固定地址 `192.168.0.58` 时，自动提供一个读取云端周报的局域网入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
 
