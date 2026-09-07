@@ -152,6 +152,7 @@ _PIN_ATTEMPTS_LOCK = threading.Lock()
 _PIN_STORE_VERSION_KEY = 'auth_pin_store_version'
 _PIN_STORE_VERSION = '2'
 _PROSPECTING_INTEGRATION_KEY = 'integration_token:prospecting_lab:hamid'
+_SELA_SERVICE_INTEGRATION_KEY = 'integration_token:sela:hamid'
 _SELA_SYNC_INTEGRATION = 'sela'
 _SELA_SYNC_SCHEMA_VERSION = 1
 _AGENT_GATEWAY_TOKEN_PREFIX = 'agent_gateway_token:'
@@ -240,10 +241,10 @@ def _readonly_viewer_read_path(path):
     )
 
 
-def _prospecting_integration_record():
+def _integration_record(setting_key):
     conn = get_system_db()
     try:
-        row = conn.execute('SELECT value FROM app_settings WHERE key=?', (_PROSPECTING_INTEGRATION_KEY,)).fetchone()
+        row = conn.execute('SELECT value FROM app_settings WHERE key=?', (setting_key,)).fetchone()
         if not row or not row['value']:
             return {}
         value = json.loads(row['value'])
@@ -252,6 +253,58 @@ def _prospecting_integration_record():
         return {}
     finally:
         conn.close()
+
+
+def _prospecting_integration_record():
+    return _integration_record(_PROSPECTING_INTEGRATION_KEY)
+
+
+def _sela_service_integration_record():
+    return _integration_record(_SELA_SERVICE_INTEGRATION_KEY)
+
+
+def _sela_integration_path_allowed():
+    return bool(
+        (request.method == 'GET' and request.path in {
+            '/api/integrations/sela/health',
+            '/api/integrations/sela/exclusions',
+        })
+        or (request.method == 'POST' and request.path in {
+            '/api/integrations/sela/sync',
+            '/api/integrations/sela/reply',
+            '/api/integrations/sela/follow-up',
+        })
+        or (request.method == 'GET' and re.fullmatch(
+            r'/api/integrations/sela/customers(?:/\d+/context)?', request.path
+        ))
+    )
+
+
+def _integration_token_matches(record):
+    header = str(request.headers.get('Authorization') or '')
+    if not header.startswith('Bearer '):
+        return False
+    token = header[7:].strip()
+    digest = hashlib.sha256(token.encode('utf-8')).hexdigest() if token else ''
+    return bool(
+        digest
+        and record.get('enabled')
+        and secrets.compare_digest(digest, str(record.get('token_sha256') or ''))
+    )
+
+
+def _sela_service_integration_user():
+    """Authenticate the non-interactive Sela service credential.
+
+    This credential is deliberately narrower than the historical
+    Prospecting Lab token: it can reach only the Sela integration surface and
+    never the legacy customer CRUD routes or browser-only routes.
+    """
+    if not _sela_integration_path_allowed():
+        return ''
+    if not _integration_token_matches(_sela_service_integration_record()):
+        return ''
+    return 'hamid'
 
 
 def _prospecting_integration_user():
@@ -632,7 +685,11 @@ def before_request():
         session.clear()
         user = ''
     gateway_principal = _agent_gateway_principal() if not user else None
-    integration_user = _prospecting_integration_user() if not user and not gateway_principal else ''
+    integration_user = _sela_service_integration_user() if not user and not gateway_principal else ''
+    integration_name = 'sela_service'
+    if not integration_user:
+        integration_user = _prospecting_integration_user() if not user and not gateway_principal else ''
+        integration_name = 'prospecting_lab'
     if gateway_principal:
         set_db_user(gateway_principal['user'])
         g.current_user = gateway_principal['user']
@@ -640,7 +697,7 @@ def before_request():
     elif integration_user:
         set_db_user(integration_user)
         g.current_user = integration_user
-        g.integration_name = 'prospecting_lab'
+        g.integration_name = integration_name
     elif user in USERS and USERS[user].get('active', True):
         set_db_user(user)
         g.current_user = user
@@ -1935,6 +1992,49 @@ def prospecting_lab_integration_token():
     conn.close()
     log_operation('ROTATE', 'integration', details='创建/轮换 Prospecting Lab 集成令牌')
     return jsonify({'success': True, 'enabled': True, 'token': token, 'created_at': now})
+
+
+@app.route('/api/integrations/sela/token', methods=['POST', 'DELETE'])
+@login_required
+def sela_service_integration_token():
+    """Issue the durable, least-privilege credential used by Sela workers.
+
+    The token is returned only at creation time and Trosa stores only its
+    digest. It is intentionally separate from the historical Prospecting Lab
+    compatibility token and from personal Agent Gateway PATs.
+    """
+    if g.current_user != 'hamid':
+        return jsonify({'error': '只有 Hamid 可以管理 Sela 服务令牌'}), 403
+    conn = get_system_db()
+    now = _calendar_now_text()
+    if request.method == 'DELETE':
+        conn.execute('DELETE FROM app_settings WHERE key=?', (_SELA_SERVICE_INTEGRATION_KEY,))
+        conn.commit()
+        conn.close()
+        log_operation('REVOKE', 'integration', details='撤销 Sela 服务令牌')
+        return jsonify({'success': True, 'enabled': False, 'service': 'sela-v1'})
+    token = 'trosa_sela_' + secrets.token_urlsafe(48)
+    record = {
+        'token_sha256': hashlib.sha256(token.encode('utf-8')).hexdigest(),
+        'enabled': True,
+        'user': 'hamid',
+        'service': 'sela-v1',
+        'created_at': now,
+    }
+    conn.execute('''INSERT INTO app_settings (key, value, updated_at)
+                    VALUES (?, ?, datetime('now', 'localtime'))
+                    ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at''',
+                 (_SELA_SERVICE_INTEGRATION_KEY, json.dumps(record, ensure_ascii=False)))
+    conn.commit()
+    conn.close()
+    log_operation('ROTATE', 'integration', details='创建/轮换 Sela 服务令牌')
+    return jsonify({
+        'success': True,
+        'enabled': True,
+        'service': 'sela-v1',
+        'token': token,
+        'created_at': now,
+    })
 
 
 # ========== Gmail communication sync ==========
