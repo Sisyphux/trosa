@@ -53,6 +53,30 @@ deploy/cloud/rollback-workbench.sh
 deploy/cloud/backup-workbench.sh
 ```
 
+## Hamid Pi CRM 助理
+
+Pi 是 Trosa 的受限日常操作入口：它只有 Gateway 工具，没有 shell、文件或数据库访问权限。首次启用先在 ECS 安装锁定版本的 Node 与 Pi：
+
+```bash
+sudo /opt/trade-os/current/deploy/cloud/install-pi-runtime.sh
+```
+
+然后由已登录的 Hamid 在 Trosa 的「Agent Gateway token」页面新建一个仅含
+`crm:read,crm:write` 的 `hamid-pi` token。把 token 和下列非业务运行参数写入
+`/etc/trade-os/trade-os.env`（权限保持 600），再重启 `trade-os`：
+
+```text
+TROSA_PI_AGENT_ENABLED=true
+TROSA_PI_EXECUTABLE=/opt/trade-os/pi-runtime/npm/bin/pi
+TROSA_PI_PROVIDER=deepseek
+TROSA_PI_MODEL=deepseek/deepseek-v4-flash
+TROSA_PI_HOME=/var/lib/trade-os/pi-home
+TROSA_GATEWAY_URL=http://127.0.0.1:8080
+TROSA_PI_GATEWAY_TOKEN=<Hamid 的新 token>
+```
+
+不要把 token 写入仓库、release、命令历史或 sela。验证必须先用 Pi 读取真实 Today，再由用户提供一条真实业务事实做一次可撤销写入；不得用虚构客户沟通作为生产验收材料。
+
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及
 CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
