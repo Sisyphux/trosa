@@ -2365,6 +2365,13 @@ class InputBoundaryRegressionTest(unittest.TestCase):
 class PostgresCompatibilityRegressionTest(unittest.TestCase):
     """SQLite-shaped writes must remain valid against PostgreSQL views."""
 
+    def test_sqlite_empty_string_literals_are_not_used_in_postgres_sql(self):
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        self.assertNotIn('deleted_at = ""', source)
+        self.assertNotIn('COALESCE(name, "")', source)
+        self.assertNotIn('COALESCE(company, "")', source)
+        self.assertNotIn('COALESCE(country, "")', source)
+
     def test_conflict_clauses_are_removed_for_every_writable_compat_view(self):
         statements = (
             "INSERT INTO customer_understandings (customer_id, version) VALUES (?, ?) "

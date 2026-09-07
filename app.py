@@ -5414,7 +5414,7 @@ def restore_customer(customer_id):
         return jsonify({'error': '客户不存在或未在回收站中'}), 404
     customer_name = row['name']
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    c.execute('UPDATE customers SET is_deleted = 0, deleted_at = "", updated_at = ? WHERE id = ?', (now, customer_id))
+    c.execute("UPDATE customers SET is_deleted = 0, deleted_at = '', updated_at = ? WHERE id = ?", (now, customer_id))
     conn.commit()
     conn.close()
     log_operation('RESTORE', 'customer', customer_id, f'从回收站恢复: {customer_name}')
@@ -7000,7 +7000,7 @@ def gateway_search_customers():
     limit = _gateway_limit()
     params, where = [], ['(is_deleted=0 OR is_deleted IS NULL)']
     if query:
-        where.append('(lower(COALESCE(name, "")) LIKE ? OR lower(COALESCE(company, "")) LIKE ? OR lower(COALESCE(country, "")) LIKE ?)')
+        where.append("(lower(COALESCE(name, '')) LIKE ? OR lower(COALESCE(company, '')) LIKE ? OR lower(COALESCE(country, '')) LIKE ?)")
         term = '%' + query.casefold() + '%'
         params.extend((term, term, term))
     conn = get_db()
