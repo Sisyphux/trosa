@@ -55,6 +55,7 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0011_postgres_compat_identity_guards.sql",
     ROOT / "migrations" / "0012_postgres_legacy_email_ids.sql",
     ROOT / "migrations" / "0013_postgres_company_match_boundaries.sql",
+    ROOT / "migrations" / "0014_postgres_customer_priority_recovery.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

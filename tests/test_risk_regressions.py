@@ -2346,6 +2346,16 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('NEW.pinned_order', migration)
         self.assertIn('is_pinned,pinned_order', importer)
 
+    def test_follow_history_submit_is_single_request_safe(self):
+        index = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.assertIn('id="followHistorySubmit" onclick="addFollowHistory()"', index)
+        self.assertIn('<button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit"', index)
+        handler = javascript[javascript.index('async function addFollowHistory()'):javascript.index('async function saveCustomerWorkspaceAndExit()')]
+        self.assertIn("button.dataset.submitting === 'true'", handler)
+        self.assertIn("button.dataset.submitting = 'true'", handler)
+        self.assertIn("button.disabled = true", handler)
+
     def test_importer_covers_every_legacy_user_table(self):
         importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
         declared = {

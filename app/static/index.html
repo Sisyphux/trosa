@@ -9,8 +9,8 @@
 <title>Trade OS · 外贸工作系统</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
-<link rel="stylesheet" href="/style.css?v={{VERSION}}-weekly-ui-refinement-3">
-<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-weekly-ui-refinement-3">
+<link rel="stylesheet" href="/style.css?v={{VERSION}}-weekly-ui-refinement-4">
+<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-weekly-ui-refinement-4">
 </head>
 <body>
 
@@ -617,7 +617,7 @@
                   <div class="form-group"><label class="form-label">任务日期</label><input type="date" class="form-control" id="followHistoryNext" onchange="updateFollowHistorySaveLabel()"></div>
                   <div class="form-group workspace-report-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
                 </div>
-                <button class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
+                <button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
                 </div>
                 <div class="workspace-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
                 <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="直接粘贴邮件即可；系统会自动提取主题、正文和发送时间。&#10;&#10;支持 Outlook、Gmail 的完整邮件内容，也支持只粘贴主题和正文。"></textarea><small class="email-import-hint">默认记录为“待回复”；粘贴退信或客户回复时会自动调整状态。</small></div>

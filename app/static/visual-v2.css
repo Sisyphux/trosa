@@ -5214,6 +5214,18 @@ html.motion-lite .customer-gap-item { transition: none; }
   min-width: 15px !important;
   height: 15px !important;
 }
+#page-overview .ov-hero-week .ov-week-nav:first-child {
+  grid-column: 1;
+  order: 0 !important;
+}
+#page-overview .ov-hero-week .ov-week-current {
+  grid-column: 2;
+  order: 0 !important;
+}
+#page-overview .ov-hero-week .ov-week-nav:last-child {
+  grid-column: 3;
+  order: 0 !important;
+}
 #page-overview .ov-hero-week button:focus-visible,
 #page-overview .weekly-member-filter:focus-visible,
 #page-overview .weekly-card-link:focus-visible {

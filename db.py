@@ -73,6 +73,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0011_postgres_compat_identity_guards.sql'),
         os.path.join(root, 'migrations', '0012_postgres_legacy_email_ids.sql'),
         os.path.join(root, 'migrations', '0013_postgres_company_match_boundaries.sql'),
+        os.path.join(root, 'migrations', '0014_postgres_customer_priority_recovery.sql'),
     )
 
 

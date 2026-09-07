@@ -6013,6 +6013,11 @@ function updateFollowHistorySaveLabel() {
 
 async function addFollowHistory() {
   var id = document.getElementById('editCustomerId').value;
+  var button = document.getElementById('followHistorySubmit');
+  // A record is one atomic write.  Ignore a second click while the first
+  // request is in flight so users never see duplicate failures or create
+  // duplicate timeline entries when a response is slow.
+  if (!id || !button || button.dataset.submitting === 'true') return false;
   var content = richTextHtml(document.getElementById('followHistoryContent'));
   var direction = resolvedCommunicationDirection('history');
   if (!content) { showToast('请填写沟通内容', 'warning'); return false; }
@@ -6028,6 +6033,10 @@ async function addFollowHistory() {
     next_follow_up: nextTask ? nextDate : '',
     is_reported: document.getElementById('followHistoryReport').checked
   };
+  button.dataset.submitting = 'true';
+  button.disabled = true;
+  var originalLabel = button.textContent;
+  button.textContent = '正在保存…';
   try {
     var saved = await api('/api/customers/' + id + '/follow_history', { method: 'POST', body: JSON.stringify(data) });
     showToast(nextTask ? '记录已保存，下一步已安排' : (attentionStateMessage(saved.attention) || '记录已保存'), 'success');
@@ -6068,6 +6077,14 @@ async function addFollowHistory() {
     if (currentPage === 'dashboard' && saved.completed_task) loadDashboard();
     return true;
   } catch(e) { return false; }
+  finally {
+    button.disabled = false;
+    delete button.dataset.submitting;
+    updateFollowHistorySaveLabel();
+    // The label can be changed while the request is in flight by a pending
+    // input event; keep the default usable even if that event did not fire.
+    if (!button.textContent) button.textContent = originalLabel;
+  }
 }
 
 async function saveCustomerWorkspaceAndExit() {
