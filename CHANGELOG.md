@@ -4,6 +4,12 @@
 - 保持：仍优先尝试 Workbench，以覆盖本机 SSH 暂时不可用的情况；状态读取保持只读，不修改 ECS 服务、数据库、附件或备份。
 - 验证：本地实际运行 `deploy/cloud/status-workbench.sh`，Workbench 返回错误后经 SSH 读取到 `app=active`、`tunnel=active`、`health=ok` 及 CPU/内存/磁盘/负载/运行时间数据。
 
+## 2026-09-07 — 修复 PostgreSQL 禁用成员失败
+
+- 修复：禁用团队成员时不再把兼容视图的文本账号 ID 与 PostgreSQL canonical membership 的 UUID 直接比较；改为在 `identity.users` 与 `identity.memberships` 之间按 UUID 连接并同步停用状态。
+- 验证：新增 PostgreSQL 路径回归测试；Python/JavaScript 语法检查及全量 140 项测试通过。
+- 发布边界：本轮只修改本地代码和测试，未发布 ECS，也未修改正式数据库。
+
 ## 2026-09-05 — 周报按负责人阅读客户沟通（本地验证，待正式发布）
 
 - 用户可见变化：周报按负责人分章，一次只展示当前成员本周的客户沟通；顶部仅提供成员切换，不显示所有成员、业绩、客户数或任何比较信息。

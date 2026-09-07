@@ -1821,9 +1821,17 @@ def disable_team_member(username):
         return jsonify({'error': '成员不存在'}), 404
     conn.execute('UPDATE users SET active=0 WHERE username=?', (username,))
     # Keep the durable PostgreSQL membership status aligned with the routable
-    # user flag. The SQLite fallback has no memberships table.
+    # user flag. The SQLite fallback has no memberships table. Do not join the
+    # canonical UUID membership table to the compatibility users view here:
+    # that view intentionally exposes the legacy username-shaped text id.
     if postgres_mode():
-        conn.execute('UPDATE memberships SET status=\'inactive\' WHERE user_id=(SELECT id FROM users WHERE username=?)', (username,))
+        conn.execute('''UPDATE identity.memberships AS membership
+                           SET status='inactive'
+                         FROM identity.users AS identity_user
+                        WHERE membership.user_id = identity_user.id
+                          AND identity_user.organization_id = trosa.compat_org_id()
+                          AND (identity_user.username = ? OR identity_user.legacy_user_id = ?)''',
+                     (username, username))
     conn.commit(); conn.close()
     if username in USERS:
         USERS[username]['active'] = False

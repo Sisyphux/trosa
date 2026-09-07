@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.parse import urlparse
+from unittest import mock
 
 import db
 
@@ -117,6 +118,44 @@ class TeamMembersApiTest(unittest.TestCase):
         self.assertEqual(self.client.post(f'/api/invitations/{token}/accept', json={
             'name': '另一位', 'password': '123456'
         }).status_code, 404)
+
+    def test_postgres_disable_joins_canonical_uuid_identity_rows(self):
+        class FakeResult:
+            def __init__(self, row=None):
+                self.row = row
+
+            def fetchone(self):
+                return self.row
+
+        class FakeConnection:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append((sql, params))
+                if sql.lstrip().upper().startswith('SELECT USERNAME'):
+                    return FakeResult({'username': 'amy'})
+                return FakeResult()
+
+            def commit(self):
+                pass
+
+            def close(self):
+                pass
+
+        connection = FakeConnection()
+        with mock.patch.object(self.module, 'postgres_mode', return_value=True), \
+                mock.patch.object(self.module, 'get_system_db', return_value=connection), \
+                mock.patch.object(self.module, 'log_operation'):
+            response = self.client.post('/api/team/members/amy/disable')
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        membership_updates = [sql for sql, _params in connection.statements
+                              if 'identity.memberships' in sql]
+        self.assertEqual(len(membership_updates), 1)
+        self.assertIn('identity.users', membership_updates[0])
+        self.assertIn('membership.user_id = identity_user.id', membership_updates[0])
+        self.assertNotIn('SELECT id FROM users', membership_updates[0])
 
     def test_operation_log_records_authenticated_user(self):
         self.assertEqual(self.client.post('/api/team/invitations', json={}).status_code, 201)
