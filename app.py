@@ -317,9 +317,9 @@ def _integration_token_matches(record):
 def _sela_service_integration_user():
     """Authenticate the non-interactive Sela service credential.
 
-    This credential is deliberately narrower than the historical
-    Prospecting Lab token: it can reach only the Sela integration surface and
-    never the legacy customer CRUD routes or browser-only routes.
+    It can access only the allowlisted, ordinary customer-operation routes.
+    It is always mapped to Hamid server-side and cannot reach users, roles,
+    tokens, system configuration, backup, or destructive administration.
     """
     if not _sela_integration_path_allowed():
         return ''
