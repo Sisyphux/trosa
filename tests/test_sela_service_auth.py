@@ -65,14 +65,17 @@ class SelaServiceAuthTest(unittest.TestCase):
             os.environ['CRM_SEED_DEMO_DATA'] = self.original_demo
         self.tempdir.cleanup()
 
-    def test_service_token_is_sela_only_and_legacy_token_remains_compatible(self):
+    def test_service_token_has_only_hamid_customer_operations_and_legacy_token_remains_compatible(self):
         service = self.module.app.test_client()
         service_headers = {'Authorization': f'Bearer {SERVICE_TOKEN}'}
         self.assertEqual(
             service.get('/api/integrations/sela/health', headers=service_headers).status_code,
             200,
         )
-        self.assertEqual(service.get('/api/customers', headers=service_headers).status_code, 401)
+        self.assertEqual(service.get('/api/customers', headers=service_headers).status_code, 200)
+        self.assertEqual(service.get('/api/inbox', headers=service_headers).status_code, 200)
+        self.assertEqual(service.post('/api/customers', json={'company': 'Sela Customer'}, headers=service_headers).status_code, 201)
+        self.assertEqual(service.get('/api/agent-gateway/tokens', headers=service_headers).status_code, 401)
         self.assertEqual(
             service.post('/api/integrations/sela/token', headers=service_headers).status_code,
             401,

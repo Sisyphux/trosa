@@ -180,13 +180,13 @@ class SelaSyncApiTest(unittest.TestCase):
 
         response = self.post_sync(payload('candidate-domain'))
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.get_json()['status'], 'REVIEW')
-        self.assertEqual(response.get_json()['reason'], 'IDENTITY_MATCH_REQUIRED')
+        self.assertEqual(response.get_json()['status'], 'SYNCED')
+        self.assertTrue(response.get_json()['created'])
 
         conn = self.hamid_db()
         try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 2)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 1)
         finally:
             conn.close()
 
@@ -238,19 +238,19 @@ class SelaSyncApiTest(unittest.TestCase):
         self.assertFalse(response.get_json()['created'])
         self.assertEqual(response.get_json()['trosa_id'], existing_id)
 
-    def test_unmatched_candidate_is_review_only(self):
+    def test_unmatched_candidate_is_created_with_its_confirmed_contact_and_outreach(self):
         response = self.post_sync(payload('candidate-unmatched'))
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
-        self.assertEqual(body['status'], 'REVIEW')
-        self.assertEqual(body['reason'], 'IDENTITY_MATCH_REQUIRED')
+        self.assertEqual(body['status'], 'SYNCED')
+        self.assertTrue(body['created'])
 
         conn = self.hamid_db()
         try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 0)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts').fetchone()[0], 0)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 0)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM integration_sync_receipts').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM integration_sync_receipts').fetchone()[0], 1)
         finally:
             conn.close()
 
