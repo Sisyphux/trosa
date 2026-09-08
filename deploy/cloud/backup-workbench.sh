@@ -72,7 +72,7 @@ printf 'DATABASE_SHA256=%s\\n' "\$database_sha"
 EOF
 )
 
-output="$("$SCRIPT_DIR/run-workbench-command.sh" \
+output="$(bash "$SCRIPT_DIR/run-workbench-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "$remote_command")"
@@ -103,7 +103,7 @@ tar -tzf "$local_archive" >/dev/null
 # Keep exactly the requested rolling window of local daily archives.
 find "$LOCAL_BACKUP_ROOT" -type f -name 'trosa-postgres-backup-*.tar.gz' -mtime +14 -delete
 
-"$SCRIPT_DIR/run-workbench-command.sh" \
+bash "$SCRIPT_DIR/run-workbench-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "rm -f '$REMOTE_ARCHIVE'"

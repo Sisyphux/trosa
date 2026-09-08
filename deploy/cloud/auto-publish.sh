@@ -263,7 +263,7 @@ run_step '浏览器扩展回归测试' run_extension_tests
 
 check_cloud_status() {
   local output
-  if ! output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" "$SCRIPT_DIR/status-workbench.sh" 2>&1)"; then
+  if ! output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" bash "$SCRIPT_DIR/status-workbench.sh" 2>&1)"; then
     printf '%s\n' "$output" >&2
     return 1
   fi
@@ -280,7 +280,7 @@ if [[ "$DB_SENSITIVE" == 1 ]]; then
   if [[ "$DRY_RUN" == 1 ]]; then
     printf '\n[dry-run] 数据库敏感改动：将执行 backup-workbench.sh，当前跳过实际备份。\n'
   else
-    run_step '数据库敏感改动备份' env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" "$SCRIPT_DIR/backup-workbench.sh"
+    run_step '数据库敏感改动备份' env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" bash "$SCRIPT_DIR/backup-workbench.sh"
   fi
 fi
 
@@ -310,7 +310,7 @@ fi
 RELEASE_ID="${TRADE_OS_RELEASE_ID:-auto-$(date -u +%Y%m%d%H%M%S)-$SHORT_SHA}"
 publish_output=""
 publish_status=0
-if publish_output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_SOURCE_DIR="$SOURCE_DIR" TRADE_OS_RELEASE_ID="$RELEASE_ID" "$SCRIPT_DIR/publish-workbench.sh" 2>&1)"; then
+if publish_output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_SOURCE_DIR="$SOURCE_DIR" TRADE_OS_RELEASE_ID="$RELEASE_ID" bash "$SCRIPT_DIR/publish-workbench.sh" 2>&1)"; then
   :
 else
   publish_status=$?

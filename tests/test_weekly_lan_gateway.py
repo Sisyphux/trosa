@@ -3,6 +3,7 @@ import importlib.util
 import ipaddress
 import threading
 import unittest
+import urllib.error
 from email.message import Message
 from pathlib import Path
 from unittest import mock
@@ -43,9 +44,11 @@ class WeeklyLanGatewayTest(unittest.TestCase):
 
     def test_route_allowlist_excludes_normal_crm_apis(self):
         self.assertTrue(self.gateway._path_allowed('/'))
+        self.assertTrue(self.gateway._path_allowed('/api/auth/users'))
         self.assertTrue(self.gateway._path_allowed('/api/weekly-summary/hamid?limit=10'))
         self.assertTrue(self.gateway._path_allowed('/api/overview/customers/amy/12'))
         self.assertTrue(self.gateway._path_allowed('/assets/sidebar-tree-lines-v2.webp'))
+        self.assertFalse(self.gateway._path_allowed('/api/auth/users/hamid'))
         self.assertFalse(self.gateway._path_allowed('/api/customers'))
         self.assertFalse(self.gateway._path_allowed('/api/settings'))
         self.assertFalse(self.gateway._path_allowed('/api/backup/list'))
@@ -74,6 +77,14 @@ class WeeklyLanGatewayTest(unittest.TestCase):
                 self.assertEqual(captured[0].get_header('X-tradeos-weekly-gateway'), 'a' * 64)
 
                 connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                connection.request('GET', '/api/auth/users')
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                response.read()
+                connection.close()
+                self.assertEqual(captured[-1].full_url, 'https://app.trosa.space/api/auth/users')
+
+                connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
                 connection.request('GET', '/api/customers')
                 response = connection.getresponse()
                 self.assertEqual(response.status, 403)
@@ -87,7 +98,36 @@ class WeeklyLanGatewayTest(unittest.TestCase):
                 response.read()
                 connection.close()
 
-                self.assertEqual(len(captured), 1)
+                self.assertEqual(len(captured), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_transient_upstream_failure_is_retried_before_returning_to_browser(self):
+        attempts = []
+
+        def fake_urlopen(_request, **_kwargs):
+            attempts.append(True)
+            if len(attempts) == 1:
+                raise urllib.error.URLError('temporary network interruption')
+            return DummyUpstreamResponse(body=b'weekly report')
+
+        server = self.gateway.WeeklyGatewayServer(('127.0.0.1', 0), self.gateway.WeeklyGatewayHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(self.gateway.urllib.request, 'urlopen', side_effect=fake_urlopen), \
+                    mock.patch.object(self.gateway.time, 'sleep') as sleep:
+                connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
+                connection.request('GET', '/api/weekly-summary/hamid')
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.read(), b'weekly report')
+                connection.close()
+
+            self.assertEqual(len(attempts), 2)
+            sleep.assert_called_once_with(self.gateway.UPSTREAM_RETRY_DELAY_SECONDS)
         finally:
             server.shutdown()
             server.server_close()

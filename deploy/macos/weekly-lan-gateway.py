@@ -9,6 +9,7 @@ LAN clients, and forwards a deliberately small set of read-only weekly routes.
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import os
 import re
 import signal
@@ -34,9 +35,17 @@ CLIENT_NETWORKS = tuple(
 STOP = threading.Event()
 OFFICE_ADDRESS_CHECK_INTERVAL_SECONDS = 2.0
 OFFICE_ADDRESS_GRACE_SECONDS = 20.0
+UPSTREAM_TIMEOUT_SECONDS = 8
+UPSTREAM_MAX_ATTEMPTS = 3
+UPSTREAM_RETRY_DELAY_SECONDS = 0.25
+_UPSTREAM_RETRYABLE_ERRORS = (OSError, urllib.error.URLError, http.client.HTTPException)
 
 _API_PATHS = (
     re.compile(r"^/api/auth/me$"),
+    # The weekly page uses this public, account-selection payload to discover
+    # active members. Keeping it exact lets invited members appear in the
+    # read-only board without opening any customer or settings API.
+    re.compile(r"^/api/auth/users$"),
     re.compile(r"^/api/network/ping$"),
     re.compile(r"^/api/version$"),
     re.compile(r"^/api/weekly-summary(?:/[a-z0-9_-]+)?$"),
@@ -133,6 +142,44 @@ def _upstream_path(raw_path: str) -> str:
     return raw_path
 
 
+def _fetch_upstream(request: urllib.request.Request, method: str):
+    """Read one upstream response, retrying only transient read failures.
+
+    The gateway allows GET and HEAD requests only, so retrying a failed fetch
+    cannot duplicate a business action. Read the body before returning so a
+    dropped upstream connection after headers is retried too.
+    """
+    last_error = None
+    for attempt in range(UPSTREAM_MAX_ATTEMPTS):
+        response = None
+        try:
+            try:
+                response = urllib.request.urlopen(
+                    request,
+                    timeout=UPSTREAM_TIMEOUT_SECONDS,
+                    context=ssl.create_default_context(),
+                )
+            except urllib.error.HTTPError as error:
+                # HTTP errors are valid upstream responses and must retain
+                # their status rather than becoming a local 502.
+                response = error
+            body = b"" if method == "HEAD" else response.read()
+            return response.status, tuple(response.headers.items()), body
+        except _UPSTREAM_RETRYABLE_ERRORS as error:
+            last_error = error
+            if attempt + 1 < UPSTREAM_MAX_ATTEMPTS:
+                time.sleep(UPSTREAM_RETRY_DELAY_SECONDS * (attempt + 1))
+        finally:
+            if response is not None:
+                try:
+                    response.close()
+                except OSError:
+                    pass
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("上游周报请求未产生响应")
+
+
 class WeeklyGatewayHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "TradeOS-Weekly-LAN"
@@ -172,21 +219,20 @@ class WeeklyGatewayHandler(BaseHTTPRequestHandler):
         headers["User-Agent"] = "TradeOS-Weekly-LAN/1.0"
         request = urllib.request.Request(target, headers=headers, method=method)
         try:
-            response = urllib.request.urlopen(
-                request,
-                timeout=20,
-                context=ssl.create_default_context(),
+            status, response_headers, body = _fetch_upstream(request, method)
+        except _UPSTREAM_RETRYABLE_ERRORS as error:
+            path = urllib.parse.urlsplit(self.path).path
+            print(
+                "上游周报读取在 %s 次尝试后仍失败：%s %s (%s)"
+                % (UPSTREAM_MAX_ATTEMPTS, method, path, type(error).__name__),
+                flush=True,
             )
-        except urllib.error.HTTPError as error:
-            response = error
-        except (OSError, urllib.error.URLError):
             self._send_text(502, "暂时无法连接云端周报，请稍后刷新。")
             return
 
         try:
-            body = b"" if method == "HEAD" else response.read()
-            self.send_response(response.status)
-            for name, value in response.headers.items():
+            self.send_response(status)
+            for name, value in response_headers:
                 lowered = name.lower()
                 if lowered not in _FORWARD_RESPONSE_HEADERS:
                     continue
@@ -200,8 +246,6 @@ class WeeklyGatewayHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
-        finally:
-            response.close()
 
     def _send_text(self, status: int, message: str) -> None:
         body = (message + "\n").encode("utf-8")

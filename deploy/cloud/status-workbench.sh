@@ -27,7 +27,7 @@ remote_command="bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'"
 # the workbench refresh loop for the full maintenance-command timeout.
 TRADE_OS_PREFER_WORKBENCH=1 \
 TROSA_WORKBENCH_EXPECT_TIMEOUT=45 \
-  "$SCRIPT_DIR/run-workbench-command.sh" \
+  bash "$SCRIPT_DIR/run-workbench-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "$remote_command"

@@ -70,7 +70,7 @@ curl --fail --location --silent --show-error --max-time 60 '$REMOTE_SCRIPT_URL' 
 EOF
 )
 
-"$SCRIPT_DIR/run-workbench-command.sh" \
+bash "$SCRIPT_DIR/run-workbench-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "$remote_command"
