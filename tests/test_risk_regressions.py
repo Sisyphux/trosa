@@ -2129,9 +2129,17 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0014_postgres_customer_priority_recovery.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0015_postgres_legacy_date_projections.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
+        self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
+
+    def test_postgres_legacy_date_projection_keeps_sqlite_date_shape(self):
+        migration = (ROOT / 'migrations' / '0015_postgres_legacy_date_projections.sql').read_text(encoding='utf-8')
+        self.assertIn('CREATE OR REPLACE FUNCTION trosa.compat_local_date', migration)
+        self.assertIn('trosa.compat_local_date(t.due_at) AS remind_date', migration)
+        self.assertIn('trosa.compat_local_date(e.occurred_at) AS follow_date', migration)
+        self.assertIn('trosa.compat_local_date(o.sent_at)', migration)
 
     def test_postgres_integrity_hardening_is_registered(self):
         migration = (ROOT / 'migrations' / '0008_postgres_runtime_integrity_hardening.sql').read_text(encoding='utf-8')

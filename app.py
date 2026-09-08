@@ -2257,12 +2257,17 @@ def _sela_sync_contact(conn, customer_id, raw_contact, now):
         )
         return []
 
-    if not contact['email'] and not phone_keys:
-        return ['CONTACT_IDENTITY_REQUIRED']
-    # A Sela sync may enrich an existing customer, but it must not silently
-    # create a new contact.  The exact identity can be reviewed and attached
-    # through the normal human workflow.
-    return ['CONTACT_REVIEW_REQUIRED']
+    # Research often starts with only a name, a LinkedIn URL, or an email.
+    # Keep that confirmed fact in Trosa now; subsequent research can enrich it.
+    conn.execute(
+        '''INSERT INTO contacts (customer_id, name, title, email, phone, whatsapp, linkedin,
+           preferred_channel, contact_type, is_primary, notes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+        (customer_id, contact['name'], contact['title'], contact['email'], contact['phone'],
+         contact['whatsapp'], contact['linkedin'], contact['preferred_channel'],
+         contact['contact_type'] or 'person', contact['is_primary'], contact['notes'], now),
+    )
+    return []
 
 
 def _sela_sync_outreach(conn, customer_id, candidate_id, outreach, now):
@@ -2352,6 +2357,238 @@ def sela_integration_health():
         'data_version': version,
         'server_time': _sela_sync_now(),
     })
+
+
+# ========== Sela v2 normal customer operations ==========
+
+_SELA_V2_CUSTOMER_FIELDS = ('name', 'company', 'country', 'website', 'field', 'industry',
+                            'profile', 'notes', 'tags', 'status', 'level', 'customer_type')
+
+
+def _sela_v2_customer_matches(conn, data):
+    """Find deterministic existing-customer matches before Sela creates one.
+
+    A stable website domain is preferred; otherwise an exact normalized company
+    name is accepted only when unique.  Ambiguous names are returned for Sela
+    to investigate instead of silently creating a duplicate.
+    """
+    wanted_company = _search_normalize(data.get('company') or data.get('name'))
+    wanted_domain = _sync_website_domain(data.get('website'))
+    rows = [dict(row) for row in conn.execute(
+        "SELECT id, name, company, country, website FROM customers "
+        "WHERE (is_deleted=0 OR is_deleted IS NULL)"
+    ).fetchall()]
+    domain_matches = [row for row in rows if wanted_domain and _sync_website_domain(row.get('website')) == wanted_domain]
+    if domain_matches:
+        return domain_matches, 'website'
+    name_matches = [row for row in rows if wanted_company and _search_normalize(row.get('company') or row.get('name')) == wanted_company]
+    return name_matches, 'company'
+
+
+def _sela_v2_create_customer(data):
+    if not isinstance(data, dict):
+        raise CrmWriteError('客户必须是 JSON 对象')
+    supplied = {key: data[key] for key in _SELA_V2_CUSTOMER_FIELDS if key in data}
+    company = str(supplied.get('company') or supplied.get('name') or '').strip()
+    if not company:
+        raise CrmWriteError('至少需要公司名称或客户名称')
+    contacts = data.get('contacts') or []
+    if not isinstance(contacts, list) or len(contacts) > 20:
+        raise CrmWriteError('contacts 必须是不超过 20 项的列表')
+    contacts = _merge_contact_candidates([item for item in contacts if isinstance(item, dict)])
+
+    def operation(conn, c):
+        matches, matched_by = _sela_v2_customer_matches(conn, supplied)
+        if len(matches) == 1:
+            return {'id': int(matches[0]['id']), 'customer_id': int(matches[0]['id']),
+                    'created': False, 'matched_by': matched_by}
+        if len(matches) > 1:
+            raise CrmWriteError('Trosa 中存在多个可能相同的客户，请先处理重复记录', 409)
+        now = _sela_sync_now()
+        values = {key: str(supplied.get(key) or '').strip() for key in _SELA_V2_CUSTOMER_FIELDS}
+        values['company'] = values['company'] or values['name']
+        values['name'] = values['name'] or values['company']
+        values['country'] = normalize_country(values['country'])
+        values['website'] = normalize_website(values['website'])
+        values['level'] = _normalize_customer_level(values['level'] or 'C')
+        values['status'] = values['status'] or '未建联'
+        values['customer_type'] = values['customer_type'] or 'new'
+        c.execute('''INSERT INTO customers
+                     (name, company, country, level, website, profile, field, status, notes,
+                      customer_type, industry, tags, import_source, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (values['name'], values['company'], values['country'], values['level'], values['website'],
+                   values['profile'], values['field'], values['status'], values['notes'], values['customer_type'],
+                   values['industry'], values['tags'], _SELA_SYNC_INTEGRATION, now, now))
+        customer_id = int(c.lastrowid)
+        for index, contact in enumerate(contacts):
+            contact_data = dict(contact)
+            contact_data['is_primary'] = 1 if index == 0 else 0
+            # Reuse the normal validator/writer's SQL shape without granting
+            # Sela a separate administrative contact surface.
+            c.execute('''INSERT INTO contacts (customer_id, name, title, email, phone, whatsapp, linkedin,
+                         preferred_channel, contact_type, is_primary, notes, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (customer_id, str(contact_data.get('name') or '').strip(), str(contact_data.get('title') or '').strip(),
+                       _canonical_email(contact_data.get('email')), str(contact_data.get('phone') or '').strip(),
+                       str(contact_data.get('whatsapp') or '').strip(), str(contact_data.get('linkedin') or '').strip(),
+                       str(contact_data.get('preferred_channel') or '').strip(), str(contact_data.get('contact_type') or 'person').strip(),
+                       int(contact_data['is_primary']), str(contact_data.get('notes') or '').strip(), now))
+        return {'id': customer_id, 'customer_id': customer_id, 'created': True, 'matched_by': ''}
+    return _run_crm_write(operation)
+
+
+def _sela_v2_direct_action(action, customer_id, payload):
+    """Apply a normal customer-operation directly, with the same core writers as Trosa UI."""
+    payload = dict(payload or {})
+    payload['source'] = 'sela_service'
+    if action == 'create_contact':
+        if not isinstance(customer_id, int): raise CrmWriteError('新增联系人需要 customer_id')
+        return create_customer_contact(customer_id, payload)
+    if action == 'update_contact':
+        if not isinstance(payload.get('contact_id'), int): raise CrmWriteError('修改联系人需要 contact_id')
+        return update_customer_contact(payload['contact_id'], payload)
+    if action == 'update_customer':
+        if not isinstance(customer_id, int): raise CrmWriteError('修改客户需要 customer_id')
+        return update_customer_profile(customer_id, payload)
+    if action == 'record_communication':
+        if not isinstance(customer_id, int): raise CrmWriteError('记录沟通需要 customer_id')
+        return record_customer_communication(customer_id, payload)
+    if action == 'create_task':
+        if not isinstance(customer_id, int): raise CrmWriteError('创建待办需要 customer_id')
+        return create_customer_follow_up_task(customer_id, payload)
+    if action == 'update_task':
+        if not isinstance(payload.get('task_id'), int): raise CrmWriteError('修改待办需要 task_id')
+        return update_customer_follow_up_task(payload['task_id'], payload)
+    if action == 'complete_task':
+        if not isinstance(payload.get('task_id'), int): raise CrmWriteError('完成待办需要 task_id')
+        return complete_customer_task(payload['task_id'], payload)
+    if action == 'resolve_inbox':
+        if not isinstance(payload.get('inbox_item_id'), int): raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
+        return resolve_customer_inbox_item(payload['inbox_item_id'], payload)
+    if action == 'assign_inbox_customer':
+        if not isinstance(customer_id, int) or not isinstance(payload.get('inbox_item_id'), int):
+            raise CrmWriteError('确认 Inbox 归属需要 customer_id 和 inbox_item_id')
+        return assign_customer_inbox_item(payload['inbox_item_id'], customer_id, payload)
+    raise CrmWriteError('该动作不在 Sela 客户运营权限范围内', 403)
+
+
+@app.route('/api/integrations/sela/v2/customers', methods=['GET', 'POST'])
+@login_required
+def sela_v2_customers():
+    if request.method == 'POST':
+        try:
+            result = _sela_v2_create_customer(request.get_json(silent=True))
+        except CrmWriteError as error:
+            return jsonify({'error': error.message}), error.status
+        log_operation('SELA_CREATE_CUSTOMER', 'customer', result['customer_id'], 'Sela 创建或匹配客户')
+        return jsonify({'success': True, **result}), 201 if result['created'] else 200
+    query = str(request.args.get('query') or '').strip()[:200]
+    limit = min(max(int(request.args.get('limit', 50) or 50), 1), 100)
+    conn = get_db()
+    try:
+        rows = conn.execute('''SELECT id, name, company, country, website, status, customer_type,
+                                      last_contact, next_follow_up, updated_at
+                               FROM customers WHERE (is_deleted=0 OR is_deleted IS NULL)
+                               AND (?='' OR lower(COALESCE(name,'')) LIKE ? OR lower(COALESCE(company,'')) LIKE ?
+                                    OR lower(COALESCE(website,'')) LIKE ?)
+                               ORDER BY updated_at DESC, id DESC LIMIT ?''',
+                            (query, '%' + query.casefold() + '%', '%' + query.casefold() + '%', '%' + query.casefold() + '%', limit)).fetchall()
+        return jsonify({'customers': [dict(row) for row in rows]})
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/v2/customers/<int:customer_id>', methods=['GET'])
+@login_required
+def sela_v2_customer(customer_id):
+    conn = get_db()
+    try:
+        return jsonify(_sela_customer_context(conn, customer_id))
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/v2/customers/<int:customer_id>/contacts', methods=['GET'])
+@login_required
+def sela_v2_customer_contacts(customer_id):
+    conn = get_db()
+    try:
+        if not conn.execute('SELECT id FROM customers WHERE id=? AND COALESCE(is_deleted,0)=0', (customer_id,)).fetchone():
+            return jsonify({'error': '客户不存在'}), 404
+        rows = conn.execute('SELECT id, customer_id, name, title, email, phone, whatsapp, linkedin, preferred_channel, contact_type, is_primary, notes FROM contacts WHERE customer_id=? ORDER BY is_primary DESC, id DESC', (customer_id,)).fetchall()
+        return jsonify({'contacts': [dict(row) for row in rows]})
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/v2/customers/<int:customer_id>/activity', methods=['GET'])
+@login_required
+def sela_v2_customer_activity(customer_id):
+    conn = get_db()
+    try:
+        rows = conn.execute('SELECT id, customer_id, follow_date, content, result, next_plan, activity_type, direction, source, created_at FROM follow_up_logs WHERE customer_id=? AND COALESCE(is_deleted,0)=0 ORDER BY follow_date DESC, created_at DESC, id DESC LIMIT 100', (customer_id,)).fetchall()
+        return jsonify({'activities': [dict(row) for row in rows]})
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/v2/tasks', methods=['GET'])
+@login_required
+def sela_v2_tasks():
+    customer_id = request.args.get('customer_id', type=int)
+    conn = get_db()
+    try:
+        filters, params = ['r.is_done=0', "r.reminder_type NOT LIKE 'outreach_%'", '(c.is_deleted=0 OR c.is_deleted IS NULL)'], []
+        if customer_id:
+            filters.append('r.customer_id=?'); params.append(customer_id)
+        rows = conn.execute('SELECT r.id, r.customer_id, r.title, r.content, r.reason, r.remind_date, r.reminder_type, c.name, c.company FROM reminders r JOIN customers c ON c.id=r.customer_id WHERE ' + ' AND '.join(filters) + ' ORDER BY r.remind_date, r.id LIMIT 100', params).fetchall()
+        return jsonify({'tasks': [dict(row) for row in rows]})
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/v2/inbox', methods=['GET'])
+@login_required
+def sela_v2_inbox():
+    response = get_inbox.__wrapped__()
+    payload = response.get_json() or {}
+    items = payload.get('items') or payload.get('inbox_items') or []
+    return jsonify({'items': [{key: item.get(key) for key in ('id', 'item_type', 'customer_id', 'title', 'content', 'created_at', 'source', 'status')} for item in items[:100]]})
+
+
+@app.route('/api/integrations/sela/v2/actions', methods=['POST'])
+@login_required
+def sela_v2_actions():
+    data = request.get_json(silent=True)
+    key = str(request.headers.get('X-Idempotency-Key') or '').strip()
+    if not isinstance(data, dict) or not key or len(key) > 200:
+        return jsonify({'error': '需要 JSON 动作和有效幂等键'}), 400
+    action, customer_id = str(data.get('action') or '').strip(), data.get('customer_id')
+    payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
+    digest = _sela_sync_hash({'action': action, 'customer_id': customer_id, 'payload': payload})
+    receipt_key = 'v2:' + key
+    conn = get_db()
+    try:
+        existing = conn.execute('SELECT request_sha256, response_json FROM integration_sync_receipts WHERE integration=? AND idempotency_key=?', (_SELA_SYNC_INTEGRATION, receipt_key)).fetchone()
+        if existing:
+            if existing['request_sha256'] != digest: return jsonify({'error': '幂等键已对应另一份请求'}), 409
+            return jsonify(json.loads(existing['response_json']))
+    finally:
+        conn.close()
+    try:
+        result = _sela_v2_direct_action(action, customer_id, payload)
+        response_body = {'success': True, 'action': action, 'customer_id': result.get('customer_id') or customer_id, 'result': result}
+        conn = get_db(); conn.execute('BEGIN')
+        conn.execute('INSERT INTO integration_sync_receipts (integration,idempotency_key,request_sha256,candidate_id,customer_id,response_json,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                     (_SELA_SYNC_INTEGRATION, receipt_key, digest, '', response_body['customer_id'], json.dumps(response_body, ensure_ascii=False), _sela_sync_now(), _sela_sync_now()))
+        conn.commit(); conn.close()
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    log_operation('SELA_' + action.upper(), 'customer_operation', response_body['customer_id'], action)
+    return jsonify(response_body), 201
 
 
 @app.route('/api/integrations/sela/exclusions', methods=['GET'])
@@ -2487,35 +2724,39 @@ def sela_integration_sync():
                 'candidate_id': candidate_id,
                 'trosa_ids': [int(row['id']) for row in matches],
             })
-        if not matches:
-            conn.rollback()
-            return jsonify({
-                'success': True, 'status': 'REVIEW', 'reason': 'IDENTITY_MATCH_REQUIRED',
-                'candidate_id': candidate_id,
-            })
-
         now = _sela_sync_now()
-        created = False
-        row = matches[0]
-        customer_id = int(row['id'])
-        owner = str(row.get('external_source') or '').strip()
-        owner_id = str(row.get('external_id') or '').strip()
-        if owner and (owner != _SELA_SYNC_INTEGRATION or owner_id != candidate_id):
-            conn.rollback()
-            return jsonify({
-                'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_LINKED',
-                'candidate_id': candidate_id, 'trosa_id': customer_id,
-            })
         website = normalize_website(payload.get('website'))
         country = normalize_country(payload.get('country'))
-        conn.execute(
-            '''UPDATE customers
-               SET website=CASE WHEN COALESCE(website, '')='' THEN ? ELSE website END,
-                   country=CASE WHEN COALESCE(country, '')='' THEN ? ELSE country END,
-                   external_source=?, external_id=?, updated_at=?
-               WHERE id=?''',
-            (website, country, _SELA_SYNC_INTEGRATION, candidate_id, now, customer_id),
-        )
+        created = not matches
+        if created:
+            cursor = conn.execute(
+                '''INSERT INTO customers (name, company, country, level, website, profile, field, status,
+                   notes, customer_type, industry, import_source, external_source, external_id, created_at, updated_at)
+                   VALUES (?, ?, ?, 'C', ?, ?, ?, '未建联', ?, 'new', ?, ?, ?, ?, ?, ?)''',
+                (company, company, country, website, str(payload.get('source_note') or '')[:20000],
+                 str(payload.get('business_type') or ''), str(payload.get('source_note') or '')[:20000],
+                 _SELA_SYNC_INTEGRATION, _SELA_SYNC_INTEGRATION, candidate_id, now, now),
+            )
+            customer_id = int(cursor.lastrowid)
+        else:
+            row = matches[0]
+            customer_id = int(row['id'])
+            owner = str(row.get('external_source') or '').strip()
+            owner_id = str(row.get('external_id') or '').strip()
+            if owner and (owner != _SELA_SYNC_INTEGRATION or owner_id != candidate_id):
+                conn.rollback()
+                return jsonify({
+                    'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_LINKED',
+                    'candidate_id': candidate_id, 'trosa_id': customer_id,
+                })
+            conn.execute(
+                '''UPDATE customers
+                   SET website=CASE WHEN COALESCE(website, '')='' THEN ? ELSE website END,
+                       country=CASE WHEN COALESCE(country, '')='' THEN ? ELSE country END,
+                       external_source=?, external_id=?, updated_at=?
+                   WHERE id=?''',
+                (website, country, _SELA_SYNC_INTEGRATION, candidate_id, now, customer_id),
+            )
 
         warnings = _sela_sync_contact(conn, customer_id, payload.get('contact'), now)
         source_note = str(payload.get('source_note') or '').strip()[:20000]
@@ -12176,7 +12417,7 @@ if __name__ == '__main__':
     print('客户跟进提醒系统启动中...')
     print(f'数据库目录: {DB_DIR}')
     try:
-        app.run(debug=False, port=8080, host='0.0.0.0')
+        app.run(debug=False, port=PORT, host='0.0.0.0')
     except Exception as e:
         print(f'Flask 服务异常退出: {e}')
         import traceback
