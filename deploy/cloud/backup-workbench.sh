@@ -2,6 +2,7 @@
 # Create a verified PostgreSQL + attachment backup and download it to the Mac.
 # This does not create or use an Alibaba Cloud ECS disk snapshot.
 set -euo pipefail
+export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
@@ -84,7 +85,11 @@ if [[ -z "$remote_sha" ]]; then
   exit 1
 fi
 
-if [[ -n "${TRADE_OS_SSH_HOST:-}" ]]; then
+# The ECS SSH alias is also used for command execution, but its tunnel can
+# close an scp data channel after the remote archive is ready.  Workbench's
+# managed download is the reliable default; keep scp as an explicit opt-in for
+# environments where the SSH data path is known to work.
+if [[ "${TRADE_OS_BACKUP_TRANSFER:-workbench}" == "ssh" && -n "${TRADE_OS_SSH_HOST:-}" ]]; then
   scp -o BatchMode=yes -o ConnectTimeout=10 \
     "${TRADE_OS_SSH_HOST}:${REMOTE_ARCHIVE}" "$LOCAL_BACKUP_ROOT/"
 else

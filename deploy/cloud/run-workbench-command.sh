@@ -37,7 +37,12 @@ run_ssh_command() {
   # observable without changing the remote command: decode it on ECS, run it
   # as a child, and emit a bounded heartbeat until it exits.
   command_payload="$(printf '%s' "$remote_command" | base64 | tr -d '\n')"
-  ssh_command="printf '%s' '$command_payload' | base64 -d | bash & child=\$!; while kill -0 \$child 2>/dev/null; do printf 'TROSA_MANAGER_COMMAND_RUNNING\\n'; sleep 1; done; wait \$child"
+  # Materialize the payload before starting it.  Feeding the script itself via
+  # stdin lets nested commands (notably docker compose/pg_dump) consume the
+  # remaining script text as their own stdin and make the command stop early.
+  # These are non-interactive workbench commands, so the payload gets a clean
+  # EOF after it has been loaded.
+  ssh_command="bash -c \"\$(printf '%s' '$command_payload' | base64 -d)\" </dev/null & child=\$!; while kill -0 \$child 2>/dev/null; do printf 'TROSA_MANAGER_COMMAND_RUNNING\\n'; sleep 1; done; wait \$child"
   "$ssh_bin" -T -o BatchMode=yes -o ConnectTimeout=10 "$ssh_host" "$ssh_command"
 }
 

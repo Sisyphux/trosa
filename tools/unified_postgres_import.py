@@ -57,12 +57,22 @@ def norm(value: Any) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", clean(value).lower())).strip()
 
 
+PUBLIC_PROFILE_DOMAINS = frozenset({
+    "linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "youtube.com", "tiktok.com", "pinterest.com", "whatsapp.com", "wa.me",
+    "t.me", "linktr.ee", "beacons.ai", "about.me", "crunchbase.com", "yelp.com",
+})
+
+
 def domain(value: Any) -> str:
     value = clean(value).lower()
     if not value:
         return ""
     parsed = urlparse(value if "://" in value else f"https://{value}")
-    return parsed.netloc.split("@")[-1].split(":")[0].removeprefix("www.")
+    host = parsed.netloc.split("@")[-1].split(":")[0].removeprefix("www.")
+    if host in PUBLIC_PROFILE_DOMAINS or any(host.endswith(f".{suffix}") for suffix in PUBLIC_PROFILE_DOMAINS):
+        return ""
+    return host
 
 
 def legacy_user_key(db_name: str) -> str:
@@ -277,17 +287,24 @@ class Importer:
         self.user_ids[username] = row[0]
         return row[0]
 
-    def account_ref(self, db_name: str, customer_id: Any, account_id: uuid.UUID) -> None:
+    def account_ref(
+        self,
+        db_name: str,
+        customer_id: Any,
+        account_id: uuid.UUID,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
         legacy_customer_id = self.legacy_id(customer_id)
         if legacy_customer_id is None:
             return
         legacy_user = legacy_user_key(db_name)
         self.execute("""insert into trosa.account_legacy_refs
-          (organization_id,legacy_user_id,legacy_customer_id,account_id,source_db)
-          values (%s,%s,%s,%s,%s)
+          (organization_id,legacy_user_id,legacy_customer_id,account_id,source_db,legacy_payload)
+          values (%s,%s,%s,%s,%s,%s)
           on conflict (organization_id,legacy_user_id,legacy_customer_id)
-          do update set account_id=excluded.account_id,source_db=excluded.source_db""",
-          (ORG_ID, legacy_user, legacy_customer_id, account_id, db_name))
+          do update set account_id=excluded.account_id,source_db=excluded.source_db,
+                        legacy_payload=excluded.legacy_payload""",
+          (ORG_ID, legacy_user, legacy_customer_id, account_id, db_name, Jsonb(payload or {})))
 
     def row_ref(self, db_name: str, table_name: str, legacy_id: Any, target_id: uuid.UUID) -> None:
         number = self.legacy_id(legacy_id)
@@ -836,7 +853,7 @@ class Importer:
                     continue
                 account_id = actual_account[0]
                 self.accounts[key] = account_id
-                self.account_ref(db_name, legacy_customer_id, account_id)
+                self.account_ref(db_name, legacy_customer_id, account_id, row)
             for row in rows.get("contacts", []):
                 legacy_contact_id = self.legacy_id(row.get("id"))
                 legacy_customer_id = self.legacy_id(row.get("customer_id"))

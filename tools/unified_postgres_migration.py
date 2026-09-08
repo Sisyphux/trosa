@@ -57,6 +57,7 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0013_postgres_company_match_boundaries.sql",
     ROOT / "migrations" / "0014_postgres_customer_priority_recovery.sql",
     ROOT / "migrations" / "0015_postgres_legacy_date_projections.sql",
+    ROOT / "migrations" / "0016_postgres_user_scoped_customer_payloads.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

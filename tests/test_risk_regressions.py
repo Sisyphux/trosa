@@ -24,7 +24,7 @@ from postgres_compat import _translate_sql
 import scheduler
 from ical_gen import build_icalendar
 from tools.unified_postgres_import import (
-    compat_dedupe_key, compat_uuid, clean, legacy_bool, legacy_int, parse_time,
+    compat_dedupe_key, compat_uuid, clean, domain, legacy_bool, legacy_int, parse_time,
     sela_evidence_entries,
 )
 
@@ -2151,10 +2151,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0015_postgres_legacy_date_projections.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0016_postgres_user_scoped_customer_payloads.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
         self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
+        self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', tool_source)
 
     def test_postgres_legacy_date_projection_keeps_sqlite_date_shape(self):
         migration = (ROOT / 'migrations' / '0015_postgres_legacy_date_projections.sql').read_text(encoding='utf-8')
@@ -2209,6 +2210,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         utc_parsed = parse_time('2026-09-04 12:00:00+00:00')
         self.assertIsNotNone(utc_parsed)
         self.assertEqual(utc_parsed.utcoffset().total_seconds(), 0)
+
+    def test_public_profile_urls_are_not_company_identity_domains(self):
+        self.assertEqual(domain('https://www.linkedin.com/in/example-person'), '')
+        self.assertEqual(domain('https://www.linkedin.com/company/example-company'), '')
+        self.assertEqual(domain('https://www.example-corp.com/about'), 'example-corp.com')
 
     def test_postgres_final_integrity_boundaries_are_registered(self):
         migration = (ROOT / 'migrations' / '0009_postgres_final_integrity_boundaries.sql').read_text(encoding='utf-8')
@@ -2367,6 +2373,16 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertNotIn('normalized_name=v_normalized_name', migration)
         self.assertNotIn('ORDER BY d.is_primary DESC, d.created_at ASC', migration)
         self.assertIn('0013_postgres_company_match_boundaries.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
+
+    def test_postgres_customer_fields_are_user_scoped_after_a_shared_merge(self):
+        migration = (ROOT / 'migrations' / '0016_postgres_user_scoped_customer_payloads.sql').read_text(encoding='utf-8')
+        for marker in (
+            'account_legacy_refs', 'legacy_payload', 'compat_keep_shared_account_canonical',
+            'compat_keep_shared_company_canonical', 'compat_customers_ref_payload_write',
+            'zz_customers_ref_payload_write', 'audit.legacy_records',
+        ):
+            self.assertIn(marker, migration)
+        self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
 
     def test_postgres_customer_priority_is_imported_and_recovered(self):
         migration = (ROOT / 'migrations' / '0014_postgres_customer_priority_recovery.sql').read_text(encoding='utf-8')

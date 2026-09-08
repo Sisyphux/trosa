@@ -75,6 +75,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0013_postgres_company_match_boundaries.sql'),
         os.path.join(root, 'migrations', '0014_postgres_customer_priority_recovery.sql'),
         os.path.join(root, 'migrations', '0015_postgres_legacy_date_projections.sql'),
+        os.path.join(root, 'migrations', '0016_postgres_user_scoped_customer_payloads.sql'),
     )
 
 
