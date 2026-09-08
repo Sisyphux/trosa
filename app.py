@@ -5231,9 +5231,14 @@ def update_customer(customer_id):
         old_manual = existing.get('manual_next_follow', 0) or 0
         try:
             old_date = _normalize_optional_date(existing.get('next_follow_up', ''), '下次跟进日期')
-            last_contact = _normalize_optional_date(
-                data.get('last_contact', existing.get('last_contact', '')), '上次联系日期'
-            )
+            # The profile editor deliberately no longer exposes last_contact:
+            # communications are its source of truth.  Some imported legacy
+            # records nevertheless contain an invalid old value.  Do not make
+            # an unrelated profile edit fail because of that untouched value;
+            # validate only an explicit API request to change it.
+            last_contact = existing.get('last_contact', '')
+            if 'last_contact' in data:
+                last_contact = _normalize_optional_date(data.get('last_contact'), '上次联系日期')
             new_next_follow = _normalize_optional_date(
                 data.get('next_follow_up', old_date), '下次跟进日期'
             )

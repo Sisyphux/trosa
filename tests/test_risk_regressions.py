@@ -2043,6 +2043,28 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         })
         self.assertEqual(extension.status_code, 400, extension.get_json())
 
+    def test_legacy_invalid_last_contact_does_not_block_unrelated_profile_save(self):
+        module = self._load_module('crm_app_legacy_last_contact_test')
+        client, customer_id = self._client_and_customer(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("UPDATE customers SET last_contact='legacy-date' WHERE id=?", (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = client.put(f'/api/customers/{customer_id}', json={'notes': '资料仍可保存'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            row = conn.execute('SELECT last_contact, notes FROM customers WHERE id=?', (customer_id,)).fetchone()
+            self.assertEqual(row, ('legacy-date', '资料仍可保存'))
+        finally:
+            conn.close()
+
+        invalid_explicit_update = client.put(f'/api/customers/{customer_id}', json={'last_contact': 'not-a-date'})
+        self.assertEqual(invalid_explicit_update.status_code, 400, invalid_explicit_update.get_json())
+
     def test_typed_ids_are_normalized_or_rejected_without_500(self):
         module = self._load_module('crm_app_input_ids_test')
         client, customer_id = self._client_and_customer(module)
