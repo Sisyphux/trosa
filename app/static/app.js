@@ -1396,6 +1396,7 @@ function isInboxCommunicationCapture(item) {
 
 function inboxCategory(item) {
   if (item.item_type === 'sela_follow_up') return 'sela_follow_up';
+  if (item.item_type === 'sela_agent_request') return 'sela_agent_request';
   if (item.item_type === 'customer_reply') return 'new_reply';
   if (isInboxCommunicationCapture(item)) return 'capture';
   if (item.item_type === 'uncontacted_follow_up') return 'uncontacted';
@@ -1411,6 +1412,7 @@ function inboxCategory(item) {
 
 var INBOX_CATEGORY_LABELS = {
   sela_follow_up: 'sela 跟进建议',
+  sela_agent_request: 'sela 需要你判断',
   new_reply: '客户有新回复',
   capture: '待归属沟通',
   waiting: '待二次开发',
@@ -1421,7 +1423,7 @@ var INBOX_CATEGORY_LABELS = {
   silent: '长期沉默',
   other_suggestion: '其他建议'
 };
-var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_follow_up', 'waiting', 'uncontacted', 'new_customer', 'no_next', 'research', 'silent', 'other_suggestion', 'other'];
+var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_follow_up', 'waiting', 'uncontacted', 'new_customer', 'no_next', 'research', 'silent', 'other_suggestion', 'other'];
 var _inboxExpanded = new Set();
 
 function toggleInboxItem(key) {
@@ -1523,6 +1525,8 @@ function renderInboxItemHtml(item) {
   var mainAction = '';
   if (item.item_type === 'sela_follow_up' && /^sela_proposal:\d+$/.test(item.dedupe_key || '')) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="openSelaFollowUpReview(' + Number(item.dedupe_key.split(':')[1]) + ')">核对跟进建议</button>';
+  } else if (item.item_type === 'sela_agent_request') {
+    mainAction = '<button class="btn btn-sm btn-primary" onclick="resolveSelaAgentRequest(' + itemId + ',\'approve\')">记录决定</button>';
   } else if (item.item_type === 'customer_reply') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
   } else if (isInboxCommunicationCapture(item)) {
@@ -1577,7 +1581,7 @@ function renderInboxItemHtml(item) {
       body = '<p>' + escapeHtml(item.content || item.title || '') + '</p>';
     }
     var inlineDecision = '';
-    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_follow_up') {
+    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_follow_up' && item.item_type !== 'sela_agent_request') {
       var suggestedTitle = item.suggested_action || item.title || '联系客户并确认进展';
       var taskDate = new Date(); taskDate.setDate(taskDate.getDate() + 1);
       inlineDecision = '<div class="inbox-inline-decision">' +
@@ -1648,6 +1652,27 @@ async function archiveInboxItem(key, customerId, itemType) {
   try {
     await api('/api/inbox/archive', { method: 'POST', body: JSON.stringify({ dedupe_key: key, customer_id: customerId || null, item_type: itemType }) });
     showToast('已归档', 'success');
+    loadInbox();
+  } catch (e) {}
+}
+
+async function resolveSelaAgentRequest(itemId, action) {
+  var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
+  if (!item) { showToast('这条 Agent 请求已不存在，请刷新 Inbox', 'warning'); return; }
+  var resolution = '';
+  if (action === 'skip') {
+    resolution = '已跳过，本轮不决策';
+  } else {
+    var suggestion = item.content || item.title || '';
+    resolution = window.prompt('请记录对这条 Agent 请求的处理结果：', suggestion) || '';
+    if (!resolution.trim()) return;
+  }
+  try {
+    await api('/api/integrations/sela/needs/' + Number(itemId) + '/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ action: action || 'edit', resolution: resolution.trim() })
+    });
+    showToast('已记录到 Inbox 和客户时间线', 'success');
     loadInbox();
   } catch (e) {}
 }
@@ -5057,6 +5082,31 @@ function renderCustomerFactsBrief(customer) {
   }).join('') : '<div class="customer-gap-empty">暂无缺口</div>';
   var customerLevel = customerLevelForDisplay(customer.level);
   var aiSummary = customer.ai_summary || {};
+  var agentProspect = customer.agent_prospect || null;
+  var agentResearchHtml = '';
+  if (agentProspect) {
+    var researchTags = [agentProspect.qualification_status, agentProspect.research_status, agentProspect.confidence].filter(Boolean).join(' · ');
+    var researchText = agentProspect.reason || agentProspect.research_reason || 'sela 已建立该客户的研究资料。';
+    var researchSources = (agentProspect.source_urls || []).filter(function(url) {
+      return /^https?:\/\//i.test(String(url || ''));
+    }).slice(0, 3).map(function(url) {
+      var label = String(url).replace(/^https?:\/\//i, '').replace(/\/$/, '');
+      return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
+    }).join(' · ');
+    var permission = agentProspect.contact_permission === 'do_not_contact'
+      ? '已停止联系' + (agentProspect.suppression_reason ? '：' + agentProspect.suppression_reason : '')
+      : '';
+    var exclusionReview = agentProspect.exclusion_review || null;
+    var exclusionReviewHtml = exclusionReview
+      ? '<small class="customer-fact-files">排除身份待确认：可能与「' + escapeHtml(exclusionReview.canonical_name || exclusionReview.matched_value || '历史记录') + '」相同；当前仅名称相似。</small><div><button type="button" class="text-action" onclick="resolveCustomerSelaExclusionReview(\'accept\')">确认是新主体</button><button type="button" class="text-action" onclick="resolveCustomerSelaExclusionReview(\'reject\')">确认同一主体并停止联系</button></div>'
+      : '';
+    agentResearchHtml = '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">sela 研究</span><span class="customer-fact-gap-count">' + escapeHtml(researchTags || '已导入') + '</span></div><p class="customer-fact-context-copy">' + renderRichText(researchText.slice(0, 720)) + '</p>' +
+      (agentProspect.angle ? '<small class="customer-fact-files">沟通角度：' + escapeHtml(agentProspect.angle) + '</small>' : '') +
+      (permission ? '<small class="customer-fact-files">联系权限：' + escapeHtml(permission) + '</small>' : '') +
+      exclusionReviewHtml +
+      (researchSources ? '<small class="customer-fact-files">公开来源：' + researchSources + '</small>' : '') +
+    '</section>';
+  }
   var aiSummaryHtml = '';
   if (aiSummary.status === 'loading') {
     aiSummaryHtml = '<section class="customer-ai-summary" aria-live="polite"><div class="customer-ai-summary-head"><strong>AI 客户总结</strong><span>整理当前 CRM 记录中…</span></div><p class="customer-ai-summary-loading">正在读取客户资料；你仍可以继续编辑和记录沟通。</p></section>';
@@ -5083,8 +5133,39 @@ function renderCustomerFactsBrief(customer) {
       '<section class="customer-fact-section customer-fact-contact"><div class="customer-fact-section-head"><span class="customer-fact-label">沟通对象</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabContacts\')">' + (primaryContact ? '查看' : '添加') + '</button></div>' + contactHtml + '</section>' +
       '<section class="customer-fact-section customer-fact-status"><div class="customer-fact-section-head"><span class="customer-fact-label">客户状态</span><button type="button" class="text-action" onclick="editCustomerWaiting()">编辑等待</button></div><div class="customer-fact-status-grid"><div><span>关系状态</span><strong>' + escapeHtml(currentStatus.label || '未记录') + '</strong></div><div><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong></div><div><span>下一步</span><strong>' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time>' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : '') + '</div></div></section>' +
       '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">当前上下文</span><span class="customer-fact-gap-count">关键需求：' + escapeHtml(customer.field || customer.industry || '待补充') + '</span></div><p class="customer-fact-context-copy">' + renderRichText((customer.profile || customer.notes || '尚未记录当前背景；可在资料中补充。').slice(0, 360)) + '</p><small class="customer-fact-files">相关资料：' + Number(customer.file_count || 0) + ' 个文件</small></section>' +
+      agentResearchHtml +
       '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">信息缺口</span><span class="customer-fact-gap-count">' + (gaps.length ? gaps.length + ' 项待确认' : '基础字段完整') + '</span></div><div class="customer-gap-list">' + gapsHtml + '</div></section>' +
     '</div></details>';
+}
+
+async function resolveCustomerSelaExclusionReview(decision) {
+  var customer = _customerDetailCache || {};
+  var customerId = Number(customer.id || (document.getElementById('editCustomerId') || {}).value || 0);
+  var review = (customer.agent_prospect || {}).exclusion_review;
+  if (!customerId || !review) { showToast('没有待确认的 sela 排除身份', 'info'); return; }
+  var accepting = decision === 'accept';
+  if (!await showAppConfirm({
+    title: accepting ? '确认是新主体' : '确认同一主体并停止联系',
+    message: accepting
+      ? '这会保留客户并记录“与历史名称不是同一主体”的决定。'
+      : '这会在 Trosa 记录停止联系，并阻止 sela 后续外联。',
+    submitLabel: accepting ? '确认新主体' : '停止联系', danger: !accepting,
+  })) return;
+  var note = await showAppPrompt({
+    title: '补充决定依据（可选）', message: '这条说明会和决定一起保存在 Trosa。',
+    label: '依据', value: '', submitLabel: '保存决定',
+  });
+  if (note === null) return;
+  try {
+    await api('/api/customers/' + customerId + '/agent-prospect/exclusion-decision', {
+      method: 'POST', body: { decision: accepting ? 'accept' : 'reject', note: note }
+    });
+    delete _customerWorkspaceCache[customerId];
+    await openEditModal(customerId);
+    showToast('排除身份决定已保存到 Trosa', 'success');
+  } catch (e) {
+    showToast((e && e.message) || '保存排除身份决定失败', 'error');
+  }
 }
 
 async function requestCustomerAiSummary() {

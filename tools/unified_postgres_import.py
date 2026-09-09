@@ -979,6 +979,151 @@ class Importer:
                 self.issue(f"{source_name}/{table}", clean(row.get("id")), "MISSING_CUSTOMER", "Row kept in audit only because its customer is unavailable", row)
             return account
 
+        def json_text(value: Any, default: str) -> str:
+            parsed = json_value(value)
+            if isinstance(parsed, (dict, list)):
+                return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+            return default
+
+        # These are Trosa-owned hand-off/safety records, not a second Sela
+        # ledger. Keep them in the unified restore path so a PostgreSQL
+        # rehearsal preserves the Agent's durable research metadata and the
+        # exclusion registry as well as the ordinary CRM tables.
+        for row in rows.get("agent_prospect_profiles", []):
+            source = clean(row.get("source")) or "sela"
+            source_id = clean(row.get("source_id"))
+            legacy_customer_id = self.legacy_id(row.get("customer_id"))
+            if not source_id or legacy_customer_id is None:
+                self.issue(
+                    f"{source_name}/agent_prospect_profiles",
+                    clean(row.get("id")) or source_id or "unknown",
+                    "INVALID_AGENT_PROFILE",
+                    "Agent profile is missing source_id or a positive customer_id; raw row remains archived",
+                    row,
+                )
+                continue
+            if not self.account_for(db_name, legacy_customer_id):
+                self.issue(
+                    f"{source_name}/agent_prospect_profiles",
+                    source_id,
+                    "MISSING_CUSTOMER",
+                    "Agent profile was not projected because its Trosa customer is unavailable",
+                    row,
+                )
+                continue
+            permission = clean(row.get("contact_permission")) or "allowed"
+            if permission not in {"allowed", "do_not_contact"}:
+                self.issue(
+                    f"{source_name}/agent_prospect_profiles",
+                    source_id,
+                    "INVALID_AGENT_PERMISSION",
+                    "Agent profile contact permission was normalized to allowed",
+                    row,
+                )
+                permission = "allowed"
+            conflict = self.cur.execute(
+                """select source, source_id from trosa.agent_prospect_profiles
+                   where organization_id=%s and legacy_user_id=%s and customer_id=%s
+                     and not (source=%s and source_id=%s) limit 1""",
+                (ORG_ID, user, legacy_customer_id, source, source_id),
+            ).fetchone()
+            if conflict:
+                self.issue(
+                    f"{source_name}/agent_prospect_profiles",
+                    source_id,
+                    "AGENT_PROFILE_CUSTOMER_CONFLICT",
+                    "Customer already has another Agent source profile; the row was kept in audit for review",
+                    {"existing_source": conflict[0], "existing_source_id": conflict[1]},
+                )
+                continue
+            self.execute(
+                """insert into trosa.agent_prospect_profiles
+                   (organization_id,legacy_user_id,source,source_id,customer_id,
+                    research_json,contact_permission,suppression_reason,suppression_at,
+                    transport_json,created_at,updated_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (organization_id,legacy_user_id,source,source_id)
+                   do update set customer_id=excluded.customer_id,
+                    research_json=excluded.research_json,
+                    contact_permission=excluded.contact_permission,
+                    suppression_reason=excluded.suppression_reason,
+                    suppression_at=excluded.suppression_at,
+                    transport_json=excluded.transport_json,
+                    updated_at=excluded.updated_at""",
+                (
+                    ORG_ID, user, source, source_id, legacy_customer_id,
+                    json_text(row.get("research_json"), "{}"), permission,
+                    clean(row.get("suppression_reason")), clean(row.get("suppression_at")),
+                    json_text(row.get("transport_json"), "{}"),
+                    clean(row.get("created_at")) or datetime.now(timezone.utc).isoformat(),
+                    clean(row.get("updated_at")) or clean(row.get("created_at")) or datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+        for row in rows.get("business_exclusions", []):
+            source = clean(row.get("source"))
+            source_id = clean(row.get("source_id"))
+            canonical_name = clean(row.get("canonical_name"))
+            if not source or not source_id or not canonical_name:
+                self.issue(
+                    f"{source_name}/business_exclusions",
+                    clean(row.get("id")) or source_id or "unknown",
+                    "INVALID_BUSINESS_EXCLUSION",
+                    "Business exclusion is missing source, source_id, or canonical_name; raw row remains archived",
+                    row,
+                )
+                continue
+            policy = clean(row.get("match_policy")) or "hard"
+            if policy not in {"hard", "review_name_only"}:
+                self.issue(
+                    f"{source_name}/business_exclusions",
+                    source_id,
+                    "INVALID_EXCLUSION_POLICY",
+                    "Business exclusion match policy was normalized to hard",
+                    row,
+                )
+                policy = "hard"
+            linked_customer_id = self.legacy_id(row.get("linked_customer_id"))
+            if linked_customer_id is not None and not self.account_for(db_name, linked_customer_id):
+                self.issue(
+                    f"{source_name}/business_exclusions",
+                    source_id,
+                    "MISSING_LINKED_CUSTOMER",
+                    "Linked customer was unavailable; the exclusion was preserved without a customer link",
+                    row,
+                )
+                linked_customer_id = None
+            self.execute(
+                """insert into trosa.business_exclusions
+                   (organization_id,legacy_user_id,source,source_id,canonical_name,
+                    normalized_name,aliases_json,domains_json,country,status,match_policy,
+                    reason,linked_customer_id,is_active,created_at,updated_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (organization_id,legacy_user_id,source,source_id)
+                   do update set canonical_name=excluded.canonical_name,
+                    normalized_name=excluded.normalized_name,
+                    aliases_json=excluded.aliases_json,
+                    domains_json=excluded.domains_json,
+                    country=excluded.country,
+                    status=excluded.status,
+                    match_policy=excluded.match_policy,
+                    reason=excluded.reason,
+                    linked_customer_id=excluded.linked_customer_id,
+                    is_active=excluded.is_active,
+                    updated_at=excluded.updated_at""",
+                (
+                    ORG_ID, user, source, source_id, canonical_name,
+                    clean(row.get("normalized_name")) or norm(canonical_name),
+                    json_text(row.get("aliases_json"), "[]"),
+                    json_text(row.get("domains_json"), "[]"), clean(row.get("country")),
+                    clean(row.get("status")) or "confirmed_exclude", policy,
+                    clean(row.get("reason")), linked_customer_id,
+                    int(legacy_bool(row.get("is_active"), True)),
+                    clean(row.get("created_at")) or datetime.now(timezone.utc).isoformat(),
+                    clean(row.get("updated_at")) or clean(row.get("created_at")) or datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
         # Research and customer AI state use the normalized module tables.
         for row in rows.get("research_reports", []):
             account = required_account(row, "research_reports")
@@ -2449,6 +2594,7 @@ class Importer:
                     'trade_os_compat.communication_source_item_rows',
                     'trosa.email_verifications','trosa.email_verification_jobs',
                     'trosa.email_domain_probes','trosa.email_logs',
+                    'trosa.agent_prospect_profiles','trosa.business_exclusions',
                 ):
                     self.report['target'][table]=cur.execute(f'select count(*) from {table}').fetchone()[0]
                 self.report['sources'] = {

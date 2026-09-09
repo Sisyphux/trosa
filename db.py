@@ -76,6 +76,8 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0014_postgres_customer_priority_recovery.sql'),
         os.path.join(root, 'migrations', '0015_postgres_legacy_date_projections.sql'),
         os.path.join(root, 'migrations', '0016_postgres_user_scoped_customer_payloads.sql'),
+        os.path.join(root, 'migrations', '0017_trosa_agent_prospect_profiles.sql'),
+        os.path.join(root, 'migrations', '0018_trosa_business_exclusions.sql'),
     )
 
 
@@ -1208,6 +1210,57 @@ USER_TABLE_SQL = [
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     )
     ''',
+    # A source-scoped prospect profile is the durable hand-off from an
+    # autonomous research agent. It carries only agent-native research metadata
+    # and suppression state; identity, contacts, delivery, replies and tasks
+    # remain in the ordinary CRM tables.
+    '''
+    CREATE TABLE IF NOT EXISTS agent_prospect_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'sela',
+        source_id TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
+        research_json TEXT NOT NULL DEFAULT '{}',
+        contact_permission TEXT NOT NULL DEFAULT 'allowed'
+            CHECK(contact_permission IN ('allowed', 'do_not_contact')),
+        suppression_reason TEXT DEFAULT '',
+        suppression_at TEXT DEFAULT '',
+        transport_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(legacy_user_id, source, source_id),
+        UNIQUE(legacy_user_id, source, customer_id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+    ''',
+    # A business exclusion is a durable safety/identity record even when the
+    # historical name cannot yet be linked to one Trosa customer.  It replaces
+    # sela's standalone blacklist and historical exclusion JSON files.
+    '''
+    CREATE TABLE IF NOT EXISTS business_exclusions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        canonical_name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL DEFAULT '',
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        domains_json TEXT NOT NULL DEFAULT '[]',
+        country TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'confirmed_exclude',
+        match_policy TEXT NOT NULL DEFAULT 'hard'
+            CHECK(match_policy IN ('hard', 'review_name_only')),
+        reason TEXT DEFAULT '',
+        linked_customer_id INTEGER,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(legacy_user_id, source, source_id),
+        FOREIGN KEY(linked_customer_id) REFERENCES customers(id) ON DELETE SET NULL
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_business_exclusions_active ON business_exclusions(legacy_user_id, is_active, updated_at DESC)',
     # AI keeps a concise, auditable working understanding instead of repeatedly
     # regenerating a long customer report from scratch.
     '''
@@ -1841,6 +1894,8 @@ def init_user_tables(user):
                      ON ai_recommendations(customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_external_analysis_notes_customer_time
                      ON external_analysis_notes(customer_id, created_at DESC)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_prospect_profiles_customer
+                     ON agent_prospect_profiles(customer_id, updated_at DESC)''')
         # Match the high-frequency dashboard, Inbox and customer-list queries.
         c.execute('''CREATE INDEX IF NOT EXISTS idx_reminders_open_date
                      ON reminders(is_done, remind_date, customer_id)''')

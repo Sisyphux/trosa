@@ -74,6 +74,12 @@ class SelaServiceAuthTest(unittest.TestCase):
         )
         self.assertEqual(service.get('/api/customers', headers=service_headers).status_code, 200)
         self.assertEqual(service.get('/api/inbox', headers=service_headers).status_code, 200)
+        self.assertEqual(service.get('/api/integrations/sela/needs', headers=service_headers).status_code, 200)
+        self.assertEqual(service.post(
+            '/api/integrations/sela/inbox-captures',
+            json={'message': {'id': 'auth-capture-1', 'body': 'test'}},
+            headers=service_headers,
+        ).status_code, 200)
         self.assertEqual(service.post('/api/customers', json={'company': 'Sela Customer'}, headers=service_headers).status_code, 201)
         self.assertEqual(service.get('/api/agent-gateway/tokens', headers=service_headers).status_code, 401)
         self.assertEqual(

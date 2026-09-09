@@ -68,6 +68,18 @@ class SelaReplyApiTest(unittest.TestCase):
                 }),
             ),
         )
+        conn.execute(
+            '''INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?, ?, datetime('now', 'localtime'))''',
+            (
+                'integration_token:sela:hamid',
+                json.dumps({
+                    'token_sha256': hashlib.sha256(TOKEN.encode('utf-8')).hexdigest(),
+                    'enabled': True,
+                    'user': 'hamid',
+                }),
+            ),
+        )
         conn.commit()
         conn.close()
         self.module = load_app()
@@ -166,11 +178,12 @@ class SelaReplyApiTest(unittest.TestCase):
         conn = self.hamid_db()
         try:
             activity = conn.execute(
-                '''SELECT content, follow_date, direction, activity_type, source, related_task_id
+                '''SELECT content, result, follow_date, direction, activity_type, source, related_task_id
                    FROM follow_up_logs WHERE customer_id=? ORDER BY id DESC LIMIT 1''',
                 (trosa_id,),
             ).fetchone()
             self.assertIn('Please contact me next month.', activity['content'])
+            self.assertIn('事件：INTERESTED', activity['result'])
             self.assertEqual(activity['follow_date'], '2026-08-17')
             self.assertEqual(activity['direction'], 'inbound')
             self.assertEqual(activity['activity_type'], 'customer_reply')
@@ -194,9 +207,103 @@ class SelaReplyApiTest(unittest.TestCase):
                 conn.execute(
                     "SELECT COUNT(*) FROM integration_sync_receipts WHERE idempotency_key=?",
                     (reply['idempotency_key'],),
-                ).fetchone()[0],
+            ).fetchone()[0],
                 1,
             )
+        finally:
+            conn.close()
+
+    def test_automatic_outbound_reply_is_a_canonical_trosa_timeline_fact(self):
+        outbound = outbound_payload('candidate-auto-reply')
+        first_outbound = self.post_outbound(outbound)
+        self.assertEqual(first_outbound.status_code, 200, first_outbound.get_data(as_text=True))
+        trosa_id = first_outbound.get_json()['trosa_id']
+        reply = {
+            'candidate_id': outbound['candidate_id'],
+            'trosa_id': trosa_id,
+            'reply': {
+                'message_id': 'gmail-inbound-auto-1',
+                'thread_id': 'gmail-thread-auto',
+                'from': 'Ana Silva <ana@acrilicos.com>',
+                'subject': 'Re: Acrylic sheet supply',
+                'received_at': '2026-09-09T09:00:00+08:00',
+                'body': 'Please send your catalogue.',
+            },
+            'action': {
+                'name': 'CATALOGUE_SENT',
+                'route': 'AUTO_CATALOGUE',
+                'intent': 'INTERESTED',
+                'event': 'INTERESTED',
+                'outbound': {
+                    'message_id': 'gmail-outbound-auto-1',
+                    'thread_id': 'gmail-thread-auto',
+                    'sent_at': '2026-09-09T09:01:00+08:00',
+                    'subject': 'Our acrylic sheet catalogue',
+                    'body': 'Thank you. Here is our current acrylic sheet catalogue.',
+                    'in_reply_to': '<gmail-inbound-auto-1@example.com>',
+                },
+            },
+            'idempotency_key': 'sela-reply:auto-outbound-1',
+        }
+        first = self.client.post(
+            '/api/integrations/sela/reply',
+            json=reply,
+            headers=self.headers(reply['idempotency_key']),
+        )
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        self.assertEqual(first.get_json()['status'], 'SYNCED')
+
+        second = self.client.post(
+            '/api/integrations/sela/reply',
+            json=reply,
+            headers=self.headers(reply['idempotency_key']),
+        )
+        self.assertEqual(second.status_code, 200)
+
+        # A normal Sela refresh submits the current Prospect projection after
+        # the reply write. It must not replay a stale initial-send timestamp
+        # over the canonical reply outcome.
+        refresh = {
+            'source_id': outbound['candidate_id'],
+            'company': outbound['company'],
+            'website': outbound['website'],
+            'country': outbound['country'],
+            'business_type': outbound['business_type'],
+            'contact': outbound['contact'],
+            'outreach_status': 'INTERESTED',
+            'subject': outbound['outreach']['subject'],
+            'email_draft': outbound['outreach']['content'],
+            'sent_at': outbound['outreach']['sent_at'],
+            'gmail_message_id': 'gmail-outbound-auto-1',
+        }
+        refreshed = self.client.post(
+            '/api/integrations/sela/prospects',
+            json={'prospect': refresh, 'idempotency_key': 'sela-v2:candidate-auto-reply:refresh'},
+            headers=self.headers('sela-v2:candidate-auto-reply:refresh'),
+        )
+        self.assertEqual(refreshed.status_code, 200, refreshed.get_data(as_text=True))
+
+        conn = self.hamid_db()
+        try:
+            rows = conn.execute(
+                '''SELECT content, follow_date, direction, activity_type, source
+                   FROM follow_up_logs WHERE customer_id=? ORDER BY id ASC''',
+                (trosa_id,),
+            ).fetchall()
+            outbound_rows = [row for row in rows if row['direction'] == 'outbound']
+            self.assertEqual(len(outbound_rows), 1)
+            self.assertIn('[Sela Outbound Reply ID: gmail-outbound-auto-1]', outbound_rows[0]['content'])
+            self.assertIn('Here is our current acrylic sheet catalogue.', outbound_rows[0]['content'])
+            self.assertEqual(outbound_rows[0]['follow_date'], '2026-09-09')
+            self.assertEqual(outbound_rows[0]['activity_type'], 'email')
+            self.assertEqual(outbound_rows[0]['source'], 'sela_reply_engine')
+            outreach = conn.execute(
+                'SELECT reply_status, reply_content, reply_date, external_updated_at FROM outreach_emails'
+            ).fetchone()
+            self.assertEqual(outreach['reply_status'], 'replied')
+            self.assertEqual(outreach['reply_content'], 'Please send your catalogue.')
+            self.assertEqual(outreach['reply_date'], '2026-09-09')
+            self.assertEqual(outreach['external_updated_at'], '2026-09-09T09:00:00+08:00')
         finally:
             conn.close()
 

@@ -68,6 +68,21 @@ class SelaFollowUpTest(unittest.TestCase):
         self.ui.post(f'/api/agent/proposals/{pid}/confirm')
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM reminders').fetchone()[0], 1)
 
+    def test_context_includes_trosa_owned_agent_research(self):
+        self.conn.execute(
+            '''INSERT INTO agent_prospect_profiles
+               (legacy_user_id, source, source_id, customer_id, research_json)
+               VALUES ('hamid', 'sela', 'prospect-1', ?, ?)''',
+            (self.cid, json.dumps({
+                'reason': '公开资料显示该公司加工亚克力板材。',
+                'research_status': 'VERIFIED',
+            }, ensure_ascii=False)),
+        )
+        self.conn.commit()
+        context = self.context()
+        self.assertEqual(context['agent_prospect']['source_id'], 'prospect-1')
+        self.assertIn('公开资料显示该公司加工亚克力板材。', context['agent_prospect']['reason'])
+
     def test_stale_context_blocks_confirmation_and_cannot_be_overwritten(self):
         response = self.submit()
         pid = response.get_json()['proposal_id']
