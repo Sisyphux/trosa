@@ -2598,6 +2598,20 @@ def _sela_business_exclusion_view(row):
     }
 
 
+def _sela_conflict_target(*columns):
+    """Return the portable upsert target for Sela-owned integration rows.
+
+    PostgreSQL scopes these tables by the compatibility organization and
+    therefore includes ``organization_id`` in their unique constraints.
+    SQLite keeps the older user-scoped shape.  Keep the difference in one
+    small boundary so the business API remains identical on both backends.
+    """
+    target = list(columns)
+    if postgres_mode():
+        target.insert(0, 'organization_id')
+    return '(' + ', '.join(target) + ')'
+
+
 def _sela_upsert_business_exclusion(conn, value, now):
     item = _sela_business_exclusion_payload(value)
     conn.execute(
@@ -2606,7 +2620,7 @@ def _sela_upsert_business_exclusion(conn, value, now):
             aliases_json, domains_json, country, status, match_policy, reason,
             is_active, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(legacy_user_id, source, source_id) DO UPDATE SET
+           ON CONFLICT''' + _sela_conflict_target('legacy_user_id', 'source', 'source_id') + ''' DO UPDATE SET
              canonical_name=excluded.canonical_name,
              normalized_name=excluded.normalized_name,
              aliases_json=excluded.aliases_json,
@@ -3200,7 +3214,7 @@ def _sela_upsert_profile(conn, customer_id, source_id, prospect, now, existing=N
             contact_permission, suppression_reason, suppression_at, transport_json,
             created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(legacy_user_id, source, source_id) DO UPDATE SET
+           ON CONFLICT''' + _sela_conflict_target('legacy_user_id', 'source', 'source_id') + ''' DO UPDATE SET
              customer_id=excluded.customer_id,
              research_json=excluded.research_json,
              contact_permission=excluded.contact_permission,

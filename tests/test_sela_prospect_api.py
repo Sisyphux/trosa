@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -103,6 +104,17 @@ class SelaProspectApiTest(unittest.TestCase):
     def hamid_db(self):
         db.set_db_user('hamid')
         return db.get_db()
+
+    def test_sela_upsert_conflict_target_matches_sqlite_and_postgres_shapes(self):
+        self.assertEqual(
+            self.module._sela_conflict_target('legacy_user_id', 'source', 'source_id'),
+            '(legacy_user_id, source, source_id)',
+        )
+        with mock.patch.object(self.module, 'postgres_mode', return_value=True):
+            self.assertEqual(
+                self.module._sela_conflict_target('legacy_user_id', 'source', 'source_id'),
+                '(organization_id, legacy_user_id, source, source_id)',
+            )
 
     def test_upsert_creates_trosa_owned_prospect_before_send_and_is_idempotent(self):
         body = prospect()
