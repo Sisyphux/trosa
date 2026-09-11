@@ -61,11 +61,6 @@ tar -xzf "$ARCHIVE_PATH" -C "$RELEASE_DIR" --strip-components=1
 "$REMOTE_ROOT/venv/bin/pip" install --disable-pip-version-check -r "$RELEASE_DIR/requirements.txt"
 "$REMOTE_ROOT/venv/bin/python" -m py_compile \
   "$RELEASE_DIR/app.py" "$RELEASE_DIR/db.py" "$RELEASE_DIR/scheduler.py" "$RELEASE_DIR/serve.py"
-PI_NPM="$REMOTE_ROOT/pi-runtime/node-v22.23.2/bin/npm"
-if [ -x "$PI_NPM" ] && [ -f "$RELEASE_DIR/pi-agent/package-lock.json" ]; then
-  PATH="$REMOTE_ROOT/pi-runtime/node-v22.23.2/bin:$PATH" \
-    "$PI_NPM" ci --omit=dev --ignore-scripts --prefix "$RELEASE_DIR/pi-agent"
-fi
 chown -R root:root "$RELEASE_DIR"
 ln -sfn "$RELEASE_DIR" "$REMOTE_ROOT/current.next"
 mv -Tf "$REMOTE_ROOT/current.next" "$REMOTE_ROOT/current"
@@ -82,7 +77,7 @@ fi
 healthy=0
 for attempt in $(seq 1 15); do
   ping_body=$(curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping || true)
-  if printf '%s' "$ping_body" | grep -q '"sela_sync_api"[[:space:]]*:[[:space:]]*"sela-v1"'; then
+  if printf '%s' "$ping_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     healthy=1
     break
   fi

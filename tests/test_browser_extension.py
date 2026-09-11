@@ -124,3 +124,99 @@ class BrowserExtensionApiTest(unittest.TestCase):
         conn = sqlite3.connect(db.get_user_db_path('hamid'))
         self.assertEqual(conn.execute('SELECT COUNT(*) FROM communication_source_items').fetchone()[0], 1)
         conn.close()
+
+    def test_next_plan_is_history_without_creating_a_task(self):
+        response = self.client.post('/api/extension/communications', json={
+            'customer_id': self.customer_id, 'channel': 'whatsapp', 'content': '客户说明项目仍在内部评估。',
+            'next_plan': '下月了解评估结果',
+            'messages': [{'fingerprint': 'history-only-plan', 'text': '项目仍在评估'}],
+        })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT next_plan FROM follow_up_logs').fetchone()[0], '下月了解评估结果')
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM reminders WHERE is_done=0').fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_undo_removes_browser_evidence_with_its_communication(self):
+        saved = self.client.post('/api/extension/communications', json={
+            'customer_id': self.customer_id, 'channel': 'netease', 'content': '客户确认需要样品。',
+            'messages': [{'fingerprint': 'undo-browser-evidence', 'text': '请寄样品'}],
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        undone = self.client.post('/api/undo/' + saved.get_json()['undo_token'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM communication_sources').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM communication_source_items').fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_legacy_inbox_reply_entry_uses_shared_durable_write(self):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''INSERT INTO inbox_items
+                         (item_type, customer_id, title, content, dedupe_key, status, created_at)
+                         VALUES ('customer_reply', ?, '客户回复', '请确认交期。', 'legacy-inbox-reply', 'open', '2026-09-11')''',
+                         (self.customer_id,))
+            item_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        recorded = self.client.post(f'/api/inbox/{item_id}/record-reply')
+        self.assertEqual(recorded.status_code, 200, recorded.get_json())
+        undone = self.client.post('/api/undo/' + recorded.get_json()['undo_token'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (item_id,)).fetchone()[0], 'open')
+        finally:
+            conn.close()
+
+    def test_outreach_delivery_does_not_change_customer_work_state(self):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''UPDATE customers
+                         SET status='未建联', customer_type='new', last_contact='2026-08-01',
+                             next_follow_up='', attention_state='monitoring', attention_reason='等待项目更新'
+                         WHERE id=?''', (self.customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        saved = self.client.post(f'/api/customers/{self.customer_id}/outreach', json={
+            'subject': '产品资料', 'content': '请查收产品资料。', 'sent_date': '2026-09-11',
+        })
+        self.assertEqual(saved.status_code, 201, saved.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            state = conn.execute('''SELECT status, customer_type, last_contact, next_follow_up,
+                                           attention_state, attention_reason
+                                    FROM customers WHERE id=?''', (self.customer_id,)).fetchone()
+            self.assertEqual(tuple(state), ('未建联', 'new', '2026-08-01', '', 'monitoring', '等待项目更新'))
+        finally:
+            conn.close()
+        undone = self.client.post('/api/undo/' + saved.get_json()['undo_token'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+
+    def test_backfilled_communication_does_not_replace_newer_last_contact(self):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''INSERT INTO follow_up_logs (customer_id, content, follow_date, created_at)
+                         VALUES (?, '较新的沟通', '2026-09-10', '2026-09-10')''', (self.customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        saved = self.client.post(f'/api/customers/{self.customer_id}/follow_history', json={
+            'activity_content': '补录较早沟通', 'follow_date': '2026-08-01', 'direction': 'inbound',
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute('SELECT last_contact FROM customers WHERE id=?',
+                                          (self.customer_id,)).fetchone()[0], '2026-09-10')
+        finally:
+            conn.close()

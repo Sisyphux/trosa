@@ -37,12 +37,12 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 | 业务数据 | PostgreSQL 的 `identity`、`core`、`trosa`、`sela`、`audit` 是正式事实源；兼容层通过用户作用域映射旧 `customers`、`contacts`、`follow_up_logs`、`reminders`、`inbox_items` 形状。 | `TRADE_OS_DATABASE_URL` 是正式写入边界；`CRM_DB_PATH` 仅用于 SQLite 隔离/导入演练/明确批准的回滚，不把 Excel 变成同步源。 |
 | 关系闭环 | 客户/联系人 → 沟通事实 → 明确待办 → Today/日历 → 新事实。 | 沟通可以没有下一步；待办必须有动作和日期。 |
 | 保护与恢复 | `db.py` 负责 PostgreSQL 启动迁移、兼容层和来源审计；正式备份由 PostgreSQL logical dump + 附件 bundle 完成，`undo_actions` 保存冲突感知的操作快照。 | 改写入逻辑时必须保留用户隔离、来源、操作日志、undo、外键/唯一约束与可恢复备份。 |
-| Sela | 通过 Bearer token 调用 `/api/integrations/sela/health`、`/exclusions`、`/sync`；`sela-v1` 在一个 PostgreSQL 事务中精确匹配身份、记录已确认外联，并以幂等键防重。 | Sela 不直接读写 PostgreSQL 或 SQLite；多重命中或身份冲突必须返回 `REVIEW`，不能猜测归属。 |
+| Sela | 通过 Bearer token 调用 `/health`、`/exclusions`、`/prospects`、`/reply`、`/follow-up` 及受限的 needs/capture 接口；prospect/exclusion 使用 `sela-v2`，follow-up 使用 `sela-follow-up-v1`，在 PostgreSQL 事务中精确匹配身份并以幂等键防重。 | Sela 不直接读写 PostgreSQL 或 SQLite；多重命中或身份冲突必须返回 `REVIEW`，不能猜测归属。 |
 
 ### 已冻结或不应扩张的旧能力
 
 - **网站监控、客户 AI 研究/推荐**：历史数据保留，但已从用户模块和 Inbox 活动信号中冻结；不恢复为核心流程。
-- **15/30/60 天自动开发节点**：保留兼容数据与独立接口，但不进入 Today；不要把它们重新混入人工待办。
+- **15/30/60 天自动开发节点**：历史行仅保留用于数据/迁移审计；正式运行不再创建、展示或操作，不要把它们重新混入人工待办。
 - **旧式客户等级、阶段、状态、信息缺口、手动排序和大量动态视图**：历史兼容可保留，默认界面不应继续增加依赖；先降级为次级信息，再决定是否停止暴露。
 - **开发信、批量操作、邮箱可发送性复核、本周工作和 Excel 入口**：保留可用性与数据兼容，不做下一阶段的产品扩张。是否删除前须先看真实使用和导出/审计依赖。
 - **前端 Pi 聊天运行时**：已移除。保留的 `/api/agent/*` 是给上层 Agent 的原子工具和确认式提案，不应重新引入独立前端 Agent。
@@ -53,7 +53,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 |---|---|---|
 | 保留并维护 | 客户、联系人、时间线、明确待办、Today、日历、Search、Inbox、归档/恢复、导入导出、备份 | 这是不依赖模型也能完成日常工作的闭环。任何改动先保护它。 |
 | 简化 | Customer 工作区、沟通记录入口、Today 完成动作、Inbox 手工回复、搜索结果、客户筛选 | 当前把同一工作分散到多处，且旧 CRM 元数据压过“刚发生什么、现在做什么”。 |
-| 冻结 | 网站监控、AI 研究、自动开发节点在 Today 中的呈现、批量经营工具继续扩张 | 已有明确代码/产品口径将前两项冻结，其他项低频且会重新引入状态负担。 |
+| 冻结 | 网站监控、客户 AI 研究/推荐、自动开发节点运行时、批量经营工具继续扩张 | 这些能力已退出正式运行面；历史表、字段和迁移记录只为数据恢复与审计保留。 |
 | 未来删除候选 | 默认客户列表中的等级/状态批量维护、旧开发信专属录入、未被使用的复杂视图 | **不是现在删除字段或接口。** 先隐藏默认入口、记录 60–90 天使用情况、确认没有导出/审计引用后，再做单独迁移与回滚计划。 |
 | 交给 Sela / AI | 已确认外联的同步、来源/时间/渠道/身份证据预填、去重、沟通摘要和明确事实提取、低置信度匹配候选 | Sela 负责受限自动采集与已确认外联；AI 只生成草稿和候选。客户归属、下一步动作/日期、任何商业承诺始终由人确认。 |
 
@@ -75,7 +75,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 
 **当前问题**
 
-Customer 的沟通表单、Today 的完成与记录、Inbox 的“记录客户回复”各自拥有动作。用户重复选择渠道、方向、日期、客户和下一步；同一事实也可能被记录两次。虽然 `POST /api/customers/<id>/follow_history` 已会自动完成匹配的到期待办、关闭同客户自动开发节点、建立下一待办并清除相关 Inbox 信号，但它没有被所有入口作为唯一终点。
+Customer 的沟通表单、Today 的完成与记录、Inbox 的“记录客户回复”各自拥有动作。用户重复选择渠道、方向、日期、客户和下一步；同一事实也可能被记录两次。虽然 `POST /api/customers/<id>/follow_history` 已会自动完成匹配的到期待办、建立下一待办并清除相关 Inbox 信号，但它没有被所有入口作为唯一终点。
 
 **目标状态**
 
@@ -91,7 +91,7 @@ Sela/扩展提供的准确来源、时间、渠道、联系人和原文只做预
 
 - 页面：Customer 工作区、Today 右侧焦点区、Inbox “客户回复”。
 - 前端：`app/static/index.html`、`app/static/app.js`；仅在需要时微调 `style.css` 或 `visual-v2.css`。
-- 复用的写入 API：`POST /api/customers/<customer_id>/follow_history`（`app.py`）；保留 `POST /api/inbox/<item_id>/record-reply` 以兼容现有条目，第一阶段改为打开共同确认入口而非删除接口。
+- 复用的写入 API：`POST /api/customers/<customer_id>/follow_history`（`app.py`）；`POST /api/inbox/<item_id>/record-reply` 仅处理仍在运行的客户回复条目并复用共同确认入口。
 - 保护测试：`tests/test_risk_regressions.py`、`tests/test_browser_extension.py`；必要时为该共同路径新增少量端到端 API 回归。
 
 **最小修改范围**
@@ -218,4 +218,4 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 
 ## 明天直接开始
 
-从共享业务写入开始：在隔离数据库中让 UI、现有 `/api/agent/*` 与未来 Gateway 共同复用沟通、创建待办和完成待办的事务规则；不要先改等级、筛选、表结构或部署脚本。
+从共享业务写入开始：在隔离数据库中让 UI、现有 `/api/agent/*` 与当前 Gateway 共同复用沟通、创建待办和完成待办的事务规则；不要先改等级、筛选、表结构或部署脚本。

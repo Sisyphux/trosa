@@ -20,8 +20,7 @@ if [[ ! -x "$CURL_BIN" ]]; then
   exit 1
 fi
 
-# Anchor the business database exclusion to the project root. A broad
-# "data" pattern also hides Pi's provider catalog under node_modules/**/data.
+# Anchor the business database exclusion to the project root.
 rsync -a --delete \
   --exclude '.git' \
   --exclude '.env' \

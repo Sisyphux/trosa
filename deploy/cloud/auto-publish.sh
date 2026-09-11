@@ -324,7 +324,7 @@ public_ok=0
 public_body=""
 for attempt in 1 2 3 4 5 6; do
   public_body="$(curl --fail --silent --show-error --max-time 10 "$PUBLIC_HEALTH_URL" 2>/dev/null || true)"
-  if printf '%s' "$public_body" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' && printf '%s' "$public_body" | grep -Eq '"sela_sync_api"[[:space:]]*:[[:space:]]*"sela-v1"'; then
+  if printf '%s' "$public_body" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     public_ok=1
     break
   fi

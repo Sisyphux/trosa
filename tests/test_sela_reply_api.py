@@ -60,18 +60,6 @@ class SelaReplyApiTest(unittest.TestCase):
             '''INSERT INTO app_settings (key, value, updated_at)
                VALUES (?, ?, datetime('now', 'localtime'))''',
             (
-                'integration_token:prospecting_lab:hamid',
-                json.dumps({
-                    'token_sha256': hashlib.sha256(TOKEN.encode('utf-8')).hexdigest(),
-                    'enabled': True,
-                    'user': 'hamid',
-                }),
-            ),
-        )
-        conn.execute(
-            '''INSERT INTO app_settings (key, value, updated_at)
-               VALUES (?, ?, datetime('now', 'localtime'))''',
-            (
                 'integration_token:sela:hamid',
                 json.dumps({
                     'token_sha256': hashlib.sha256(TOKEN.encode('utf-8')).hexdigest(),
@@ -101,9 +89,25 @@ class SelaReplyApiTest(unittest.TestCase):
         return result
 
     def post_outbound(self, body):
+        outreach = body.get('outreach') or {}
+        prospect = {
+            'source_id': body['candidate_id'],
+            'company': body.get('company'),
+            'country': body.get('country'),
+            'website': body.get('website'),
+            'business_type': body.get('business_type'),
+            'source_run': body.get('source_run'),
+            'contact': body.get('contact') or {},
+            'outreach_status': outreach.get('status'),
+            'subject': outreach.get('subject'),
+            'email_draft': outreach.get('content'),
+            'sent_at': outreach.get('sent_at'),
+            'gmail_message_id': body.get('gmail_message_id'),
+            'gmail_thread_id': body.get('gmail_thread_id'),
+        }
         return self.client.post(
-            '/api/integrations/sela/sync',
-            json=body,
+            '/api/integrations/sela/prospects',
+            json={'prospect': prospect, 'idempotency_key': body['idempotency_key']},
             headers=self.headers(body['idempotency_key']),
         )
 

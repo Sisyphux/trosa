@@ -78,6 +78,9 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0016_postgres_user_scoped_customer_payloads.sql'),
         os.path.join(root, 'migrations', '0017_trosa_agent_prospect_profiles.sql'),
         os.path.join(root, 'migrations', '0018_trosa_business_exclusions.sql'),
+        os.path.join(root, 'migrations', '0019_retire_frozen_compat_surfaces.sql'),
+        os.path.join(root, 'migrations', '0020_customer_state_facts.sql'),
+        os.path.join(root, 'migrations', '0021_formal_business_read_models.sql'),
     )
 
 
@@ -1017,6 +1020,13 @@ USER_TABLE_SQL = [
         attention_reason TEXT DEFAULT '',
         attention_updated_at TEXT DEFAULT '',
         attention_review_date TEXT DEFAULT '',
+        -- Only durable, user-authored account classification lives here.
+        -- Contact and next-action state are derived from communications and
+        -- open dated reminders; the old status/customer_type/attention
+        -- columns below remain solely for on-disk migration compatibility.
+        business_stage TEXT DEFAULT '' CHECK(business_stage IN ('', '成交', '流失')),
+        business_role TEXT DEFAULT '' CHECK(business_role IN ('', '中间商', '终端')),
+        customer_judgment TEXT DEFAULT '',
         is_pinned INTEGER DEFAULT 0,
         pinned_order INTEGER DEFAULT 0,
         pinned_at TEXT DEFAULT '',
@@ -1182,34 +1192,6 @@ USER_TABLE_SQL = [
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL
     )
     ''',
-    # 背调报告
-    '''
-    CREATE TABLE IF NOT EXISTS research_reports (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER NOT NULL UNIQUE,
-        summary TEXT DEFAULT '',
-        company_info TEXT DEFAULT '',
-        key_findings TEXT DEFAULT '',
-        needs_analysis TEXT DEFAULT '',
-        cooperation_value TEXT DEFAULT '',
-        raw_input TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-    )
-    ''',
-    # 用户从外部模型带回、主动保存的分析结果；与系统生成报告分开保存。
-    '''
-    CREATE TABLE IF NOT EXISTS external_analysis_notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER NOT NULL,
-        content TEXT NOT NULL,
-        source TEXT DEFAULT 'external_model',
-        created_at TEXT DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-    )
-    ''',
     # A source-scoped prospect profile is the durable hand-off from an
     # autonomous research agent. It carries only agent-native research metadata
     # and suppression state; identity, contacts, delivery, replies and tasks
@@ -1261,44 +1243,6 @@ USER_TABLE_SQL = [
     )
     ''',
     'CREATE INDEX IF NOT EXISTS idx_business_exclusions_active ON business_exclusions(legacy_user_id, is_active, updated_at DESC)',
-    # AI keeps a concise, auditable working understanding instead of repeatedly
-    # regenerating a long customer report from scratch.
-    '''
-    CREATE TABLE IF NOT EXISTS customer_understandings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER NOT NULL UNIQUE,
-        current_summary TEXT DEFAULT '',
-        recent_change TEXT DEFAULT '',
-        open_loops TEXT DEFAULT '[]',
-        action_state TEXT DEFAULT 'hold' CHECK(action_state IN ('act', 'wait', 'hold')),
-        action_reason TEXT DEFAULT '',
-        source_activity_id INTEGER,
-        version INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-        FOREIGN KEY (source_activity_id) REFERENCES follow_up_logs(id) ON DELETE SET NULL
-    )
-    ''',
-    '''
-    CREATE TABLE IF NOT EXISTS ai_recommendations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER NOT NULL,
-        understanding_version INTEGER DEFAULT 0,
-        content TEXT NOT NULL,
-        reason TEXT DEFAULT '',
-        source_activity_id INTEGER,
-        review_status TEXT DEFAULT 'hold' CHECK(review_status IN ('display', 'rewrite', 'hold')),
-        user_response TEXT DEFAULT '',
-        user_modified_content TEXT DEFAULT '',
-        executed_action TEXT DEFAULT '',
-        outcome TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now', 'localtime')),
-        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
-        FOREIGN KEY (source_activity_id) REFERENCES follow_up_logs(id) ON DELETE SET NULL
-    )
-    ''',
     # 操作日志
     '''
     CREATE TABLE IF NOT EXISTS operation_logs (
@@ -1438,7 +1382,6 @@ USER_TABLE_SQL = [
         status TEXT DEFAULT 'open' CHECK(status IN ('open', 'archived', 'resolved')),
         created_at TEXT DEFAULT (datetime('now', 'localtime')),
         resolved_at TEXT DEFAULT '',
-        snoozed_until TEXT DEFAULT '',
         resolution_reason TEXT DEFAULT '',
         resolution_note TEXT DEFAULT '',
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
@@ -1515,21 +1458,6 @@ USER_TABLE_SQL = [
         next_check_at TEXT DEFAULT ''
     )
     ''',
-    # 官网监控日志
-    '''
-    CREATE TABLE IF NOT EXISTS web_monitor_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_id INTEGER NOT NULL,
-        url TEXT DEFAULT '',
-        status TEXT DEFAULT 'ok' CHECK(status IN ('ok', 'error', 'changed')),
-        content_hash TEXT DEFAULT '',
-        content_snippet TEXT DEFAULT '',
-        change_summary TEXT DEFAULT '',
-        checked_at TEXT DEFAULT (datetime('now', 'localtime')),
-        reminder_id INTEGER,
-        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
-    )
-    ''',
     # 客户文件：挂在客户资料下的附件，元数据入库、二进制文件落盘
     # （uploads/customer_files/）。数据库保留来源、校验与归属信息，
     # 文件本体由备份清单单独校验并恢复。
@@ -1574,6 +1502,9 @@ USER_MIGRATIONS = {
         'attention_reason': "TEXT DEFAULT ''",
         'attention_updated_at': "TEXT DEFAULT ''",
         'attention_review_date': "TEXT DEFAULT ''",
+        'business_stage': "TEXT DEFAULT ''",
+        'business_role': "TEXT DEFAULT ''",
+        'customer_judgment': "TEXT DEFAULT ''",
         'is_pinned': "INTEGER DEFAULT 0",
         'pinned_order': "INTEGER DEFAULT 0",
         'pinned_at': "TEXT DEFAULT ''",
@@ -1617,15 +1548,8 @@ USER_MIGRATIONS = {
         'contact_type': "TEXT DEFAULT 'person'",
     },
     'inbox_items': {
-        'snoozed_until': "TEXT DEFAULT ''",
         'resolution_reason': "TEXT DEFAULT ''",
         'resolution_note': "TEXT DEFAULT ''",
-    },
-    'research_reports': {
-        'source': "TEXT DEFAULT 'manual'",
-        'web_content': "TEXT DEFAULT ''",
-        'web_fetched_at': "TEXT DEFAULT ''",
-        'expires_at': "TEXT DEFAULT ''",
     },
     'import_unmatched_customers': {
         'unmatched_hash': "TEXT DEFAULT ''",
@@ -1865,6 +1789,22 @@ def init_user_tables(user):
 
         _migrate_customer_level_constraint(c)
 
+        # Retire the old, mutually-maintained customer state model without
+        # rewriting communication or task facts.  Only terminal commercial
+        # outcomes and explicitly user-entered waiting notes become durable
+        # classification.  Everything else is calculated at read time.
+        c.execute("""UPDATE customers
+                     SET business_stage=CASE WHEN status IN ('成交', '流失') THEN status ELSE '' END
+                     WHERE COALESCE(business_stage, '')=''""")
+        c.execute("""UPDATE customers
+                     SET business_role=CASE WHEN type IN ('中间商', '终端') THEN type ELSE '' END
+                     WHERE COALESCE(business_role, '')=''""")
+        c.execute("""UPDATE customers
+                     SET customer_judgment=attention_reason
+                     WHERE COALESCE(customer_judgment, '')=''
+                       AND attention_state='custom'
+                       AND trim(COALESCE(attention_reason, ''))<>''""")
+
         merged_contacts = _merge_duplicate_contact_emails(c)
         if merged_contacts:
             logger.info(f'{user}: 已合并 {merged_contacts} 条重复邮箱联系人')
@@ -1890,10 +1830,6 @@ def init_user_tables(user):
                      ON email_delivery_events(lower(trim(email)), occurred_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_email_verification_jobs_next_run
                      ON email_verification_jobs(status, next_run_at)''')
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_ai_recommendations_customer_time
-                     ON ai_recommendations(customer_id, created_at DESC)''')
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_external_analysis_notes_customer_time
-                     ON external_analysis_notes(customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_prospect_profiles_customer
                      ON agent_prospect_profiles(customer_id, updated_at DESC)''')
         # Match the high-frequency dashboard, Inbox and customer-list queries.
@@ -1919,8 +1855,6 @@ def init_user_tables(user):
                      ON outreach_emails(is_reported, sent_date, customer_id)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_inbox_status_type_customer
                      ON inbox_items(status, item_type, customer_id, created_at DESC)''')
-        c.execute('''CREATE INDEX IF NOT EXISTS idx_web_monitor_customer_status_date
-                     ON web_monitor_logs(customer_id, status, checked_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_proposals_pending
                      ON agent_proposals(status, customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_gateway_idempotency_key

@@ -109,7 +109,7 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
    使用 `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` 生成会话密钥，并将环境文件权限设为 `600`。用户首次进入生产登录页时创建自己的 6 位访问码；本地开发模式仍可选择账号后直接进入。
 
-3. AI、官网监控和邮箱 SMTP 复核均为可选能力。核心 CRM 上线验收不要求模型密钥。上线后管理员也可在「设置 → AI API 快速接入」填写并测试共享模型；设置页会把密钥保存到 `/var/lib/trade-os/ai-config.env`（权限 600），不会写入 PostgreSQL。仍可使用 `/etc/trade-os/trade-os.env` 环境变量方式，修改环境文件后重启服务。
+3. AI 官网智能导入和邮箱 SMTP 复核均为可选能力。核心 CRM 上线验收不要求模型密钥。上线后管理员也可在「设置 → AI API 快速接入」填写并测试共享模型；设置页会把密钥保存到 `/var/lib/trade-os/ai-config.env`（权限 600），不会写入 PostgreSQL。仍可使用 `/etc/trade-os/trade-os.env` 环境变量方式，修改环境文件后重启服务。
 
 4. 将 `deploy/trade-os.service` 复制到 `/etc/systemd/system/`，按实际账号、项目目录、虚拟环境和数据目录调整：
 
@@ -165,7 +165,7 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 - 重启服务器后 `trade-os` 与 `cloudflared` 自动恢复。
 - 异地 PostgreSQL dump 与附件 bundle 已完成一次真实恢复演练。
 - 主机断电或故障后，备用机可依据最近一次校验通过的快照恢复为唯一主机；没有两台主机同时运行或写入同一数据目录。
-- 如启用 AI、官网监控或 SMTP 复核，再单独验收其网络、密钥、失败降级和数据范围。
+- 如启用 AI 官网智能导入或 SMTP 复核，再单独验收其网络、密钥、失败降级和数据范围。
 
 ## 当前容量边界
 

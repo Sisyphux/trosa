@@ -6,8 +6,6 @@ LLM 分析引擎 - 所有 AI 功能共用一个当前生效的连接
 import os
 import sys
 import json
-import hashlib
-import difflib
 import re
 import urllib.request
 import urllib.error
@@ -147,7 +145,6 @@ _AI_CONFIG_KEYS = (
     'DASHSCOPE_API_KEY', 'DASHSCOPE_BASE_URL', 'DASHSCOPE_MODEL',
     'ZHIPU_API_KEY', 'ZHIPU_BASE_URL', 'ZHIPU_MODEL',
     'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_MODEL',
-    'VISION_API_KEY', 'VISION_BASE_URL', 'VISION_MODEL',
     'LM_STUDIO_URL', 'LM_STUDIO_MODEL',
     'OLLAMA_URL', 'OLLAMA_MODEL',
 )
@@ -227,10 +224,6 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-VISION_BASE_URL = os.environ.get("VISION_BASE_URL") or OPENAI_BASE_URL
-VISION_API_KEY = os.environ.get("VISION_API_KEY") or OPENAI_API_KEY
-VISION_MODEL = os.environ.get("VISION_MODEL") or "gpt-4o-mini"
-
 # 选择使用哪个后端：lmstudio / ollama / openai / auto（自动检测）
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "auto")
 
@@ -273,7 +266,7 @@ _AI_PROVIDER_IDS = tuple(_AI_PROVIDERS.keys())
 def _runtime_ai_config():
     """Refresh the small AI config surface so settings changes apply immediately."""
     global LLM_BACKEND, LM_STUDIO_URL, LM_STUDIO_MODEL, OLLAMA_BASE_URL, OLLAMA_MODEL
-    global OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, VISION_BASE_URL, VISION_API_KEY, VISION_MODEL
+    global OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
     global DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
     global DASHSCOPE_API_KEY, DASHSCOPE_BASE_URL, DASHSCOPE_MODEL
     global ZHIPU_API_KEY, ZHIPU_BASE_URL, ZHIPU_MODEL
@@ -285,9 +278,6 @@ def _runtime_ai_config():
     OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY') or ''
     OPENAI_BASE_URL = os.environ.get('OPENAI_BASE_URL') or 'https://api.openai.com/v1'
     OPENAI_MODEL = os.environ.get('OPENAI_MODEL') or 'gpt-4o-mini'
-    VISION_BASE_URL = os.environ.get('VISION_BASE_URL') or OPENAI_BASE_URL
-    VISION_API_KEY = os.environ.get('VISION_API_KEY') or OPENAI_API_KEY
-    VISION_MODEL = os.environ.get('VISION_MODEL') or 'gpt-4o-mini'
     DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY') or ''
     DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL') or 'https://api.deepseek.com'
     DEEPSEEK_MODEL = os.environ.get('DEEPSEEK_MODEL') or 'deepseek-chat'
@@ -356,7 +346,7 @@ def get_ai_config_status():
         # Screenshot recognition uses the same selected connection. The
         # model still has to support image input; the status deliberately
         # describes configuration, not capability.
-        'vision_configured': bool(VISION_API_KEY) or shared_configured,
+        'vision_configured': shared_configured,
         'config_source': '快速接入配置' if os.path.isfile(_AI_CONFIG_FILE) else '环境变量',
         'providers': providers,
     }
@@ -684,22 +674,8 @@ def extract_text_from_image(image_data_url: str) -> str:
     _runtime_ai_config()
     if not image_data_url.startswith('data:image/') or ';base64,' not in image_data_url:
         return "[ERROR_VISION] 图片格式无效"
-    # Keep an explicitly configured legacy vision triplet working for older
-    # deployments, but let the settings page or any explicit shared LLM
-    # configuration take precedence so new installs really use one connection.
-    legacy_vision_key = str(os.environ.get('VISION_API_KEY') or '').strip()
     provider = _resolve_ai_provider()
-    shared_configured = os.path.isfile(_AI_CONFIG_FILE) or (
-        str(os.environ.get('LLM_BACKEND') or '').strip().lower() in _AI_PROVIDER_IDS
-    ) or any(str(os.environ.get(name) or '').strip() for name in (
-        'DEEPSEEK_API_KEY', 'DASHSCOPE_API_KEY', 'ZHIPU_API_KEY', 'OPENAI_API_KEY',
-    ))
-    if legacy_vision_key and not shared_configured:
-        provider = 'openai'
-        api_key = legacy_vision_key
-        base_url = str(os.environ.get('VISION_BASE_URL') or OPENAI_BASE_URL).strip().rstrip('/')
-        model = str(os.environ.get('VISION_MODEL') or OPENAI_MODEL).strip()
-    elif provider:
+    if provider:
         api_key, base_url, model = _ai_provider_values(provider)
     else:
         return "[ERROR_VISION] 未配置共享 AI 接口。请先在设置中完成 AI API 快速接入。"
@@ -863,7 +839,7 @@ def ask_llm(prompt: str) -> str:
     - LLM_BACKEND=openai   → 只用 OpenAI
     - LLM_BACKEND=lmstudio → 只用 LM Studio
     - LLM_BACKEND=ollama   → 只用 Ollama
-    - LLM_BACKEND=auto     → 兼容模式：先选出一套可用连接，并让所有 AI 功能共用它
+    - LLM_BACKEND=auto     → 自动选择一套可用连接，并让所有 AI 功能共用它
     """
     _runtime_ai_config()
     if LLM_BACKEND == "deepseek":
@@ -1572,159 +1548,3 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
             return finish(browser_text)
         meta.update(error_code='unknown', error_message=f'读取网站失败：{str(exc)[:120]}')
         return finish('')
-
-
-def compute_text_similarity(text1: str, text2: str) -> float:
-    """
-    使用 SequenceMatcher 计算两段文本的相似度
-    返回 0.0 ~ 1.0 之间的浮点数，越大越相似
-    """
-    if not text1 or not text2:
-        return 0.0
-    matcher = difflib.SequenceMatcher(None, text1, text2)
-    return matcher.ratio()
-
-
-def hash_content(text: str) -> str:
-    """对文本内容计算 MD5 哈希，返回 32 位十六进制字符串"""
-    return hashlib.md5(text.encode('utf-8')).hexdigest()
-
-
-def check_website_changes_by_level(db_path: str, levels: list, max_changes: int = 10) -> dict:
-    """
-    按客户等级分层检查官网变化
-    
-    参数:
-        db_path: SQLite 数据库路径；PostgreSQL 演练模式下由当前用户连接工厂决定数据源
-        levels: 要检查的客户等级列表，如 ['A', 'B'] 或 ['C+']
-        max_changes: 最大变化提醒数
-    
-    返回: {'checked': N, 'changed': N, 'errors': N, 'reminders_created': N}
-    """
-    import sqlite3
-    from datetime import datetime, timedelta
-    from db import get_db, postgres_mode
-    
-    result = {'checked': 0, 'changed': 0, 'errors': 0, 'reminders_created': 0}
-    
-    # Keep the legacy path for production/local SQLite, but do not let this
-    # background feature silently open the old file when the unified backend
-    # is explicitly enabled.
-    using_postgres = postgres_mode()
-    conn = get_db() if using_postgres else sqlite3.connect(db_path)
-    if not using_postgres:
-        conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    
-    # 查询目标客户
-    placeholders = ','.join(['?' for _ in levels])
-    c.execute(f'''SELECT * FROM customers 
-                  WHERE website IS NOT NULL AND website != '' 
-                  AND level IN ({placeholders})
-                  AND (is_deleted = 0 OR is_deleted IS NULL)
-                  ORDER BY 
-                    CASE level 
-                        WHEN 'A' THEN 1 
-                        WHEN 'B' THEN 2 
-                        WHEN 'C+' THEN 3 
-                        WHEN 'C' THEN 4 
-                        ELSE 5 
-                    END''', levels)
-    customers = c.fetchall()
-    
-    today = datetime.now().strftime('%Y-%m-%d')
-    
-    for customer in customers:
-        customer = dict(customer)
-        if result['reminders_created'] >= max_changes:
-            break
-        
-        customer_id = customer['id']
-        website = customer['website']
-        company = customer.get('company', '') or customer.get('name', '')
-        
-        # 抓取当前官网内容
-        current_text = fetch_website_content(website)
-        current_hash = hash_content(current_text) if current_text else ''
-        
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        if not current_text:
-            # 网站不可达
-            c.execute('''INSERT INTO web_monitor_logs 
-                         (customer_id, url, status, content_hash, checked_at)
-                         VALUES (?, ?, 'error', ?, ?)''',
-                      (customer_id, website, current_hash, now_str))
-            result['errors'] += 1
-            result['checked'] += 1
-            continue
-        
-        # 查找上次记录
-        c.execute('''SELECT * FROM web_monitor_logs 
-                     WHERE customer_id = ? AND status = 'ok'
-                     ORDER BY checked_at DESC LIMIT 1''', (customer_id,))
-        last_log = c.fetchone()
-        if last_log:
-            last_log = dict(last_log)
-        
-        if last_log and last_log['content_hash']:
-            last_hash = last_log['content_hash']
-            
-            if current_hash != last_hash:
-                # 内容有变化，计算相似度
-                last_text = last_log.get('content_snippet', '')
-                if last_text:
-                    similarity = compute_text_similarity(last_text, current_text)
-                else:
-                    similarity = 0.0
-                
-                if similarity < 0.8:
-                    # 显著变化，生成 LLM 摘要
-                    change_summary = ask_llm(
-                        f"以下是一家客户（{company}）官网的内容变化，请用一句话总结变化了什么：\n\n"
-                        f"旧内容：{last_text[:500]}\n\n新内容：{current_text[:500]}"
-                    )
-                    if change_summary.startswith("[错误"):
-                        change_summary = f"官网内容有显著变化（相似度 {similarity:.0%}）"
-                    
-                    # 创建提醒
-                    c.execute('''INSERT INTO reminders 
-                                 (customer_id, reminder_type, remind_date, content, is_done, created_at)
-                                 VALUES (?, 'web_change', ?, ?, 0, ?)''',
-                              (customer_id, today, 
-                               f"官网变化: {company} - {change_summary[:200]}",
-                               now_str))
-                    reminder_id = c.lastrowid
-                    
-                    c.execute('''INSERT INTO web_monitor_logs 
-                                 (customer_id, url, status, content_hash, content_snippet, 
-                                  change_summary, reminder_id, checked_at)
-                                 VALUES (?, ?, 'changed', ?, ?, ?, ?, ?)''',
-                              (customer_id, website, current_hash, current_text[:500],
-                               change_summary[:500], reminder_id, now_str))
-                    result['changed'] += 1
-                    result['reminders_created'] += 1
-                else:
-                    # 微小变化，仅更新 hash
-                    c.execute('''INSERT INTO web_monitor_logs 
-                                 (customer_id, url, status, content_hash, content_snippet, checked_at)
-                                 VALUES (?, ?, 'ok', ?, ?, ?)''',
-                              (customer_id, website, current_hash, current_text[:500], now_str))
-            else:
-                # 无变化
-                c.execute('''INSERT INTO web_monitor_logs 
-                             (customer_id, url, status, content_hash, content_snippet, checked_at)
-                             VALUES (?, ?, 'ok', ?, ?, ?)''',
-                          (customer_id, website, current_hash, current_text[:500], now_str))
-        else:
-            # 首次检查，记录初始状态
-            c.execute('''INSERT INTO web_monitor_logs 
-                         (customer_id, url, status, content_hash, content_snippet, checked_at)
-                         VALUES (?, ?, 'ok', ?, ?, ?)''',
-                      (customer_id, website, current_hash, current_text[:500], now_str))
-        
-        result['checked'] += 1
-    
-    conn.commit()
-    conn.close()
-    return result

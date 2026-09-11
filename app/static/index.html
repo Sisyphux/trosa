@@ -96,7 +96,7 @@
     <details class="sidebar-tools">
       <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
-        <button type="button" onclick="switchPage('newpool')" aria-label="打开新客户" title="打开新客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">新客户</span></button>
+        <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">未建立真实沟通</span></button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
         <button type="button" onclick="switchPage('history')" aria-label="打开全部记录" title="打开全部记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">全部记录</span></button>
         <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">操作日志</span></button>
@@ -130,9 +130,6 @@
 
     <!-- ==================== DASHBOARD ==================== -->
     <div class="page-section active" id="page-dashboard">
-      <div class="compact-workbar" data-workbar-page="dashboard" aria-hidden="true">
-        <div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>今天</strong><span>今日客户工作</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button><button class="command-primary" type="button" onclick="openTodayPrimaryAction()" aria-label="记录沟通" title="记录沟通"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg></button><button class="command-icon" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div></div>
-      </div>
       <div class="page-header today-page-header">
         <div>
           <div class="today-date" id="dashDate"></div>
@@ -194,7 +191,6 @@
 
     <!-- ==================== INBOX ==================== -->
     <div class="page-section" id="page-inbox">
-      <div class="compact-workbar" data-workbar-page="inbox" aria-hidden="true"><div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>Inbox</strong><span>需要判断的事项</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="refreshInboxManually()" aria-label="刷新 Inbox" title="刷新 Inbox"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg></button><button class="command-primary" type="button" onclick="openInboxReplyModal()" aria-label="记录客户回复" title="记录客户回复"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><path d="M4 5h16v12H9l-5 4V5z"/><path d="M8 10h8M8 13h5"/></svg></button></div></div></div>
       <div class="page-header inbox-page-header">
         <div><h2>Inbox</h2><div class="page-desc">只放需要判断、且尚未被现有任务覆盖的事项</div></div>
         <div class="command-shelf is-collapsible inbox-command-shelf" aria-label="快捷操作">
@@ -212,7 +208,6 @@
           <button class="inbox-filter active" data-inbox-filter="all" onclick="setInboxFilter('all')">全部</button>
           <button class="inbox-filter" data-inbox-filter="customer_reply" onclick="setInboxFilter('customer_reply')">客户回复</button>
           <button class="inbox-filter" data-inbox-filter="browser_capture" onclick="setInboxFilter('browser_capture')">待归属沟通</button>
-          <button class="inbox-filter" data-inbox-filter="uncontacted_follow_up" onclick="setInboxFilter('uncontacted_follow_up')">未联系跟进</button>
         </div>
         <div class="inbox-list" id="inboxList"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
       </div>
@@ -220,7 +215,6 @@
 
     <!-- ==================== EXISTING CUSTOMERS ==================== -->
     <div class="page-section" id="page-customers">
-      <div class="compact-workbar" data-workbar-page="customers" aria-hidden="true"><div class="compact-workbar-inner"><div class="compact-workbar-title"><strong>客户</strong><span>所有公司与关系</span></div><div class="compact-workbar-actions"><button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg></button><button class="command-icon" type="button" onclick="exportAllContacts()" aria-label="导出联系人" title="导出联系人"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></button><button class="command-icon" type="button" onclick="openBatchAddModal()" aria-label="批量添加" title="批量添加"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg></button><button class="command-primary" type="button" onclick="openAddCustomerModal()" aria-label="添加客户" title="添加客户"><svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round"><path d="M12 5v14M5 12h14"/></svg></button></div></div></div>
       <div class="page-header customer-page-workbar">
         <div><h2>客户</h2><div class="page-desc">所有公司与关系都在这里，不需要维护固定分类</div></div>
         <div class="command-shelf is-collapsible customer-command-shelf" aria-label="快捷操作">
@@ -256,10 +250,10 @@
         <div class="customer-advanced-filters" id="customerAdvancedFilters" hidden>
           <div class="advanced-filter-grid">
             <label>国家 / 地区<input type="text" id="filterCountry" placeholder="例如：阿联酋"></label>
-            <label>客户类型<select id="filterType"><option value="">全部</option><option value="中间商">中间商</option><option value="终端">终端</option></select></label>
+            <label>业务角色<select id="filterBusinessRole"><option value="">全部</option><option value="中间商">中间商</option><option value="终端">终端</option></select></label>
             <label>行业领域<input type="text" id="filterField" placeholder="可自由填写"></label>
             <label>客户等级<select id="filterLevel"><option value="">全部</option><option>A</option><option>B</option><option>C</option><option>D</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>C+</option><option>C-</option><option>D+</option><option>D-</option></select></label>
-            <label>当前状态<select id="filterAttention"><option value="">全部</option><option value="waiting_reply">等待回复</option><option value="no_response">跟进后未回复</option><option value="no_near_term_need">近期无需求</option><option value="monitoring">暂时观察</option></select></label>
+            <label>人工判断<select id="filterJudgment"><option value="">全部</option><option value="yes">有记录</option><option value="no">未记录</option></select></label>
             <label>下一步<select id="filterNextState"><option value="">全部</option><option value="scheduled">已有下一步</option><option value="none">尚无下一步</option><option value="overdue">下一步已逾期</option></select></label>
             <label>至少未联系<input type="number" id="filterDaysMin" min="0" placeholder="天数"></label>
             <label>最多未联系<input type="number" id="filterDaysMax" min="0" placeholder="天数"></label>
@@ -288,8 +282,10 @@
       </div>
     </div>
 
-    <!-- ==================== NEW CLIENT POOL ==================== -->
-    <div class="page-section" id="page-newpool">
+    <!-- Retired Newpool markup: no navigation or runtime route reaches this
+         legacy compatibility page. It is retained temporarily for a safe
+         static-bundle deletion after browser visual verification. -->
+    <div class="page-section" id="page-newpool" hidden>
       <div class="page-header">
         <h2>新客户</h2>
         <div class="page-desc">尚未产生任何有效沟通或开发邮件的潜在客户</div>
@@ -300,8 +296,8 @@
           <select class="filter-select" id="newPoolLevelFilter" onchange="loadNewPool()">
             <option value="">全部等级</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option>
           </select>
-          <select class="filter-select" id="newPoolStatusFilter" onchange="loadNewPool()">
-            <option value="">全部状态</option><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中">跟进中</option><option value="成交">成交</option><option value="流失">流失</option>
+          <select class="filter-select" id="newPoolStageFilter" onchange="loadNewPool()">
+            <option value="">全部业务阶段</option><option value="成交">成交</option><option value="流失">流失</option>
           </select>
           <button class="btn btn-primary" onclick="openAddNewCustomerModal()">+ 添加新客户</button>
           <button class="btn" onclick="openBatchAddModal()">批量导入</button>
@@ -309,20 +305,10 @@
         <div class="batch-bar" id="newPoolBatchBar">
           <span class="batch-count" id="newPoolBatchCount">已选 0 项</span>
           <button class="btn btn-sm" onclick="batchSetLevelNew()">设置等级</button>
-          <button class="btn btn-sm" onclick="batchSetStatusNew()">设置状态</button>
+          <button class="btn btn-sm" onclick="batchSetStatusNew()">设置业务阶段</button>
           <button class="btn btn-sm" onclick="batchExportEmailsNew()">导出邮箱</button>
           <button class="btn btn-sm btn-danger" onclick="batchDeleteNew()">删除</button>
           <button class="btn btn-sm" onclick="clearNewPoolSelection()" style="margin-left:auto;">取消</button>
-        </div>
-
-        <!-- 待二次开发：发过开发信但未回复，且发信满 14 天的新客户 -->
-        <div class="pool-group" id="poolGroupSecondaryDev">
-          <div class="pool-group-header">
-            <span class="pool-group-title"><span class="ui-icon ui-icon-alert" aria-hidden="true"></span>待二次开发</span>
-            <span class="pool-group-count" id="poolCountSecondaryDev">0</span>
-            <button class="btn btn-sm" onclick="exportSecondaryDevEmails()">导出邮箱</button>
-          </div>
-          <div class="pool-group-body" id="poolBodySecondaryDev"></div>
         </div>
 
         <!-- 逾期 -->
@@ -486,7 +472,7 @@
             <div class="ai-config-form" id="aiConfigForm" hidden>
               <div class="ai-config-grid">
                 <label>服务商<select class="form-control" id="aiConfigBackend" onchange="updateAiConfigProviderFields()">
-                  <option value="auto">自动选择（兼容模式）</option>
+                  <option value="auto">自动选择</option>
                   <option value="deepseek">DeepSeek</option>
                   <option value="qwen">通义千问</option>
                   <option value="glm">智谱 GLM</option>
@@ -679,18 +665,15 @@
           </div>
 
           <div class="tab-content" id="editTabTasks">
-            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>明确安排的下一步与自动开发节点分开显示。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal()">安排下一步</button></div>
+            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>只显示已明确安排、带日期的下一步。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal()">安排下一步</button></div>
             <div id="customerTasksList"></div>
-            <details class="customer-automatic-nodes" id="customerAutomaticNodes"><summary>自动 15 / 30 / 60 天节点</summary><div id="customerAutomaticNodesList"></div></details>
           </div>
 
           <div class="tab-content" id="editTabBasic">
             <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
-            <div class="form-group"><label class="form-label">国家 / 地区</label><div class="country-checkboxes" id="editCountryContainer" hidden>
-              <label class="country-checkbox"><input type="checkbox" value="中国"> 中国</label><label class="country-checkbox"><input type="checkbox" value="美国"> 美国</label><label class="country-checkbox"><input type="checkbox" value="日本"> 日本</label><label class="country-checkbox"><input type="checkbox" value="韩国"> 韩国</label><label class="country-checkbox"><input type="checkbox" value="德国"> 德国</label><label class="country-checkbox"><input type="checkbox" value="英国"> 英国</label><label class="country-checkbox"><input type="checkbox" value="法国"> 法国</label><label class="country-checkbox"><input type="checkbox" value="意大利"> 意大利</label><label class="country-checkbox"><input type="checkbox" value="西班牙"> 西班牙</label><label class="country-checkbox"><input type="checkbox" value="荷兰"> 荷兰</label><label class="country-checkbox"><input type="checkbox" value="比利时"> 比利时</label><label class="country-checkbox"><input type="checkbox" value="瑞士"> 瑞士</label><label class="country-checkbox"><input type="checkbox" value="澳大利亚"> 澳大利亚</label><label class="country-checkbox"><input type="checkbox" value="新西兰"> 新西兰</label><label class="country-checkbox"><input type="checkbox" value="加拿大"> 加拿大</label><label class="country-checkbox"><input type="checkbox" value="墨西哥"> 墨西哥</label><label class="country-checkbox"><input type="checkbox" value="巴西"> 巴西</label><label class="country-checkbox"><input type="checkbox" value="阿根廷"> 阿根廷</label><label class="country-checkbox"><input type="checkbox" value="新加坡"> 新加坡</label><label class="country-checkbox"><input type="checkbox" value="马来西亚"> 马来西亚</label><label class="country-checkbox"><input type="checkbox" value="泰国"> 泰国</label><label class="country-checkbox"><input type="checkbox" value="越南"> 越南</label><label class="country-checkbox"><input type="checkbox" value="印度"> 印度</label><label class="country-checkbox"><input type="checkbox" value="阿联酋"> 阿联酋</label><label class="country-checkbox"><input type="checkbox" value="沙特阿拉伯"> 沙特阿拉伯</label><label class="country-checkbox"><input type="checkbox" value="俄罗斯"> 俄罗斯</label><label class="country-checkbox"><input type="checkbox" value="波兰"> 波兰</label><label class="country-checkbox"><input type="checkbox" value="罗马尼亚"> 罗马尼亚</label><label class="country-checkbox"><input type="checkbox" value="其他"> 其他</label>
-            </div><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
-            <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">类型</label><select class="form-control" id="editType"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
-            <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group legacy-classification"><label class="form-label">状态（旧数据，可选）</label><select class="form-control" id="editStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
+            <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
+            <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
             <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
             <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
             <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
@@ -864,37 +847,6 @@
       </div>
       <div class="form-group add-customer-advanced exist-customer-advanced">
         <label class="form-label">国家 / 地区</label>
-        <div class="country-checkboxes" id="addExistCountryContainer" hidden>
-          <label class="country-checkbox"><input type="checkbox" value="中国"> 中国</label>
-          <label class="country-checkbox"><input type="checkbox" value="美国"> 美国</label>
-          <label class="country-checkbox"><input type="checkbox" value="日本"> 日本</label>
-          <label class="country-checkbox"><input type="checkbox" value="韩国"> 韩国</label>
-          <label class="country-checkbox"><input type="checkbox" value="德国"> 德国</label>
-          <label class="country-checkbox"><input type="checkbox" value="英国"> 英国</label>
-          <label class="country-checkbox"><input type="checkbox" value="法国"> 法国</label>
-          <label class="country-checkbox"><input type="checkbox" value="意大利"> 意大利</label>
-          <label class="country-checkbox"><input type="checkbox" value="西班牙"> 西班牙</label>
-          <label class="country-checkbox"><input type="checkbox" value="荷兰"> 荷兰</label>
-          <label class="country-checkbox"><input type="checkbox" value="比利时"> 比利时</label>
-          <label class="country-checkbox"><input type="checkbox" value="瑞士"> 瑞士</label>
-          <label class="country-checkbox"><input type="checkbox" value="澳大利亚"> 澳大利亚</label>
-          <label class="country-checkbox"><input type="checkbox" value="新西兰"> 新西兰</label>
-          <label class="country-checkbox"><input type="checkbox" value="加拿大"> 加拿大</label>
-          <label class="country-checkbox"><input type="checkbox" value="墨西哥"> 墨西哥</label>
-          <label class="country-checkbox"><input type="checkbox" value="巴西"> 巴西</label>
-          <label class="country-checkbox"><input type="checkbox" value="阿根廷"> 阿根廷</label>
-          <label class="country-checkbox"><input type="checkbox" value="新加坡"> 新加坡</label>
-          <label class="country-checkbox"><input type="checkbox" value="马来西亚"> 马来西亚</label>
-          <label class="country-checkbox"><input type="checkbox" value="泰国"> 泰国</label>
-          <label class="country-checkbox"><input type="checkbox" value="越南"> 越南</label>
-          <label class="country-checkbox"><input type="checkbox" value="印度"> 印度</label>
-          <label class="country-checkbox"><input type="checkbox" value="阿联酋"> 阿联酋</label>
-          <label class="country-checkbox"><input type="checkbox" value="沙特阿拉伯"> 沙特阿拉伯</label>
-          <label class="country-checkbox"><input type="checkbox" value="俄罗斯"> 俄罗斯</label>
-          <label class="country-checkbox"><input type="checkbox" value="波兰"> 波兰</label>
-          <label class="country-checkbox"><input type="checkbox" value="罗马尼亚"> 罗马尼亚</label>
-          <label class="country-checkbox"><input type="checkbox" value="其他"> 其他</label>
-        </div>
         <input type="text" class="form-control" id="addExistCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大">
       </div>
       <div class="form-row add-customer-advanced exist-customer-advanced">
@@ -903,7 +855,7 @@
       </div>
       <div class="form-row add-customer-advanced exist-customer-advanced">
         <div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="addExistField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
-        <div class="form-group legacy-classification"><label class="form-label">状态</label><select class="form-control" id="addExistStatus"><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中" selected>跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
+        <div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="addExistBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
       </div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴邮箱后自动检查并生成联系人</span></div></div>
@@ -993,29 +945,6 @@
   </div>
 </div>
 
-<!-- AI suggestion decision modal -->
-<div class="modal-overlay" id="inboxNoFollowModal">
-  <div class="modal inbox-decision-modal">
-    <div class="modal-header">
-      <div><div class="workspace-kicker">下一步计划</div><h3>最近还没有下一步计划</h3><p class="modal-subtitle" id="inboxNoFollowCustomer"></p></div>
-      <button class="modal-close" onclick="closeModal('inboxNoFollowModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
-    </div>
-    <div class="modal-body">
-      <input type="hidden" id="inboxNoFollowKey">
-      <input type="hidden" id="inboxNoFollowCustomerId">
-      <p class="inbox-decision-intro">可以直接确认，也可以选择常见情况或填写实际原因。当前建议会关闭；客户出现新回复、官网变化或新的分析信号时，AI 仍会结合具体情况提醒。</p>
-      <div class="form-label">常见情况（可选）</div>
-      <div class="inbox-decision-options">
-        <label><input type="radio" name="inboxNoFollowReason" value="waiting_reply"><span><strong>等待客户回复</strong><small>已经发出信息，先等待对方回应</small></span></label>
-        <label><input type="radio" name="inboxNoFollowReason" value="no_near_term_need"><span><strong>近期无需求</strong><small>客户当前没有明确采购或项目需求</small></span></label>
-        <label><input type="radio" name="inboxNoFollowReason" value="not_investing_now"><span><strong>当前不投入</strong><small>现阶段把精力放在其他客户上</small></span></label>
-      </div>
-      <div class="form-group"><label class="form-label" for="inboxNoFollowNote">实际情况（可选）</label><textarea class="form-control" id="inboxNoFollowNote" rows="3" placeholder="直接填写真实情况，例如：客户项目预计第四季度重启"></textarea><p class="form-hint">填写后将作为客户判断依据留档。</p></div>
-    </div>
-    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxNoFollowModal')">取消</button><button class="btn btn-primary" onclick="resolveInboxSuggestion()">确认暂不安排</button></div>
-  </div>
-</div>
-
 <!-- Inbox Reply Modal -->
 <div class="modal-overlay" id="inboxReplyModal">
   <div class="modal inbox-reply-modal">
@@ -1102,7 +1031,7 @@
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">等级</label><select class="form-control" id="todayQuickEditLevel"><option value="">不修改</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div>
-        <div class="form-group"><label class="form-label">状态</label><select class="form-control" id="todayQuickEditStatus"><option value="">不修改</option><option value="未建联">未建联</option><option value="已建联">已建联</option><option value="跟进中">跟进中</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
+        <div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="todayQuickEditBusinessStage"><option value="">不修改</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
       </div>
       <div class="form-group"><label class="form-label">下次跟进日期</label><input type="date" class="form-control" id="todayQuickEditNextFollowUp"></div>
       <div style="margin:16px 0 8px;border-top:1px solid var(--border);padding-top:12px;">
@@ -1161,9 +1090,6 @@
   <button type="button" data-color="pink" role="menuitem" aria-label="粉色高亮"></button>
   <button type="button" class="highlight-context-clear" data-color="clear" role="menuitem">清除</button>
 </div>
-
-
-<!-- AI Research Section (inside customer edit modal) -->
 
 
 <datalist id="industryFieldOptions">

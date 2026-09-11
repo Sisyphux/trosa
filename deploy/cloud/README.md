@@ -27,17 +27,19 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 - `GET /api/integrations/sela/health`：轻量健康检查和契约版本；
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
-- `POST /api/integrations/sela/sync`：单条已确认外联事件的事务写入。
+- `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；
+- `POST /api/integrations/sela/reply`：记录已确认的真实外联结果；
+- `POST /api/integrations/sela/follow-up`：提交需要人工核对的跟进提案。
 
-`sela-v1` 的写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
+当前 `sela-v2` 写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
 
 发布和验收顺序：
 
-1. 先通过 `deploy/cloud/publish-workbench.sh` 发布包含 `sela-v1` 的 Trosa commit。服务启动时会自动执行增量数据库迁移，既有数据不会被重建。
-2. 在 Mac 的 sela 项目中运行 `python3 tools/lab.py trosa-status`，确认结果中的 `sync_api` 为 `sela-v1`，再运行 `python3 tools/lab.py trosa-retry` 处理历史积压。
+1. 先通过 `deploy/cloud/publish-workbench.sh` 发布包含 `sela-v2` 的 Trosa commit。服务启动时会自动执行增量数据库迁移，既有数据不会被重建。
+2. 在 Mac 的 sela 项目中运行 `python3 tools/lab.py trosa-status`，确认健康检查中的 prospect/exclusion 契约版本，再按需运行对应的重试命令处理历史积压。
 3. 观察 `data/trosa_auto_sync_state.json` 和 `data/server.log`；只有成功同步的 candidate 才会从 retry queue 消失，`review` 必须人工确认。
 
-如果发布健康检查失败，发布脚本会切回上一份 release；若已经有新契约写入数据，不要把旧代码作为长期运行版本，应重新发布包含 `sela-v1` 的版本。数据库新增字段和回执表是向后兼容的，发布前不需要停掉本地 sela。
+如果发布健康检查失败，发布脚本会切回上一份 release；若已经有新契约写入数据，不要把旧代码作为长期运行版本，应重新发布包含 `sela-v2` 的版本。数据库新增字段和回执表是向后兼容的，发布前不需要停掉本地 sela。
 
 公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
 
@@ -63,30 +65,6 @@ deploy/cloud/publish-workbench.sh
 deploy/cloud/rollback-workbench.sh
 deploy/cloud/backup-workbench.sh
 ```
-
-## Hamid Pi CRM 助理
-
-Pi 是 Trosa Agent Gateway 的 CRM 调用方。Gateway 只验证 `hamid-pi`、绑定 Hamid 数据并记录 CRM 操作；不限制 Pi 的原生 shell、文件、搜索、编码或调试能力。首次启用先在 ECS 安装锁定版本的 Node 与 Pi：
-
-```bash
-sudo /opt/trade-os/current/deploy/cloud/install-pi-runtime.sh
-```
-
-然后由已登录的 Hamid 在 Trosa 的「Agent Gateway token」页面新建一个含
-`crm:read,crm:write` 的 `hamid-pi` token。把 token 和下列运行参数写入
-`/etc/trade-os/trade-os.env`（权限保持 600），再重启 `trade-os`：
-
-```text
-TROSA_PI_AGENT_ENABLED=true
-TROSA_PI_EXECUTABLE=/opt/trade-os/pi-runtime/npm/bin/pi
-TROSA_PI_PROVIDER=deepseek
-TROSA_PI_MODEL=deepseek/deepseek-v4-flash
-TROSA_PI_HOME=/var/lib/trade-os/pi-home
-TROSA_GATEWAY_URL=http://127.0.0.1:8080
-TROSA_PI_GATEWAY_TOKEN=<Hamid 的新 token>
-```
-
-不要把 token 写入仓库、release、命令历史或 sela。Gateway token 的明文唯一来源是 `/etc/trade-os/trade-os.env`；数据库只保存 SHA-256 hash。模型凭证唯一来源是 `/var/lib/trade-os/ai-config.env`，由 Trosa AI 配置加载并传给 Pi。验证必须先用 Pi 读取真实 Today，再由用户提供一条真实业务事实做一次可撤销写入；不得用虚构客户沟通作为生产验收材料。
 
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及

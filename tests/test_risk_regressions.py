@@ -341,29 +341,6 @@ class CalendarAndAccessTest(unittest.TestCase):
             else:
                 os.environ['CRM_WEEKLY_GATEWAY_TOKEN_SHA256'] = previous_digest
 
-    def test_prospecting_integration_token_is_hashed_and_least_privilege(self):
-        spec = importlib.util.spec_from_file_location('crm_app_integration_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        issued = client.post('/api/integrations/prospecting-lab/token')
-        self.assertEqual(issued.status_code, 200, issued.get_json())
-        token = issued.get_json()['token']
-        conn = db.get_system_db()
-        try:
-            stored = conn.execute('SELECT value FROM app_settings WHERE key=?',
-                                  (module._PROSPECTING_INTEGRATION_KEY,)).fetchone()['value']
-        finally:
-            conn.close()
-        self.assertNotIn(token, stored)
-        anonymous = module.app.test_client()
-        headers = {'Authorization': 'Bearer ' + token}
-        self.assertEqual(anonymous.get('/api/customers?page=1&per_page=10', headers=headers).status_code, 200)
-        self.assertEqual(anonymous.get('/api/backup/list', headers=headers).status_code, 401)
-        self.assertEqual(anonymous.delete('/api/customers/1', headers=headers).status_code, 401)
-        self.assertEqual(anonymous.get('/api/customers?page=1', headers={'Authorization': 'Bearer wrong'}).status_code, 401)
-
     def test_weekly_customer_detail_is_allowlisted_and_paginated(self):
         spec = importlib.util.spec_from_file_location('crm_app_weekly_detail_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
@@ -496,15 +473,15 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(compact_weekly['reported_customer_count'], 12)
         self.assertTrue(compact_weekly['reported_customer_pagination']['has_next'])
 
-    def test_customer_facts_summary_returns_recent_facts_status_and_gaps(self):
+    def test_customer_facts_summary_returns_recent_facts_judgment_and_gaps(self):
         spec = importlib.util.spec_from_file_location('crm_app_customer_facts_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         conn = sqlite3.connect(db.get_user_db_path('hamid'))
         try:
             conn.execute("""INSERT INTO customers
-                         (name, company, country, created_at, updated_at, attention_state, attention_reason)
-                         VALUES ('事实客户', '重复公司', '', date('now'), date('now'), 'waiting_reply', '等待客户确认规格')""")
+                         (name, company, country, created_at, updated_at, customer_judgment)
+                         VALUES ('事实客户', '重复公司', '', date('now'), date('now'), '等待客户确认规格')""")
             customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
             conn.execute("INSERT INTO customers (name, company) VALUES ('重复记录', '重复公司')")
             for index, day in enumerate(('2026-08-10', '2026-08-09', '2026-08-08', '2026-08-07')):
@@ -523,8 +500,8 @@ class CalendarAndAccessTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(len(payload['recent_facts']), 3)
         self.assertEqual(payload['recent_facts'][0]['source'], '沟通记录')
-        self.assertEqual(payload['current_status']['label'], '等待客户确认规格')
-        self.assertEqual(payload['current_status']['source'], '用户记录')
+        self.assertEqual(payload['current_judgment']['label'], '等待客户确认规格')
+        self.assertEqual(payload['current_judgment']['source'], '用户记录')
         gap_codes = {gap['code'] for gap in payload['information_gaps']}
         self.assertTrue({'missing_contact', 'missing_industry', 'missing_website', 'missing_profile', 'missing_country', 'possible_duplicate'} <= gap_codes)
         self.assertIn('缺少联系人', payload['data_quality_issues'])
@@ -562,30 +539,6 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertTrue(states[('follow', 1)])
         self.assertFalse(states[('outreach', 1)])
 
-    def test_development_nodes_are_separate_and_categorized(self):
-        """15/30/60-day nodes stay available without polluting human Today."""
-        spec = importlib.util.spec_from_file_location('crm_app_development_nodes_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        today = module._calendar_today().isoformat()
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            conn.execute("INSERT INTO customers (name, company, customer_type) VALUES ('开发节点客户', '开发节点公司', 'new')")
-            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, reminder_type) VALUES (?, '自动开发', ?, 'outreach_15天')", (customer_id, today))
-            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, reminder_type) VALUES (?, '人工跟进', ?, 'follow_up')", (customer_id, today))
-            conn.commit()
-        finally:
-            conn.close()
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        development = client.get('/api/reminders/development').get_json()
-        self.assertEqual(len(development), 1)
-        self.assertTrue(development[0]['is_automatic_development'])
-        self.assertEqual(development[0]['reminder_category_label'], '自动开发节点')
-        today_items = client.get('/api/reminders/today').get_json()
-        self.assertEqual([item['reminder_type'] for item in today_items], ['follow_up'])
-
     def test_today_frontend_keeps_customer_focus_without_development_section(self):
         """Today stays focused on explicit follow-ups and the selected customer."""
         html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
@@ -594,7 +547,6 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertIn('id="todayWideDetail"', html)
         self.assertNotIn('id="todayDevelopmentSection"', html)
         self.assertNotIn('id="statDevelopment"', html)
-        self.assertNotIn("api('/api/reminders/development')", javascript)
 
     def test_frozen_customer_intelligence_is_not_a_user_module(self):
         spec = importlib.util.spec_from_file_location('crm_app_frozen_modules_test', ROOT / 'app.py')
@@ -713,6 +665,39 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertIn(replied_id, communicated_ids)
         self.assertNotIn(outbound_id, communicated_ids)
         self.assertIn(outbound_id, uncontacted_ids)
+
+    def test_customer_facts_are_shared_by_list_summary_stats_and_sela(self):
+        """A sent email is evidence, not contact; all formal readers agree."""
+        spec = importlib.util.spec_from_file_location('crm_app_shared_facts_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, business_role, business_stage) VALUES ('统一事实', '终端', '')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("INSERT INTO outreach_emails (customer_id, subject, sent_date, reply_status) VALUES (?, '首次开发', '2026-09-01', 'pending')", (customer_id,))
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, '确认规格', '2026-09-20', 0, 'follow_up')", (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        listed = next(row for row in client.get('/api/customers?view=uncontacted').get_json()['customers'] if row['id'] == customer_id)
+        summary = client.get(f'/api/customers/{customer_id}/summary').get_json()
+        with module.app.test_request_context('/'):
+            module.g.current_user = 'hamid'
+            sela_conn = module.get_db()
+            try:
+                sela_context = module._sela_customer_context(sela_conn, customer_id)
+            finally:
+                sela_conn.close()
+        stats = client.get('/api/stats').get_json()
+        self.assertEqual(listed['contact_state'], summary['contact_state'])
+        self.assertEqual(summary['contact_state'], sela_context['customer']['contact_state'])
+        self.assertEqual(listed['next_task_date'], summary['next_task']['remind_date'])
+        self.assertEqual(summary['next_task_date'], sela_context['customer']['next_task_date'])
+        self.assertTrue(listed['waiting_reply'])
+        self.assertGreaterEqual(stats['uncontacted'], 1)
 
     def test_create_customer_rejects_empty_identity_without_writing(self):
         spec = importlib.util.spec_from_file_location('crm_app_empty_customer_test', ROOT / 'app.py')
@@ -876,39 +861,6 @@ class CalendarAndAccessTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_scheduling_uncontacted_inbox_customer_removes_the_signal(self):
-        spec = importlib.util.spec_from_file_location('crm_app_inbox_task_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        today = '2026-07-28'
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            conn.execute("INSERT INTO customers (name, customer_type, created_at, updated_at) VALUES (?, 'new', ?, ?)",
-                         ('待联系客户', today, today))
-            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute("""INSERT INTO reminders
-                         (customer_id, title, remind_date, is_done, reminder_type, created_at)
-                         VALUES (?, ?, ?, 0, 'outreach_15', ?)""",
-                         (customer_id, '开发提醒', today, today))
-            conn.commit()
-        finally:
-            conn.close()
-
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        with mock.patch.object(module, 'datetime') as mocked_datetime:
-            mocked_datetime.now.return_value = __import__('datetime').datetime(2026, 7, 28, 10, 0, 0)
-            mocked_datetime.strptime = __import__('datetime').datetime.strptime
-            before = client.get('/api/inbox').get_json()['items']
-            self.assertTrue(any(item['customer_id'] == customer_id and item['item_type'] == 'uncontacted_follow_up'
-                                for item in before))
-            response = client.post(f'/api/customers/{customer_id}/tasks',
-                                   json={'title': '再次联系客户', 'due_date': '2026-08-04'})
-            self.assertEqual(response.status_code, 201, response.get_json())
-            after = client.get('/api/inbox').get_json()['items']
-        self.assertFalse(any(item['customer_id'] == customer_id and item['item_type'] == 'uncontacted_follow_up'
-                             for item in after))
-
     def test_recording_an_inbox_reply_through_follow_history_resolves_only_that_reply(self):
         """The shared communication form must preserve the Inbox item's resolution boundary."""
         spec = importlib.util.spec_from_file_location('crm_app_shared_inbox_record_test', ROOT / 'app.py')
@@ -1026,7 +978,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(items[capture_id]['contact_name'], 'Capture Contact')
 
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
-        capture_handler = javascript[javascript.index('function recordInboxCapture'):javascript.index('function showInboxRecordUndoToast')]
+        capture_handler = javascript[javascript.index('function recordInboxCapture'):javascript.index('async function openInboxCustomer')]
         self.assertIn("customerId: item.customer_id || ''", capture_handler)
         self.assertIn("contactId: item.contact_id || ''", capture_handler)
 
@@ -1191,52 +1143,6 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(len({item['id'] for item in paged_data['customers']}), 1)
         all_search = client.get('/api/customers?search=塑料&page=1&per_page=100').get_json()
         self.assertEqual(len({(item.get('company') or item.get('name')).casefold() for item in all_search['customers']}), 6)
-
-    def test_batch_today_follow_up_removes_uncontacted_inbox_signal(self):
-        """Clicking "今天跟进" in Inbox must clear the 新客户待跟进 signal immediately.
-
-        Regression: batch_update_next_follow_up only set customers.next_follow_up,
-        but the uncontacted_follow_up inbox query ignored that field, so items
-        reappeared right after the "操作成功" toast.
-        """
-        spec = importlib.util.spec_from_file_location('crm_app_inbox_batch_follow_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        today = '2026-07-28'
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            conn.execute("INSERT INTO customers (name, customer_type, created_at, updated_at) VALUES (?, 'new', ?, ?)",
-                         ('待跟进新客户', today, today))
-            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute("""INSERT INTO reminders
-                         (customer_id, title, remind_date, is_done, reminder_type, created_at)
-                         VALUES (?, ?, ?, 0, 'outreach_15', ?)""",
-                         (customer_id, '开发提醒', today, today))
-            conn.commit()
-        finally:
-            conn.close()
-
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        with mock.patch.object(module, 'datetime') as mocked_datetime:
-            mocked_datetime.now.return_value = __import__('datetime').datetime(2026, 7, 28, 10, 0, 0)
-            mocked_datetime.strptime = __import__('datetime').datetime.strptime
-            before = client.get('/api/inbox').get_json()['items']
-            self.assertTrue(
-                any(item['customer_id'] == customer_id and item['item_type'] == 'uncontacted_follow_up'
-                    for item in before),
-                '新客户应先出现在 inbox 的"新客户待跟进"分组中'
-            )
-            # Simulate clicking "今天跟进" for the whole group.
-            response = client.post('/api/customers/batch/next_follow_up',
-                                   json={'ids': [customer_id], 'value': today})
-            self.assertEqual(response.status_code, 200, response.get_json())
-            after = client.get('/api/inbox').get_json()['items']
-        self.assertFalse(
-            any(item['customer_id'] == customer_id and item['item_type'] == 'uncontacted_follow_up'
-                for item in after),
-            '"今天跟进"操作后，该客户必须立即从"新客户待跟进"消失'
-        )
 
     def test_agent_brief_workspace_and_confirmed_task_proposal(self):
         spec = importlib.util.spec_from_file_location('crm_app_agent_tools_test', ROOT / 'app.py')
@@ -1486,7 +1392,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         body = {'action': 'record_communication', 'customer_id': customer_id, 'payload': {
             'content': 'Jay 今天确认 9 月 15 日上海见。', 'direction': 'inbound', 'activity_type': 'whatsapp',
             'follow_date': '2026-08-30', 'inbox_item_id': inbox_id, 'next_task': '提前确认会面资料',
-            'next_follow_up': '2026-09-12', 'source': 'chat_agent',
+            'next_follow_up': '2026-09-12', 'source': 'agent_gateway',
         }}
         self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + propose_token, 'Idempotency-Key': 'propose-no-write'}, json=body).status_code, 403)
         self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + read_token, 'Idempotency-Key': 'read-no-write'}, json=body).status_code, 403)
@@ -1538,147 +1444,6 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(gateway.post('/api/gateway/actions', headers={'Authorization': 'Bearer ' + write_token, 'Idempotency-Key': 'no-delete'}, json={
             'action': 'delete_customer', 'customer_id': customer_id, 'payload': {}
         }).status_code, 409)
-
-    def _legacy_chat_agent_handles_real_crm_conversations_through_gateway(self):
-        spec = importlib.util.spec_from_file_location('crm_app_chat_agent_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            conn.execute("INSERT INTO customers (name, company, attention_reason) VALUES ('Jay', 'EXION', '等待客户确认会议安排')")
-            exion_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute("INSERT INTO customers (name, company) VALUES ('Hideout', 'Hideout')")
-            hideout_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute("INSERT INTO customers (name, company) VALUES ('Acme One', 'Acme')")
-            conn.execute("INSERT INTO customers (name, company) VALUES ('Acme Two', 'Acme')")
-            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, '确认会议时间', ?, 0, 'follow_up')",
-                         (exion_id, module._calendar_today().isoformat()))
-            conn.execute("INSERT INTO follow_up_logs (customer_id, content, follow_date, direction) VALUES (?, '客户此前询问上海会面安排', '2026-08-29', 'inbound')", (exion_id,))
-            conn.commit()
-        finally:
-            conn.close()
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        today = client.post('/api/chat/agent', json={'message': '我今天有什么要做？'})
-        self.assertEqual(today.status_code, 200, today.get_json())
-        self.assertIn('EXION', today.get_json()['reply'])
-        status = client.post('/api/chat/agent', json={'message': 'EXION 最近怎么样？'})
-        self.assertEqual(status.status_code, 200, status.get_json())
-        self.assertIn('客户此前询问上海会面安排', status.get_json()['reply'])
-        record_request = {'message': '记录一下 Jay 今天确认 9 月 15 日上海见。', 'idempotency_key': 'chat-retry-record'}
-        record = client.post('/api/chat/agent', json=record_request)
-        self.assertEqual(record.status_code, 200, record.get_json())
-        self.assertTrue(record.get_json()['operations'][0]['action_id'])
-        replay = client.post('/api/chat/agent', json=record_request)
-        self.assertEqual(replay.status_code, 200, replay.get_json())
-        self.assertEqual(replay.get_json()['operations'][0]['action_id'], record.get_json()['operations'][0]['action_id'])
-        reminder = client.post('/api/chat/agent', json={'message': '下周三提醒我跟进 Hideout。'})
-        self.assertEqual(reminder.status_code, 200, reminder.get_json())
-        self.assertIn('Hideout', reminder.get_json()['reply'])
-        combined = client.post('/api/chat/agent', json={'message': 'Jay 今天确认 9 月 15 日上海见，记一下，提前三天提醒我。'})
-        self.assertEqual(combined.status_code, 200, combined.get_json())
-        combined_action = combined.get_json()['operations'][0]['action_id']
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND remind_date='2026-09-12' AND is_done=0", (exion_id,)).fetchone()[0], 1)
-        finally:
-            conn.close()
-        undone = client.post('/api/chat/agent', json={'message': '撤销刚才的操作'})
-        self.assertEqual(undone.status_code, 200, undone.get_json())
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            self.assertEqual(conn.execute('SELECT status FROM agent_actions WHERE action_id=?', (combined_action,)).fetchone()[0], 'undone')
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=? AND remind_date='2026-09-12'", (exion_id,)).fetchone()[0], 0)
-        finally:
-            conn.close()
-        ambiguous = client.post('/api/chat/agent', json={'message': '记录一下 Acme 今天确认样品。'})
-        self.assertEqual(ambiguous.status_code, 200, ambiguous.get_json())
-        self.assertTrue(ambiguous.get_json()['candidates'])
-        self.assertIn('没有修改', ambiguous.get_json()['reply'])
-        no_date = client.post('/api/chat/agent', json={'message': '提醒我跟进 Hideout。'})
-        self.assertEqual(no_date.status_code, 200, no_date.get_json())
-        self.assertIn('明确日期', no_date.get_json()['reply'])
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_actions WHERE action_type=?', ('create_task',)).fetchone()[0], 1)
-        finally:
-            conn.close()
-        amy = module.app.test_client()
-        amy.post('/api/auth/login', json={'user': 'amy'})
-        self.assertEqual(amy.post('/api/chat/agent', json={'message': '我今天有什么要做？'}).status_code, 404)
-
-    def _legacy_chat_can_delegate_to_pi_runtime_without_giving_it_db_access(self):
-        spec = importlib.util.spec_from_file_location('crm_app_pi_runtime_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        pi_events = '\n'.join([
-            json.dumps({'type': 'tool_execution_end', 'toolName': 'record_communication',
-                        'result': {'details': {'action_id': 'agact_test_runtime_1234567890',
-                                               'action_type': 'record_communication', 'undo_available': True}}}),
-            json.dumps({'type': 'message_end', 'message': {'role': 'assistant',
-                                                            'content': [{'type': 'text', 'text': '已记录 EXION 的最新沟通。'}],
-                                                            'stopReason': 'stop'}}),
-        ])
-        fake_completed = mock.Mock(returncode=0, stdout=pi_events, stderr='')
-        with mock.patch.dict(os.environ, {
-            'TROSA_PI_AGENT_ENABLED': 'true',
-            'TROSA_PI_GATEWAY_TOKEN': 'test-token',
-            'TROSA_PI_EXECUTABLE': sys.executable,
-            'CRM_SESSION_SECRET': 'must-not-reach-pi',
-        }, clear=False), mock.patch.object(module.subprocess, 'run', return_value=fake_completed) as run:
-            response = client.post('/api/chat/agent', json={'message': '帮我看看 EXION 的最新情况', 'idempotency_key': 'pi-runtime-test'})
-        self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(response.get_json()['reply'], '已记录 EXION 的最新沟通。')
-        self.assertEqual(response.get_json()['operations'][0]['action_id'], 'agact_test_runtime_1234567890')
-        command = run.call_args.args[0]
-        self.assertIn('--mode', command)
-        self.assertNotIn('--no-builtin-tools', command)
-        self.assertNotIn('--no-context-files', command)
-        self.assertIn(str(ROOT / 'pi-agent' / 'trosa-tools.ts'), command)
-        self.assertNotIn('--api-key', command)
-        runtime_env = run.call_args.kwargs['env']
-        self.assertEqual(runtime_env['TROSA_GATEWAY_TOKEN'], 'test-token')
-        self.assertNotIn('CRM_SESSION_SECRET', runtime_env)
-
-    def test_pi_runtime_starts_each_chat_turn_without_legacy_session_history(self):
-        spec = importlib.util.spec_from_file_location('crm_app_pi_isolated_turn_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        pi_events = json.dumps({
-            'type': 'message_end',
-            'message': {
-                'role': 'assistant',
-                'content': [{'type': 'text', 'text': '当前入口不处理文件搜索。'}],
-                'stopReason': 'stop',
-            },
-        })
-        fake_completed = mock.Mock(returncode=0, stdout=pi_events, stderr='')
-        with mock.patch.dict(os.environ, {
-            'TROSA_PI_AGENT_ENABLED': 'true',
-            'TROSA_PI_GATEWAY_TOKEN': 'test-token',
-            'TROSA_PI_EXECUTABLE': sys.executable,
-            'TROSA_PI_EXTENSION': str(ROOT / 'pi-agent' / 'trosa-tools.ts'),
-            'TROSA_PI_SYSTEM_PROMPT': str(ROOT / 'pi-agent' / 'system-prompt.md'),
-        }, clear=False), mock.patch.object(module.subprocess, 'run', return_value=fake_completed) as run:
-            response, status = module._run_pi_agent('检查一下 Excel 文件', request_id='pi-isolated-turn-test')
-        self.assertEqual(status, 200, response)
-        command = run.call_args.args[0]
-        self.assertIn('--no-session', command)
-        self.assertNotIn('--session', command)
-
-    def _legacy_pi_runtime_failure_is_reported_without_claiming_a_crm_write(self):
-        spec = importlib.util.spec_from_file_location('crm_app_pi_runtime_failure_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        with mock.patch.dict(os.environ, {'TROSA_PI_AGENT_ENABLED': 'true', 'TROSA_PI_GATEWAY_TOKEN': ''}, clear=False):
-            response = client.post('/api/chat/agent', json={'message': '帮我整理一下客户情况'})
-        self.assertEqual(response.status_code, 503)
-        self.assertIn('没有执行任何 CRM 修改', response.get_json()['reply'])
-        self.assertEqual(response.get_json()['operations'], [])
 
     def test_agent_timeline_and_message_search_are_composable_and_authenticated(self):
         spec = importlib.util.spec_from_file_location('crm_app_agent_search_test', ROOT / 'app.py')
@@ -1835,69 +1600,6 @@ class CalendarAndAccessTest(unittest.TestCase):
             self.assertEqual(orders[current_ids[1]], 0)
         finally:
             conn.close()
-
-    def test_agent_command_routes_reads_and_requires_confirmation_for_writes(self):
-        spec = importlib.util.spec_from_file_location('crm_app_agent_command_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            conn.execute("INSERT INTO customers (name, company, created_at, updated_at) VALUES (?, ?, date('now'), date('now'))",
-                         ('Command User', 'Command Test Co.'))
-            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.commit()
-        finally:
-            conn.close()
-
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-
-        read = client.post('/api/agent/command', json={'command': '查看 Command Test Co. 的资料和下一步'})
-        self.assertEqual(read.status_code, 200, read.get_json())
-        self.assertEqual(read.get_json()['mode'], 'read')
-        self.assertIn('Command Test Co.', read.get_json()['answer'])
-
-        task = client.post('/api/agent/command', json={'command': '给 Command Test Co. 安排确认报价数量，明天'})
-        self.assertEqual(task.status_code, 200, task.get_json())
-        self.assertIn('proposal', task.get_json(), task.get_json())
-        task_proposal = task.get_json()['proposal']
-        self.assertEqual(task.get_json()['mode'], 'proposal')
-        self.assertEqual(task_proposal['type'], 'task')
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM reminders WHERE customer_id=?", (customer_id,)).fetchone()[0], 0)
-        finally:
-            conn.close()
-        confirmed = client.post(f"/api/agent/proposals/{task_proposal['id']}/confirm")
-        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
-
-        activity = client.post('/api/agent/command', json={'command': '记录沟通到 Command Test Co.：客户回复了上次报价'})
-        self.assertEqual(activity.status_code, 200, activity.get_json())
-        activity_proposal = activity.get_json()['proposal']
-        self.assertEqual(activity_proposal['type'], 'activity')
-        cancelled = client.post(f"/api/agent/proposals/{activity_proposal['id']}/cancel")
-        self.assertEqual(cancelled.status_code, 200, cancelled.get_json())
-        conn = sqlite3.connect(db.get_user_db_path('hamid'))
-        try:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM follow_up_logs WHERE customer_id=?", (customer_id,)).fetchone()[0], 0)
-        finally:
-            conn.close()
-
-    def test_excel_sync_rejects_paths_outside_the_current_upload(self):
-        spec = importlib.util.spec_from_file_location('crm_app_sync_test', ROOT / 'app.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        allowed = str(Path(self.tempdir.name) / 'allowed.xlsx')
-        outside = str(Path(self.tempdir.name) / 'outside.xlsx')
-        Path(allowed).write_bytes(b'placeholder')
-        Path(outside).write_bytes(b'placeholder')
-        client = module.app.test_client()
-        client.post('/api/auth/login', json={'user': 'hamid'})
-        with mock.patch.object(module, 'get_uploaded_excel_path', return_value=allowed), \
-             mock.patch.object(module, 'sync_from_excel') as sync:
-            response = client.post('/api/sync', json={'excel_path': outside})
-        self.assertEqual(response.status_code, 400)
-        sync.assert_not_called()
 
     def test_marked_customer_order_can_be_saved(self):
         spec = importlib.util.spec_from_file_location('crm_app_priority_test', ROOT / 'app.py')
@@ -2073,26 +1775,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             'dedupe_key': 'boundary-archive', 'item_type': 'customer_reply', 'customer_id': '',
         })
         self.assertEqual(archived.status_code, 200, archived.get_json())
-        snooze_bad = client.post('/api/inbox/snooze', json={
-            'dedupe_key': 'boundary-snooze', 'item_type': 'ai_suggestion',
-            'customer_id': '', 'days': 'not-an-int',
-        })
-        self.assertEqual(snooze_bad.status_code, 400, snooze_bad.get_json())
-        snoozed = client.post('/api/inbox/snooze', json={
-            'dedupe_key': 'boundary-snooze', 'item_type': 'ai_suggestion',
-            'customer_id': '', 'days': 7,
-        })
-        self.assertEqual(snoozed.status_code, 200, snoozed.get_json())
         reply = client.post('/api/inbox/reply', json={'customer_id': '', 'content': '回复'})
         self.assertEqual(reply.status_code, 400, reply.get_json())
-        suggestion = client.post('/api/inbox/resolve-suggestion', json={
-            'dedupe_key': f'ai_suggestion:{customer_id}:x', 'customer_id': 'not-an-id',
-            'reason': 'waiting_reply',
-        })
-        self.assertEqual(suggestion.status_code, 400, suggestion.get_json())
 
         malformed_batch_requests = (
-            ('/api/customers/batch/status', {'ids': [''], 'value': '跟进中'}),
+            ('/api/customers/batch/business-stage', {'ids': [''], 'value': '成交'}),
             ('/api/customers/batch/level', {'ids': [''], 'value': 'B'}),
             ('/api/customers/batch/next_follow_up', {'ids': [''], 'value': '2026-09-10'}),
             ('/api/customers/batch/follow_history', {'ids': [''], 'content': '批量记录'}),
@@ -2114,7 +1801,6 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         try:
             self.assertEqual(conn.execute('SELECT is_primary FROM contacts WHERE id=?', (contact_id,)).fetchone()[0], 0)
             self.assertIsNone(conn.execute('SELECT customer_id FROM inbox_items WHERE dedupe_key=?', ('boundary-archive',)).fetchone()[0])
-            self.assertIsNone(conn.execute('SELECT customer_id FROM inbox_items WHERE dedupe_key=?', ('boundary-snooze',)).fetchone()[0])
         finally:
             conn.close()
 
@@ -2131,7 +1817,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         client = module.app.test_client()
         self.assertEqual(client.get('/').status_code, 200)
         for path in (
-            '/app.js', '/static/app.js', '/style.css', '/visual-v2.css',
+            '/app.js', '/style.css', '/visual-v2.css',
             '/icons/phosphor/check.svg', '/assets/workspace-tree-lines-v2.webp', '/favicon.ico',
         ):
             response = client.get(path)
@@ -2140,7 +1826,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             response.close()
             self.assertGreater(len(body), 0, path)
         with self.assertLogs(module.logger, level='WARNING') as captured:
-            missing = client.get('/static/definitely-missing.js')
+            missing = client.get('/definitely-missing.js')
         self.assertEqual(missing.status_code, 404)
         missing.close()
         self.assertTrue(any('definitely-missing.js' in line for line in captured.output))
@@ -2151,13 +1837,16 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0018_trosa_business_exclusions.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0021_formal_business_read_models.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
         self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
         self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', tool_source)
         self.assertIn('0017_trosa_agent_prospect_profiles.sql', tool_source)
         self.assertIn('0018_trosa_business_exclusions.sql', tool_source)
+        self.assertIn('0019_retire_frozen_compat_surfaces.sql', tool_source)
+        self.assertIn('0020_customer_state_facts.sql', tool_source)
+        self.assertIn('0021_formal_business_read_models.sql', tool_source)
 
     def test_postgres_legacy_date_projection_keeps_sqlite_date_shape(self):
         migration = (ROOT / 'migrations' / '0015_postgres_legacy_date_projections.sql').read_text(encoding='utf-8')
@@ -2203,7 +1892,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertFalse(legacy_bool('0'))
         self.assertTrue(legacy_bool('yes'))
         self.assertTrue(legacy_bool('', True))
-        self.assertEqual(compat_dedupe_key('amy', 'ai_suggestion:1:hold'), 'compat:amy:ai_suggestion:1:hold')
+        self.assertEqual(compat_dedupe_key('amy', 'historical_inbox:1:hold'), 'compat:amy:historical_inbox:1:hold')
         digest = hashlib.md5('agent-gateway:amy:write:create_task:key-1'.encode()).hexdigest()
         self.assertEqual(compat_uuid('agent-gateway:amy:write:create_task:key-1'), uuid.UUID(digest))
         parsed = parse_time('2026-09-04T12:00:00')
@@ -2452,8 +2141,6 @@ class PostgresCompatibilityRegressionTest(unittest.TestCase):
 
     def test_conflict_clauses_are_removed_for_every_writable_compat_view(self):
         statements = (
-            "INSERT INTO customer_understandings (customer_id, version) VALUES (?, ?) "
-            "ON CONFLICT(customer_id) DO UPDATE SET version=excluded.version",
             "INSERT INTO inbox_items (item_type, dedupe_key) VALUES (?, ?) "
             "ON CONFLICT(dedupe_key) DO UPDATE SET status='resolved'",
             "INSERT OR IGNORE INTO contacts (customer_id, name) VALUES (?, ?)",
@@ -2478,8 +2165,8 @@ class PostgresCompatibilityRegressionTest(unittest.TestCase):
         self.assertRegex(translated, r"\bON\s+CONFLICT\b")
 
 
-class CustomerAiSummaryTest(unittest.TestCase):
-    """按需 AI 摘要必须兼容旧调用，并在无模型时保留事实回退。"""
+class CommunicationAssistTest(unittest.TestCase):
+    """沟通整理与 AI 配置属于可选辅助，不改变 CRM 事实。"""
 
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -2498,7 +2185,7 @@ class CustomerAiSummaryTest(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _module_client_customer(self):
-        spec = importlib.util.spec_from_file_location('crm_app_customer_ai_summary_test', ROOT / 'app.py')
+        spec = importlib.util.spec_from_file_location('crm_app_communication_assist_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         client = module.app.test_client()
@@ -2534,7 +2221,7 @@ class CustomerAiSummaryTest(unittest.TestCase):
             conn.close()
         return module, client, customer_id
 
-    def test_unknown_direction_from_old_client_is_accepted(self):
+    def test_unknown_direction_can_be_inferred_from_the_message(self):
         module, client, customer_id = self._module_client_customer()
         llm_result = json.dumps({
             'summary': '客户询问亚克力与 PS 板材。', 'needs': ['亚克力与 PS 板材'],
@@ -2549,42 +2236,6 @@ class CustomerAiSummaryTest(unittest.TestCase):
             })
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['analysis']['direction'], 'inbound')
-
-    def test_customer_summary_returns_model_result_and_legacy_alias(self):
-        module, client, customer_id = self._module_client_customer()
-        model_summary = '## 客户是谁\nSK Crafts Limited 位于英国。\n\n## 已记录沟通与需求\n客户询问亚克力与 PS 板材。'
-        with mock.patch.object(module, 'quick_chat', return_value=model_summary) as mocked:
-            response = client.post(f'/api/customers/{customer_id}/ai-summary')
-            legacy = client.post(f'/api/intelligence/analyze/{customer_id}')
-        self.assertEqual(response.status_code, 200, response.get_json())
-        payload = response.get_json()
-        self.assertEqual(payload['summary'], model_summary)
-        self.assertEqual(payload['analysis'], model_summary)
-        self.assertTrue(payload['ai_available'])
-        self.assertEqual(payload['source'], 'llm')
-        self.assertIn('SK Crafts Limited', mocked.call_args_list[0].kwargs['customer_context'])
-        self.assertEqual(legacy.status_code, 200, legacy.get_json())
-        self.assertEqual(legacy.get_json()['analysis'], model_summary)
-
-    def test_customer_summary_falls_back_to_crm_facts_without_model(self):
-        module, client, customer_id = self._module_client_customer()
-        with mock.patch.object(module, 'quick_chat', return_value='[错误] 所有 LLM 后端均不可用'):
-            response = client.post(f'/api/customers/{customer_id}/ai-summary')
-        self.assertEqual(response.status_code, 200, response.get_json())
-        payload = response.get_json()
-        self.assertFalse(payload['ai_available'])
-        self.assertEqual(payload['source'], 'crm_facts')
-        self.assertEqual(payload['summary'], payload['analysis'])
-        self.assertIn('SK Crafts Limited', payload['summary'])
-        self.assertIn('亚克力与 PS 板材', payload['summary'])
-
-    def test_customer_summary_requires_login_and_frontend_exposes_both_paths(self):
-        module, _, customer_id = self._module_client_customer()
-        anonymous = module.app.test_client()
-        self.assertEqual(anonymous.post(f'/api/customers/{customer_id}/ai-summary').status_code, 401)
-        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
-        self.assertIn("/api/customers/' + customerId + '/ai-summary", javascript)
-        self.assertIn("direction: requestedDirection", javascript)
 
     def test_ai_config_status_is_safe_and_mutations_are_admin_only(self):
         module, client, _ = self._module_client_customer()
@@ -2708,7 +2359,6 @@ class AiEngineConfigTest(unittest.TestCase):
                 os.environ.pop(key, None)
             with mock.patch.object(engine, '_AI_CONFIG_FILE', config_path), \
                     mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}):
-                os.environ['VISION_API_KEY'] = 'legacy-vision-secret'
                 engine.save_ai_config({
                     'backend': 'openai',
                     'api_key': 'shared-test-secret',

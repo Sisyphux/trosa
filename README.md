@@ -18,13 +18,20 @@ ECS PostgreSQL（正式唯一业务写入源，127.0.0.1:5432）
 /var/lib/trade-os/uploads/  客户附件与导入来源
 ```
 
-- 核心闭环：客户与联系人 → 沟通记录 → 明确待办 → 到期执行 → 新记录。
+- 核心闭环：客户与联系人 → 已确认沟通事实 / 邮件证据 → 明确待办 → 到期执行 → 新记录。
 - 核心页面：今天、Inbox、客户、本周工作；完整日历、全部记录和操作日志从场景入口进入。
 - 数据存储：正式 ECS 使用 PostgreSQL 作为业务数据唯一事实源；SQLite 仅用于隔离开发、历史导入/演练和明确批准的回滚材料。Excel 用于导入、导出和历史恢复。
 - 数据保护：正式备份由 PostgreSQL logical dump 加客户附件 bundle 组成，并在独立位置做 SHA-256 与 restore-check；应用不会在 PostgreSQL 模式下伪造 SQLite 快照。恢复前先保存当前版本，任何时刻只允许一个写入源。
 - Apple 日历：通过个人 ICS 订阅读取待办，只同步日历事件，不复制 CRM 数据库。
 - AI：可关闭的按需辅助模块，用于整理、分析和问答。关闭或未配置模型时，客户、记录、待办、Inbox、日历、导入导出和备份恢复保持完整可用。
 - iCloud：当前运行链路不包含 iCloud 数据库拉取、推送或冲突合并。
+
+### 事实与兼容边界
+
+- `trosa.customer_states` 是 `business_stage`、`business_role` 与 `customer_judgment` 的正式 PostgreSQL 事实源；旧 `status`、`type`、`attention_*` 仅为导入、恢复和历史兼容保留。
+- `follow_up_logs` 是已记录沟通事实，`outreach_emails` 是发送、投递和回复证据；它们通过同一客户事实投影提供联系状态、最近沟通、等待回复和下一步。
+- Today 只读取有动作和日期的开放任务；`outreach_*` 自动开发节点、网站监控和旧 AI 研究不参与正式运行路径。
+- “未建立真实沟通”是客户列表筛选，不是第二个 New Customer 数据域；已发送但未获回复的开发邮件仍是邮件证据，不能被误写成客户已联系。
 
 ## 项目结构
 

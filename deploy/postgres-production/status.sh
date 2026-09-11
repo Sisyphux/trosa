@@ -28,14 +28,14 @@ else
   printf '%s\n' 'migrations=pending'
 fi
 
-if has_table core.companies && has_table sela.prospects && has_table trosa.accounts && has_table core.contact_methods; then
-  psql_query "select 'orphans=' || ((select count(*) from sela.prospects p left join core.companies c on c.id=p.company_id where c.id is null) + (select count(*) from trosa.accounts a left join core.companies c on c.id=a.company_id where c.id is null) + (select count(*) from core.contact_methods m left join core.companies c on c.id=m.company_id where m.company_id is null and m.person_id is null))"
+if has_table core.companies && has_table trosa.accounts && has_table core.contact_methods; then
+  psql_query "select 'orphans=' || ((select count(*) from trosa.accounts a left join core.companies c on c.id=a.company_id where c.id is null) + (select count(*) from core.contact_methods m left join core.companies c on c.id=m.company_id where m.company_id is null and m.person_id is null))"
 else
   printf '%s\n' 'orphans=pending'
 fi
 
-if has_table sela.prospects && has_table trosa.accounts; then
-  psql_query "select 'shared_active_companies=' || (select count(distinct p.company_id) from sela.prospects p join trosa.accounts a on a.company_id=p.company_id where a.deleted_at is null)"
+if has_table trosa.customer_interactions && has_table trosa.customer_tasks; then
+  psql_query "select 'business_read_models=ready'"
 else
-  printf '%s\n' 'shared_active_companies=pending'
+  printf '%s\n' 'business_read_models=pending'
 fi

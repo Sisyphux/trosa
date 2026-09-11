@@ -148,23 +148,15 @@ class SelaProspectApiTest(unittest.TestCase):
 
         conn = self.hamid_db()
         try:
-            customer = conn.execute('SELECT customer_type, status FROM customers').fetchone()
-            self.assertEqual(tuple(customer), ('new', '未建联'))
+            customer = conn.execute('SELECT business_stage, business_role FROM customers').fetchone()
+            self.assertEqual(tuple(customer), ('', ''))
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts').fetchone()[0], 1)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 1)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_delivery_events').fetchone()[0], 0)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_prospect_profiles').fetchone()[0], 1)
-            # v2 research has one canonical home: agent_prospect_profiles.
-            # It must not be copied into the generic notes table as a second
-            # durable business record.
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM external_analysis_notes').fetchone()[0], 0)
         finally:
             conn.close()
 
-        with self.module.app.app_context():
-            context = self.module._customer_ai_summary_data(result['trosa_id'])
-        self.assertIn('Public fabrication evidence is present.', context['context'])
-        self.assertEqual(context['agent_prospect']['source_id'], 'prospect-1')
         exported = self.client.get(f"/api/customers/{result['trosa_id']}/context?mode=full")
         self.assertEqual(exported.status_code, 200, exported.get_data(as_text=True))
         self.assertIn('Public fabrication evidence is present.', exported.get_json()['content'])
@@ -387,84 +379,6 @@ class SelaProspectApiTest(unittest.TestCase):
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_exclusion_review' AND status='resolved'"
             ).fetchone()[0], 1)
-        finally:
-            conn.close()
-
-    def test_feedback_history_imports_only_as_trosa_timeline_or_review_note(self):
-        events = [
-            {
-                'source_id': 'history-prospect-1', 'event_id': 'feedback:sent:1',
-                'event': 'SENT', 'company': 'History Acrylic Co.', 'country': 'India',
-                'business_type': 'Fabricator', 'occurred_at': '2026-08-17T10:00:00+08:00',
-                'detail': 'Historical Gmail send receipt.',
-            },
-            {
-                'source_id': 'history-prospect-1', 'event_id': 'feedback:review:1',
-                'event': 'CUSTOMER_REVIEW_APPROVED', 'company': 'History Acrylic Co.',
-                'occurred_at': '2026-08-17T10:01:00+08:00', 'detail': 'Human approved outreach.',
-            },
-        ]
-        key = 'sela-v2-history:batch:one'
-        first = self.client.post(
-            '/api/integrations/sela/history-events',
-            json={'events': events, 'idempotency_key': key}, headers=self.headers(key),
-        )
-        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
-        self.assertEqual(first.get_json()['status'], 'SYNCED')
-        repeat = self.client.post(
-            '/api/integrations/sela/history-events',
-            json={'events': events, 'idempotency_key': key}, headers=self.headers(key),
-        )
-        self.assertEqual(repeat.get_json(), first.get_json())
-        conn = self.hamid_db()
-        try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 1)
-            note = conn.execute('SELECT content FROM external_analysis_notes').fetchone()['content']
-            self.assertIn('CUSTOMER_REVIEW_APPROVED', note)
-        finally:
-            conn.close()
-
-    def test_history_outcomes_merge_into_the_same_trosa_outreach(self):
-        sent = prospect()
-        sent.update({
-            'outreach_status': 'SENT',
-            'sent_at': '2026-08-17T10:00:00+08:00',
-            'gmail_message_id': 'message-history-1',
-        })
-        created = self.post_prospect(sent, 'sela-v2:prospect-1:sent-history')
-        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
-
-        events = [{
-            'source_id': 'prospect-1', 'event_id': 'feedback:reply:1',
-            'event': 'INTERESTED', 'company': sent['company'], 'country': sent['country'],
-            'business_type': sent['business_type'],
-            'occurred_at': '2026-08-20T10:00:00+08:00',
-            'detail': 'Please send your catalogue.',
-        }]
-        response = self.client.post(
-            '/api/integrations/sela/history-events',
-            json={'events': events, 'idempotency_key': 'sela-v2-history:prospect-1:reply'},
-            headers=self.headers('sela-v2-history:prospect-1:reply'),
-        )
-        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.get_json()['status'], 'SYNCED')
-
-        listed = self.client.get('/api/integrations/sela/prospects', headers=self.headers())
-        self.assertEqual(listed.status_code, 200)
-        row = listed.get_json()['prospects'][0]
-        self.assertEqual(row['outreach_status'], 'INTERESTED')
-        self.assertEqual(row['outcome'], 'INTERESTED')
-        self.assertEqual(row['last_reply_body'], 'Please send your catalogue.')
-
-        conn = self.hamid_db()
-        try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM outreach_emails').fetchone()[0], 1)
-            outreach = conn.execute(
-                'SELECT reply_status, reply_content, reply_date FROM outreach_emails'
-            ).fetchone()
-            self.assertEqual(tuple(outreach), ('replied', 'Please send your catalogue.', '2026-08-20'))
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM follow_up_logs').fetchone()[0], 1)
         finally:
             conn.close()
 

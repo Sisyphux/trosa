@@ -30,5 +30,5 @@ docker compose exec -T -e "PGPASSWORD=${password}" postgres \
 
 docker compose exec -T -e "PGPASSWORD=${password}" postgres \
   psql --username "$POSTGRES_USER" --dbname "$check_db" --set ON_ERROR_STOP=1 --tuples-only --no-align \
-  --command "select 'orphans=' || ((select count(*) from sela.prospects p left join core.companies c on c.id=p.company_id where c.id is null) + (select count(*) from trosa.accounts a left join core.companies c on c.id=a.company_id where c.id is null) + (select count(*) from core.contact_methods m left join core.companies c on c.id=m.company_id where m.company_id is null and m.person_id is null)); select 'schema_migrations=' || count(*) from audit.schema_migrations"
+  --command "select 'orphans=' || ((select count(*) from trosa.accounts a left join core.companies c on c.id=a.company_id where c.id is null) + (select count(*) from core.contact_methods m left join core.companies c on c.id=m.company_id where m.company_id is null and m.person_id is null)); select 'business_read_models=' || ((select count(*) from pg_views where schemaname='trosa' and viewname in ('customer_interactions','customer_tasks')) = 2); select 'schema_migrations=' || count(*) from audit.schema_migrations"
 printf '%s\n' 'restore-check=passed'

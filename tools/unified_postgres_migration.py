@@ -60,6 +60,9 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0016_postgres_user_scoped_customer_payloads.sql",
     ROOT / "migrations" / "0017_trosa_agent_prospect_profiles.sql",
     ROOT / "migrations" / "0018_trosa_business_exclusions.sql",
+    ROOT / "migrations" / "0019_retire_frozen_compat_surfaces.sql",
+    ROOT / "migrations" / "0020_customer_state_facts.sql",
+    ROOT / "migrations" / "0021_formal_business_read_models.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

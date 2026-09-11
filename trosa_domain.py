@@ -1,0 +1,253 @@
+"""The small, explicit business read model used by current Trosa surfaces.
+
+The PostgreSQL store has canonical tables and a compatibility projection for
+historical identifiers.  This module is the boundary for the *business*
+meaning of those records: callers receive interactions and tasks, never a
+requirement to understand which transport table supplied them.  SQLite remains
+available for isolated development and recovery, so the queries deliberately
+use the same current relation names on both stores.
+
+Write actions remain in ``app.py`` for now because they share Flask's
+authentication, audit and undo transaction hooks.  Read semantics must not be
+duplicated merely because an action has several entry points.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from db import postgres_mode
+
+
+def _ids(customer_ids: Iterable[int]) -> list[int]:
+    return list(dict.fromkeys(int(value) for value in customer_ids if value is not None))
+
+
+def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False) -> list[dict]:
+    """Return human tasks in the one ordering used by Today and Customer.
+
+    Retired outreach scheduler rows are delivery history, not tasks.  They
+    remain accessible through history/recovery but cannot become a next step.
+    """
+    if postgres_mode():
+        done_clause = '' if include_done else "AND status='open'"
+        rows = conn.execute(
+            f'''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
+                       task_type AS reminder_type, source_activity_legacy_id AS source_activity_id,
+                       CASE WHEN status='done' THEN 1 ELSE 0 END AS is_done,
+                       completed_at, created_at
+                  FROM trosa.customer_tasks
+                 WHERE customer_id=? {done_clause}
+                 ORDER BY CASE WHEN status='open' THEN 0 ELSE 1 END,
+                          due_date ASC, manual_order ASC, id ASC''',
+            (customer_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    done_clause = '' if include_done else 'AND r.is_done=0'
+    rows = conn.execute(
+        f'''SELECT r.id, r.customer_id, r.title, r.content, r.reason,
+                   r.remind_date, r.reminder_type, r.source_activity_id,
+                   r.is_done, r.completed_at, r.created_at
+              FROM reminders r
+             WHERE r.customer_id=? {done_clause}
+               AND COALESCE(r.reminder_type, 'follow_up') NOT LIKE 'outreach_%'
+             ORDER BY CASE WHEN r.is_done=0 THEN 0 ELSE 1 END,
+                      r.remind_date ASC, r.manual_order ASC, r.id ASC''',
+        (customer_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def customer_interactions(
+    conn: Any, customer_id: int, *, limit: int | None = None, offset: int = 0,
+) -> list[dict]:
+    """Return a single product-level timeline across communication and email.
+
+    ``kind`` describes what happened, while ``source`` describes where the
+    durable fact arrived.  Upper layers do not branch on historical table
+    names.  An outbound delivery remains an interaction but does not by itself
+    establish a customer relationship; that rule lives in ``customer_facts``.
+    """
+    if postgres_mode():
+        query = '''SELECT id, customer_id, kind, occurred_on, activity_type,
+                          direction, content, result, next_plan, source,
+                          is_reported, delivery_status, reply_date, created_at
+                     FROM trosa.customer_interactions
+                    WHERE customer_id=?
+                    ORDER BY occurred_on DESC, created_at DESC, id DESC'''
+        params: list[Any] = [customer_id]
+        if limit is not None:
+            query += ' LIMIT ? OFFSET ?'
+            params.extend([max(1, int(limit)), max(0, int(offset))])
+        items = [dict(row) for row in conn.execute(query, params).fetchall()]
+        _add_compatibility_aliases(items)
+        return items
+    query = '''SELECT * FROM (
+                   SELECT 'communication' AS kind, f.id, f.customer_id,
+                          f.follow_date AS occurred_on, f.created_at,
+                          f.activity_type, f.direction, f.content, f.result,
+                          f.next_plan, f.source, COALESCE(f.is_reported, 0) AS is_reported,
+                          '' AS delivery_status, '' AS reply_date
+                     FROM follow_up_logs f
+                    WHERE f.customer_id=? AND (f.is_deleted=0 OR f.is_deleted IS NULL)
+                   UNION ALL
+                   SELECT 'email' AS kind, o.id, o.customer_id,
+                          o.sent_date AS occurred_on, o.created_at,
+                          'outreach_email' AS activity_type, 'outbound' AS direction,
+                          o.subject AS content, o.reply_content AS result,
+                          '' AS next_plan, 'gmail_delivery' AS source,
+                          COALESCE(o.is_reported, 0) AS is_reported,
+                          COALESCE(o.reply_status, '') AS delivery_status,
+                          COALESCE(o.reply_date, '') AS reply_date
+                     FROM outreach_emails o WHERE o.customer_id=?
+               ) interactions
+              ORDER BY occurred_on DESC, created_at DESC, id DESC'''
+    params: list[Any] = [customer_id, customer_id]
+    if limit is not None:
+        query += ' LIMIT ? OFFSET ?'
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+    items = [dict(row) for row in conn.execute(query, params).fetchall()]
+    # ``type`` and ``date`` keep existing API clients working during the
+    # endpoint transition. New consumers use ``kind`` and ``occurred_on``.
+    _add_compatibility_aliases(items)
+    return items
+
+
+def _add_compatibility_aliases(items: list[dict]) -> None:
+    """Keep response contracts stable while callers move to Interaction."""
+    for item in items:
+        item['type'] = 'follow' if item['kind'] == 'communication' else 'outreach'
+        item['date'] = item['occurred_on']
+        if item['kind'] == 'communication':
+            item['follow_date'] = item['occurred_on']
+        else:
+            item['sent_date'] = item['occurred_on']
+            item['subject'] = item.get('content') or ''
+            item['reply_status'] = item.get('delivery_status') or ''
+
+
+def customer_interaction_count(conn: Any, customer_id: int) -> int:
+    if postgres_mode():
+        row = conn.execute(
+            'SELECT COUNT(*) FROM trosa.customer_interactions WHERE customer_id=?', (customer_id,),
+        ).fetchone()
+        return int(row[0] if row else 0)
+    row = conn.execute(
+        '''SELECT COUNT(*) FROM (
+               SELECT id FROM follow_up_logs
+                WHERE customer_id=? AND (is_deleted=0 OR is_deleted IS NULL)
+               UNION ALL SELECT id FROM outreach_emails WHERE customer_id=?
+           ) history''',
+        (customer_id, customer_id),
+    ).fetchone()
+    return int(row[0] if row else 0)
+
+
+def customer_facts(conn: Any, customer_ids: Iterable[int]) -> dict[int, dict]:
+    """Project the one shared definition of relationship and next-work facts."""
+    ids = _ids(customer_ids)
+    facts = {customer_id: {
+        'contact_state': 'uncontacted', 'has_contact': False,
+        'latest_communication_date': '', 'latest_activity': None,
+        'next_task': None, 'next_task_date': '', 'next_task_title': '',
+        'waiting_reply': False, 'latest_email_date': '', 'latest_email_status': '',
+    } for customer_id in ids}
+    if not ids:
+        return facts
+
+    if postgres_mode():
+        # These canonical views are intentionally the only PostgreSQL read
+        # dependency for current relationship and work meaning.  The bounded
+        # per-customer loop keeps the projection readable and is used only for
+        # the current page of customers (at most 100 records).
+        for customer_id in ids:
+            fact = facts[customer_id]
+            for item in customer_interactions(conn, customer_id):
+                if item['kind'] == 'communication':
+                    if not fact['latest_communication_date']:
+                        fact['latest_communication_date'] = item.get('occurred_on') or ''
+                        fact['latest_activity'] = item
+                    if item.get('direction') in ('inbound', 'two_way') or item.get('activity_type') == 'customer_reply':
+                        fact['has_contact'] = True
+                elif item.get('delivery_status') == 'replied':
+                    fact['has_contact'] = True
+                if item['kind'] == 'email' and fact['latest_activity'] is None:
+                    fact['latest_activity'] = item
+                    fact['waiting_reply'] = item.get('delivery_status') in ('pending', 'no_reply')
+                if item['kind'] == 'email' and not fact['latest_email_date']:
+                    fact['latest_email_date'] = item.get('occurred_on') or ''
+                    fact['latest_email_status'] = item.get('delivery_status') or ''
+            tasks = customer_tasks(conn, customer_id)
+            if tasks:
+                fact['next_task'] = tasks[0]
+                fact['next_task_date'] = tasks[0].get('remind_date') or ''
+                fact['next_task_title'] = tasks[0].get('title') or tasks[0].get('content') or ''
+            fact['contact_state'] = 'contacted' if fact['has_contact'] else 'uncontacted'
+        return facts
+
+    marks = ','.join('?' for _ in ids)
+    communications = conn.execute(
+        f'''SELECT f.customer_id, f.id, f.follow_date, f.content, f.result,
+                   f.activity_type, f.direction, f.source, f.created_at
+              FROM follow_up_logs f
+             WHERE f.customer_id IN ({marks})
+               AND (f.is_deleted=0 OR f.is_deleted IS NULL)
+             ORDER BY f.follow_date DESC, f.created_at DESC, f.id DESC''', ids,
+    ).fetchall()
+    for row in communications:
+        item = dict(row)
+        fact = facts[item['customer_id']]
+        if not fact['latest_communication_date']:
+            fact['latest_communication_date'] = item.get('follow_date') or ''
+            fact['latest_activity'] = {
+                'kind': 'communication', 'date': item.get('follow_date') or '',
+                'content': item.get('content') or '', 'result': item.get('result') or '',
+                'activity_type': item.get('activity_type') or '',
+                'direction': item.get('direction') or '', 'source': item.get('source') or '',
+            }
+        if item.get('direction') in ('inbound', 'two_way') or item.get('activity_type') == 'customer_reply':
+            fact['has_contact'] = True
+
+    tasks = conn.execute(
+        f'''SELECT r.customer_id, r.id, r.title, r.content, r.reason,
+                   r.remind_date, r.reminder_type, r.source_activity_id
+              FROM reminders r
+             WHERE r.customer_id IN ({marks}) AND r.is_done=0
+               AND COALESCE(r.reminder_type, 'follow_up') NOT LIKE 'outreach_%'
+             ORDER BY r.customer_id, r.remind_date, r.manual_order, r.id''', ids,
+    ).fetchall()
+    for row in tasks:
+        item = dict(row)
+        fact = facts[item['customer_id']]
+        if fact['next_task'] is None:
+            fact['next_task'] = item
+            fact['next_task_date'] = item.get('remind_date') or ''
+            fact['next_task_title'] = item.get('title') or item.get('content') or ''
+
+    emails = conn.execute(
+        f'''SELECT o.customer_id, o.id, o.sent_date, o.subject, o.reply_status,
+                   o.reply_date, o.reply_content, o.created_at
+              FROM outreach_emails o WHERE o.customer_id IN ({marks})
+             ORDER BY o.customer_id, o.sent_date DESC, o.created_at DESC, o.id DESC''', ids,
+    ).fetchall()
+    seen_email: set[int] = set()
+    for row in emails:
+        item = dict(row)
+        customer_id = item['customer_id']
+        fact = facts[customer_id]
+        if item.get('reply_status') == 'replied':
+            fact['has_contact'] = True
+        if customer_id not in seen_email:
+            seen_email.add(customer_id)
+            fact['latest_email_date'] = item.get('sent_date') or ''
+            fact['latest_email_status'] = item.get('reply_status') or ''
+            fact['waiting_reply'] = item.get('reply_status') in ('pending', 'no_reply')
+            if fact['latest_activity'] is None:
+                fact['latest_activity'] = {
+                    'kind': 'email', 'date': item.get('sent_date') or '',
+                    'content': item.get('subject') or '', 'result': item.get('reply_content') or '',
+                    'delivery_status': item.get('reply_status') or '', 'source': 'gmail_delivery',
+                }
+    for fact in facts.values():
+        fact['contact_state'] = 'contacted' if fact['has_contact'] else 'uncontacted'
+    return facts

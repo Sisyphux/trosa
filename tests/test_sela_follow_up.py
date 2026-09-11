@@ -24,7 +24,7 @@ class SelaFollowUpTest(unittest.TestCase):
         self.backup.start()
         self.ui = self.module.app.test_client()
         self.ui.post('/api/auth/login', json={'user': 'hamid'})
-        token = self.ui.post('/api/integrations/prospecting-lab/token').get_json()['token']
+        token = self.ui.post('/api/integrations/sela/token').get_json()['token']
         self.agent = self.module.app.test_client()
         self.headers = {'Authorization': 'Bearer ' + token, 'X-Idempotency-Key': 'event-1'}
         self.conn = sqlite3.connect(db.get_user_db_path('hamid'))

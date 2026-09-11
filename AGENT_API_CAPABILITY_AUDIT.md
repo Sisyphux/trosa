@@ -1,110 +1,80 @@
-# Trosa Agent API 能力审计
+# Trosa Agent API 当前能力审计
 
-> 审计日期：2026-08-30  
-> 范围：当前本地工作树中的 Trosa REST API、`/api/agent/*`、Sela 集成认证、Today、Inbox、Search 与统一沟通确认路径。  
-> 本文只做能力审计和最小接口规划，不实现 Agent、MCP Server、Local Bridge，不修改 ECS 或正式数据。
+> 审计日期：2026-08-30；本文随后按 2026-09-10 的清理结果校正。
+> 范围：Trosa REST API、当前 `/api/agent/*` 原子读取/提议、`/api/gateway/*` 受限 Agent 入口、Sela 集成认证、Today、Inbox、Search 与统一沟通确认路径。
+> 本文记录当前能力边界；仓库不再包含独立 Agent/MCP/Web runtime。数据库迁移和历史数据兼容不等于重新开放旧运行入口。
 
 ## 结论
 
-推荐采用以下边界：
+当前正式边界是：
 
 ```text
-Sela / Pi / Codex / 其他 Agent
-              ↓
-       Thin Agent Gateway
-              ↓
-      Trosa 受控业务 API
-              ↓
- Customers / Timeline / Today / Inbox / Search
+Sela / 其他 Agent
+       ↓              ↓
+受限 Sela API      /api/gateway/*（Bearer token）
+       ↓              ↓
+          Trosa 受控业务 API
+                  ↓
+      Customers / Timeline / Today / Inbox / Search
 ```
 
-方向正确，而且不需要恢复 Agent 直读 SQLite 或文件夹。
-
-当前 Trosa 的**底层业务能力约有 8/10 已存在**：客户搜索、客户工作区、Today、Inbox、沟通搜索、时间线、沟通写入、待办创建和待办完成都有现成逻辑。真正缺少的不是 Agent，而是一个可供外部调用的、按用户绑定且有明确权限边界的 Gateway 契约。
-
-目前还不应直接把现有 `/api/agent/*` 暴露给远程 Agent，主要原因有三项：
-
-1. `/api/agent/*` 只接受浏览器登录 Session，没有独立的 Agent Bearer token、用户绑定和工具级 scope。
-2. Agent 的沟通提议确认使用独立 SQL 写入，没有复用统一确认面板背后的完整 `follow_history` 业务规则。
-3. 外部重试、提议查询、分页、紧凑字段和 Inbox 处理语义还未形成稳定契约。
-
-因此下一步应是**补一层很薄的 Agent API，而不是写 Agent Runtime**。
+不需要恢复 Agent 直读 SQLite、文件夹或独立聊天运行时。当前本地 `/api/agent/*` 面向已登录 Trosa 会话，提供有界读取和需确认的提议；`/api/gateway/*` 面向外部 Agent，使用个人 Bearer token、scope、幂等写入和可撤销动作。两者都复用 Trosa 的受控业务函数，Sela 仍走独立的受限集成接口。
 
 ## 现有安全边界
 
-- `get_db()` 已按当前认证用户路由到 Hamid、Amy、Kelley 各自独立的 SQLite，用户隔离的基础是可复用的。
-- 普通业务 API 和 `/api/agent/*` 都有 `login_required`，未登录读取已由回归测试覆盖。
-- Sela 已证明“Bearer token → 固定用户 → 端点白名单”模式可行；其同步还具有事务、精确身份匹配、`REVIEW` 和幂等收据。
-- 待办创建、修改、取消以及部分 Agent 确认写入已有冲突感知的撤销快照。
-- 统一沟通入口 `POST /api/customers/<id>/follow_history` 已是当前最完整的沟通写入终点：它能记录事实、完成匹配的到期待办、关闭旧开发节点、按需创建下一待办、更新客户状态/理解，并仅在成功后解决指定 Inbox 条目。
+- `get_db()` 在 SQLite 隔离/回滚边界内按当前认证用户路由；正式运行由 PostgreSQL 组织/成员作用域隔离。
+- 普通业务 API 和 `/api/agent/*` 使用 `login_required`；`/api/gateway/*` 使用个人 Bearer token、scope 和当前用户绑定。
+- Sela 使用受限 Bearer token 集成；prospects/exclusions 为 `sela-v2`，follow-up 为 `sela-follow-up-v1`，并具有事务、精确身份匹配、`REVIEW` 和幂等收据。
+- Gateway 的低风险写入使用 `Idempotency-Key`，记录 `agent_actions`，并通过 undo token 提供冲突感知撤销；高风险操作不允许直接执行。
+- 统一沟通入口与 Gateway 的 `record_communication` 共同复用当前业务函数，能记录事实、完成匹配的到期待办、按需创建下一待办，并仅在成功后解决指定 Inbox 条目。
 
 这些能力说明不需要更换数据模型，也不需要让 Gateway 接触数据库。
 
-## 10 个候选工具的能力映射
+## 当前 Agent 能力映射
 
-| Agent 工具 | 现有能力 | 可复用程度 | 开放前最小补充 |
-|---|---|---:|---|
-| `search_customers` | `GET /api/customers?search=...`，已有分页、自然语言筛选、联系人/沟通/待办/Inbox 命中和 `match_context` | 高 | 增加 Agent 专用紧凑字段投影；默认不返回完整客户行、备注和无关联系人隐私；返回明确的 `exact/candidate/ambiguous` 匹配状态 |
-| `get_customer` | `GET /api/customers/<id>/summary` 与 `GET /api/agent/customers/<id>/workspace` | 高 | 以 summary 为默认；联系人、完整时间线和开发信按需读取；避免 workspace 的 `SELECT *` 成为默认响应 |
-| `get_today` | `GET /api/agent/brief/today` 与 `GET /api/reminders/today` | 高 | 统一 Today 的排序与字段；不要用 Agent brief 当前的 Inbox 直查代替真实 Inbox 生成逻辑；增加上限/分页 |
-| `search_activity` | `GET /api/agent/messages/search` | 高 | 保留关键词、国家、方向、日期、客户和回复状态过滤；增加游标分页和稳定 schema；明确“无结果不等于现实未发生” |
-| `record_communication` | Agent `activity` proposal；统一 `follow_history` 写入 | 中 | 工具只创建草稿/提议，不直接写入；用户确认时必须调用共享的 `follow_history` 业务服务，不能继续走当前独立 SQL |
-| `create_task` | Agent `task` proposal；`POST /api/customers/<id>/tasks` | 高 | 工具只创建提议；确认后复用共享待办创建服务；校验动作与日期；外部重试须幂等 |
-| `complete_task` | `PUT /api/reminders/<id>` | 中 | 新增 `task_completion` 提议类型；完成待办必须同时确认实际发生了什么，可选确认下一步及日期；不能只静默把 `is_done` 改为 1 |
-| `get_inbox` | `GET /api/inbox` | 高 | 提供紧凑、分页、可解释的 Agent 视图，保留 `why_now/evidence/source/status`；不能重新生成一套 Inbox 判断规则 |
-| `resolve_inbox` | `archive`、`snooze`、`resolve-suggestion`、`follow_history(inbox_item_id)` 等分散端点 | 中低 | 定义有限动作枚举：`record_fact`、`snooze`、`archive`、`keep_waiting`；均先形成确认提议；客户回复只能在沟通写入成功后解决 |
-| `get_recent_activity` | `messages/search` 在空 query 下可返回最近沟通和开发信；客户 timeline 也有有界读取 | 高 | 增加稳定的 recent 入口或把它定义为 `search_activity` 的预设；支持 `since/cursor/limit`，默认只返回必要字段 |
+| Agent 能力 | 当前入口 | 当前边界 |
+|---|---|---|
+| `search_customers` | `GET /api/gateway/customers`；登录会话仍可使用 `/api/customers?search=...` | 只返回客户基础投影和有界结果，不接受 Agent 切换用户或扩大字段范围。 |
+| `get_customer` | `GET /api/gateway/customers/<id>` 与 `/api/agent/customers/<id>/workspace` | 先读客户受限摘要，再按需读取联系人、时间线和任务；不把旧研究字段当作当前工作区。 |
+| `get_today` | `GET /api/gateway/today` 与 `/api/agent/brief/today` | 只返回当前人工待办；历史 `outreach_%` 行和退役 Inbox 类型不进入 Today/brief。 |
+| `search_activity` | `GET /api/gateway/activity` 与 `/api/agent/messages/search` | 结果来自已记录沟通/开发信；有界 limit，空结果不等于现实中没有发生沟通。 |
+| `record_communication` | `POST /api/gateway/actions` 的 `record_communication`；登录会话可用 Agent activity proposal | Gateway 使用 `crm:write`、`Idempotency-Key` 和共享沟通写入；Agent proposal 仍需用户确认。 |
+| `create_task` | `POST /api/gateway/actions` 的 `create_task`；客户任务 API 与 Agent task proposal | 待办必须同时有动作和日期；直接 Gateway 写入可撤销，proposal 写入需确认。 |
+| `complete_task` | Gateway `complete_task`；登录会话的共享完成路径 | 完成动作可带实际沟通和下一步；不直接恢复退役自动开发节点。 |
+| `get_inbox` | `GET /api/gateway/inbox`、`GET /api/agent/brief/today` | 只暴露当前客户回复、浏览器/Gmail 采集和 Sela 请求等待判断条目。 |
+| `resolve_inbox` | Gateway `resolve_inbox` / `assign_inbox_customer`；网页 `archive` 与共同沟通入口 | 不再提供旧 snooze/建议解析入口；客户回复只有在沟通事实成功写入后才解决。 |
+| `get_recent_activity` | `GET /api/gateway/actions/recent`、`/api/gateway/activity` 和客户 timeline | 有界读取、绑定当前 token 用户，不另建一套活动数据源。 |
 
-建议最终对 Agent 暴露 9 个工具：把 `get_recent_activity` 合并为 `search_activity` 的空查询/时间预设，减少重复契约。如果上层 MCP 客户端更需要显式工具名，也可以保留 10 个，但底层仍调用同一读取函数。
+当前外部 Gateway 已将读取与写入按 scope 分开；`/api/agent/*` 保留为登录会话下的原子读取和确认式提议。新增工具应复用这些业务入口，不再增加第二套 CRM 规则。
 
-## 必须先修的业务分叉
+## 当前写入路径
 
-当前 `POST /api/agent/proposals/<id>/confirm` 对 `activity` 提议直接插入 `follow_up_logs`。这条路径只更新 `last_contact`，没有完整执行统一沟通入口的规则，至少会漏掉：
+当前 Gateway 的低风险 `record_communication`、`create_task`、`complete_task`、客户/联系人更新和 Inbox 处理均通过共享业务函数执行，并在 `agent_actions` 中留下可撤销动作；重复请求由 `agent_gateway_idempotency` 按 `Idempotency-Key` 重放原结果。登录会话下的 `/api/agent/proposals/<id>/confirm` 也调用同一批共享函数，仍保留人工确认边界。
 
-- 自动完成沟通日期之前的匹配到期待办；
-- 关闭同客户遗留的 15/30/60 天开发节点；
-- 创建提议中的下一步动作与日期；
-- 更新 `next_follow_up`、`manual_next_follow`、客户类型和跟进状态；
-- 刷新当前状态与工作理解；
-- 仅在写入成功后解决关联 Inbox 条目；
-- 返回统一确认面板用于局部刷新的完整结果。
-
-这会让“网页确认”和“Agent 确认”产生两个业务事实版本，是当前最高优先级缺口。
-
-最小修法不是让一个 Flask route 内部 HTTP 调另一个 route，而是把以下三段现有逻辑提取为小型业务函数，并让网页 API 与 Agent 确认共同调用：
-
-1. `record_communication_for_user(...)`
-2. `create_task_for_user(...)`
-3. `complete_task_with_activity_for_user(...)`
-
-只提取这三个闭环，不拆分整个 `app.py`，不改变表结构和核心业务语义。
+高风险删除、批量更新、恢复数据库和 token 管理不允许通过 Gateway 直接执行。历史自动开发行和退役 Inbox 类型即使仍在数据库中，也不会被这些当前写入路径重新操作。
 
 ## Gateway 认证与权限
 
 不要复用浏览器 PIN、Session cookie，也不要把现有 Sela token 扩权。
 
-建议为每位用户创建独立的 Agent Gateway token，服务端只保存 SHA-256 摘要，并把 token 映射到唯一用户。请求进入 Flask 后仍通过现有 `set_db_user(user)` 和 `get_db()` 路由到该用户数据库。
+每位用户可以在 Trosa 中创建独立的 Agent Gateway token，服务端只保存 SHA-256 摘要，并把 token 映射到唯一用户。请求进入 Flask 后绑定该用户的 PostgreSQL 组织作用域（SQLite 仅作为隔离/回滚兼容边界）。
 
-建议 scope 只有三类：
+当前 scope 为：
 
-- `agent:read`：客户、Today、Inbox、Search、Timeline；
-- `agent:propose`：创建待确认草稿；
-- `agent:confirm`：**不授予外部 Agent**，只允许已登录的 Trosa 浏览器会话执行。
+- `crm:read`：客户、Today、Inbox、Search、Timeline 等有界读取；
+- `crm:propose`：创建待确认的业务提议；
+- `crm:write`：执行低风险、可幂等、可撤销的业务动作。
 
-关键约束：Agent 可以准备 `record_communication`、`create_task`、`complete_task` 和 `resolve_inbox`，但不能自己调用最终确认。Gateway 返回 `proposal_id` 和可在 Trosa 打开的确认入口，统一面板加载提议、展示来源/客户/日期/事实/下一步，用户确认后由浏览器 Session 完成写入。
+高风险操作仍不能由外部 Agent 直接调用。Sela token 不与 Gateway token 共用，也不扩权。
 
 ## 提议与幂等
 
-现有 `agent_proposals` 能保存 `task` 和 `activity`，但 Gateway 化之前需要补齐契约：
+当前 `agent_proposals` 保存 `task`、`activity` 及 Sela follow-up 提议，Gateway 的直接动作另由 `agent_actions` 和幂等表记录：
 
-- 支持 `activity`、`task`、`task_completion`、`inbox_resolution` 四类提议；
-- 提议携带来源、外部请求 ID、关联 Inbox/待办 ID、规范化后的预填字段和原始证据摘要；
-- 增加读取单条提议和读取当前用户 pending 提议的 Session API，供统一确认面板恢复上下文；
-- 创建提议使用 `X-Idempotency-Key`，相同 key + 相同请求返回原结果，相同 key + 不同请求返回 409；
-- confirm/cancel 重试返回原终态，不应把网络重试变成含混的 404；
-- 确认时重新读取客户、待办和 Inbox 当前状态，发生变化时返回 409 并要求刷新，而不是覆盖新事实。
-
-不一定需要新表。现有每用户数据库中的 `integration_sync_receipts` 已是通用的幂等收据结构，可以用新的 integration 名称复用；新增字段若只用于展示，也可先放在受严格校验的 proposal payload 中。
+- Agent proposal 提交前校验客户、动作、日期和来源；登录会话可读取、编辑、确认或取消待确认提议；确认时重新读取当前业务状态。
+- Gateway 写入使用 `Idempotency-Key`；相同 key 和请求重放原结果，不同请求返回冲突；动作保留 `undo_token`。
+- 当前 Inbox 处理只有归档、归属确认、沟通事实写入后的解决等有限语义；不再把 snooze 或旧建议解析作为契约。
+- Gateway token 的创建/撤销仍是登录会话管理能力，不属于外部 Agent 的 `crm:write`。
 
 ## 响应边界与隐私
 
@@ -131,15 +101,12 @@ Sela / Pi / Codex / 其他 Agent
 
 Agent API 的优先级可以提高，但不应跳过路线图任务 3。
 
-推荐顺序：
+当前维护顺序：
 
-1. 先完成 Inbox 与 Search 带上下文进入统一确认入口；
-2. 提取三个最小共享业务函数，消除 Agent 确认的独立写入分叉；
-3. 增加按用户绑定的 Agent Gateway token、scope 和端点白名单；
-4. 稳定 9–10 个工具的紧凑 JSON schema、分页、错误与幂等；
-5. 让 proposal 能在 Trosa 统一确认面板中恢复、编辑、确认和取消；
-6. 完成三用户隔离、重复请求、歧义匹配、撤销冲突、Inbox 一致性和核心无 AI 回归；
-7. 最后再实现 MCP Server、Sela tools 或聊天入口，它们只做协议适配，不再包含 CRM 业务规则。
+1. 保持 Inbox 与 Search 通过共同确认入口进入同一套事实写入；
+2. 保持 `/api/agent/*` 的登录会话提议与 `/api/gateway/*` 的外部动作复用共享业务函数；
+3. 持续验证 token scope、幂等、撤销、歧义匹配、Inbox 一致性和核心无 AI 回归；
+4. 新增协议适配只能复用当前 Gateway/Sela 合同，不在 Trosa 内恢复独立 runtime 或第二套 CRM 规则。
 
 Sela 证据交接仍按路线图任务 4 进行。Local Bridge 单独立项，只负责本地文件搜索、指定文件读取和摘要，通过出站 HTTPS 返回受限结果；它不持有 CRM 数据库权限，也不应被合并进 Trosa Agent Gateway。
 
@@ -148,11 +115,11 @@ Sela 证据交接仍按路线图任务 4 进行。Local Bridge 单独立项，�
 - 外部 Agent token 只能访问绑定用户和白名单工具，不能读取其他用户数据库；
 - 无 token、错误 scope、过期/撤销 token 均返回明确错误；
 - 搜索歧义只返回候选，不自动确认客户归属；
-- Agent 创建沟通/待办/完成/Inbox 处理时，CRM 业务数据保持不变，直到用户在 Trosa 确认；
-- 同一个外部请求重放不会创建第二个 proposal 或第二条业务事实；
-- Agent 沟通确认与网页统一确认产生完全一致的 Timeline、Today、Inbox 和客户摘要结果；
+- Agent proposal 创建后，CRM 业务数据保持不变，直到用户在 Trosa 确认；Gateway 低风险直接动作必须可幂等、可审计、可撤销；
+- 同一个外部请求重放不会创建第二条业务事实；
+- Agent 沟通确认、Gateway 写入与网页统一确认产生一致的 Timeline、Today、Inbox 和客户摘要结果；
 - 待办始终同时有明确动作和日期；沟通记录允许没有下一步；
-- 未配置 AI、Gateway 或 MCP 时，客户、沟通、Today、Inbox、Search、导入导出和备份恢复继续完整可用；
+- 未配置 AI 或 Gateway 时，客户、沟通、Today、Inbox、Search、导入导出和备份恢复继续完整可用；
 - 全部测试使用独立 `CRM_DB_PATH`/隔离数据库，不修改 ECS、正式数据库或正式备份。
 
 ## 本次核验
@@ -161,7 +128,7 @@ Sela 证据交接仍按路线图任务 4 进行。Local Bridge 单独立项，�
 
 - Agent 今日简报、客户 workspace 与确认式待办提议；
 - Agent timeline 与沟通搜索的组合和未登录拦截；
-- Agent command 的读取、提议、确认与取消；
-- 统一 `follow_history` 写入成功后只解决指定 Inbox 回复。
+- Gateway 读取、scope、幂等写入、undo 与高风险动作拦截；
+- 统一沟通写入成功后只解决指定 Inbox 回复。
 
 这些测试证明现有原子能力可复用，但尚未覆盖 Gateway token、外部幂等、proposal 恢复、Agent 沟通确认与统一写入等本审计指出的新增边界。

@@ -54,13 +54,6 @@ install -d -o root -g root -m 755 "$REMOTE_ROOT" "$REMOTE_ROOT/releases"
 install -d -o root -g root -m 755 /etc/trade-os
 install -d -o root -g cloudflared -m 750 /etc/cloudflared
 install -d -o tradeos -g tradeos -m 700 /var/lib/trade-os
-# Pi persists provider credentials and cache under its dedicated HOME. Keep
-# the directory writable by the service account even when an administrator
-# has run a one-off Pi smoke test as root.
-install -d -o tradeos -g tradeos -m 700 /var/lib/trade-os/pi-home
-chown -R tradeos:tradeos /var/lib/trade-os/pi-home
-chmod 700 /var/lib/trade-os/pi-home
-
 if [ ! -x "$REMOTE_ROOT/venv/bin/python" ]; then
   python3 -m venv "$REMOTE_ROOT/venv"
 fi

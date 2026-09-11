@@ -30,9 +30,8 @@ _INSERT_TABLE = re.compile(r"^\s*INSERT\s+(?:INTO\s+)?(?:OR\s+\w+\s+)?([\w.]+)",
 _PSYCOPG_PLACEHOLDER_OR_PERCENT = re.compile(r"%(?![%sbt])", re.IGNORECASE)
 _COMPAT_VIEW_INSERT = re.compile(
     r"^\s*INSERT\s+INTO\s+(?:trade_os_compat\.)?"
-    r"(users|customers|contacts|reminders|follow_up_logs|outreach_emails|research_reports|"
-    r"external_analysis_notes|customer_understandings|ai_recommendations|inbox_items|"
-    r"web_monitor_logs|customer_files|email_verifications|email_verification_jobs|"
+    r"(users|customers|contacts|reminders|follow_up_logs|outreach_emails|inbox_items|"
+    r"customer_files|email_verifications|email_verification_jobs|"
     r"email_domain_probes|email_logs|gmail_message_states|communication_sources|"
     r"communication_source_items|email_delivery_events|import_batches|imported_activity_rows|"
     r"import_unmatched_customers|weekly_reports|team_invitations|"

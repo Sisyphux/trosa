@@ -18,7 +18,6 @@ import db
 
 
 SERVICE_TOKEN = 'trosa_sela_test_service_token'
-LEGACY_TOKEN = 'legacy-prospecting-lab-token'
 
 
 def load_app():
@@ -39,19 +38,15 @@ class SelaServiceAuthTest(unittest.TestCase):
         os.environ.pop('CRM_SEED_DEMO_DATA', None)
         db.init_all_dbs()
         conn = db.get_system_db()
-        for key, token in (
-            ('integration_token:sela:hamid', SERVICE_TOKEN),
-            ('integration_token:prospecting_lab:hamid', LEGACY_TOKEN),
-        ):
-            conn.execute(
-                '''INSERT INTO app_settings (key, value, updated_at)
-                   VALUES (?, ?, datetime('now', 'localtime'))''',
-                (key, json.dumps({
-                    'token_sha256': hashlib.sha256(token.encode('utf-8')).hexdigest(),
-                    'enabled': True,
-                    'user': 'hamid',
-                })),
-            )
+        conn.execute(
+            '''INSERT INTO app_settings (key, value, updated_at)
+               VALUES (?, ?, datetime('now', 'localtime'))''',
+            ('integration_token:sela:hamid', json.dumps({
+                'token_sha256': hashlib.sha256(SERVICE_TOKEN.encode('utf-8')).hexdigest(),
+                'enabled': True,
+                'user': 'hamid',
+            })),
+        )
         conn.commit()
         conn.close()
         self.module = load_app()
@@ -65,7 +60,7 @@ class SelaServiceAuthTest(unittest.TestCase):
             os.environ['CRM_SEED_DEMO_DATA'] = self.original_demo
         self.tempdir.cleanup()
 
-    def test_service_token_has_only_hamid_customer_operations_and_legacy_token_remains_compatible(self):
+    def test_service_token_has_only_hamid_customer_operations(self):
         service = self.module.app.test_client()
         service_headers = {'Authorization': f'Bearer {SERVICE_TOKEN}'}
         self.assertEqual(
@@ -85,14 +80,6 @@ class SelaServiceAuthTest(unittest.TestCase):
         self.assertEqual(
             service.post('/api/integrations/sela/token', headers=service_headers).status_code,
             401,
-        )
-
-        legacy = self.module.app.test_client()
-        legacy_headers = {'Authorization': f'Bearer {LEGACY_TOKEN}'}
-        self.assertEqual(legacy.get('/api/customers', headers=legacy_headers).status_code, 200)
-        self.assertEqual(
-            legacy.get('/api/integrations/sela/health', headers=legacy_headers).status_code,
-            200,
         )
 
     def test_issuance_stores_only_digest_and_replaces_previous_service_token(self):
