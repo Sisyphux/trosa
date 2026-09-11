@@ -102,6 +102,49 @@ def customer_record(conn: Any, customer_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def active_customers(conn: Any, *, include_deleted: bool = False) -> list[dict]:
+    """List the modern Customer records used by reporting and search surfaces."""
+    if postgres_mode():
+        where = '' if include_deleted else 'WHERE deleted_at IS NULL'
+        rows = conn.execute(f'SELECT * FROM trosa.customer_records {where} ORDER BY updated_at DESC, id DESC').fetchall()
+    else:
+        where = '' if include_deleted else 'WHERE (is_deleted=0 OR is_deleted IS NULL)'
+        rows = conn.execute(f'SELECT * FROM customers {where} ORDER BY updated_at DESC, id DESC').fetchall()
+    return [dict(row) for row in rows]
+
+
+def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict]:
+    """Return reportable Interaction facts; weekly is a view, never its own history."""
+    if postgres_mode():
+        rows = conn.execute(
+            '''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country AS customer_country
+                 FROM trosa.customer_interactions i
+                 JOIN trosa.customer_records c ON c.id=i.customer_id
+                WHERE i.occurred_on>=? AND i.occurred_on<=? AND i.is_reported=true
+                  AND c.deleted_at IS NULL
+                ORDER BY i.occurred_on DESC, i.created_at DESC, i.id DESC''',
+            (from_date, to_date),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    rows = conn.execute(
+        '''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country AS customer_country FROM (
+             SELECT 'communication' AS kind, f.id, f.customer_id, f.follow_date AS occurred_on,
+                    f.created_at, f.content, f.result, f.next_plan, f.activity_type,
+                    f.direction, f.source, f.is_reported
+               FROM follow_up_logs f WHERE f.follow_date>=? AND f.follow_date<=?
+                    AND f.is_reported=1 AND (f.is_deleted=0 OR f.is_deleted IS NULL)
+             UNION ALL
+             SELECT 'email', o.id, o.customer_id, o.sent_date, o.created_at, o.content,
+                    o.reply_content, '', 'outreach_email', 'outbound', 'gmail_delivery', o.is_reported
+               FROM outreach_emails o WHERE o.sent_date>=? AND o.sent_date<=? AND o.is_reported=1
+            ) i JOIN customers c ON c.id=i.customer_id
+           WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)
+           ORDER BY occurred_on DESC, created_at DESC, id DESC''',
+        (from_date, to_date, from_date, to_date),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def record_external_interaction(
     conn: Any, *, customer_id: int, content: str, occurred_on: str,
     direction: str, source: str, activity_type: str = 'email', result: str = '',

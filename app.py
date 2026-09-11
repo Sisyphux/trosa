@@ -71,6 +71,7 @@ from gmail_sync import (
     start_gmail_sync,
 )
 from trosa_domain import (
+    active_customers as _active_customers,
     customer_contacts as _customer_contacts,
     customer_facts as _project_customer_facts,
     customer_interaction_count as _customer_interaction_count,
@@ -78,6 +79,7 @@ from trosa_domain import (
     customer_record as _customer_record,
     customer_tasks as _customer_tasks,
     today_tasks as _today_tasks,
+    weekly_interactions as _weekly_interactions,
 )
 
 # ========== 配置 ==========
@@ -5618,7 +5620,7 @@ def get_customer_timeline(customer_id):
 def get_customer_tasks(customer_id):
     """Load the customer's open, human-created tasks."""
     conn = get_db()
-    if not conn.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+    if not _customer_record(conn, customer_id):
         conn.close()
         return jsonify({'error': '客户不存在'}), 404
     tasks = _customer_tasks(conn, customer_id)
@@ -5633,29 +5635,17 @@ def get_customer(customer_id):
     try:
         conn = get_db()
         c = conn.cursor()
-        c.execute('SELECT * FROM customers WHERE id = ?', (customer_id,))
-        customer = c.fetchone()
+        customer = _customer_record(conn, customer_id)
         if not customer:
             return jsonify({'error': '客户不存在'}), 404
-        customer = dict(customer)
-        # 同样的逻辑：客户详情里的"上次跟进"以跟进记录里的最新沟通日期为准，
-        # 避免 customers.last_contact 在历史导入或补录场景落后于活动表。
-        c.execute('''SELECT MAX(follow_date) AS latest FROM follow_up_logs
-                     WHERE customer_id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,))
-        latest_follow = c.fetchone()
-        if latest_follow and latest_follow['latest']:
-            customer['last_contact'] = latest_follow['latest']
-        c.execute('''SELECT * FROM reminders
-                     WHERE customer_id = ? AND is_done = 0
-                       AND COALESCE(reminder_type, 'follow_up') NOT LIKE 'outreach_%'
-                     ORDER BY remind_date ASC''', (customer_id,))
-        reminders = [dict(row) for row in c.fetchall()]
-        c.execute('SELECT * FROM follow_up_logs WHERE customer_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY follow_date DESC, created_at DESC', (customer_id,))
-        follow_history = [dict(row) for row in c.fetchall()]
-        c.execute('SELECT * FROM contacts WHERE customer_id = ? ORDER BY is_primary DESC, created_at DESC', (customer_id,))
-        contacts = [dict(row) for row in c.fetchall()]
-        c.execute('SELECT * FROM outreach_emails WHERE customer_id = ? ORDER BY sent_date DESC, created_at DESC', (customer_id,))
-        outreach_emails = [dict(row) for row in c.fetchall()]
+        facts = _customer_business_facts(conn, [customer_id])[customer_id]
+        customer['last_contact'] = facts['latest_communication_date']
+        customer['next_follow_up'] = facts['next_task_date']
+        reminders = _customer_tasks(conn, customer_id)
+        interactions = _customer_interactions(conn, customer_id)
+        follow_history = [item for item in interactions if item['kind'] == 'communication']
+        outreach_emails = [item for item in interactions if item['kind'] == 'email']
+        contacts = _customer_contacts(conn, customer_id)
         agent_prospect = _sela_customer_agent_context(_sela_profile_for_customer(conn, customer_id))
         result = dict(customer)
         result['reminders'] = reminders
@@ -10408,30 +10398,23 @@ name、country、type（只能是中间商、终端或空；销售/进口/分销
 @login_required
 def get_stats():
     conn = get_db()
-    c = conn.cursor()
     today = datetime.now().strftime('%Y-%m-%d')
-    active_customer_ids = [row['id'] for row in c.execute(
-        'SELECT id FROM customers WHERE (is_deleted = 0 OR is_deleted IS NULL)'
-    ).fetchall()]
+    customers = _active_customers(conn)
+    active_customer_ids = [row['id'] for row in customers]
     facts = _customer_business_facts(conn, active_customer_ids)
     total = len(active_customer_ids)
-    c.execute('''SELECT COUNT(*) FROM reminders r LEFT JOIN customers cu ON r.customer_id = cu.id
-                 WHERE r.is_done = 0 AND r.remind_date <= ? AND r.reminder_type NOT LIKE 'outreach_%'
-                 AND (cu.is_deleted = 0 OR cu.is_deleted IS NULL)''', (today,))
-    pending = c.fetchone()[0]
-    c.execute('''SELECT COUNT(*) FROM reminders r LEFT JOIN customers cu ON r.customer_id = cu.id
-                 WHERE r.is_done = 0 AND r.remind_date < ? AND r.reminder_type NOT LIKE 'outreach_%'
-                 AND (cu.is_deleted = 0 OR cu.is_deleted IS NULL)''', (today,))
-    overdue = c.fetchone()[0]
-    c.execute('''SELECT business_stage, COUNT(*) FROM customers
-                 WHERE (is_deleted = 0 OR is_deleted IS NULL)
-                 GROUP BY business_stage''')
-    stage_counts = {row[0] or '未标记': row[1] for row in c.fetchall()}
+    all_open_tasks = _today_tasks(conn, due_on_or_before=today)
+    pending = len(all_open_tasks)
+    overdue = sum(1 for task in all_open_tasks if (task.get('remind_date') or '') < today)
+    stage_counts = {}
+    level_counts = {}
+    for customer in customers:
+        stage = customer.get('business_stage') or '未标记'
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        level = customer.get('level') or ''
+        level_counts[level] = level_counts.get(level, 0) + 1
     contacted = sum(1 for fact in facts.values() if fact['has_contact'])
-    c.execute('SELECT level, COUNT(*) FROM customers WHERE (is_deleted = 0 OR is_deleted IS NULL) GROUP BY level')
-    level_counts = {row[0]: row[1] for row in c.fetchall()}
-    c.execute('SELECT COUNT(*) FROM customers WHERE is_deleted = 1')
-    deleted_count = c.fetchone()[0]
+    deleted_count = len(_active_customers(conn, include_deleted=True)) - total
     
     conn.close()
     return jsonify({
@@ -11644,52 +11627,25 @@ def _build_weekly_summary(user, week_start, week_end):
         set_db_user(user)
         conn = get_db()
         try:
-            rows = conn.execute('''
-            SELECT * FROM (
-            SELECT 'follow' AS type, f.id, f.customer_id,
-                   f.follow_date AS date, f.created_at,
-                   f.content AS actual_work, f.result, f.next_plan,
-                   c.name AS customer_name, c.company AS customer_company,
-                   c.country AS customer_country
-            FROM follow_up_logs f
-            JOIN customers c ON c.id = f.customer_id
-            WHERE f.follow_date >= ? AND f.follow_date <= ?
-              AND f.is_reported = 1
-              AND (f.is_deleted = 0 OR f.is_deleted IS NULL)
-              AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            UNION ALL
-            SELECT 'outreach' AS type, o.id, o.customer_id,
-                   o.sent_date AS date, o.created_at,
-                   o.content AS actual_work, o.reply_content AS result,
-                   '' AS next_plan,
-                   c.name AS customer_name, c.company AS customer_company,
-                   c.country AS customer_country
-            FROM outreach_emails o
-            JOIN customers c ON c.id = o.customer_id
-            WHERE o.sent_date >= ? AND o.sent_date <= ?
-              AND o.is_reported = 1
-              AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            )
-            ORDER BY date DESC, created_at DESC, id DESC
-            ''', (week_start, week_end, week_start, week_end)).fetchall()
+            rows = _weekly_interactions(conn, from_date=week_start, to_date=week_end)
         finally:
             conn.close()
 
         grouped = {}
         for row in rows:
             item = dict(row)
-            customer_key = item.get('customer_id') or f"{item['type']}:{item['id']}"
+            customer_key = item.get('customer_id') or f"{item['kind']}:{item['id']}"
             group = grouped.setdefault(customer_key, {
                 'customer_id': item.get('customer_id'),
                 'customer_name': item.get('customer_name', ''),
                 'customer_company': item.get('customer_company', ''),
                 'customer_country': item.get('customer_country', ''),
-                'date': item.get('date', ''),
+                'date': item.get('occurred_on', ''),
                 '_actual_work': [],
                 '_result': [],
                 '_next_steps': [],
             })
-            group['_actual_work'].append(item.get('actual_work', ''))
+            group['_actual_work'].append(item.get('content', ''))
             group['_result'].append(item.get('result', ''))
             group['_next_steps'].append(item.get('next_plan', ''))
 
