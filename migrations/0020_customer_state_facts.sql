@@ -64,13 +64,17 @@ SELECT r.legacy_customer_id AS id,
        CASE WHEN r.legacy_payload ? 'attention_reason' THEN coalesce(r.legacy_payload->>'attention_reason', '') ELSE a.attention_reason END AS attention_reason,
        coalesce(a.attention_updated_at::text, r.legacy_payload->>'attention_updated_at', '') AS attention_updated_at,
        coalesce(a.attention_review_date::text, r.legacy_payload->>'attention_review_date', '') AS attention_review_date,
-       coalesce(s.business_stage, '') AS business_stage, coalesce(s.business_role, '') AS business_role,
-       coalesce(s.customer_judgment, '') AS customer_judgment,
        CASE WHEN lower(coalesce(r.legacy_payload->>'is_pinned', CASE WHEN a.is_pinned THEN '1' ELSE '0' END)) IN ('1', 'true') THEN 1 ELSE 0 END AS is_pinned,
        a.pinned_order, coalesce(r.legacy_payload->>'pinned_at', '') AS pinned_at,
        CASE WHEN lower(coalesce(r.legacy_payload->>'is_deleted', CASE WHEN a.deleted_at IS NULL THEN '0' ELSE '1' END)) IN ('1', 'true') THEN 1 ELSE 0 END AS is_deleted,
        coalesce(r.legacy_payload->>'deleted_at', a.deleted_at::text, '') AS deleted_at,
-       a.created_at::text AS created_at, a.updated_at::text AS updated_at
+       a.created_at::text AS created_at, a.updated_at::text AS updated_at,
+       -- CREATE OR REPLACE VIEW may only append columns on an existing
+       -- production view; current state fields therefore sit after the
+       -- historical compatibility surface rather than renaming it in place.
+       coalesce(s.business_stage, '') AS business_stage,
+       coalesce(s.business_role, '') AS business_role,
+       coalesce(s.customer_judgment, '') AS customer_judgment
 FROM trosa.account_legacy_refs r JOIN trosa.accounts a ON a.id=r.account_id
 JOIN core.companies c ON c.id=a.company_id
 LEFT JOIN trosa.customer_states s ON s.organization_id=r.organization_id AND s.legacy_user_id=r.legacy_user_id AND s.legacy_customer_id=r.legacy_customer_id
