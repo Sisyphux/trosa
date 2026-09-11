@@ -63,6 +63,7 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0019_retire_frozen_compat_surfaces.sql",
     ROOT / "migrations" / "0020_customer_state_facts.sql",
     ROOT / "migrations" / "0021_formal_business_read_models.sql",
+    ROOT / "migrations" / "0022_modern_trosa_core.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

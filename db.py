@@ -81,6 +81,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0019_retire_frozen_compat_surfaces.sql'),
         os.path.join(root, 'migrations', '0020_customer_state_facts.sql'),
         os.path.join(root, 'migrations', '0021_formal_business_read_models.sql'),
+        os.path.join(root, 'migrations', '0022_modern_trosa_core.sql'),
     )
 
 

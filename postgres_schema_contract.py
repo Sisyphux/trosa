@@ -46,7 +46,8 @@ REQUIRED_TABLES = (
 REQUIRED_VIEWS = (
     "trosa.users", "trosa.customers", "trosa.contacts", "trosa.reminders",
     "trosa.follow_up_logs", "trosa.outreach_emails", "trosa.customer_tasks",
-    "trosa.customer_interactions",
+    "trosa.customer_interactions", "trosa.customer_records", "trosa.customer_contacts",
+    "trosa.today_tasks",
     "trade_os_compat.users", "trade_os_compat.customers", "trade_os_compat.contacts",
     "trade_os_compat.reminders", "trade_os_compat.follow_up_logs", "trade_os_compat.outreach_emails",
     "trade_os_compat.inbox_items", "trade_os_compat.customer_files",

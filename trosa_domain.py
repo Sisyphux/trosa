@@ -58,6 +58,123 @@ def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False) -
     return [dict(row) for row in rows]
 
 
+def customer_contacts(conn: Any, customer_id: int) -> list[dict]:
+    """Return Contacts without making product callers depend on compat tables."""
+    relation = 'trosa.customer_contacts' if postgres_mode() else 'contacts'
+    rows = conn.execute(
+        f'''SELECT id, customer_id, name, title, email, phone, whatsapp, linkedin,
+                   preferred_channel, contact_type, is_primary, notes, created_at
+              FROM {relation} WHERE customer_id=?
+             ORDER BY is_primary DESC, created_at DESC, id DESC''', (customer_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -> list[dict]:
+    """The one Today work view.  It is a projection of open Tasks, never a second queue."""
+    if postgres_mode():
+        query = '''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
+                          task_type AS reminder_type, manual_order, customer_name, customer_company
+                     FROM trosa.today_tasks WHERE due_date<=?
+                    ORDER BY due_date, manual_order, id'''
+    else:
+        query = '''SELECT r.id, r.customer_id, r.title, r.content, r.reason,
+                          r.remind_date, r.reminder_type, r.manual_order,
+                          c.name AS customer_name, c.company AS customer_company
+                     FROM reminders r JOIN customers c ON c.id=r.customer_id
+                    WHERE r.is_done=0 AND r.remind_date<=?
+                      AND COALESCE(r.reminder_type, 'follow_up') NOT LIKE 'outreach_%'
+                      AND (c.is_deleted=0 OR c.is_deleted IS NULL)
+                    ORDER BY r.remind_date, r.manual_order, r.id'''
+    params: list[Any] = [due_on_or_before]
+    if limit is not None:
+        query += ' LIMIT ?'
+        params.append(max(1, int(limit)))
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def customer_record(conn: Any, customer_id: int) -> dict | None:
+    """Return the modern Customer identity and state used by all adapters."""
+    relation = 'trosa.customer_records' if postgres_mode() else 'customers'
+    row = conn.execute(f'''SELECT * FROM {relation}
+                            WHERE id=? AND ({'deleted_at IS NULL' if postgres_mode() else '(is_deleted=0 OR is_deleted IS NULL)'})''',
+                       (customer_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def record_external_interaction(
+    conn: Any, *, customer_id: int, content: str, occurred_on: str,
+    direction: str, source: str, activity_type: str = 'email', result: str = '',
+    next_plan: str = '', source_reference: str = '', contact_id: int | None = None,
+) -> int:
+    """Persist an adapter-observed fact as one Interaction.
+
+    Gmail and sela call this boundary instead of inventing an independent
+    follow-up-log implementation.  The SQLite branch exists only for local
+    recovery fixtures; production writes the canonical event first.
+    """
+    if postgres_mode():
+        account = conn.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''', (customer_id,),
+        ).fetchone()
+        if not account:
+            raise ValueError('customer is not visible to the current user')
+        if source_reference:
+            existing = conn.execute(
+                '''SELECT ref.legacy_id FROM trosa.legacy_row_refs ref
+                     JOIN trosa.timeline_events event ON event.id=ref.target_id
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id=trosa.compat_current_user()
+                      AND ref.table_name='follow_up_logs' AND event.account_id=?
+                      AND event.source_module=? AND event.source_reference=?''',
+                (account['account_id'], source, source_reference),
+            ).fetchone()
+            if existing:
+                return int(existing[0])
+        legacy_id = conn.execute(
+            "SELECT trosa.compat_next_id('follow_up_logs', trosa.compat_current_user())",
+        ).fetchone()[0]
+        target_id = conn.execute(
+            "SELECT trosa.compat_uuid(?)", (f'interaction:{source}:{source_reference or legacy_id}',),
+        ).fetchone()[0]
+        contact_method_id = None
+        if contact_id:
+            contact = conn.execute(
+                '''SELECT contact_method_id FROM trosa.contact_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user() AND legacy_contact_id=?
+                      AND legacy_customer_id=?''', (contact_id, customer_id),
+            ).fetchone()
+            contact_method_id = contact['contact_method_id'] if contact else None
+        conn.execute(
+            '''INSERT INTO trosa.timeline_events
+               (id, account_id, contact_method_id, event_type, direction, content, result, next_plan,
+                source_module, source_reference, occurred_at, payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, trosa.compat_time(?), '{}'::jsonb)
+               ON CONFLICT (id) DO NOTHING''',
+            (target_id, account['account_id'], contact_method_id, activity_type, direction, content, result,
+             next_plan, source, source_reference, occurred_on),
+        )
+        conn.execute(
+            '''INSERT INTO trosa.legacy_row_refs
+               (organization_id, legacy_user_id, table_name, legacy_id, target_id)
+               VALUES (trosa.compat_org_id(), trosa.compat_current_user(), 'follow_up_logs', ?, ?)
+               ON CONFLICT (organization_id, legacy_user_id, table_name, legacy_id) DO NOTHING''',
+            (legacy_id, target_id),
+        )
+        return int(legacy_id)
+    cursor = conn.execute(
+        '''INSERT INTO follow_up_logs
+           (customer_id, content, follow_date, result, next_plan, activity_type, direction, contact_id, source, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'))''',
+        (customer_id, content, occurred_on, result, next_plan, activity_type, direction, contact_id, source),
+    )
+    return int(cursor.lastrowid)
+
+
 def customer_interactions(
     conn: Any, customer_id: int, *, limit: int | None = None, offset: int = 0,
 ) -> list[dict]:

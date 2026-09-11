@@ -32,6 +32,7 @@ from db import (
     schedule_safety_backup,
     set_db_user,
 )
+from trosa_domain import record_external_interaction
 
 
 logger = logging.getLogger(__name__)
@@ -691,22 +692,14 @@ def _store_message(user, account, message, summary):
         now = _now_text()
         if match['status'] == 'matched':
             escaped_summary = html.escape(str(summary or _fallback_summary(message)), quote=False)
-            c.execute('''INSERT INTO follow_up_logs
-                        (customer_id, content, follow_date, result, next_plan, activity_type, direction,
-                         contact_id, source, created_at)
-                        VALUES (?, ?, ?, '', '', 'email', ?, ?, 'gmail', ?)''',
-                      (match['customer_id'], escaped_summary, message.get('date') or now[:10],
-                       message.get('direction', 'unknown'), match.get('contact_id'), now))
-            activity_id = c.lastrowid
+            activity_id = record_external_interaction(
+                conn, customer_id=match['customer_id'], content=escaped_summary,
+                occurred_on=message.get('date') or now[:10],
+                direction=message.get('direction', 'unknown'), source='gmail',
+                activity_type='email', source_reference=message.get('message_id', ''),
+                contact_id=match.get('contact_id'),
+            )
             _insert_source(c, activity_id, account, message)
-            follow_date = message.get('date') or now[:10]
-            c.execute('''UPDATE customers
-                         SET last_contact=CASE WHEN COALESCE(last_contact, '')='' OR last_contact<? THEN ? ELSE last_contact END,
-                             customer_type='existing',
-                             status=CASE WHEN status='未建联' THEN '跟进中' ELSE status END,
-                             updated_at=CASE WHEN COALESCE(last_contact, '')='' OR last_contact<? THEN ? ELSE updated_at END
-                         WHERE id=?''',
-                      (follow_date, follow_date, follow_date, now, match['customer_id']))
             _store_state(c, message, match, activity_id=activity_id)
             conn.commit()
             return {'state': 'matched', 'activity_id': activity_id, 'customer_id': match['customer_id']}

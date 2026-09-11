@@ -71,10 +71,13 @@ from gmail_sync import (
     start_gmail_sync,
 )
 from trosa_domain import (
+    customer_contacts as _customer_contacts,
     customer_facts as _project_customer_facts,
     customer_interaction_count as _customer_interaction_count,
     customer_interactions as _customer_interactions,
+    customer_record as _customer_record,
     customer_tasks as _customer_tasks,
+    today_tasks as _today_tasks,
 )
 
 # ========== 配置 ==========
@@ -1427,8 +1430,27 @@ def _enrich_reminders(conn, reminders):
     follow_by_customer = {}
     outreach_by_customer = {}
     if customer_ids:
-        placeholders = ','.join('?' for _ in customer_ids)
-        cursor.execute(f'''SELECT customer_id, content, result, follow_date, activity_type
+        if postgres_mode():
+            # Today is a Task projection with Interaction context.  Do not
+            # reopen the legacy follow-up/outreach split after the formal
+            # domain boundary has supplied the task rows.
+            for customer_id in customer_ids:
+                interactions = _customer_interactions(conn, customer_id, limit=1)
+                if not interactions:
+                    continue
+                item = interactions[0]
+                target = follow_by_customer if item['kind'] == 'communication' else outreach_by_customer
+                target[customer_id] = {
+                    'follow_date': item.get('occurred_on') or '',
+                    'sent_date': item.get('occurred_on') or '',
+                    'content': item.get('content') or '', 'result': item.get('result') or '',
+                    'subject': item.get('subject') or item.get('content') or '',
+                    'activity_type': item.get('activity_type') or '',
+                    'reply_status': item.get('delivery_status') or '',
+                }
+        else:
+            placeholders = ','.join('?' for _ in customer_ids)
+            cursor.execute(f'''SELECT customer_id, content, result, follow_date, activity_type
                            FROM (
                                SELECT customer_id, content, result, follow_date, activity_type,
                                       ROW_NUMBER() OVER (
@@ -1439,8 +1461,8 @@ def _enrich_reminders(conn, reminders):
                                WHERE customer_id IN ({placeholders})
                                  AND (is_deleted=0 OR is_deleted IS NULL)
                            ) WHERE row_number=1''', customer_ids)
-        follow_by_customer = {row['customer_id']: row for row in cursor.fetchall()}
-        cursor.execute(f'''SELECT customer_id, subject, content, sent_date, reply_status
+            follow_by_customer = {row['customer_id']: row for row in cursor.fetchall()}
+            cursor.execute(f'''SELECT customer_id, subject, content, sent_date, reply_status
                            FROM (
                                SELECT customer_id, subject, content, sent_date, reply_status,
                                       ROW_NUMBER() OVER (
@@ -1450,7 +1472,7 @@ def _enrich_reminders(conn, reminders):
                                FROM outreach_emails
                                WHERE customer_id IN ({placeholders})
                            ) WHERE row_number=1''', customer_ids)
-        outreach_by_customer = {row['customer_id']: row for row in cursor.fetchall()}
+            outreach_by_customer = {row['customer_id']: row for row in cursor.fetchall()}
 
     for reminder in reminders:
         customer_id = reminder['customer_id']
@@ -7501,63 +7523,24 @@ def get_agent_customer_timeline(customer_id):
     except (TypeError, ValueError):
         limit = 50
     conn = get_db()
-    c = conn.cursor()
-    customer = c.execute('''SELECT id, name, company, country
-                            FROM customers
-                            WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''',
-                         (customer_id,)).fetchone()
+    customer = _customer_record(conn, customer_id)
     if not customer:
         conn.close()
         return jsonify({'error': '客户不存在'}), 404
 
     events = []
-    activities = c.execute('''SELECT id, follow_date, content, result, next_plan,
-                                     activity_type, direction, contact_id, related_task_id,
-                                     source, created_at
-                              FROM follow_up_logs
-                              WHERE customer_id=? AND (is_deleted=0 OR is_deleted IS NULL)
-                              ORDER BY follow_date DESC, created_at DESC, id DESC
-                              LIMIT ?''', (customer_id, limit)).fetchall()
-    for row in activities:
-        item = dict(row)
+    for item in _customer_interactions(conn, customer_id, limit=limit):
         events.append({
-            'event_type': 'communication',
+            'event_type': item['kind'],
             'event_id': item['id'],
             'customer_id': customer_id,
-            'event_date': item.get('follow_date') or '',
+            'event_date': item.get('occurred_on') or '',
             'activity_type': item.get('activity_type') or 'follow_up',
             'direction': item.get('direction') or 'unknown',
             'content': item.get('content') or '',
             'result': item.get('result') or '',
             'next_plan': item.get('next_plan') or '',
-            'contact_id': item.get('contact_id'),
-            'related_task_id': item.get('related_task_id'),
             'source': item.get('source') or '',
-            'created_at': item.get('created_at') or '',
-        })
-
-    emails = c.execute('''SELECT id, sent_date, subject, content, reply_status,
-                                 reply_content, reply_date, created_at
-                          FROM outreach_emails
-                          WHERE customer_id=?
-                          ORDER BY sent_date DESC, created_at DESC, id DESC
-                          LIMIT ?''', (customer_id, limit)).fetchall()
-    for row in emails:
-        item = dict(row)
-        events.append({
-            'event_type': 'outreach_email',
-            'event_id': item['id'],
-            'customer_id': customer_id,
-            'event_date': item.get('sent_date') or '',
-            'activity_type': 'email',
-            'direction': 'outbound',
-            'content': item.get('content') or '',
-            'result': item.get('reply_content') or '',
-            'next_plan': '',
-            'subject': item.get('subject') or '',
-            'reply_status': item.get('reply_status') or '',
-            'reply_date': item.get('reply_date') or '',
-            'source': 'outreach_email',
             'created_at': item.get('created_at') or '',
         })
     conn.close()
@@ -7773,22 +7756,17 @@ def gateway_search_customers():
 def gateway_get_customer(customer_id):
     conn = get_db()
     try:
-        row = conn.execute('''SELECT id, name, company, country, website, field, industry, business_stage, business_role, customer_judgment, level,
-                                      last_contact, next_follow_up
-                               FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
+        row = _customer_record(conn, customer_id)
         if not row:
             return _gateway_response(error=('not_found', '客户不存在'), status=404)
-        task = conn.execute('''SELECT id, title, remind_date FROM reminders WHERE customer_id=? AND is_done=0
-                               AND reminder_type NOT LIKE 'outreach_%' ORDER BY remind_date, id LIMIT 1''', (customer_id,)).fetchone()
-        contact = conn.execute('''SELECT id, name, title, email, phone FROM contacts WHERE customer_id=?
-                                  ORDER BY is_primary DESC, id LIMIT 1''', (customer_id,)).fetchone()
+        contacts = _customer_contacts(conn, customer_id)
         facts = _customer_business_facts(conn, [customer_id])[customer_id]
     finally:
         conn.close()
     customer = dict(row)
     customer['next_task'] = facts['next_task']
     customer.update({key: facts[key] for key in ('contact_state', 'has_contact', 'latest_communication_date', 'next_task_date', 'next_task_title', 'waiting_reply')})
-    customer['primary_contact'] = dict(contact) if contact else None
+    customer['primary_contact'] = contacts[0] if contacts else None
     return _gateway_response({'customer': customer})
 
 
@@ -7798,15 +7776,11 @@ def gateway_get_today():
     limit, today = _gateway_limit(), _calendar_today().isoformat()
     conn = get_db()
     try:
-        rows = conn.execute('''SELECT r.id, r.customer_id, r.title, r.content, r.remind_date, c.name, c.company
-                               FROM reminders r JOIN customers c ON c.id=r.customer_id
-                               WHERE r.is_done=0 AND r.remind_date<=? AND r.reminder_type NOT LIKE 'outreach_%'
-                                 AND (c.is_deleted=0 OR c.is_deleted IS NULL)
-                               ORDER BY r.remind_date, r.id LIMIT ?''', (today, limit)).fetchall()
+        rows = _today_tasks(conn, due_on_or_before=today, limit=limit)
     finally:
         conn.close()
     return _gateway_response({'tasks': [{'id': row['id'], 'customer_id': row['customer_id'], 'title': row['title'] or row['content'] or '',
-                                         'due_date': row['remind_date'], 'customer_name': row['company'] or row['name'] or ''} for row in rows]},
+                                         'due_date': row['remind_date'], 'customer_name': row.get('customer_company') or row.get('customer_name') or ''} for row in rows]},
                              pagination={'limit': limit, 'has_more': len(rows) == limit})
 
 
@@ -7853,14 +7827,12 @@ def gateway_get_inbox():
 def gateway_get_contacts(customer_id):
     conn = get_db()
     try:
-        if not conn.execute('SELECT id FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)', (customer_id,)).fetchone():
+        if not _customer_record(conn, customer_id):
             return _gateway_response(error=('not_found', '客户不存在'), status=404)
-        rows = conn.execute('''SELECT id, customer_id, name, title, email, phone, whatsapp, linkedin,
-                                      preferred_channel, contact_type, is_primary, notes
-                               FROM contacts WHERE customer_id=? ORDER BY is_primary DESC, created_at DESC, id DESC''', (customer_id,)).fetchall()
+        rows = _customer_contacts(conn, customer_id)
     finally:
         conn.close()
-    return _gateway_response({'contacts': [dict(row) for row in rows]})
+    return _gateway_response({'contacts': rows})
 
 
 @app.route('/api/gateway/tasks', methods=['GET'])
@@ -8298,20 +8270,7 @@ def cancel_agent_proposal(proposal_id):
 def get_today_reminders():
     today = _calendar_today().isoformat()
     conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        SELECT r.*, c.name as customer_name, c.company as customer_company,
-               c.country, c.level, c.business_stage, c.business_role, c.field, c.website, COALESCE(c.is_pinned, 0) AS is_pinned,
-               c.profile, c.last_contact, c.notes as customer_notes,
-               c.business_role
-        FROM reminders r JOIN customers c ON r.customer_id = c.id
-        WHERE r.is_done = 0 AND r.remind_date <= ?
-          AND r.reminder_type NOT LIKE 'outreach_%'
-          AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-        ORDER BY CASE WHEN COALESCE(r.manual_order, 0) > 0 THEN 0 ELSE 1 END,
-                 COALESCE(r.manual_order, 0) ASC, r.remind_date ASC, c.level DESC, r.id ASC
-    ''', (today,))
-    reminders = _enrich_reminders(conn, [dict(row) for row in c.fetchall()])
+    reminders = _enrich_reminders(conn, _today_tasks(conn, due_on_or_before=today))
     conn.close()
     return jsonify(reminders)
 
