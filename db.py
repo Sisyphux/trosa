@@ -174,6 +174,15 @@ def init_postgres_store():
                         # boundaries.  Commit the ledger row before the next
                         # file starts its transaction.
                         conn.commit()
+                # ``trade_os_compat.customers`` was originally created from
+                # ``SELECT *``. PostgreSQL fixes that column list at view
+                # creation time, so refresh this adapter on every startup as
+                # canonical customer fields evolve.
+                cursor.execute('''
+                    CREATE OR REPLACE VIEW trade_os_compat.customers AS
+                    SELECT * FROM trosa.customers
+                ''')
+                conn.commit()
                 if not _postgres_schema_ready(cursor):
                     raise RuntimeError(
                         'PostgreSQL schema is incomplete; refusing to start with a partial compatibility surface'
