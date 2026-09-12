@@ -16,6 +16,18 @@ import threading
 import subprocess
 import logging
 
+# ``desktop.py`` is retained only as an explicit isolated-development helper.
+# It must not be an undocumented way to start a second Trosa business writer.
+if __name__ == '__main__':
+    _desktop_environment = os.environ.get('CRM_ENV', '').strip().lower()
+    _desktop_sqlite_opt_in = os.environ.get('TRADE_OS_DEV_SQLITE', '').strip() == '1'
+    if _desktop_environment != 'development' or not _desktop_sqlite_opt_in:
+        raise SystemExit(
+            'desktop.py 不是正式 Trosa 启动入口。正式服务请使用 serve.py（必须连接 PostgreSQL）；'
+            '隔离 SQLite 开发必须显式设置 CRM_ENV=development TRADE_OS_DEV_SQLITE=1；'
+            'PostgreSQL 演练请使用 serve_rehearsal.py。'
+        )
+
 # ============================================================
 # 路径处理
 # ============================================================

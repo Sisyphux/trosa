@@ -15,7 +15,7 @@ from pathlib import Path
 
 from waitress import serve
 
-from db import init_all_dbs, run_startup_maintenance
+from db import init_all_dbs, require_formal_postgres_runtime, run_startup_maintenance
 from scheduler import start_scheduler, stop_scheduler
 
 
@@ -42,6 +42,10 @@ def shutdown(*_args):
 def main():
     if os.environ.get('CRM_ENV', '').lower() != 'production':
         raise RuntimeError('生产服务请设置 CRM_ENV=production')
+    # This is the only formal web entrypoint.  Fail before migrations,
+    # maintenance, scheduler startup, or socket binding if PostgreSQL is not
+    # explicitly configured; a missing variable must never select SQLite.
+    require_formal_postgres_runtime()
     init_all_dbs()
     run_startup_maintenance()
     start_scheduler()

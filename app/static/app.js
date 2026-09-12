@@ -4767,7 +4767,7 @@ async function openEditModal(id) {
           type: item.type, id: item.id, date: item.date || item.follow_date || item.sent_date || '',
           activity_type: item.activity_type || '', content: item.content || item.subject || '',
           result: item.result || item.reply_content || '', source: item.type === 'outreach' ? '开发邮件' : '沟通记录',
-          source_detail: item.activity_type || (item.type === 'outreach' ? '开发邮件' : '沟通记录')
+          source_detail: item.source || item.activity_type || ''
         };
       });
     }
@@ -4984,9 +4984,7 @@ function renderCustomerFactsBrief(customer) {
   var recentFacts = (customer.recent_facts || []).slice(0, 3);
   var recentHtml = recentFacts.length ? recentFacts.slice(0, 1).map(function(fact) {
     var factText = fact.content || fact.subject || '已记录沟通';
-    var sourceDetail = fact.source_detail || '';
-    if (fact.type === 'follow' && sourceDetail) sourceDetail = communicationTypeLabel(sourceDetail);
-    var sourceLabel = [fact.source || '沟通记录', sourceDetail].filter(function(value, index, values) { return value && values.indexOf(value) === index; }).join(' · ');
+    var sourceLabel = customerFactLabel(fact.type, fact.source_detail);
     return '<article class="customer-fact-event"><div class="customer-fact-event-meta"><span>' + escapeHtml(sourceLabel) + '</span><time>' + escapeHtml(formatChineseDate(fact.date || '')) + '</time></div>' +
       '<p>' + (fact.type === 'follow' ? renderRichText(factText) : escapeHtml(factText)) + '</p>' +
       (fact.result ? '<small><b>结果</b> ' + (fact.type === 'follow' ? renderRichText(fact.result) : escapeHtml(fact.result)) + '</small>' : '') +
@@ -5812,6 +5810,22 @@ var _followTimelineCache = {};
 function communicationTypeLabel(type) {
   var labels = { whatsapp:'WhatsApp', email:'邮件', phone:'电话', meeting:'会议', quote:'报价', sample:'寄样', follow_up:'其他跟进', customer_reply:'客户回复', task_completed:'完成任务' };
   return labels[type] || type || '沟通记录';
+}
+// The timeline stores where a fact came from as an internal key. Showing the
+// raw key ("manual") next to a business label reads like a bug to the user, so
+// only known import channels get named and everything else stays generic.
+function interactionSourceLabel(source) {
+  var labels = { manual:'手动记录', quick_reply:'快速回复', gmail:'Gmail', gmail_delivery:'Gmail', gmail_reply:'Gmail 回复', excel:'Excel 导入', excel_recovery:'Excel 恢复', import:'导入', sync:'自动同步', agent_confirmed:'AI 建议已确认', sela_agent:'Sela 建议已确认' };
+  return (source && labels[source]) || '';
+}
+function customerFactLabel(type, sourceDetail) {
+  var detail = String(sourceDetail || '');
+  var contactTypes = { whatsapp:1, email:1, phone:1, meeting:1, quote:1, sample:1, follow_up:1, customer_reply:1, task_completed:1 };
+  var typeLabel = type === 'outreach' ? '开发邮件'
+    : (Object.prototype.hasOwnProperty.call(contactTypes, detail.toLowerCase()) ? communicationTypeLabel(detail) : '');
+  var channel = interactionSourceLabel(detail);
+  if (typeLabel && channel && channel !== typeLabel) return typeLabel + ' · ' + channel;
+  return typeLabel || channel || '沟通记录';
 }
 function renderCustomerTimelineMore(pagination) {
   var el = document.getElementById('customerTimelineMore');

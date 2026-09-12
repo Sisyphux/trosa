@@ -1,0 +1,301 @@
+// Trosa 数据拓扑（当前状态）
+// 场景技能：system-modeler ｜ 基础技能：graphviz
+//
+// 证据：migrations/0001–0029、postgres_schema_contract.py、db.py、tools/unified_postgres_import.py
+// 渲染：本机无原生 Graphviz，SVG 由 Graphviz 16.0.0 的 WASM 构建渲染
+//       （npm i @viz-js/viz → viz.renderString(src, {format:'svg'})）；
+//       若已装原生 dot：dot -Tsvg <file>.dot -o <file>.svg
+// 布局：rankdir=LR。本图节点多（43）而边少（30），TB 会摊成 6.8:1 的超宽画布；
+//       LR 让每个 schema 成为纵向一列，宽度回到 1517pt 左右，纵向滚动即可读完
+//
+// 图例：圆柱 = 基表 ｜ 虚线圆角框 = 视图（派生） ｜ 点线灰 = 已退役/仅审计 ｜ 菱形 = 兼容写边界触发器
+// 未绘制：列级外键与逐列血缘未逐一核实，本图只画有直接证据的关系
+
+digraph trosa_data_topology {
+    rankdir=LR;
+    graph [
+        fontname="Helvetica",
+        fontsize=11,
+        labelloc="t",
+        label="Trosa 数据拓扑（当前状态）\n单一事实源：云主机本机 PostgreSQL 库 tradeos ｜ 6 个 schema ｜ 29 个迁移文件\n「兼容层」是 SQLite 形状的历史写入面，经触发器镜像进现代 trosa 规范表",
+        splines=true,
+        nodesep=0.35,
+        ranksep=0.6,
+        compound=true,
+        newrank=true,
+        pad=0.3
+    ];
+    node [
+        shape=cylinder,
+        style=filled,
+        fillcolor="#dce9f7",
+        color="#3b6ea5",
+        fontname="Helvetica",
+        fontsize=10,
+        penwidth=1.1
+    ];
+    edge [
+        fontname="Helvetica",
+        fontsize=9,
+        color="#5a5a5a",
+        arrowsize=0.7
+    ];
+
+    // ---------------------------------------------------------------
+    // 应用写入路径（Python 侧）
+    // ---------------------------------------------------------------
+
+    app [
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#fff3cd",
+        color="#b8860b",
+        label="Python 业务写入路径\ntrosa_domain.py → db.py → postgres_compat.py\n（具体落到基表还是可写视图未逐列核实，置信度 medium）"
+    ];
+
+    // ---------------------------------------------------------------
+    // identity
+    // ---------------------------------------------------------------
+
+    subgraph cluster_identity {
+        label="schema: identity（身份与租户边界）";
+        style="filled,rounded";
+        fillcolor="#f2f7fc";
+        color="#7fa8cc";
+        fontname="Helvetica";
+        fontsize=10;
+
+        identity_users [label="users\n（3 个团队成员）"];
+        identity_orgs [label="organizations"];
+        identity_memberships [label="memberships"];
+        identity_settings [label="settings"];
+        identity_invitations [label="team_invitations\n（0002）"];
+    }
+
+    // ---------------------------------------------------------------
+    // core
+    // ---------------------------------------------------------------
+
+    subgraph cluster_core {
+        label="schema: core（客户/联系人/文件的规范实体）";
+        style="filled,rounded";
+        fillcolor="#f1f8f2";
+        color="#7fb98f";
+        fontname="Helvetica";
+        fontsize=10;
+
+        core_companies [label="companies"];
+        core_company_domains [label="company_domains\ncompany_aliases"];
+        core_people [label="people"];
+        core_company_people [label="company_people"];
+        core_contact_methods [label="contact_methods"];
+        core_email_obs [label="email_verification_\nobservations"];
+        core_file_objects [label="file_objects\n（+category, uploaded_by，0027）"];
+        core_entity_files [label="entity_files"];
+    }
+
+    // ---------------------------------------------------------------
+    // trosa：规范业务表与读模型
+    // ---------------------------------------------------------------
+
+    subgraph cluster_trosa {
+        label="schema: trosa（现代规范业务模型 + 读模型视图）";
+        style="filled,rounded";
+        fillcolor="#eef4fd";
+        color="#5b8fc9";
+        fontname="Helvetica";
+        fontsize=10;
+
+        trosa_accounts [label="accounts"];
+        trosa_customer_details [label="customer_details\n（0022 新建）"];
+        trosa_customer_states [label="customer_states\n（0020 新建）"];
+        trosa_tasks [label="tasks"];
+        trosa_timeline [label="timeline_events"];
+        trosa_outreach [label="outreach_messages"];
+        trosa_inbox [label="inbox_items"];
+        trosa_comm_sources [label="communication_sources\ncommunication_source_items"];
+        trosa_email_receipts [label="email_message_receipts\nemail_delivery_events"];
+        trosa_reports [label="weekly_reports"];
+        trosa_profiles [label="agent_prospect_profiles\n（0017）\nbusiness_exclusions（0018）"];
+        trosa_legacy_refs [label="account_legacy_refs\ncontact_legacy_refs\nlegacy_row_refs"];
+
+        trosa_v_customers [
+            shape=box,
+            style="filled,rounded,dashed",
+            fillcolor="#e8f0fb",
+            color="#3b6ea5",
+            label="view: trosa.customers\n（0002，0020 重建）"
+        ];
+        trosa_v_records [
+            shape=box,
+            style="filled,rounded,dashed",
+            fillcolor="#e8f0fb",
+            color="#3b6ea5",
+            label="view: trosa.customer_records\n（0022；0024/0025/0027 连续重定义）"
+        ];
+        trosa_v_readmodels [
+            shape=box,
+            style="filled,rounded,dashed",
+            fillcolor="#e8f0fb",
+            color="#3b6ea5",
+            label="view: customer_contacts · customer_tasks\ntoday_tasks · customer_interactions"
+        ];
+        trosa_v_legacy_views [
+            shape=box,
+            style="filled,rounded,dashed",
+            fillcolor="#e8f0fb",
+            color="#3b6ea5",
+            label="view: reminders · follow_up_logs\noutreach_emails · users"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // trade_os_compat：SQLite 形状兼容层
+    // ---------------------------------------------------------------
+
+    subgraph cluster_compat {
+        label="schema: trade_os_compat（SQLite 形状兼容层，0003–0019）";
+        style="filled,rounded";
+        fillcolor="#fdf3e7";
+        color="#d19a52";
+        fontname="Helvetica";
+        fontsize=10;
+
+        compat_views [
+            shape=box,
+            style="filled,rounded,dashed",
+            fillcolor="#fdf3e7",
+            color="#d19a52",
+            label="约 20 个兼容视图\ncustomers · contacts · inbox_items · users\ncustomer_files · email_* · gmail_message_states\ncommunication_* · weekly_reports · import*\nintegration_sync_receipts"
+        ];
+        compat_rows [
+            shape=box,
+            style="filled,rounded",
+            fillcolor="#fdf3e7",
+            color="#d19a52",
+            label="13 个 *_rows 表\ncustomer_file_rows · operation_log_rows\nagent_rows · undo_rows · import*_rows\n delivery_rows · gmail_message_state_rows\ncommunication_source(_item)_rows"
+        ];
+        compat_settings [label="app_settings"];
+        compat_boundary [
+            shape=diamond,
+            style="filled",
+            fillcolor="#f6d6c6",
+            color="#b5563a",
+            label="兼容写边界触发器\nzz_customers_ref_payload_write\n（0023 建立；0026 改为读 to_jsonb(NEW)）"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // audit
+    // ---------------------------------------------------------------
+
+    subgraph cluster_audit {
+        label="schema: audit（审计、导入账本与回滚）";
+        style="filled,rounded";
+        fillcolor="#f4f1fa";
+        color="#8f7fc0";
+        fontname="Helvetica";
+        fontsize=10;
+
+        audit_ledger [label="schema_migrations\n（迁移账本：name + sha256）"];
+        audit_legacy [label="legacy_records\n（导入前逐行归档）"];
+        audit_imports [label="import_batches\nimported_activity_rows\nimport_unmatched_customers"];
+        audit_receipts [label="integration_receipts\nagent_gateway_idempotency\n（幂等键）"];
+        audit_agent [label="agent_proposals\nagent_actions"];
+        audit_undo [label="undo_snapshots\nevents\nmigration_issues"];
+        audit_oplog [
+            label="operation_log_events（0028 + 0029）\n规范审计事实；app.py 的 _record_operation_log() 直接写入\n0029 仅保留旧 operation_logs 兼容写入桥接\n生产库是否已应用最新迁移 → 待 verify_schema 确认",
+            style="filled",
+            color="#8f7fc0",
+            penwidth=2.0
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // sela：仅导入器使用的历史表
+    // ---------------------------------------------------------------
+
+    subgraph cluster_sela {
+        label="schema: sela（Sela 历史导入面；契约未声明）";
+        style="filled,rounded,dotted";
+        fillcolor="#f7f7f7";
+        color="#9a9a9a";
+        fontname="Helvetica";
+        fontsize=10;
+
+        sela_all [
+            shape=box,
+            style="filled,rounded,dotted",
+            fillcolor="#f7f7f7",
+            color="#9a9a9a",
+            label="search_runs · prospects · prospect_research\nprospect_evidence · outreach_messages\nprospect_events · run_activity_events\nsearch_memory_entries"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // 冻结/退役：基表保留，兼容视图已删除
+    // ---------------------------------------------------------------
+
+    subgraph cluster_retired {
+        label="已冻结/退役（0019 删除兼容视图，基表保留供审计）";
+        style="filled,rounded,dotted";
+        fillcolor="#fafafa";
+        color="#b0b0b0";
+        fontname="Helvetica";
+        fontsize=10;
+
+        retired_tables [
+            shape=box,
+            style="filled,rounded,dotted",
+            fillcolor="#fafafa",
+            color="#b0b0b0",
+            label="research_reports\nexternal_analysis_notes\naccount_understandings\nai_recommendations\nweb_monitor_observations"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // 关系边
+    // ---------------------------------------------------------------
+
+    app -> trosa_accounts [label="写"];
+    app -> trosa_customer_details [label="写"];
+    app -> trosa_customer_states [label="写"];
+    app -> trosa_tasks [label="写"];
+    app -> trosa_timeline [label="写"];
+    app -> trosa_inbox [label="写"];
+    app -> trosa_outreach [label="写（投递历史，永不作为下一步）"];
+    app -> core_file_objects [label="写附件元数据"];
+    app -> identity_users [label="读用户注册表"];
+    app -> compat_views [label="遗留写入面", style=dashed];
+    app -> audit_ledger [label="应用迁移并记账", style=dashed];
+    app -> audit_oplog [label="写规范审计事实\n（_record_operation_log）"];
+
+    // 兼容层：视图可写，经触发器镜像进规范表
+    compat_views -> compat_boundary [label="INSTEAD OF 写", color="#b5563a", fontcolor="#b5563a"];
+    compat_boundary -> trosa_customer_details [label="mirrors into", color="#b5563a", fontcolor="#b5563a"];
+    compat_boundary -> trosa_customer_states [label="mirrors into", color="#b5563a", fontcolor="#b5563a"];
+    compat_boundary -> trosa_legacy_refs [label="经 account_legacy_refs 解析账户", color="#b5563a", fontcolor="#b5563a", style=dashed];
+    compat_views -> compat_rows [label="读写", dir=both];
+    compat_views -> compat_settings [label="读写", dir=both];
+
+    // 读模型视图
+    trosa_v_customers -> trosa_accounts [label="projects", style=dashed, color="#3b6ea5", fontcolor="#3b6ea5"];
+    trosa_v_records -> trosa_customer_details [label="projects", style=dashed, color="#3b6ea5", fontcolor="#3b6ea5"];
+    trosa_v_records -> trosa_accounts [label="projects", style=dashed, color="#3b6ea5", fontcolor="#3b6ea5"];
+    trosa_v_readmodels -> trosa_tasks [label="projects", style=dashed, color="#3b6ea5", fontcolor="#3b6ea5"];
+    trosa_v_readmodels -> trosa_timeline [label="projects", style=dashed, color="#3b6ea5", fontcolor="#3b6ea5"];
+
+    // 身份
+    identity_users -> identity_memberships [label="belongs to"];
+    identity_memberships -> identity_orgs [label="scopes"];
+    identity_invitations -> identity_users [label="invites", style=dashed];
+
+    // 审计
+    audit_receipts -> trosa_outreach [label="幂等保护", style=dashed];
+    audit_undo -> trosa_timeline [label="快照", style=dashed];
+    sela_all -> audit_legacy [label="导入前逐行归档", style=dotted, color="#9a9a9a", fontcolor="#9a9a9a"];
+    sela_all -> trosa_accounts [label="导入器投影到规范模型", style=dashed, color="#9a9a9a", fontcolor="#9a9a9a"];
+
+    // 退役：retired_tables 现无写入者。0019 已删除其兼容视图，故不绘制边——
+    // 已不存在的视图不应在图上呈现为仍在投影。
+}

@@ -1,6 +1,6 @@
 # Trosa 长期维护计划
 
-> 更新：2026-09-05。依据当前仓库、ECS 只读运行链路、正式 PostgreSQL 只读审计和一次真实核心流程审计整理。任务 1 的 Customer、Today、Inbox 共同确认入口、任务 2 的 Customer“现在 / 下一步”首屏收敛，以及任务 3 的 Inbox / Search 上下文续接，已在隔离本地环境完成并通过回归；尚未发布本轮未提交修复，未修改正式数据。本文仍是下一阶段的维护入口，不是重构方案。
+> 更新：2026-09-12。依据当前仓库、ECS 只读运行链路、正式 PostgreSQL 运行契约和本地真实 PostgreSQL 演练整理。本文是维护入口，不是重构方案；正式发布后的远端版本与数据库账本仍以 `status-workbench.sh` 和受控备份/核验记录为准。
 
 ## 先读这一页
 
@@ -23,6 +23,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 ```
 
 - 正式入口：`https://app.trosa.space`。
+- 正式运行契约：`trosa-postgresql-v1`。`CRM_ENV=production` 必须同时声明 `TRADE_OS_DATA_BACKEND=postgres`、非空 `TRADE_OS_DATABASE_URL`；`serve.py`、`init_all_dbs()` 和健康门均拒绝隐式 SQLite 回退。
 - 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
 - 2026-09-05 的只读检查：`trade-os=active/running`、`cloudflared=active`、服务进程实际 backend=`postgres`、PostgreSQL=`17.11`、应用健康状态=`ok`。本机没有 `psql` 或 Docker CLI 只说明开发机工具不完整，不影响 ECS 上的正式 PostgreSQL 验收。
 - 普通代码任务完成后默认由 `deploy/cloud/auto-publish.sh` 自动验证、提交、推送 `main`，再由 `publish-workbench.sh` 让 ECS 拉取同一 commit、健康检查并原子切换 release。当前 ECS release 以 `deploy/cloud/status-workbench.sh` 的实时输出为准；发布前仍应核对状态和待发布 commit 的关系。数据库敏感改动先备份；疑似破坏性迁移需明确确认。
@@ -34,10 +35,10 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 |---|---|---|
 | Web 与业务编排 | `app.py` 是 Flask 路由、业务规则、权限、undo 和编排中心；`serve.py` 启动生产进程。 | 不因文件大而拆分；改动优先局限在已有端点和函数。 |
 | 前端 | `app/static/index.html`、`app/static/app.js`、`style.css` / `visual-v2.css` 是单页应用。 | 核心工作流改动先做局部状态更新，避免整页或整客户对象重载。 |
-| 业务数据 | PostgreSQL 的 `identity`、`core`、`trosa`、`sela`、`audit` 是正式事实源；兼容层通过用户作用域映射旧 `customers`、`contacts`、`follow_up_logs`、`reminders`、`inbox_items` 形状。 | `TRADE_OS_DATABASE_URL` 是正式写入边界；`CRM_DB_PATH` 仅用于 SQLite 隔离/导入演练/明确批准的回滚，不把 Excel 变成同步源。 |
+| 业务数据 | PostgreSQL 的 `identity`、`core`、`trosa`、`audit` 是正式事实源；`sela` schema 仅是历史导入/兼容面，不是 Sela Agent 的本地业务库；兼容层通过用户作用域映射旧形状。 | `TRADE_OS_DATABASE_URL` 是正式写入边界；`CRM_DB_PATH` 仅用于 SQLite 隔离/导入演练/明确批准的回滚，不把 Excel 变成同步源。 |
 | 关系闭环 | 客户/联系人 → 沟通事实 → 明确待办 → Today/日历 → 新事实。 | 沟通可以没有下一步；待办必须有动作和日期。 |
 | 保护与恢复 | `db.py` 负责 PostgreSQL 启动迁移、兼容层和来源审计；正式备份由 PostgreSQL logical dump + 附件 bundle 完成，`undo_actions` 保存冲突感知的操作快照。 | 改写入逻辑时必须保留用户隔离、来源、操作日志、undo、外键/唯一约束与可恢复备份。 |
-| Sela | 通过 Bearer token 调用 `/health`、`/exclusions`、`/prospects`、`/reply`、`/follow-up` 及受限的 needs/capture 接口；prospect/exclusion 使用 `sela-v2`，follow-up 使用 `sela-follow-up-v1`，在 PostgreSQL 事务中精确匹配身份并以幂等键防重。 | Sela 不直接读写 PostgreSQL 或 SQLite；多重命中或身份冲突必须返回 `REVIEW`，不能猜测归属。 |
+| Sela | 通过 Bearer token 调用受限 `/api/integrations/sela/*` 接口；prospect/exclusion 使用 `sela-v2`，follow-up 使用 `sela-follow-up-v1`，由 Trosa 在 PostgreSQL 事务中精确匹配身份并以幂等键防重。 | Sela 不直接读写 Trosa 的 PostgreSQL 或文件存储；其本地 SQLite 只保留 Agent 会话、诊断、有限传输 outbox 和 Gmail delivery journal。多重命中或身份冲突必须返回 `REVIEW`。 |
 
 ### 已冻结或不应扩张的旧能力
 
@@ -202,7 +203,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 1. **先保存基线**：记录 `git status --short`，确认不触碰现有 `deploy/cloud/` 未提交运维修改。
 2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
 3. **使用项目依赖跑回归**：根目录使用 `.venv`，由 `requirements.txt` 固定 Python 依赖；浏览器扩展在 `browser-extension/` 中执行 `npm install`，由 `package-lock.json` 固定测试依赖。不要使用系统 Python 或为了让测试绿而放宽测试。
-4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search。
+4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search；涉及 PG 时再运行 `python3 tools/postgres_rehearsal.py test`。
 5. **自动发布入口**：普通代码任务使用 `deploy/cloud/auto-publish.sh --message ... -- FILE...`；它会执行本地回归、发布前只读 ECS 状态、提交、推送、原子发布和公网健康检查。不得用 `git add .` 混入无关修改。
 6. **数据库改动保护**：涉及 schema、迁移或导入边界时，自动入口先执行 PostgreSQL logical dump + 附件 bundle 备份；疑似破坏性 SQL 不自动执行。
 7. **发布后事实检查**：健康接口、三位用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。

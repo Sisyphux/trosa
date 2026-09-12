@@ -1,0 +1,247 @@
+// Trosa 运行与部署拓扑（当前状态）
+// 场景技能：system-modeler ｜ 基础技能：graphviz
+// 说明：本图是结构总览中的「运行单元在哪里跑」，不是发布流程评审；
+//       发布链路问题请改用 deployment-topology-analyzer。
+//
+// 证据：deploy/trade-os.service、deploy/cloudflared.service、serve.py、deploy/cloud/*.sh、
+//       deploy/postgres-production/*、tools/postgres_rehearsal.py、TROSA_MAINTENANCE.md
+// 渲染：本机无原生 Graphviz，SVG 由 Graphviz 16.0.0 的 WASM 构建渲染
+//       （npm i @viz-js/viz → viz.renderString(src, {format:'svg'})）；
+//       若已装原生 dot：dot -Tsvg <file>.dot -o <file>.svg
+// 布局：rankdir=TB。本图是一条自左上的本机、经云主机、到使用者的流动，TB 下 2.5:1，可整屏阅读
+//
+// 图例：实线 = 仓库脚本强制的事实 ｜ 虚线 = 文档记录/未在仓库强制执行 ｜ 点线灰 = 本机开发/辅助
+
+digraph trosa_runtime_topology {
+    rankdir=TB;
+    graph [
+        fontname="Helvetica",
+        fontsize=11,
+        labelloc="t",
+        label="Trosa 运行与部署拓扑（当前状态）\n云主机是唯一正式运行环境与唯一写入主机 ｜ 公网入口经 Cloudflare Tunnel 回源到本机回环地址\n实线=脚本强制　虚线=仅文档记录　点线=本地开发/辅助",
+        splines=true,
+        nodesep=0.4,
+        ranksep=0.7,
+        compound=true,
+        newrank=true,
+        pad=0.3
+    ];
+    node [
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#e8f0fb",
+        color="#3b6ea5",
+        fontname="Helvetica",
+        fontsize=10,
+        penwidth=1.1
+    ];
+    edge [
+        fontname="Helvetica",
+        fontsize=9,
+        color="#5a5a5a",
+        arrowsize=0.7
+    ];
+
+    // ---------------------------------------------------------------
+    // 使用者设备
+    // ---------------------------------------------------------------
+
+    subgraph cluster_client {
+        label="使用者设备（浏览器）";
+        style="filled,rounded";
+        fillcolor="#f2f7fc";
+        color="#7fa8cc";
+        fontname="Helvetica";
+        fontsize=10;
+
+        web_ui [
+            shape=box,
+            label="Web 工作台\napp.trosa.space\n（静态资源由 Flask 提供）"
+        ];
+        extension [
+            shape=box,
+            label="沟通采集扩展\nChrome MV3 侧边栏 v0.5.0\n（默认 apiBase 指向 app.trosa.space）"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // Cloudflare 边缘
+    // ---------------------------------------------------------------
+
+    cf_edge [
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#fdf3e7",
+        color="#d19a52",
+        label="Cloudflare 边缘\nhostname: app.trosa.space\n（Access 策略未在仓库中体现 — UNKNOWN）"
+    ];
+
+    // ---------------------------------------------------------------
+    // 云主机（ECS）
+    // ---------------------------------------------------------------
+
+    subgraph cluster_ecs {
+        label="云主机（ECS / Alibaba Cloud）— 唯一正式运行环境与唯一写入主机";
+        style="filled,rounded";
+        fillcolor="#f1f8f2";
+        color="#7fb98f";
+        fontname="Helvetica";
+        fontsize=10;
+
+        cloudflared [
+            shape=box,
+            label="systemd: cloudflared.service\ncloudflared --config /etc/cloudflared/config.yml\nRequires=trade-os.service"
+        ];
+
+        trade_os_service [
+            shape=box,
+            style="filled,rounded",
+            fillcolor="#d6e8d9",
+            color="#4a7c59",
+            label="systemd: trade-os.service\nUser=tradeos · WorkingDirectory=/opt/trade-os/current\nExecStart=/opt/trade-os/venv/bin/python /opt/trade-os/current/serve.py\nRestart=always · UMask=0077"
+        ];
+
+        env_file [
+            shape=note,
+            style="filled",
+            fillcolor="#fff9e6",
+            color="#b8860b",
+            label="/etc/trade-os/trade-os.env\nEnvironmentFile（CRM_ENV、CRM_SESSION_SECRET 等）"
+        ];
+        pg_dropin [
+            shape=note,
+            style="filled,dashed",
+            fillcolor="#fff9e6",
+            color="#b8860b",
+            label="/etc/systemd/system/trade-os.service.d/postgres.conf\nTRADE_OS_DATA_BACKEND / TRADE_OS_DATABASE_URL / PGPASSFILE\n（文档记录，不在仓库中）"
+        ];
+
+        waitress [
+            shape=box,
+            style="filled,rounded",
+            fillcolor="#cfdff0",
+            color="#3b6ea5",
+            label="Waitress（serve.py）\n127.0.0.1:8080 · threads=8\n要求 CRM_ENV=production\n同进程内启动 APScheduler"
+        ];
+
+        pg_server [
+            shape=cylinder,
+            style="filled",
+            fillcolor="#dce9f7",
+            color="#2f6f4f",
+            label="PostgreSQL\n127.0.0.1:5432 / 库 tradeos\n（业务数据单一事实源）"
+        ];
+
+        data_dir [
+            shape=folder,
+            label="/var/lib/trade-os\n附件上传 · 导入来源 · 历史回滚材料"
+        ];
+
+        releases [
+            shape=folder,
+            label="/opt/trade-os/releases/<release-id>\ncurrent 为原子切换符号链接\n保留最近 5 个版本"
+        ];
+
+        ecs_desktop [
+            shape=box,
+            style="filled,dotted",
+            fillcolor="#fafafa",
+            color="#b0b0b0",
+            label="私有桌面（无隧道路由）\nXFCE + noVNC · 127.0.0.1:5901 / 127.0.0.1:6080"
+        ];
+
+        pg_backup [
+            shape=box,
+            style="filled,rounded",
+            fillcolor="#ede7f6",
+            color="#8f7fc0",
+            label="PostgreSQL 备份\npg_dump --format=custom （0600 + SHA-256）\nrestore-check.sh 还原到一次性库校验后删除"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // 开发与运维本机
+    // ---------------------------------------------------------------
+
+    subgraph cluster_local {
+        label="开发/运维本机（macOS）— 不得修改正式数据";
+        style="filled,rounded,dotted";
+        fillcolor="#fafafa";
+        color="#b0b0b0";
+        fontname="Helvetica";
+        fontsize=10;
+
+        auto_publish [
+            shape=box,
+            style="filled,rounded",
+            fillcolor="#fff3cd",
+            color="#b8860b",
+            label="deploy/cloud/auto-publish.sh\n发布前门禁：仅 main 分支 · 拒绝 git add . · 拒绝破坏性 SQL\n临时 CRM_DB_PATH 跑单测 · py_compile · node --check · npm test"
+        ];
+        local_dev [
+            shape=box,
+            style="filled,dotted",
+            fillcolor="#fafafa",
+            color="#b0b0b0",
+            label="本地开发\nCRM_DB_PATH → 独立 SQLite（非正式数据）"
+        ];
+        rehearsal [
+            shape=box,
+            style="filled,dotted",
+            fillcolor="#fafafa",
+            color="#b0b0b0",
+            label="隔离 rehearsal 集群\ntools/postgres_rehearsal.py\n127.0.0.1:55432 · 库 trosa_rehearsal"
+        ];
+        local_backup [
+            shape=folder,
+            label="~/Library/Application Support/trosa/backups\n（备份拉取落点，本地校验 SHA-256）"
+        ];
+        lan_gateway [
+            shape=box,
+            style="filled,dotted",
+            fillcolor="#fafafa",
+            color="#b0b0b0",
+            label="周报只读局域网网关\ndeploy/macos/weekly-lan-gateway.py\n（公司 Mac，摘要认证，只读）"
+        ];
+    }
+
+    // ---------------------------------------------------------------
+    // 发布来源
+    // ---------------------------------------------------------------
+
+    github [
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#ede7f6",
+        color="#8f7fc0",
+        label="GitHub 仓库 main 分支\n（发布以 commit SHA 为锚点）"
+    ];
+
+    // ---------------------------------------------------------------
+    // 关系
+    // ---------------------------------------------------------------
+
+    web_ui -> cf_edge [label="HTTPS 访问"];
+    extension -> cf_edge [label="HTTPS 提交采集"];
+    cf_edge -> cloudflared [label="隧道"];
+    cloudflared -> waitress [label="回源 127.0.0.1:8080"];
+
+    trade_os_service -> waitress [label="ExecStart 拉起"];
+    trade_os_service -> env_file [label="读取环境"];
+    trade_os_service -> pg_dropin [label="数据库凭据注入", style=dashed];
+    trade_os_service -> releases [label="WorkingDirectory=current"];
+    waitress -> pg_server [label="SQL 读写（唯一写入路径）"];
+    waitress -> data_dir [label="读写附件与回滚材料"];
+    waitress -> releases [label="代码来自 current"];
+
+    local_dev -> auto_publish [label="改动"];
+    auto_publish -> github [label="commit + push origin main"];
+    auto_publish -> rehearsal [label="架构/迁移变更时", style=dashed];
+    auto_publish -> lan_gateway [label="发布前读取只读状态", style=dashed];
+    github -> releases [label="publish-remote.sh 下载 commit 压缩包\n解包 → 安装依赖 → 符号链接切换 → 重启服务", style=dashed];
+
+    pg_server -> pg_backup [label="定时 pg_dump"];
+    pg_backup -> local_backup [label="备份拉取（保留 14 天）", style=dashed];
+    ecs_desktop -> pg_server [label="本机访问", style=dotted, color="#b0b0b0"];
+    lan_gateway -> waitress [label="只读查询", style=dotted, color="#b0b0b0"];
+}

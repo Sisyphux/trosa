@@ -54,19 +54,19 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
 安装文件位于 `~/Library/Application Support/TradeOS/`，私密配置为 `weekly-lan.env`，日志位于 `logs/weekly-lan.log` 和 `logs/weekly-lan-error.log`。该入口不依赖旧的 `com.tradeos.app`、`com.tradeos.tunnel` 或 `com.tradeos.health`；这三个 Mac 正式服务继续保持禁用，避免与 ECS 双运行。
 
-### 旧 Mac 正式服务（仅用于灾难回退）
+### 灾难恢复入口（仅在批准主机切换后）
 
-当前项目提供 `deploy/macos/` 中的正式运行文件：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于登录后自动启动服务。正式环境安装在 `~/Library/Application Support/TradeOS/runtime/`，避开 macOS 对桌面目录的自动启动限制；原项目的 `data/` 指向该目录中的唯一业务数据。它们只会在最终切换时启用，准备期间继续使用现有本地启动器。
+`deploy/macos/` 只保留灾难恢复所需的备用运行入口：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于在确认 ECS 已停止且 Mac 将成为唯一正式主机后启动 `serve.py`。它们要求 `CRM_ENV=production`、PostgreSQL backend、非空 DSN 和 `PGPASSFILE`；缺少任何一项都会在启动前失败，不会启动 SQLite writer。ECS 正常运行期间不得启用这套备用入口。
 
 - 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；三位用户的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 PostgreSQL 兼容设置表（按当前用户作用域隔离）。
-- 只有执行灾难回退并让 Mac 再次成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`。ECS 正常运行期间不得启动这套旧服务。
-- 生产服务将唯一业务数据保存在 `~/Library/Application Support/TradeOS/runtime/data/`；项目根目录的 `data/` 仅为指向该位置的链接，不复制、不合并、不创建第二份日常数据库。
-- 日常开发始终在桌面项目目录完成。完成并验证修改后，运行 `deploy/macos/publish-production.sh`，它会同步代码和静态资源、重启正式服务并检查本机健康状态；不会同步或删除 `data/`、私密设置、日志或 Python 运行环境。
-- LaunchAgent 适合当前由 Mac 登录用户持续使用的场景。正式运行时 Mac 需接通电源、保持联网和用户登录。`run-production.sh` 使用 macOS 自带的 `caffeinate -i` 阻止**空闲系统睡眠**，但不阻止显示器熄灭，因此屏幕关闭后本机服务与 Cloudflare Tunnel 仍保持在线。用户从菜单手动选择“睡眠”或机器断电时服务仍会短暂离线；唤醒后健康检查会恢复连接。
+- 只有执行灾难回退并让 Mac 成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`；切换前先停止 ECS 的应用与 Tunnel，并确认没有第二个 writer。
+- Mac 上的 `CRM_DB_PATH` 只可保存附件、导入来源和 SQLite 回滚材料；正式业务表、事务和身份仍在 PostgreSQL。不要把任何 `data/` 目录解释为日常业务数据库。
+- 日常开发始终在桌面项目目录完成。任何代码发布都必须经过仓库的发布门禁和 PostgreSQL 健康门；不要用旧的本地启动器复制或合并业务数据。
+- 如确需在灾难恢复期间使用 Mac，`run-production.sh` 使用 macOS 自带的 `caffeinate -i` 阻止**空闲系统睡眠**，但不阻止显示器熄灭。恢复结束后关闭 Mac 服务，避免双写。
 
 ### 公网可用性自检与自动恢复
 
-生产环境提供独立于应用进程的自检器，用于处理 Cloudflare 1033（Tunnel 暂无活动连接）及本机服务未监听等临时故障。它不会修改代码、SQLite 数据、私密环境文件或 Tunnel 凭据。
+生产环境提供独立于应用进程的自检器，用于处理 Cloudflare 1033（Tunnel 暂无活动连接）及本机服务未监听等临时故障。它不会修改代码、PostgreSQL 数据、回滚材料、私密环境文件或 Tunnel 凭据。
 
 1. 在项目目录执行一次安装：
 

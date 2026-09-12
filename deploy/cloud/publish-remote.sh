@@ -77,7 +77,10 @@ fi
 healthy=0
 for attempt in $(seq 1 15); do
   ping_body=$(curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping || true)
-  if printf '%s' "$ping_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+  if printf '%s' "$ping_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
+    && printf '%s' "$ping_body" | grep -q '"backend"[[:space:]]*:[[:space:]]*"postgresql"' \
+    && printf '%s' "$ping_body" | grep -q '"runtime_contract"[[:space:]]*:[[:space:]]*"trosa-postgresql-v1"' \
+    && printf '%s' "$ping_body" | grep -q '"formal_runtime"[[:space:]]*:[[:space:]]*true'; then
     healthy=1
     break
   fi

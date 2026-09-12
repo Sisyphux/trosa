@@ -13,6 +13,7 @@ import logging
 import os
 import signal
 from pathlib import Path
+from urllib.parse import urlparse
 
 from waitress import serve
 
@@ -38,12 +39,21 @@ def _shutdown(*_args):
 
 
 def main():
-    if os.environ.get("CRM_ENV", "rehearsal").lower() == "production":
-        raise RuntimeError("演练入口不能以 CRM_ENV=production 启动")
+    if os.environ.get("CRM_ENV", "").strip().lower() != "rehearsal":
+        raise RuntimeError("演练入口必须设置 CRM_ENV=rehearsal")
+    if os.environ.get("TROSA_REHEARSAL", "").strip() != "1":
+        raise RuntimeError("演练入口必须设置 TROSA_REHEARSAL=1")
     if os.environ.get("TRADE_OS_DATA_BACKEND", "").strip().lower() != "postgres":
         raise RuntimeError("演练入口必须设置 TRADE_OS_DATA_BACKEND=postgres")
-    if not os.environ.get("TRADE_OS_DATABASE_URL", "").strip():
+    database_url = os.environ.get("TRADE_OS_DATABASE_URL", "").strip()
+    if not database_url:
         raise RuntimeError("演练入口必须设置 TRADE_OS_DATABASE_URL")
+    parsed = urlparse(database_url)
+    rehearsal_port = int(os.environ.get("TROSA_REHEARSAL_PORT", "55432"))
+    if parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("演练入口只允许连接 loopback PostgreSQL")
+    if parsed.port != rehearsal_port or parsed.path.lstrip("/") != "trosa_rehearsal":
+        raise RuntimeError("演练入口只允许连接固定的 trosa_rehearsal 数据库和演练端口")
 
     # Keep the existing filesystem fallback available for temporary uploads,
     # session markers and preview assets, but never use it as a business store.

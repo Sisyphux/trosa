@@ -43,6 +43,7 @@ deploy/cloud/workbench.env
 node_modules/
 .pytest_cache/
 .rehearsal/
+.local/postgres-rehearsal/
 archive/
 tmp/
 

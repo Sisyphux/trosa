@@ -29,10 +29,16 @@ from db import (
     get_current_user,
     get_db,
     get_system_db,
+    postgres_mode,
     schedule_safety_backup,
     set_db_user,
 )
-from trosa_domain import record_external_interaction
+from trosa_domain import (
+    active_customers as _active_customers,
+    create_inbox_item,
+    customer_contacts as _customer_contacts,
+    record_external_interaction,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -494,6 +500,53 @@ def _matches_for_emails(cursor, emails):
     emails = [email for email in dict.fromkeys(_normalize_email(value) for value in emails) if email]
     if not emails:
         return {'status': 'ignored', 'customer_id': None, 'contact_id': None, 'customer': {}, 'contact': {}}
+    if postgres_mode():
+        # Gmail matching is a read-only adapter over the canonical Customer and
+        # Contact facts.  It must not reopen the SQLite-shaped contacts/
+        # customers tables in PostgreSQL mode, even though those relations are
+        # still available for recovery and old clients.
+        conn = getattr(cursor, 'connection', cursor)
+        wanted = set(emails)
+        customers = {
+            int(row['id']): dict(row)
+            for row in _active_customers(conn)
+            if row.get('id') is not None
+        }
+        rows = []
+        for customer_id, customer in customers.items():
+            for contact in _customer_contacts(conn, customer_id):
+                email = _normalize_email(contact.get('email'))
+                if not email or email not in wanted:
+                    continue
+                rows.append({
+                    'id': int(contact['id']),
+                    'customer_id': customer_id,
+                    'name': contact.get('name') or '',
+                    'email': contact.get('email') or '',
+                    'is_primary': contact.get('is_primary') or 0,
+                    'customer_name': customer.get('name') or '',
+                    'customer_company': customer.get('company') or '',
+                })
+        customer_ids = {row['customer_id'] for row in rows}
+        if not rows:
+            return {'status': 'unmatched', 'customer_id': None, 'contact_id': None, 'customer': {}, 'contact': {}}
+        if len(customer_ids) != 1:
+            return {'status': 'ambiguous', 'customer_id': None, 'contact_id': None, 'customer': {}, 'contact': {}}
+        customer_id = next(iter(customer_ids))
+        ordered = sorted(rows, key=lambda row: (
+            0 if _normalize_email(row.get('email')) == emails[0] else 1,
+            -int(row.get('is_primary') or 0), row['id'],
+        ))
+        contact = ordered[0]
+        return {
+            'status': 'matched',
+            'customer_id': customer_id,
+            'contact_id': contact['id'],
+            'customer': {'id': customer_id, 'name': contact.get('customer_name') or '',
+                         'company': contact.get('customer_company') or ''},
+            'contact': {'id': contact['id'], 'name': contact.get('name') or '',
+                        'email': contact.get('email') or ''},
+        }
     placeholders = ','.join('?' for _ in emails)
     rows = cursor.execute(
         '''SELECT ct.id, ct.customer_id, ct.name, ct.email, ct.is_primary,
@@ -606,8 +659,18 @@ def _message_processed(user, message_id):
     set_db_user(user)
     conn = get_db()
     try:
-        row = conn.execute('SELECT provider_message_id FROM gmail_message_states WHERE provider_message_id=?',
-                           (message_id,)).fetchone()
+        if postgres_mode():
+            row = conn.execute(
+                '''SELECT provider_message_id
+                     FROM trosa.email_message_receipts
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND provider_message_id=?''',
+                (message_id,),
+            ).fetchone()
+        else:
+            row = conn.execute('SELECT provider_message_id FROM gmail_message_states WHERE provider_message_id=?',
+                               (message_id,)).fetchone()
         return bool(row)
     finally:
         conn.close()
@@ -647,7 +710,98 @@ def _capture_payload(message, account=''):
     }
 
 
+def _connection_for_cursor(value):
+    """Return the owning connection for either SQLite or CompatCursor values."""
+    return getattr(value, 'connection', value)
+
+
+def _legacy_target_id(conn, table_name, legacy_id):
+    if legacy_id is None:
+        return None
+    row = conn.execute(
+        '''SELECT target_id FROM trosa.legacy_row_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND table_name=? AND legacy_id=?
+            LIMIT 1''',
+        (table_name, legacy_id),
+    ).fetchone()
+    return row['target_id'] if row else None
+
+
+def _canonical_account_id(conn, customer_id):
+    if customer_id is None:
+        return None
+    row = conn.execute(
+        '''SELECT account_id FROM trosa.account_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id=?
+            LIMIT 1''',
+        (customer_id,),
+    ).fetchone()
+    return row['account_id'] if row else None
+
+
+def _canonical_contact_method_id(conn, customer_id, contact_id):
+    if customer_id is None or contact_id is None:
+        return None
+    row = conn.execute(
+        '''SELECT contact_method_id FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id=? AND legacy_contact_id=?
+            LIMIT 1''',
+        (customer_id, contact_id),
+    ).fetchone()
+    return row['contact_method_id'] if row else None
+
+
 def _store_state(cursor, message, match, *, activity_id=None, inbox_item_id=None, error=''):
+    if postgres_mode():
+        conn = _connection_for_cursor(cursor)
+        now = _now_text()
+        customer_id = match.get('customer_id')
+        contact_id = match.get('contact_id')
+        timeline_id = _legacy_target_id(conn, 'follow_up_logs', activity_id)
+        inbox_id = _legacy_target_id(conn, 'inbox_items', inbox_item_id)
+        receipt_id = conn.execute(
+            'SELECT trosa.compat_uuid(?)',
+            (f"gmail-receipt:{get_current_user() or 'hamid'}:{message.get('message_id', '')}",),
+        ).fetchone()[0]
+        source = _source_payload(message)
+        conn.execute(
+            '''INSERT INTO trosa.email_message_receipts
+               (id, organization_id, legacy_user_id, provider_message_id, provider_thread_id,
+                message_time, sender_email, recipient_emails, subject, account_id,
+                contact_method_id, timeline_event_id, inbox_item_id, match_status,
+                raw_payload, last_error, created_at, updated_at)
+               VALUES (?, trosa.compat_org_id(), trosa.compat_current_user(), ?, ?,
+                       trosa.compat_time(?), ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?::jsonb, ?,
+                       coalesce(trosa.compat_time(?), now()), now())
+               ON CONFLICT (organization_id, legacy_user_id, provider_message_id) DO UPDATE SET
+                   provider_thread_id=excluded.provider_thread_id,
+                   message_time=excluded.message_time,
+                   sender_email=excluded.sender_email,
+                   recipient_emails=excluded.recipient_emails,
+                   subject=excluded.subject,
+                   account_id=excluded.account_id,
+                   contact_method_id=excluded.contact_method_id,
+                   timeline_event_id=excluded.timeline_event_id,
+                   inbox_item_id=excluded.inbox_item_id,
+                   match_status=excluded.match_status,
+                   raw_payload=excluded.raw_payload,
+                   last_error=excluded.last_error,
+                   updated_at=excluded.updated_at''',
+            (receipt_id, message.get('message_id', ''), message.get('thread_id', ''),
+             message.get('time', ''), message.get('sender_email', ''),
+             json.dumps(message.get('to') or [], ensure_ascii=False), message.get('subject', ''),
+             _canonical_account_id(conn, customer_id),
+             _canonical_contact_method_id(conn, customer_id, contact_id), timeline_id, inbox_id,
+             match.get('status') or 'unmatched', json.dumps(source, ensure_ascii=False),
+             str(error or '')[:500], now),
+        )
+        return
     now = _now_text()
     source = _source_payload(message)
     cursor.execute('''INSERT INTO gmail_message_states
@@ -662,6 +816,68 @@ def _store_state(cursor, message, match, *, activity_id=None, inbox_item_id=None
 
 
 def _insert_source(cursor, activity_id, account, message):
+    if postgres_mode():
+        conn = _connection_for_cursor(cursor)
+        timeline_id = _legacy_target_id(conn, 'follow_up_logs', activity_id)
+        if not timeline_id:
+            raise ValueError(f'互动 {activity_id} 尚未建立 canonical timeline event')
+        source = _source_payload(message)
+        source_row = conn.execute(
+            'SELECT id FROM trosa.communication_sources WHERE timeline_event_id=?',
+            (timeline_id,),
+        ).fetchone()
+        source_id = source_row['id'] if source_row else conn.execute(
+            'SELECT trosa.compat_uuid(?)',
+            (f"communication-source:{get_current_user() or 'hamid'}:{activity_id}",),
+        ).fetchone()[0]
+        conn.execute(
+            '''INSERT INTO trosa.communication_sources
+               (id, timeline_event_id, channel, source_url, account, conversation_identity,
+                adapter_version, extraction_scope, warnings, raw_payload, cleaned_payload, captured_at)
+               VALUES (?, ?, 'gmail', ?, ?, ?, 'gmail-v0.1', 'gmail_api', '[]'::jsonb,
+                       ?::jsonb, ?, trosa.compat_time(?))
+               ON CONFLICT (timeline_event_id) DO UPDATE SET
+                   channel=excluded.channel,
+                   source_url=excluded.source_url,
+                   account=excluded.account,
+                   conversation_identity=excluded.conversation_identity,
+                   adapter_version=excluded.adapter_version,
+                   extraction_scope=excluded.extraction_scope,
+                   warnings=excluded.warnings,
+                   raw_payload=excluded.raw_payload,
+                   cleaned_payload=excluded.cleaned_payload,
+                   captured_at=excluded.captured_at''',
+            (source_id, timeline_id, message.get('source_url', ''), account,
+             message.get('thread_id', ''), json.dumps(source, ensure_ascii=False),
+             json.dumps([source], ensure_ascii=False), _now_text()),
+        )
+        fingerprint = 'gmail:' + account + ':' + message.get('message_id', '')
+        item_row = conn.execute(
+            '''SELECT id FROM trosa.communication_source_items
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND source_fingerprint=?''',
+            (fingerprint,),
+        ).fetchone()
+        item_id = item_row['id'] if item_row else conn.execute(
+            'SELECT trosa.compat_uuid(?)',
+            (f"communication-item:{get_current_user() or 'hamid'}:{fingerprint}",),
+        ).fetchone()[0]
+        conn.execute(
+            '''INSERT INTO trosa.communication_source_items
+               (id, organization_id, legacy_user_id, communication_source_id,
+                source_fingerprint, message_time, direction, raw_text)
+               VALUES (?, trosa.compat_org_id(), trosa.compat_current_user(), ?, ?,
+                       trosa.compat_time(?), ?, ?)
+               ON CONFLICT (organization_id, legacy_user_id, source_fingerprint) DO UPDATE SET
+                   communication_source_id=excluded.communication_source_id,
+                   message_time=excluded.message_time,
+                   direction=excluded.direction,
+                   raw_text=excluded.raw_text''',
+            (item_id, source_id, fingerprint, message.get('time', ''),
+             message.get('direction', 'unknown'), message.get('text', '')[:12000]),
+        )
+        return
     source = _source_payload(message)
     cursor.execute('''INSERT INTO communication_sources
                     (activity_id, channel, source_url, account, conversation_identity, adapter_version,
@@ -684,8 +900,18 @@ def _store_message(user, account, message, summary):
     try:
         c = conn.cursor()
         c.execute('BEGIN IMMEDIATE')
-        if c.execute('SELECT provider_message_id FROM gmail_message_states WHERE provider_message_id=?',
-                     (message.get('message_id'),)).fetchone():
+        if postgres_mode():
+            processed = c.execute(
+                '''SELECT provider_message_id FROM trosa.email_message_receipts
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND provider_message_id=?''',
+                (message.get('message_id'),),
+            ).fetchone()
+        else:
+            processed = c.execute('SELECT provider_message_id FROM gmail_message_states WHERE provider_message_id=?',
+                                 (message.get('message_id'),)).fetchone()
+        if processed:
             conn.rollback()
             return {'state': 'duplicate'}
         match = _matches_for_emails(c, message.get('external_emails') or [])
@@ -712,13 +938,24 @@ def _store_message(user, account, message, summary):
         capture = _capture_payload(message, account)
         prefix = 'Gmail 邮件归属有冲突' if match['status'] == 'ambiguous' else '待归属 Gmail 邮件'
         identity = message.get('primary_external_email') or message.get('sender_email') or '未识别对象'
+        dedupe_key = 'gmail:' + account + ':' + message.get('message_id', '')
+        if postgres_mode():
+            inbox_id = create_inbox_item(
+                conn, item_type='gmail_capture', customer_id=None,
+                title=prefix + '：' + identity[:180],
+                content=json.dumps(capture, ensure_ascii=False), dedupe_key=dedupe_key,
+                status='open', created_at=now,
+            )
+            _store_state(c, message, match, inbox_item_id=inbox_id)
+            conn.commit()
+            return {'state': match['status'], 'inbox_item_id': inbox_id}
         c.execute('''INSERT OR IGNORE INTO inbox_items
                     (item_type, customer_id, title, content, dedupe_key, status, created_at)
                     VALUES ('gmail_capture', NULL, ?, ?, ?, 'open', ?)''',
                   (prefix + '：' + identity[:180], json.dumps(capture, ensure_ascii=False),
-                   'gmail:' + account + ':' + message.get('message_id', ''), now))
+                   dedupe_key, now))
         inbox_row = c.execute('SELECT id FROM inbox_items WHERE dedupe_key=?',
-                              ('gmail:' + account + ':' + message.get('message_id', ''),)).fetchone()
+                              (dedupe_key,)).fetchone()
         _store_state(c, message, match, inbox_item_id=(inbox_row['id'] if inbox_row else None))
         conn.commit()
         return {'state': match['status'], 'inbox_item_id': inbox_row['id'] if inbox_row else None}
@@ -763,6 +1000,24 @@ def attach_gmail_capture_to_activity(cursor, inbox_item, activity_id, customer_i
         'attachments': message.get('attachments') if isinstance(message.get('attachments'), list) else [],
         'source_url': str(message.get('source_url') or payload.get('source_url') or ''),
     }
+    if postgres_mode():
+        conn = _connection_for_cursor(cursor)
+        fingerprint = 'gmail:' + account + ':' + message_id
+        existing = conn.execute(
+            '''SELECT id FROM trosa.communication_source_items
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND source_fingerprint=?''',
+            (fingerprint,),
+        ).fetchone()
+        if not existing:
+            _insert_source(conn, activity_id, account, source_message)
+        _store_state(
+            conn, source_message,
+            {'status': 'matched', 'customer_id': customer_id, 'contact_id': contact_id},
+            activity_id=activity_id, inbox_item_id=inbox_item.get('id'),
+        )
+        return
     existing = cursor.execute('SELECT id FROM communication_source_items WHERE source_fingerprint=?',
                               ('gmail:' + account + ':' + message_id,)).fetchone()
     if not existing:

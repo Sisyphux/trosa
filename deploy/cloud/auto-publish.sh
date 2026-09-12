@@ -163,6 +163,9 @@ if [[ -n "$UNSTAGED_FILES" ]]; then
 fi
 
 while IFS= read -r path; do
+  if [[ "$path" == ".env.example" ]]; then
+    continue
+  fi
   case "$path" in
     data|data/*|app/data|app/data/*|*.db|*.db-*|*.sqlite|*.sqlite-*|*.sqlite3|*.bak|*.wal|*.shm|*.log|.env|.env.*|deploy/cloud/workbench.env|deploy/macos/cloudflared.yml)
       fail "禁止把运行数据、密钥或本地环境文件放入发布 commit：$path"

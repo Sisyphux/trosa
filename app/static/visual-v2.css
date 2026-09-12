@@ -7274,3 +7274,169 @@ html.motion-lite .card {
     overflow-x: auto !important;
   }
 }
+
+/* ============================================================================
+   Reading-surface pass · v4
+
+   A density and legibility pass over the three highest-traffic surfaces. It
+   only tightens existing layout: no new colours, components, or DOM, and every
+   fact that used to be visible stays visible.
+   ============================================================================ */
+
+/* The fixed search shelf belongs to the page column, not to the viewport, so
+   it lines up with the content it searches once the sidebar is at full width. */
+@media (min-width: 1181px) {
+  .global-page-tools {
+    left: 248px !important;
+  }
+}
+
+/* --- Today: the work list is the protagonist, so it gets a readable column
+   and every row keeps a predictable rhythm. --- */
+@media (min-width: 1181px) {
+  #page-dashboard .today-fullscreen-shell {
+    grid-template-columns: minmax(340px, .46fr) minmax(0, 1fr) !important;
+  }
+
+  /* Long English next-step text used to stretch a row to five lines. Two lines
+     is enough to recognise the task; the full text lives in the dossier. */
+  #page-dashboard .today-task-copy strong {
+    display: -webkit-box !important;
+    overflow: hidden !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  /* "已逾期 N 天 · 最近：…" is orientation, not content. One line, ellipsis. */
+  #page-dashboard .today-task-copy span:last-child {
+    display: block !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  /* Pin the date to the first line so short and tall rows share one baseline. */
+  #page-dashboard .today-task-index-wrap,
+  #page-dashboard .today-task-date {
+    align-self: start !important;
+    margin-top: 3px !important;
+  }
+
+  #page-dashboard .today-task-copy {
+    min-width: 0 !important;
+  }
+}
+
+/* --- Customers: one scan line for identity, one for state.
+
+   The company cell used to stack four blocks (name, relationship chip, updated
+   date, data-quality hints), which pushed every row to ~119px and set the
+   smallest text at 9–10px. The same facts now share a wrapped meta line at the
+   shared 12px floor, so a row reads in two passes and the list shows roughly
+   twice as many customers per screen. */
+@media (min-width: 621px) {
+  #page-customers .customer-company-cell {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    column-gap: 8px !important;
+    row-gap: 3px !important;
+    min-width: 0 !important;
+  }
+
+  #page-customers .customer-company-heading {
+    flex: 1 1 100% !important;
+    margin-bottom: 1px !important;
+  }
+
+  #page-customers .customer-contact-state {
+    margin: 0 !important;
+  }
+
+  #page-customers .customer-updated {
+    display: inline-block !important;
+    margin: 0 !important;
+    color: var(--ui-ink-muted) !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+    white-space: nowrap !important;
+  }
+
+  #page-customers .customer-company-cell > small {
+    margin: 0 !important;
+    color: var(--ui-ink-muted) !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+
+  #page-customers .customer-quality-issues {
+    margin: 0 !important;
+  }
+
+  #page-customers .customer-quality-issues span {
+    padding: 2px 7px !important;
+    background: rgba(169, 132, 71, .13) !important;
+    color: #85683a !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    line-height: 1.35 !important;
+  }
+
+  /* The first meta item is the relationship state: give it room to breathe
+     before the quieter dates and hints that follow. */
+  #page-customers .customer-contact-state + .customer-updated,
+  #page-customers .customer-contact-state + small {
+    margin-left: 2px !important;
+  }
+}
+
+/* --- Inbox: a decision queue with nothing to decide should look calm, and the
+   count should read as a fact rather than a headline number. A 27px serif "0"
+   next to a dashed 132px placeholder made an empty queue look like a hero metric
+   with a missing chart. --- */
+#page-inbox .inbox-overview {
+  padding: 0 0 14px !important;
+}
+
+#page-inbox .inbox-overview strong {
+  font-size: 17px !important;
+  font-weight: 500 !important;
+  line-height: 1.25 !important;
+  color: var(--ui-ink) !important;
+}
+
+#page-inbox .inbox-overview > span {
+  color: var(--ui-ink-muted) !important;
+  font-size: 13px !important;
+}
+
+#page-inbox .inbox-overview p {
+  margin-top: 4px !important;
+  max-width: 62ch !important;
+  color: var(--ui-ink-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+}
+
+/* The rule-split line already separates the overview from the list, so the
+   placeholder is a quiet block rather than a second, competing container. */
+#page-inbox .inbox-empty {
+  min-height: 0 !important;
+  justify-content: flex-start !important;
+  margin-top: 14px !important;
+  padding: 16px 18px !important;
+  border: 1px solid var(--ui-line) !important;
+  border-radius: 12px !important;
+  background: rgba(255, 253, 249, .5) !important;
+}
+
+#page-inbox .inbox-empty strong {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+
+#page-inbox .inbox-empty span {
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  color: var(--ui-ink-muted) !important;
+}

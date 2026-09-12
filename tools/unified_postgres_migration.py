@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 # Keep the documented ``python tools/unified_postgres_migration.py`` entry
 # point independent of the caller's PYTHONPATH.  The schema contract lives at
@@ -64,6 +65,13 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0020_customer_state_facts.sql",
     ROOT / "migrations" / "0021_formal_business_read_models.sql",
     ROOT / "migrations" / "0022_modern_trosa_core.sql",
+    ROOT / "migrations" / "0023_customer_details_compat_boundary.sql",
+    ROOT / "migrations" / "0024_customer_record_task_projection.sql",
+    ROOT / "migrations" / "0025_customer_record_dates.sql",
+    ROOT / "migrations" / "0026_compat_customer_state_boundary.sql",
+    ROOT / "migrations" / "0027_modern_customer_files_and_priority.sql",
+    ROOT / "migrations" / "0028_canonical_operation_audit.sql",
+    ROOT / "migrations" / "0029_compat_operation_audit_bridge.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES
@@ -72,6 +80,7 @@ TARGET_COLUMNS = REQUIRED_COLUMNS
 TARGET_INDEXES = REQUIRED_INDEXES
 TARGET_FUNCTIONS = REQUIRED_FUNCTIONS
 TARGET_TRIGGERS = REQUIRED_TRIGGERS
+LOCAL_POSTGRES_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def sha256(path: Path) -> str:
@@ -188,6 +197,16 @@ def postgres_connection(dsn: str):
     return psycopg.connect(dsn, autocommit=False)
 
 
+def assert_local_dsn(dsn: str) -> None:
+    """Reject a non-loopback DSN when a command is explicitly rehearsal-only."""
+    parsed = urlparse(str(dsn or ""))
+    if parsed.scheme not in {"postgres", "postgresql"} or parsed.hostname not in LOCAL_POSTGRES_HOSTS:
+        raise RuntimeError(
+            "--local-only refuses non-loopback PostgreSQL DSNs; use "
+            "tools/postgres_rehearsal.py for the isolated local database"
+        )
+
+
 def apply_schema(dsn: str) -> None:
     with postgres_connection(dsn) as connection:
         with connection.cursor() as cursor:
@@ -288,6 +307,8 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--sela-data-dir", type=Path, help="Directory containing sela JSON/SQLite ledgers")
     value.add_argument("--write-manifest", type=Path, help="Write read-only source manifest to this path")
     value.add_argument("--database-url", help="Explicit PostgreSQL DSN; never read from a source ledger")
+    value.add_argument("--local-only", action="store_true",
+                       help="Refuse any PostgreSQL host except localhost/127.0.0.1/::1")
     value.add_argument("--apply-schema", action="store_true", help="Apply canonical schema to --database-url")
     value.add_argument("--verify-schema", action="store_true", help="Verify canonical schema in --database-url")
     return value
@@ -298,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.apply_schema or args.verify_schema:
         if not args.database_url:
             parser().error("--database-url is required for PostgreSQL actions")
+        if args.local_only:
+            assert_local_dsn(args.database_url)
     if args.apply_schema:
         apply_schema(args.database_url)
     if args.verify_schema:

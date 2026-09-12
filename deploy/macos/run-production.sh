@@ -29,6 +29,19 @@ set -a
 source "$ENV_FILE"
 set +a
 
+if [[ "${CRM_ENV:-}" != "production" ]]; then
+  print -u2 "Formal Trosa service requires CRM_ENV=production: $ENV_FILE"
+  exit 1
+fi
+if [[ "${TRADE_OS_DATA_BACKEND:-}" != "postgres" || -z "${TRADE_OS_DATABASE_URL:-}" ]]; then
+  print -u2 "Formal Trosa service requires TRADE_OS_DATA_BACKEND=postgres and TRADE_OS_DATABASE_URL"
+  exit 1
+fi
+if [[ -z "${PGPASSFILE:-}" || ! -r "${PGPASSFILE}" ]]; then
+  print -u2 "Formal Trosa service requires a readable PGPASSFILE"
+  exit 1
+fi
+
 # Keep the system and network available for the named Tunnel, but do not hold
 # the screen on. launchd terminates this process with the app during updates.
 exec "$CAFFEINATE_BIN" -i "$PYTHON_BIN" "$PROJECT_DIR/serve.py"

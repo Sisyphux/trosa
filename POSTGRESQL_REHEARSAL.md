@@ -1,228 +1,98 @@
-# Trade OS PostgreSQL migration rehearsal
+# Trosa PostgreSQL 隔离演练
 
-This runbook creates an isolated, non-production PostgreSQL database for a
-first migration rehearsal.  It does not alter the running Trosa SQLite files,
-sela JSON/SQLite ledgers, or production application configuration.
+本 runbook 用于在本机验证 PostgreSQL 迁移、规范模型和 Trosa 写入路径。它只使用
+`.local/postgres-rehearsal/` 下的独立 loopback 集群与固定数据库
+`trosa_rehearsal`，不读取或修改 ECS、正式 PostgreSQL、正式附件或 Sela 运行状态。
 
-The target schemas are `identity`, `core`, `trosa`, `sela`, and `audit`.
-They live in one PostgreSQL database.  No synchronization service, dual write,
-or production read/write cutover is part of this runbook.
+正式业务路径只有 ECS `trade-os.service → serve.py → PostgreSQL`；本演练不能替代
+正式服务，也不能与任何正式 writer 并行。
 
-## 0. Guardrails
+## 0. 硬性边界
 
-- Use a new Docker volume named `trade_os_postgres_rehearsal`; never mount the
-  production Trosa data directory into the container.
-- Bind PostgreSQL only to `127.0.0.1:5433`.  Do not open port 5432 in an ECS
-  security group or bind the rehearsal service to `0.0.0.0`.
-- Copy only an existing consistent Trosa SQLite backup and read sela data in
-  read-only mode.  Do not point the rehearsal at live writable source files.
-- Set `TRADE_OS_DATABASE_URL` only in the shell executing the rehearsal tool.
-  Do not add it to the production `.env` or service unit.
-- A failed rehearsal is rolled back by deleting the *rehearsal Docker volume*.
-  Source SQLite and JSON files are never rollback targets.
+- PostgreSQL 只绑定 `127.0.0.1:55432`；不使用生产 DSN，不打开防火墙端口。
+- 演练工具只会操作固定的 `trosa_rehearsal` 数据库；不会自动删除不完整的数据目录。
+- 演练输入必须是明确的只读副本。不要把正在写入的 SQLite、Sela 数据目录或其 WAL
+  文件直接作为输入。
+- 演练失败只允许重建本地演练库；正式数据库、附件和 Sela 技术状态不是回滚目标。
 
-## 1. Local Docker deployment
+## 1. 标准验收命令
 
-From the Trosa repository:
+安装本机 PostgreSQL 17 后，从 Trosa 仓库根目录运行：
 
 ```bash
-cd /Users/luoxin/Desktop/Trosa/deploy/postgres-rehearsal
-cp .env.example .env
-mkdir -p secrets
-chmod 700 secrets
-openssl rand -base64 36 > secrets/postgres_password
-chmod 600 secrets/postgres_password
-docker compose up -d
-docker compose ps
-docker compose exec postgres pg_isready -U tradeos_rehearsal -d tradeos_rehearsal
+python3 tools/postgres_rehearsal.py test
 ```
 
-The official PostgreSQL image initializes the database from `POSTGRES_USER`,
-`POSTGRES_DB`, and `POSTGRES_PASSWORD_FILE`; those variables affect only an
-empty Docker volume.  The volume is intentionally separate from all source
-data. [Official PostgreSQL Docker image](https://hub.docker.com/_/postgres)
+该命令会：
 
-Create a shell-only database URL.  Do not paste the password into source files;
-if it contains URL-reserved characters, percent-encode it first.
+1. 启动或创建独立本机集群；
+2. 重建固定的 `trosa_rehearsal` 数据库；
+3. 应用 `migrations/` 中全部迁移并校验 `audit.schema_migrations`；
+4. 载入明确标记的确定性 Customer/Contact/Interaction/Task/Inbox fixture；
+5. 验证 `postgres_schema_contract.py`；
+6. 运行 `tests/test_postgres_rehearsal.py` 的真实 PostgreSQL 集成测试。
+
+涉及 canonical schema、migration、`trosa_domain.py` 写入语义或兼容层退役的改动，
+必须先通过这条命令。
+
+## 2. 分步开发流程
 
 ```bash
-REHEARSAL_PASSWORD="$(tr -d '\n' < secrets/postgres_password)"
-export TRADE_OS_DATABASE_URL="postgresql://tradeos_rehearsal:${REHEARSAL_PASSWORD}@127.0.0.1:5433/tradeos_rehearsal"
+python3 tools/postgres_rehearsal.py start
+python3 tools/postgres_rehearsal.py init
+python3 tools/postgres_rehearsal.py migrate
+python3 tools/postgres_rehearsal.py fixture
+python3 tools/postgres_rehearsal.py verify
+python3 tools/postgres_rehearsal.py env
+python3 tools/postgres_rehearsal.py stop
 ```
 
-## 2. ECS Docker deployment (optional)
-
-Use this only as an isolated rehearsal service on the existing ECS host.  It
-does not replace `trade-os`, `cloudflared`, or the running SQLite application.
-
-1. Copy only `deploy/postgres-rehearsal/` to a separate directory such as
-   `/opt/trade-os-postgres-rehearsal/`.
-2. Create `.env` and `secrets/postgres_password` there with the same permissions
-   as the local procedure.
-3. Start only the rehearsal Compose project:
+`reset` 只重建本机固定的 `trosa_rehearsal`：
 
 ```bash
-cd /opt/trade-os-postgres-rehearsal
-docker compose up -d
-docker compose ps
+python3 tools/postgres_rehearsal.py reset
 ```
 
-4. Keep it loopback-only.  If a local development machine needs access, use an
-   SSH tunnel rather than changing firewall rules:
+若本机没有 `initdb`、`pg_ctl` 或 `pg_isready`，应记录为“未执行真实 PG 演练”，不
+把 SQLite 回归结果冒充 PostgreSQL 验证；可按提示安装 `postgresql@17` 后重试。
 
-```bash
-ssh -N -L 5433:127.0.0.1:5433 <configured-ecs-host>
-```
+## 3. 与正式运行契约的关系
 
-5. In a separate local shell, set `TRADE_OS_DATABASE_URL` to the local tunnel
-   URL from section 1.  Never set that variable for the production service.
+演练 shell 会临时设置 `TRADE_OS_DATA_BACKEND=postgres`、loopback DSN 和
+`TROSA_REHEARSAL=1`，变量只存在于当前命令进程。它不改 `.env`、systemd unit、
+Cloudflare Tunnel 或 Sela Keychain。
 
-## 3. Source snapshot for the rehearsal
-
-### Trosa
-
-Use an existing consistent snapshot from Trosa's `backups/` tree.  A snapshot
-must contain `system.db` and one `<username>.db` file for every row in the
-`system.db.users` table, including inactive members.  The preflight and
-importer derive this closed set dynamically and fail if a registered member
-database is missing or an unregistered `*.db` file is present; this prevents
-an invited user or historical owner from being silently omitted.
-
-Copy that snapshot to a dedicated rehearsal input directory, for example:
+正式服务仍必须通过：
 
 ```text
-<rehearsal-input>/trosa/system.db
-<rehearsal-input>/trosa/<every-user-from-system.db>.db
+CRM_ENV=production
+TRADE_OS_DATA_BACKEND=postgres
+TRADE_OS_DATABASE_URL=<非空 PostgreSQL DSN>
 ```
 
-Do not copy a live SQLite file together with an uncoordinated `-wal` file.  The
-Trosa backup process already produces a consistent SQLite snapshot.
+并由 `/api/network/ping` 报告 `status=ok`、`backend=postgresql`、
+`runtime_contract=trosa-postgresql-v1`。演练通过不代表 ECS 已应用当前代码或迁移；
+线上状态仍需通过远端健康检查和发布记录确认。
 
-### sela
+## 4. 历史输入导入（可选、非正式运行）
 
-Copy these files as a point-in-time input set; the rehearsal process opens them
-read-only:
+若任务明确要求复核历史迁移，可使用停止后的、不可变的 Trosa SQLite 快照和旧 Sela
+快照作为 importer 输入。它们只是 `audit`/迁移来源，不是当前业务 runtime，也不应
+复制成 Sela 的新业务账本。
 
-```text
-<rehearsal-input>/sela/candidates.json
-<rehearsal-input>/sela/feedback_events.json
-<rehearsal-input>/sela/search_memory.json
-<rehearsal-input>/sela/activity_events.sqlite3
-```
+历史 Trosa 输入必须包含 `system.db` 以及其中登记的全部用户数据库；导入器应保留
+源文件哈希、原始 payload、来源库/表/行号和未决匹配。旧 Sela JSON/SQLite 只可作为
+审计证据读入 `audit`，不得让其重新成为候选、联系人、任务或人工 review 的事实源。
 
-Before copying, pause local sela writes or use a filesystem snapshot.  This is
-for input consistency only; it does not change production read/write routing.
+任何不确定的公司、联系人或事件匹配都必须保留为待审阅问题；不得静默合并、丢弃或
+自动创建正式业务事实。历史导入不改变当前正式 Trosa/Sela 路由边界。
 
-## 4. Preflight manifest and migration log
+## 5. 验收与回滚记录
 
-Install Trosa dependencies in the rehearsal checkout, then generate a
-hash-backed manifest.  This is a read-only operation on the copied inputs.
+每次演练至少保留：迁移输出、schema verification、测试结果、fixture 标识和运行
+时间。若使用历史输入，再追加不可变 source manifest、源哈希、计数核对、未决问题和
+附件哈希核对。
 
-```bash
-cd /Users/luoxin/Desktop/Trosa
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python tools/unified_postgres_migration.py \
-  --trosa-data-dir <rehearsal-input>/trosa \
-  --sela-data-dir <rehearsal-input>/sela \
-  --write-manifest <rehearsal-output>/source-manifest.json
-```
-
-The manifest records source SHA-256, SQLite integrity status, source table
-counts, sela record counts, the canonical schema hash, and preflight errors.
-Keep it immutable as the first migration log artifact.
-
-## 5. Schema initialization
-
-With `TRADE_OS_DATABASE_URL` exported in the current shell only:
-
-```bash
-.venv/bin/python tools/unified_postgres_migration.py \
-  --database-url "$TRADE_OS_DATABASE_URL" \
-  --apply-schema \
-  --verify-schema | tee <rehearsal-output>/schema-verification.json
-```
-
-The command is safe to retry.  It initializes only the rehearsal PostgreSQL
-database and verifies the five target schemas plus required tables.
-
-## 6. Trosa import flow
-
-The Trosa loader must process each copied source database in this order:
-
-1. `system.db`: organization seed, users, membership roles and settings.
-2. All user databases: raw source rows into `audit.import_batches` and
-   `audit.legacy_records` with original database name, table name, legacy ID,
-   row number and row payload.
-3. Create or resolve `core.companies`, domains, people and contact methods.
-4. Create `trosa.accounts`, then contacts, tasks, Timeline, messages, inbox,
-   research, AI records and web-monitor history.
-5. Load Agent, undo, integration and import history into `audit`.
-6. Load `customer_files` as metadata only.  The binary remains in the copied
-   rehearsal input until an object-storage rehearsal is separately approved.
-
-Every record must retain `legacy_payload` or `audit.legacy_records` provenance.
-Uncertain company matches go to `audit.migration_issues`; they are never
-silently merged or dropped.
-
-## 7. sela import flow
-
-1. Store raw JSON rows and SQLite activity rows in the import batch audit.
-2. Resolve Candidate company/domain/email references against `core` using
-   verified domain first, then human-reviewed name/country candidates.
-3. Write Candidate workflow state to `sela.prospects`, research to
-   `sela.prospect_research` and sources to `sela.prospect_evidence`.
-4. Write draft/provider identifiers to `sela.outreach_messages`.
-5. Append every `feedback_events.json` record to `sela.prospect_events`; an
-   unresolved Candidate reference remains valid and is reported, not dropped.
-6. Append every `activity_events.sqlite3.activity_events` row to
-   `sela.run_activity_events`.
-7. Store `search_memory.json` as typed `sela.search_memory_entries` records,
-   preserving each original payload.
-
-No sela event is copied into a Trosa table.  Trosa Timeline can later display a
-cross-module view by reference; its event source remains `sela`.
-
-## 8. Acceptance report
-
-Write one `migration-verification.json` using this shape:
-
-```json
-{
-  "rehearsal_id": "2026-09-01T120000+0800",
-  "source_manifest_sha256": "...",
-  "schema_verification": {"ok": true},
-  "sources": {
-    "trosa": {"integrity": "ok", "tables": {}},
-    "sela": {"candidates": 0, "feedback_events": 0, "activity_events": 0}
-  },
-  "target": {"core": {}, "trosa": {}, "sela": {}, "audit": {}},
-  "reconciliation": {
-    "exact_count_checks": [],
-    "foreign_key_checks": [],
-    "unresolved_entities": [],
-    "unresolved_events": [],
-    "attachment_hash_checks": []
-  },
-  "result": "passed|failed",
-  "approved_by": "",
-  "created_at": ""
-}
-```
-
-The report passes only when all source integrity checks pass, all append-only
-event counts reconcile exactly, every target schema check passes, and every
-unresolved identity/event is explicitly listed for review.
-
-## 9. Rollback
-
-The rehearsal rollback is limited to the target container:
-
-```bash
-cd /Users/luoxin/Desktop/Trosa/deploy/postgres-rehearsal
-docker compose down -v
-```
-
-This removes only the named rehearsal PostgreSQL volume.  Preserve the copied
-input snapshot and all manifests/reports.  It does not alter Trosa production
-SQLite, sela JSON/SQLite, production application configuration, or production
-attachments.
+回滚范围只限本机演练数据库和演练集群；保留输出用于诊断。正式恢复必须使用
+PostgreSQL logical dump + 客户附件 bundle + restore-check，并遵循
+`POSTGRESQL_PRODUCTION_CUTOVER.md` 的单 writer 规则。

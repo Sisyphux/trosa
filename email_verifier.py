@@ -12,7 +12,7 @@ import ssl
 from datetime import datetime, timedelta, timezone
 
 from config import EMAIL_VERIFICATION_CONFIG
-from db import get_db
+from db import get_db, postgres_mode
 
 _TZ = timezone(timedelta(hours=8))
 _ENHANCED_STATUS = re.compile(r'\b([245]\.[0-9]\.[0-9]+)\b')
@@ -24,6 +24,17 @@ def _now():
 
 def _now_text():
     return _now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _json_value(value, fallback):
+    """Accept both SQLite JSON text and psycopg's decoded JSON values."""
+    if isinstance(value, type(fallback)):
+        return value
+    try:
+        parsed = json.loads(value or '')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return fallback
+    return parsed if isinstance(parsed, type(fallback)) else fallback
 
 
 def is_configured():
@@ -119,11 +130,18 @@ def _domain_catchall_probe(cursor, domain, mx_records):
     if not EMAIL_VERIFICATION_CONFIG.get('catchall_enabled') or not EMAIL_VERIFICATION_CONFIG.get('catchall_secret'):
         return None
     now = _now_text()
-    cached = cursor.execute('''SELECT catchall_status, evidence FROM email_domain_probes
-                               WHERE domain=? AND next_check_at > ?''', (domain, now)).fetchone()
+    if postgres_mode():
+        cached = cursor.execute('''SELECT catchall_status, evidence
+                                     FROM trosa.email_domain_probes
+                                    WHERE organization_id=trosa.compat_org_id()
+                                      AND legacy_user_id=trosa.compat_current_user()
+                                      AND domain=? AND next_check_at > ?''', (domain, now)).fetchone()
+    else:
+        cached = cursor.execute('''SELECT catchall_status, evidence FROM email_domain_probes
+                                   WHERE domain=? AND next_check_at > ?''', (domain, now)).fetchone()
     if cached:
         return {'status': cached['catchall_status'], 'cached': True,
-                'evidence': json.loads(cached['evidence'] or '[]')}
+                'evidence': _json_value(cached['evidence'], [])}
     period = _now().strftime('%Y-%m-%d')
     digest = hmac.new(EMAIL_VERIFICATION_CONFIG['catchall_secret'].encode('utf-8'),
                       f'{domain}:{period}'.encode('utf-8'), hashlib.sha256).hexdigest()[:24]
@@ -137,11 +155,24 @@ def _domain_catchall_probe(cursor, domain, mx_records):
         status = 'unknown'
     expires = (_now() + timedelta(days=max(1, int(EMAIL_VERIFICATION_CONFIG['domain_probe_cache_days'])))).strftime('%Y-%m-%d %H:%M:%S')
     evidence = [{'canary': canary, **result, 'checked_at': now}]
-    cursor.execute('''INSERT INTO email_domain_probes (domain, catchall_status, evidence, checked_at, next_check_at)
-                      VALUES (?, ?, ?, ?, ?)
-                      ON CONFLICT(domain) DO UPDATE SET catchall_status=excluded.catchall_status,
-                          evidence=excluded.evidence, checked_at=excluded.checked_at, next_check_at=excluded.next_check_at''',
-                   (domain, status, json.dumps(evidence, ensure_ascii=False), now, expires))
+    if postgres_mode():
+        cursor.execute('''INSERT INTO trosa.email_domain_probes
+                          (organization_id, legacy_user_id, legacy_id, domain,
+                           catchall_status, evidence, checked_at, next_check_at)
+                          VALUES (trosa.compat_org_id(), trosa.compat_current_user(),
+                                  trosa.compat_next_id('email_domain_probes', trosa.compat_current_user()),
+                                  ?, ?, ?::jsonb, ?, ?)
+                          ON CONFLICT (organization_id, legacy_user_id, domain)
+                          DO UPDATE SET catchall_status=excluded.catchall_status,
+                              evidence=excluded.evidence, checked_at=excluded.checked_at,
+                              next_check_at=excluded.next_check_at''',
+                       (domain, status, json.dumps(evidence, ensure_ascii=False), now, expires))
+    else:
+        cursor.execute('''INSERT INTO email_domain_probes (domain, catchall_status, evidence, checked_at, next_check_at)
+                          VALUES (?, ?, ?, ?, ?)
+                          ON CONFLICT(domain) DO UPDATE SET catchall_status=excluded.catchall_status,
+                              evidence=excluded.evidence, checked_at=excluded.checked_at, next_check_at=excluded.next_check_at''',
+                       (domain, status, json.dumps(evidence, ensure_ascii=False), now, expires))
     return {'status': status, 'cached': False, 'evidence': evidence}
 
 
@@ -152,23 +183,48 @@ def process_pending_email_verification_jobs(max_jobs=5):
     conn = get_db()
     conn.row_factory = __import__('sqlite3').Row
     cursor = conn.cursor()
-    jobs = cursor.execute('''SELECT * FROM email_verification_jobs
-                             WHERE status='queued' AND next_run_at <= ?
-                             ORDER BY created_at ASC LIMIT ?''', (_now_text(), max_jobs)).fetchall()
+    if postgres_mode():
+        jobs = cursor.execute('''SELECT * FROM trosa.email_verification_jobs
+                                  WHERE organization_id=trosa.compat_org_id()
+                                    AND legacy_user_id=trosa.compat_current_user()
+                                    AND status='queued' AND next_run_at <= ?
+                                  ORDER BY created_at ASC LIMIT ?''', (_now_text(), max_jobs)).fetchall()
+    else:
+        jobs = cursor.execute('''SELECT * FROM email_verification_jobs
+                                 WHERE status='queued' AND next_run_at <= ?
+                                 ORDER BY created_at ASC LIMIT ?''', (_now_text(), max_jobs)).fetchall()
     processed = 0
     for job in jobs:
-        claimed = cursor.execute("UPDATE email_verification_jobs SET status='running', updated_at=? WHERE id=? AND status='queued'",
-                                (_now_text(), job['id'])).rowcount
+        if postgres_mode():
+            claimed = cursor.execute("""UPDATE trosa.email_verification_jobs
+                                          SET status='running', updated_at=?
+                                        WHERE organization_id=trosa.compat_org_id()
+                                          AND legacy_user_id=trosa.compat_current_user()
+                                          AND id=? AND status='queued'""",
+                                    (_now_text(), job['id'])).rowcount
+        else:
+            claimed = cursor.execute("UPDATE email_verification_jobs SET status='running', updated_at=? WHERE id=? AND status='queued'",
+                                    (_now_text(), job['id'])).rowcount
         if not claimed:
             continue
-        verification = cursor.execute('SELECT * FROM email_verifications WHERE email=?', (job['email'],)).fetchone()
+        verification_relation = 'trosa.email_verifications' if postgres_mode() else 'email_verifications'
+        scope = ('organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND '
+                 if postgres_mode() else '')
+        verification = cursor.execute(f'SELECT * FROM {verification_relation} WHERE {scope}email=?', (job['email'],)).fetchone()
         if not verification:
-            cursor.execute("UPDATE email_verification_jobs SET status='failed', last_error=?, updated_at=? WHERE id=?",
-                           ('未找到基础验证结果', _now_text(), job['id']))
+            if postgres_mode():
+                cursor.execute("""UPDATE trosa.email_verification_jobs
+                                    SET status='failed', last_error=?, updated_at=?
+                                  WHERE organization_id=trosa.compat_org_id()
+                                    AND legacy_user_id=trosa.compat_current_user() AND id=?""",
+                               ('未找到基础验证结果', _now_text(), job['id']))
+            else:
+                cursor.execute("UPDATE email_verification_jobs SET status='failed', last_error=?, updated_at=? WHERE id=?",
+                               ('未找到基础验证结果', _now_text(), job['id']))
             continue
-        mx_records = json.loads(verification['mx_records'] or '[]')
+        mx_records = _json_value(verification['mx_records'], [])
         result = _probe_mx(job['email'], mx_records)
-        evidence = json.loads(verification['evidence'] or '[]')
+        evidence = _json_value(verification['evidence'], [])
         evidence.append({'type': 'smtp_rcpt', **result, 'checked_at': _now_text()})
         final_status = verification['deliverability_status']
         confidence = verification['confidence']
@@ -185,23 +241,56 @@ def process_pending_email_verification_jobs(max_jobs=5):
             final_status, confidence = 'policy_blocked', 'low'
         elif result['outcome'] == 'temporarily_unavailable':
             final_status, confidence = 'temporarily_unavailable', 'low'
-        cursor.execute('''UPDATE email_verifications SET deliverability_status=?, confidence=?, evidence=?,
-                          checked_at=?, expires_at=? WHERE email=?''',
-                       (final_status, confidence, json.dumps(evidence, ensure_ascii=False), _now_text(),
-                        (_now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S'), job['email']))
-        cursor.execute('''INSERT INTO email_delivery_events
-                          (email, event_type, smtp_code, enhanced_status, diagnostic_text, remote_mta, source, occurred_at)
-                          VALUES (?, 'smtp_probe', ?, ?, ?, ?, 'smtp_worker', ?)''',
-                       (job['email'], result['smtp_code'], result['enhanced_status'], result['diagnostic_text'],
-                        result['remote_mta'], _now_text()))
+        checked_at = _now_text()
+        expires_at = (_now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+        if postgres_mode():
+            cursor.execute('''UPDATE trosa.email_verifications
+                                SET deliverability_status=?, confidence=?, evidence=?::jsonb,
+                                    checked_at=?, expires_at=?
+                              WHERE organization_id=trosa.compat_org_id()
+                                AND legacy_user_id=trosa.compat_current_user() AND email=?''',
+                           (final_status, confidence, json.dumps(evidence, ensure_ascii=False), checked_at,
+                            expires_at, job['email']))
+            cursor.execute('''INSERT INTO trosa.email_delivery_events
+                              (id, organization_id, event_type, smtp_code, enhanced_status,
+                               diagnostic_text, remote_mta, source, occurred_at)
+                              VALUES (trosa.compat_uuid(?), trosa.compat_org_id(), 'smtp_probe',
+                                      ?, ?, ?, ?, 'smtp_worker', trosa.compat_time(?))
+                              ON CONFLICT (id) DO NOTHING''',
+                           (f'smtp-probe:{job["email"]}:{checked_at}', result['smtp_code'],
+                            result['enhanced_status'], result['diagnostic_text'], result['remote_mta'], checked_at))
+        else:
+            cursor.execute('''UPDATE email_verifications SET deliverability_status=?, confidence=?, evidence=?,
+                              checked_at=?, expires_at=? WHERE email=?''',
+                           (final_status, confidence, json.dumps(evidence, ensure_ascii=False), checked_at,
+                            expires_at, job['email']))
+            cursor.execute('''INSERT INTO email_delivery_events
+                              (email, event_type, smtp_code, enhanced_status, diagnostic_text, remote_mta, source, occurred_at)
+                              VALUES (?, 'smtp_probe', ?, ?, ?, ?, 'smtp_worker', ?)''',
+                           (job['email'], result['smtp_code'], result['enhanced_status'], result['diagnostic_text'],
+                            result['remote_mta'], checked_at))
         attempts = job['attempts'] + 1
         if result['outcome'] == 'temporarily_unavailable' and attempts < 2:
             next_run = (_now() + timedelta(minutes=30)).strftime('%Y-%m-%d %H:%M:%S')
-            cursor.execute("UPDATE email_verification_jobs SET status='queued', attempts=?, next_run_at=?, last_error=?, updated_at=? WHERE id=?",
-                           (attempts, next_run, result['diagnostic_text'], _now_text(), job['id']))
+            if postgres_mode():
+                cursor.execute("""UPDATE trosa.email_verification_jobs
+                                    SET status='queued', attempts=?, next_run_at=?, last_error=?, updated_at=?
+                                  WHERE organization_id=trosa.compat_org_id()
+                                    AND legacy_user_id=trosa.compat_current_user() AND id=?""",
+                               (attempts, next_run, result['diagnostic_text'], _now_text(), job['id']))
+            else:
+                cursor.execute("UPDATE email_verification_jobs SET status='queued', attempts=?, next_run_at=?, last_error=?, updated_at=? WHERE id=?",
+                               (attempts, next_run, result['diagnostic_text'], _now_text(), job['id']))
         else:
-            cursor.execute("UPDATE email_verification_jobs SET status='completed', attempts=?, last_error=?, updated_at=? WHERE id=?",
-                           (attempts, result['diagnostic_text'], _now_text(), job['id']))
+            if postgres_mode():
+                cursor.execute("""UPDATE trosa.email_verification_jobs
+                                    SET status='completed', attempts=?, last_error=?, updated_at=?
+                                  WHERE organization_id=trosa.compat_org_id()
+                                    AND legacy_user_id=trosa.compat_current_user() AND id=?""",
+                               (attempts, result['diagnostic_text'], _now_text(), job['id']))
+            else:
+                cursor.execute("UPDATE email_verification_jobs SET status='completed', attempts=?, last_error=?, updated_at=? WHERE id=?",
+                               (attempts, result['diagnostic_text'], _now_text(), job['id']))
         processed += 1
     conn.commit()
     conn.close()

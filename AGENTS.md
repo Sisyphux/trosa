@@ -9,8 +9,10 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 ## 运行与数据边界
 
 - **ECS 是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于 ECS 本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。
+- **正式运行契约是 `trosa-postgresql-v1`**：唯一正式入口是 `serve.py`，要求 `CRM_ENV=production`、`TRADE_OS_DATA_BACKEND=postgres` 和非空 `TRADE_OS_DATABASE_URL`；`/api/network/ping` 必须报告 `status=ok`、`backend=postgresql`、`formal_runtime=true` 和该契约名。缺配置时在迁移、调度器和端口启动前失败，不得隐式回退 SQLite。
 - 本地仅用于开发、隔离测试和已验证发布；不得修改 ECS 数据、正式备份或当前 `data/` 链接所指的运行数据。测试必须使用独立的 `CRM_DB_PATH`。
 - 业务数据单一事实源是 ECS PostgreSQL；SQLite 仅用于隔离开发、导入/导出和明确批准的历史恢复边界。Excel 仅用于导入、导出和历史恢复；Apple 日历仅订阅 ICS，不能回写 CRM。
+- `app.py`、`desktop.py` 和根目录启动器不是正式启动命令：根目录入口只打开已验证的正式工作台；需要 SQLite 旧形状回归时必须显式设置 `CRM_ENV=development TRADE_OS_DEV_SQLITE=1`，PostgreSQL 演练使用 `serve_rehearsal.py` 或 `tools/postgres_rehearsal.py`，并且只允许 loopback 固定演练库。
 - 修改前先查看 `git status --short`。工作区可能有用户未提交的改动，绝不覆盖、回退、删除或格式化无关文件。
 - 自动发布时只传入本次任务涉及的文件路径，不使用 `git add .`；已有无关修改必须保留，不能混入 commit。
 
@@ -24,7 +26,7 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 
 ## Sela 与 AI
 
-- Sela 通过受限 `/api/integrations/sela/*` 接口同步**已确认**外联，使用精确身份匹配、幂等键和 `REVIEW` 处理歧义；不得直接读写 SQLite。
+- Sela 通过受限 `/api/integrations/sela/*` 接口同步**已确认**外联，使用精确身份匹配、幂等键和 `REVIEW` 处理歧义；不得直接读写 SQLite。Sela 只保留本地 Agent session、Gmail delivery journal、Trosa outbox、诊断和安全暂停等可靠性职责，不维护客户/联系人/任务/阶段或人工判断副本；它只接受 Trosa 的 `trosa-postgresql-v1` 健康契约。
 - AI/Sela 应预填来源、时间、渠道、证据、摘要和候选，优先减少手工操作；不能自动创建客户、联系人、待办或商业承诺。
 - 没有足够信息时宁可进入 Inbox/待审阅，也不要自动执行高风险业务动作。发送消息、报价、价格/交期承诺始终由人完成。
 

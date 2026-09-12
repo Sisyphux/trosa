@@ -22,7 +22,7 @@ REQUIRED_TABLES = (
     "core.companies", "core.company_domains", "core.company_aliases", "core.people",
     "core.company_people", "core.contact_methods", "core.email_verification_observations",
     "core.file_objects", "core.entity_files",
-    "trosa.accounts", "trosa.tasks", "trosa.timeline_events", "trosa.outreach_messages",
+    "trosa.accounts", "trosa.customer_details", "trosa.tasks", "trosa.timeline_events", "trosa.outreach_messages",
     "trosa.inbox_items", "trosa.communication_sources", "trosa.communication_source_items",
     "trosa.email_message_receipts", "trosa.email_delivery_events",
     "trosa.account_legacy_refs", "trosa.customer_states", "trosa.legacy_row_refs",
@@ -31,7 +31,8 @@ REQUIRED_TABLES = (
     "trosa.agent_prospect_profiles", "trosa.business_exclusions",
     "audit.import_batches", "audit.legacy_records", "audit.migration_issues", "audit.events",
     "audit.integration_receipts", "audit.agent_proposals", "audit.agent_actions",
-    "audit.undo_snapshots", "audit.agent_gateway_idempotency", "audit.imported_activity_rows",
+    "audit.undo_snapshots", "audit.agent_gateway_idempotency", "audit.operation_log_events",
+    "audit.imported_activity_rows",
     "audit.import_unmatched_customers",
     "trade_os_compat.app_settings", "trade_os_compat.customer_file_rows",
     "trade_os_compat.integration_sync_receipt_rows", "trade_os_compat.operation_log_rows",
@@ -78,6 +79,12 @@ REQUIRED_COLUMNS = (
     ("trosa.email_verification_jobs", "legacy_id"),
     ("trosa.email_domain_probes", "legacy_id"),
     ("trosa.email_logs", "legacy_key"),
+    ("trosa.customer_details", "manual_next_task"),
+    ("trosa.customer_records", "last_interaction_on"),
+    ("trosa.customer_records", "next_task_on"),
+    ("trosa.customer_records", "pinned_at"),
+    ("core.file_objects", "category"),
+    ("core.file_objects", "uploaded_by"),
     ("trosa.agent_prospect_profiles", "source_id"),
     ("trosa.agent_prospect_profiles", "customer_id"),
     ("trosa.agent_prospect_profiles", "research_json"),
@@ -115,6 +122,12 @@ REQUIRED_INDEXES = (
      ("organization_id", "legacy_user_id", "action_id")),
     ("audit.undo_snapshots", "audit_undo_snapshots_org_user_token_idx",
      ("organization_id", "legacy_user_id", "token")),
+    ("audit.operation_log_events", "audit_operation_log_events_org_user_time_idx",
+     ("organization_id", "legacy_user_id", "occurred_at", "legacy_id")),
+)
+
+REQUIRED_COLUMNS += (
+    ("audit.operation_log_events", "target_reference"),
 )
 
 REQUIRED_FUNCTIONS = (

@@ -6,7 +6,11 @@ app_status=$(systemctl is-active trade-os 2>/dev/null || true)
 tunnel_status=$(systemctl is-active cloudflared 2>/dev/null || true)
 health_status=down
 ping_body=$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/api/network/ping 2>/dev/null || true)
-if [ -n "$ping_body" ]; then
+if [ -n "$ping_body" ] \
+  && printf '%s' "$ping_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
+  && printf '%s' "$ping_body" | grep -q '"backend"[[:space:]]*:[[:space:]]*"postgresql"' \
+  && printf '%s' "$ping_body" | grep -q '"runtime_contract"[[:space:]]*:[[:space:]]*"trosa-postgresql-v1"' \
+  && printf '%s' "$ping_body" | grep -q '"formal_runtime"[[:space:]]*:[[:space:]]*true'; then
   health_status=ok
 fi
 release=$(readlink -f /opt/trade-os/current 2>/dev/null || true)

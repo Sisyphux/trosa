@@ -33,6 +33,10 @@ USERS = {
 }
 USERS_LIST = list(USERS.keys())
 
+# This is the runtime contract, not a feature flag.  The formal Trosa service
+# must never silently fall back to one of the historical SQLite stores.
+FORMAL_RUNTIME_CONTRACT = 'trosa-postgresql-v1'
+
 
 def postgres_mode():
     """Return whether this process explicitly opts into unified PostgreSQL."""
@@ -40,6 +44,50 @@ def postgres_mode():
         os.environ.get('TRADE_OS_DATA_BACKEND', '').strip().lower() == 'postgres'
         and bool(os.environ.get('TRADE_OS_DATABASE_URL', '').strip())
     )
+
+
+def formal_runtime():
+    """Return whether this process is claiming to be the formal service."""
+    return os.environ.get('CRM_ENV', '').strip().lower() == 'production'
+
+
+def runtime_contract_status():
+    """Describe the selected store without opening a database connection.
+
+    This intentionally remains cheap and side-effect free so deployment
+    probes can distinguish a healthy PostgreSQL service from a process that
+    accidentally started in a historical SQLite mode.
+    """
+    backend_setting = os.environ.get('TRADE_OS_DATA_BACKEND', '').strip().lower()
+    database_url_configured = bool(os.environ.get('TRADE_OS_DATABASE_URL', '').strip())
+    using_postgres = postgres_mode()
+    formal = formal_runtime()
+    return {
+        'contract': FORMAL_RUNTIME_CONTRACT,
+        'environment': os.environ.get('CRM_ENV', '').strip().lower() or 'development',
+        'formal_runtime': formal,
+        'backend': 'postgresql' if using_postgres else 'sqlite',
+        'backend_setting': backend_setting or 'sqlite-default',
+        'database_url_configured': database_url_configured,
+        'valid': (not formal) or using_postgres,
+    }
+
+
+def require_formal_postgres_runtime():
+    """Reject a formal Trosa start unless PostgreSQL is fully configured.
+
+    SQLite remains available to isolated development and rehearsal callers,
+    but no production entrypoint may rely on a missing or malformed backend
+    setting and accidentally create a second business writer.
+    """
+    if not formal_runtime():
+        return
+    if not postgres_mode():
+        raise RuntimeError(
+            '正式 Trosa 服务拒绝启动：CRM_ENV=production 必须同时设置 '
+            'TRADE_OS_DATA_BACKEND=postgres 与 TRADE_OS_DATABASE_URL；'
+            'SQLite 仅允许隔离开发、演练或明确批准的恢复环境'
+        )
 
 
 def _postgres_dsn():
@@ -82,6 +130,13 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0020_customer_state_facts.sql'),
         os.path.join(root, 'migrations', '0021_formal_business_read_models.sql'),
         os.path.join(root, 'migrations', '0022_modern_trosa_core.sql'),
+        os.path.join(root, 'migrations', '0023_customer_details_compat_boundary.sql'),
+        os.path.join(root, 'migrations', '0024_customer_record_task_projection.sql'),
+        os.path.join(root, 'migrations', '0025_customer_record_dates.sql'),
+        os.path.join(root, 'migrations', '0026_compat_customer_state_boundary.sql'),
+        os.path.join(root, 'migrations', '0027_modern_customer_files_and_priority.sql'),
+        os.path.join(root, 'migrations', '0028_canonical_operation_audit.sql'),
+        os.path.join(root, 'migrations', '0029_compat_operation_audit_bridge.sql'),
     )
 
 
@@ -2046,6 +2101,10 @@ def init_system_db():
 
 def init_all_dbs():
     """初始化所有数据库"""
+    # Keep the guard here as well as in the official entrypoint.  This closes
+    # the fallback even if an older wrapper or an operator script calls the
+    # initializer directly.
+    require_formal_postgres_runtime()
     if postgres_mode():
         ensure_db_dir()
         ensure_db_identity()
