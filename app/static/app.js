@@ -1377,10 +1377,11 @@ function inboxCategory(item) {
 var INBOX_CATEGORY_LABELS = {
   sela_follow_up: 'sela 跟进建议',
   sela_agent_request: 'sela 需要你判断',
+  sela_identity_review: 'sela 身份待确认',
   new_reply: '客户有新回复',
   capture: '待归属沟通',
 };
-var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_follow_up', 'other'];
+var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_follow_up', 'sela_identity_review', 'other'];
 var _inboxExpanded = new Set();
 
 function toggleInboxItem(key) {
@@ -1470,7 +1471,8 @@ function renderInbox(counts) {
 }
 
 function renderInboxItemHtml(item) {
-  var name = item.customer_company || item.customer_name || item.capture_identity || item.title || '未关联客户';
+  var selaReview = parseSelaIdentityReview(item);
+  var name = (selaReview && selaReview.company) || item.customer_company || item.customer_name || item.capture_identity || item.title || '未关联客户';
   var customerId = Number(item.customer_id || 0);
   var itemId = item.id ? String(item.id) : '';
   var key = item.dedupe_key || [item.item_type, item.customer_id, item.created_at].join('-');
@@ -1488,6 +1490,10 @@ function renderInboxItemHtml(item) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
   } else if (isInboxCommunicationCapture(item)) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
+  } else if (selaReview) {
+    mainAction = customerId
+      ? '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户资料</button>'
+      : (selaReview.website ? '<a class="btn btn-sm" href="' + escapeHtml(selaReview.website) + '" target="_blank" rel="noopener">查看官网</a>' : '<span class="sela-review-pending-label">待人工判断</span>');
   } else {
     mainAction = '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户</button>';
   }
@@ -1498,6 +1504,8 @@ function renderInboxItemHtml(item) {
   var summaryText = '';
   if (isInboxCommunicationCapture(item)) {
     summaryText = item.capture_content || item.title || '待确认的客户沟通';
+  } else if (selaReview) {
+    summaryText = selaIdentityReasonLabel(selaReview.reason) + ' · ' + selaIdentityQualificationLabel(selaReview.research && selaReview.research.qualification_status);
   } else {
     summaryText = item.content || item.title || '';
   }
@@ -1510,6 +1518,8 @@ function renderInboxItemHtml(item) {
       body = '<div class="inbox-why">来源：' + escapeHtml(captureSource) + '</div>' +
         '<div class="inbox-evidence">原始对象：' + escapeHtml(item.capture_identity || '未识别') + '</div>' +
         '<p>' + escapeHtml(item.capture_content || item.content || '没有可显示的原文') + '</p>';
+    } else if (selaReview) {
+      body = renderSelaIdentityReview(selaReview, item);
     } else {
       body = '<p>' + escapeHtml(item.content || item.title || '') + '</p>';
     }
@@ -1540,6 +1550,78 @@ function renderInboxItemHtml(item) {
     '</div>' +
     detail +
     '</article>';
+}
+
+function parseSelaIdentityReview(item) {
+  if (!item || item.item_type !== 'sela_identity_review') return null;
+  var raw = String(item.content || '').trim();
+  if (!raw) return null;
+  try {
+    var parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function selaIdentityReasonLabel(reason) {
+  var labels = {
+    CUSTOMER_ALREADY_LINKED: '可能已关联现有客户',
+    CUSTOMER_ALREADY_HAS_SELA_PROSPECT: '已有 Sela 线索',
+    TROSA_REVISION_CONFLICT: '客户资料或来源有冲突',
+    SOURCE_IDENTITY_CONFLICT: '来源身份与客户资料不一致',
+    EXTERNAL_IDENTITY_CONFLICT: '外部身份发生冲突',
+    MULTIPLE_TROSA_MATCHES: '匹配到多个客户',
+    MULTIPLE_EXTERNAL_LINKS: '匹配到多个外部线索',
+  };
+  return labels[String(reason || '').trim()] || '需要确认客户身份';
+}
+
+function selaIdentityQualificationLabel(status) {
+  var labels = {
+    READY_TO_CONTACT: '资料初步通过',
+    'RESEARCH MORE': '需要补充核验',
+  };
+  return labels[String(status || '').trim()] || '尚未判断';
+}
+
+function selaIdentityConfidenceLabel(confidence) {
+  var labels = { HIGH: '高', MEDIUM: '中', LOW: '低' };
+  return labels[String(confidence || '').trim().toUpperCase()] || '未提供';
+}
+
+function selaIdentityMatchLabel(matchType) {
+  var labels = { DOMAIN: '官网域名一致', NAME: '名称相似', NAME_VARIANT: '名称变体' };
+  return labels[String(matchType || '').trim().toUpperCase()] || '存在匹配线索';
+}
+
+function renderSelaIdentityReview(review, item) {
+  var research = review.research || {};
+  var agentState = research.agent_state || {};
+  var match = agentState.exclusion_match || {};
+  var reason = selaIdentityReasonLabel(review.reason);
+  var qualification = selaIdentityQualificationLabel(research.qualification_status);
+  var confidence = selaIdentityConfidenceLabel(research.confidence);
+  var hygiene = String(research.site_hygiene || '').toUpperCase();
+  var hygieneLabel = hygiene === 'CONCERN' ? '官网或域名需复核' : hygiene === 'CLEAN' ? '官网资料正常' : '';
+  var explanation = research.research_reason || research.reason || research.qualification_reason || 'Sela 暂停了自动处理，等待人工确认。';
+  var action = '先核对官网、邮箱与现有客户资料；确认无误后再决定是否进入联系准备。';
+  if (review.reason === 'CUSTOMER_ALREADY_LINKED') action = '沿用现有客户档案，不要新建重复客户，也不要从这条线索直接发信。';
+  if (review.reason === 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT') action = '沿用已有 Sela 线索，不要重复建立或重复联系。';
+  if (hygiene === 'CONCERN') action = '先核对官网和域名关系；在身份确认前不要联系。';
+  var html = '<div class="sela-review-card">' +
+    '<div class="sela-review-lead"><strong>这条记录需要判断，不是待发送邮件。</strong><span>系统没有自动新建客户或发送外联。</span></div>' +
+    '<div class="sela-review-statuses"><span class="sela-review-status sela-review-status-reason">' + escapeHtml(reason) + '</span><span class="sela-review-status">' + escapeHtml(qualification) + '</span><span class="sela-review-status">置信度：' + escapeHtml(confidence) + '</span>' + (hygieneLabel ? '<span class="sela-review-status sela-review-status-warning">' + escapeHtml(hygieneLabel) + '</span>' : '') + '</div>' +
+    '<div class="sela-review-facts">' +
+      '<div><span>官网</span>' + (review.website ? '<a href="' + escapeHtml(review.website) + '" target="_blank" rel="noopener">' + escapeHtml(String(review.website).replace(/^https?:\/\//i, '').replace(/\/$/, '')) + '</a>' : '<strong>未提供</strong>') + '</div>' +
+      '<div><span>邮箱</span><strong>' + escapeHtml(review.email || '未提供') + '</strong></div>' +
+      (match.canonical_name ? '<div><span>匹配记录</span><strong>' + escapeHtml(match.canonical_name) + ' · ' + escapeHtml(selaIdentityMatchLabel(match.match_type)) + '</strong></div>' : '') +
+    '</div>' +
+    '<div class="sela-review-explanation"><span>为什么停在这里</span><p>' + escapeHtml(explanation) + '</p></div>' +
+    '<div class="sela-review-next"><span>建议处理</span><p>' + escapeHtml(action) + '</p></div>' +
+    '<details class="sela-review-raw"><summary>查看原始来源数据</summary><pre>' + escapeHtml(item.content || '') + '</pre></details>' +
+  '</div>';
+  return html;
 }
 
 async function createInboxTaskFromPanel(button, customerId) {

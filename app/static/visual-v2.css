@@ -6147,6 +6147,189 @@ html.motion-lite .modal-customer-workspace > .modal-body {
   }
 }
 
+/* Sela identity review: show the decision surface, not the transport JSON. */
+#page-inbox .inbox-group[data-category="sela_identity_review"] .inbox-group-title {
+  color: var(--v2-mist) !important;
+}
+
+#page-inbox .inbox-sela_identity_review .inbox-summary-why {
+  color: var(--v2-ink-soft) !important;
+}
+
+#page-inbox .inbox-sela_identity_review .inbox-item-name {
+  min-width: 0 !important;
+}
+
+#page-inbox .sela-review-pending-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--v2-ink-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#page-inbox .sela-review-card {
+  max-width: 880px;
+  padding: 16px 18px 18px;
+  border: 1px solid var(--v2-line);
+  border-radius: 16px;
+  background: var(--v2-paper-strong);
+}
+
+#page-inbox .sela-review-lead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 12px;
+}
+
+#page-inbox .sela-review-lead strong {
+  color: var(--v2-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+#page-inbox .sela-review-lead span {
+  color: var(--v2-ink-muted);
+  font-size: 12px;
+}
+
+#page-inbox .sela-review-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+#page-inbox .sela-review-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--v2-line);
+  border-radius: 999px;
+  background: var(--v2-canvas);
+  color: var(--v2-ink-soft);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+#page-inbox .sela-review-status-reason {
+  border-color: rgba(100, 125, 132, .24);
+  background: var(--v2-mist-soft);
+  color: var(--v2-mist);
+}
+
+#page-inbox .sela-review-status-warning {
+  border-color: rgba(169, 132, 71, .24);
+  background: var(--v2-ochre-soft);
+  color: #80652f;
+}
+
+#page-inbox .sela-review-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 22px;
+  padding: 12px 0;
+  border-top: 1px solid var(--v2-line);
+  border-bottom: 1px solid var(--v2-line);
+}
+
+#page-inbox .sela-review-facts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+#page-inbox .sela-review-facts span,
+#page-inbox .sela-review-explanation > span,
+#page-inbox .sela-review-next > span {
+  color: var(--v2-ink-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+#page-inbox .sela-review-facts strong,
+#page-inbox .sela-review-facts a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--v2-ink);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+#page-inbox .sela-review-facts a {
+  color: var(--v2-mist);
+  text-decoration: underline;
+  text-decoration-color: rgba(100, 125, 132, .35);
+  text-underline-offset: 3px;
+}
+
+#page-inbox .sela-review-explanation,
+#page-inbox .sela-review-next {
+  margin-top: 14px;
+}
+
+#page-inbox .sela-review-explanation p,
+#page-inbox .sela-review-next p {
+  display: block;
+  max-width: 760px;
+  margin: 4px 0 0;
+  color: var(--v2-ink-soft);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: normal;
+}
+
+#page-inbox .sela-review-next {
+  padding: 10px 12px;
+  border-left: 2px solid var(--v2-moss);
+  background: var(--v2-moss-soft);
+}
+
+#page-inbox .sela-review-next p {
+  color: var(--v2-ink);
+}
+
+#page-inbox .sela-review-raw {
+  margin-top: 14px;
+  color: var(--v2-ink-muted);
+  font-size: 12px;
+}
+
+#page-inbox .sela-review-raw summary {
+  cursor: pointer;
+  color: var(--v2-mist);
+}
+
+#page-inbox .sela-review-raw pre {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--v2-line);
+  border-radius: 10px;
+  background: var(--v2-canvas);
+  color: var(--v2-ink-soft);
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  #page-inbox .sela-review-card {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  #page-inbox .sela-review-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Keep the labeled primary action fully visible after the collapsible-shelf
    rules above have compacted secondary controls. */
 @media (min-width: 821px) {

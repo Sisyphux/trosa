@@ -1059,6 +1059,15 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(communication_customer['match_context']['activity_type'], 'email')
         self.assertEqual(communication_customer['match_context']['direction'], 'inbound')
 
+    def test_inbox_renders_sela_identity_reviews_as_readable_decisions(self):
+        """Sela identity payloads stay available without making raw JSON the primary UI."""
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.assertIn("sela_identity_review: 'sela 身份待确认'", javascript)
+        self.assertIn('function parseSelaIdentityReview(item)', javascript)
+        self.assertIn('function renderSelaIdentityReview(review, item)', javascript)
+        self.assertIn('查看原始来源数据', javascript)
+        self.assertIn('CUSTOMER_ALREADY_LINKED: \'可能已关联现有客户\'', javascript)
+
     def test_customer_search_prioritizes_identity_before_records_and_paginates(self):
         """Customer identity matches must outrank communication and task text."""
         spec = importlib.util.spec_from_file_location('crm_app_search_rank_test', ROOT / 'app.py')
