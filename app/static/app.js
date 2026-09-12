@@ -8169,7 +8169,7 @@ function renderWeeklyMember(uid, data, error, options) {
   var statusText = options.staleError ? '更新失败' : (options.fromCache ? '更新中' : '');
   var html = '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div>' + (statusText ? '<div class="weekly-person-header-meta"><em>' + statusText + '</em></div>' : '') + '</header>';
   if (options.staleError) html += '<div class="weekly-member-refresh-error" role="alert">更新失败，已保留最近一次内容。<button type="button" onclick="loadWeeklyMember(\'' + uid + '\')">重试</button></div>';
-  if (!reps.length) html += '<div class="weekly-person-empty"><strong>本周没有选择内容</strong></div>';
+  if (!reps.length) html += '<div class="weekly-person-empty"><strong>本周还没有确认的沟通</strong><span>确认后的客户进展会按负责人汇总在这里。</span></div>';
   reps.forEach(function(r) {
     var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
     html += '<article class="weekly-work-card">';
