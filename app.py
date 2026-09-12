@@ -8704,11 +8704,21 @@ def reschedule_reminder(reminder_id):
     conn = get_db()
     c = conn.cursor()
     before = _snapshot_entity(conn, 'reminders', reminder_id)
+    requested_customer_id = data.get('customer_id') if isinstance(data, dict) else None
+    if requested_customer_id not in (None, ''):
+        try:
+            requested_customer_id = int(requested_customer_id)
+        except (TypeError, ValueError):
+            conn.close()
+            return jsonify({'error': '客户标识无效'}), 400
     if (not before or before.get('is_done')
             or str(before.get('reminder_type') or '').startswith('outreach_')):
         conn.close()
         return jsonify({'error': '待办不存在或已完成'}), 404
     customer_id = before['customer_id']
+    if requested_customer_id is not None and int(customer_id) != requested_customer_id:
+        conn.close()
+        return jsonify({'error': '待办与客户不匹配，未调整日期'}), 409
     customer_before = _snapshot_entity(conn, 'customers', customer_id)
     now = _calendar_now_text()
     c.execute('UPDATE reminders SET remind_date=?, updated_at=? WHERE id=?', (remind_date, now, reminder_id))

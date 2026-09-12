@@ -2232,6 +2232,47 @@ function updateTodaySummary(reminders) {
   document.getElementById('statOverdue').textContent = overdueCount;
 }
 
+function arrangeOverdueReminders(button) {
+  var today = localDateString();
+  var overdue = (dashboardReminders || []).filter(function(item) {
+    return !item.is_done && String(item.reminder_type || '').indexOf('outreach_') !== 0 &&
+      String(item.remind_date || '').substring(0, 10) < today;
+  });
+  if (!overdue.length) { showToast('没有需要重新安排的逾期待办', 'success'); return; }
+  if (!window.confirm('将 ' + overdue.length + ' 项逾期待办安排到未来 9 个工作日，按当前 Today 优先顺序分配？')) return;
+  var original = button && button.textContent;
+  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.title = '正在整理'; }
+  var nextDate = new Date();
+  var businessDates = [];
+  while (businessDates.length < Math.ceil(overdue.length / 5)) {
+    nextDate.setDate(nextDate.getDate() + 1);
+    if (nextDate.getDay() !== 0 && nextDate.getDay() !== 6) businessDates.push(localDateString(nextDate));
+  }
+  (async function() {
+    var changed = 0;
+    var failed = [];
+    for (var index = 0; index < overdue.length; index++) {
+      var item = overdue[index];
+      try {
+        await api('/api/reminders/' + item.id + '/reschedule', {
+          method: 'POST',
+          body: JSON.stringify({ remind_date: businessDates[Math.floor(index / 5)], customer_id: item.customer_id })
+        });
+        changed++;
+      } catch (error) {
+        failed.push(item.customer_company || item.customer_name || ('#' + item.id));
+      }
+    }
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.title = '整理逾期'; button.textContent = original; }
+    await loadDashboard();
+    if (failed.length) showToast('已安排 ' + changed + ' 项，' + failed.length + ' 项因客户匹配冲突保留待处理', 'warning');
+    else showToast('已按工作日安排 ' + changed + ' 项逾期待办', 'success');
+  })().catch(function() {
+    if (button) { button.disabled = false; button.removeAttribute('aria-busy'); button.title = '整理逾期'; button.textContent = original; }
+    showToast('批量安排未完成，请重新加载后重试', 'error');
+  });
+}
+
 async function loadDashboard() {
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
