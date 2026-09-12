@@ -7,15 +7,15 @@
 | 项 | 值 |
 | --- | --- |
 | 模型状态 | **当前状态**（current state），不含目标态 |
-| 指纹基线 | 2026-09-12 16:36 CST 发布后运行态（commit `d1d6972`，release `auto-20260912083340-d1d6972`；包含功能收敛 commit `7535b79`） |
+| 指纹基线 | 2026-09-12 16:50 CST 发布后运行代码态（commit `9d7d87b`，release `auto-20260912085022-9d7d87b`；包含功能收敛 commit `7535b79`） |
 | 覆盖范围 | 整个仓库：后端、前端静态资源、浏览器扩展、迁移与数据层、部署与运行环境 |
 | 未覆盖 | 列级外键与逐列数据血缘；`0001`–`0029` 全部 DDL 的逐条审计；Cloudflare Access 策略 |
 
 **基线注意事项**
 
-1. **本模型对应已发布版本，不是移动靶**。`app.py` 当前为 15,152 行，所有数字以文末指纹表和
-   commit `d1d6972` 为准；新增发布后应重新核对远端 SHA 与迁移账本。
-2. **远端证据已补齐**。ECS 当前 release 为 `auto-20260912083340-d1d6972`；公网 ping
+1. **本模型对应已发布运行代码，不是移动靶**。`app.py` 当前为 15,152 行，所有数字以文末指纹表和
+   commit `9d7d87b` 为准；新增运行代码发布后应重新核对远端 SHA 与迁移账本。
+2. **远端证据已补齐**。最近一次核验的运行代码 release 为 `auto-20260912085022-9d7d87b`；公网 ping
    四字段健康门通过，受控 `verify_schema` 确认 0001–0029、schema contract 和数据完整性。
 
 ## 本轮复核记录（哪些结论被推翻或修正）
@@ -142,7 +142,7 @@
 
 | # | 问题 | 为什么重要 | 建议校验方式 |
 | --- | --- | --- | --- |
-| 1 | **ECS 是否已运行当前 release** | **已确认**：release `auto-20260912083340-d1d6972`，远端 `app=active`、`tunnel=active`、`health=ok`，公网 ping 四字段通过 | 后续发布重复 `deploy/cloud/status-workbench.sh` 和公网 ping 验收 |
+| 1 | **ECS 是否已运行当前运行代码** | **已确认**：运行代码 release `auto-20260912085022-9d7d87b`，远端 `app=active`、`tunnel=active`、`health=ok`，公网 ping 四字段通过 | 后续发布重复 `deploy/cloud/status-workbench.sh` 和公网 ping 验收 |
 | 2 | **生产库是否已应用 `0029`** | **已确认**：受控 `verify_schema` 返回 `ok=true`，0001–0029 ledger/hash、schema contract 和 orphan reference 检查均通过 | 后续新增迁移沿用受控 `verify_schema` |
 | 3 | Cloudflare Access 是否启用 | `TROSA_MAINTENANCE.md:16` 画出 Access/Tunnel，但仓库脚本未强制任何 Access 策略；若未启用，应用层登录就是唯一门禁 | 检查 Cloudflare Zero Trust 控制台（仓库外） |
 | 4 | `sela.*` schema 是否仍有历史 importer 之外的写入 | 当前正式 Sela 运行不依赖该 schema，避免把历史导入面误当成运行内核 | 对运行库检查最近写入来源 |

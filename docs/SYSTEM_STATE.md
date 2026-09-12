@@ -5,8 +5,8 @@
 > 并在 `docs/CHANGELOG.md` 留下架构变更记录。产品层面用户可见变化仍记录在根目录
 > `CHANGELOG.md`（两者分工见本文 §10）。
 >
-> 审计基线：2026-09-12 16:36 CST 发布后运行态（commit `d1d6972`，release
-> `auto-20260912083340-d1d6972`；包含功能收敛 commit `7535b79`）。本轮已把正式运行契约、入口安全门、健康响应和开发入口
+> 审计基线：2026-09-12 16:50 CST 发布后运行代码态（commit `9d7d87b`，release
+> `auto-20260912085022-9d7d87b`；包含功能收敛 commit `7535b79`）。本轮已把正式运行契约、入口安全门、健康响应和开发入口
 > 收敛到 PostgreSQL；公网健康响应与受控 `verify_schema` 已确认远端正在运行该契约，且
 > `audit.schema_migrations` 已通过 0001–0029 全量校验。
 
@@ -143,7 +143,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 4. **发布链路依赖远端控制面**：Workbench 偶发超时时必须使用已配置的 SSH 回退；
    发布脚本仍要先完成备份、基线校验、同一 commit 的原子切换和健康门，不能手工跳过。
 5. **ECS 正式契约与迁移账本已完成本轮验收**：当前 release 为
-   `auto-20260912083340-d1d6972`，公网四字段健康门通过，受控 `verify_schema` 确认
+   `auto-20260912085022-9d7d87b`，公网四字段健康门通过，受控 `verify_schema` 确认
    0001–0029、完整 schema contract 与零 orphan reference。后续修改仍须重复该验收。
 
 ## 9. 下一阶段方向（不跳过路线图）
@@ -189,7 +189,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 - 已确认事实：单体形态、无蓝图158路由、单向无环依赖、trosa_domain唯一写入通道、
   PG为正式唯一源、正式运行 guard/health 契约、兼容层可写触发器机制、Sela/Gmail/ICS/AI
   边界、冻结清单、三类兼容层故障史、90个共享account计数（2026-09-07只读核验）；
-  ECS 当前 release 为 `auto-20260912083340-d1d6972`，公网正式契约通过，生产库
+  ECS 最近一次运行代码 release 为 `auto-20260912085022-9d7d87b`，公网正式契约通过，生产库
   `audit.schema_migrations` 0001–0029 全部通过，两个 legacy reference orphan count 为 0。
 - 合理推断：ECS 设计目标与部署脚本均以 PG 为正式源；当前生产运行态已由上述受控证据确认，
   后续只需对新增发布重复同一验证。
