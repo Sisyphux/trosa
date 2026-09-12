@@ -30,8 +30,10 @@ writer、把 Sela 当本地业务账本或在旧服务上继续开发的风险�
 是否需要迁移：不需要新的数据迁移；若发布到 ECS，发布门会按当前迁移 ledger/schema contract
 和备份规则执行既有 PostgreSQL 校验。
 
-当前状态：本地代码与文档已更新；Trosa 152 项 Python 回归通过，Sela 15 项回归通过，
-静态检查待本轮最终复跑。ECS 当前 release 与生产库迁移状态仍需远端健康响应和发布记录确认。
+当前状态：已完成正式发布。Trosa 160 项 Python 回归（1 项按环境跳过）、Sela 15 项回归、
+Python/JavaScript 静态检查、浏览器扩展回归和隔离 PostgreSQL 17 演练通过；ECS release
+为 `auto-20260912081434-7535b79`，公网四字段健康门通过，生产 `verify_schema` 确认
+0001–0029 全部通过，Sela readiness 已恢复。
 
 ---
 

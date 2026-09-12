@@ -225,7 +225,7 @@
 <text xml:space="preserve" text-anchor="middle" x="535.82" y="-223" font-family="Helvetica,sans-Serif" font-size="10.00">operation_log_events（0028 + 0029）</text>
 <text xml:space="preserve" text-anchor="middle" x="535.82" y="-211" font-family="Helvetica,sans-Serif" font-size="10.00">规范审计事实；app.py 的 _record_operation_log() 直接写入</text>
 <text xml:space="preserve" text-anchor="middle" x="535.82" y="-199" font-family="Helvetica,sans-Serif" font-size="10.00">0029 仅保留旧 operation_logs 兼容写入桥接</text>
-<text xml:space="preserve" text-anchor="middle" x="535.82" y="-187" font-family="Helvetica,sans-Serif" font-size="10.00">生产库是否已应用最新迁移 → 待 verify_schema 确认</text>
+<text xml:space="preserve" text-anchor="middle" x="535.82" y="-187" font-family="Helvetica,sans-Serif" font-size="10.00">生产库 0001–0029 已通过受控 verify_schema</text>
 </g>
 <!-- app&#45;&gt;audit_oplog -->
 <g id="edge12" class="edge">

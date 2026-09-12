@@ -2,9 +2,10 @@
 
 **产出方式**：`explore`（路由）→ `system-modeler`（主场景）+ `c4model` / `graphviz`（图源基础）
 **模型状态**：当前状态（current state）
-**基线**：2026-09-12 16:00 CST 的发布前工作树快照，见文末指纹表
-**重要**：本模型针对发布前工作树（`origin/main` 基线 `f12a614` + 收敛改动）；请以文末指纹表和
-当前发布记录为准，不把快照误读成移动靶。
+**基线**：2026-09-12 16:14 CST 的发布后运行态，commit `7535b79`、release
+`auto-20260912081434-7535b79`，见文末指纹表。
+**重要**：本模型对应已发布工作树；请以文末指纹表、远端发布记录和实时健康响应为准，
+不把快照误读成移动靶。
 
 ---
 
@@ -110,18 +111,16 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 | 模块结构、路由面、导入边 | **强** | 直接来自代码与本轮实测（行数、`grep -c`、`register_blueprint` 计数） |
 | 运行单元、端口、启动命令、发布步骤 | **强** | 来自 systemd 单元与部署脚本本身 |
 | 数据 schema 与兼容边界 | **强** | 来自迁移 DDL、契约文件与触发器定义 |
-| 正式 PostgreSQL 契约 | **强（本地代码）／未知（ECS live）** | `serve.py`/`db.py`/ping 已强制；远端 release 与 migration ledger 仍需受控核验 |
+| 正式 PostgreSQL 契约 | **强（本地代码 + ECS live）** | `serve.py`/`db.py`/ping 已强制；ECS release、公网 ping 和 migration ledger 已受控核验 |
 | Cloudflare Access 策略 | **未知** | 仓库只体现 Tunnel |
 | Sela 内部实现 | **已确认边界** | `/Users/luoxin/Desktop/Sela` 的本地 runtime、HTTPS Gateway、有界 outbox 和 Gmail delivery journal；不保存业务事实副本 |
 | 列级外键与生命周期取值 | **部分** | 等级词汇已查明；阶段/判词取值未核实 |
 
 ## 未决校验任务（按重要性）
 
-1. **ECS 是否已运行当前 release**：本地代码已强制 `trosa-postgresql-v1`，但需以远端 ping 四字段和发布记录确认。
-2. **生产库是否已应用 `0029`**：代码层已更新迁移清单与契约，但运行库 ledger/schema 只能由受控生产验证。
-3. Cloudflare Access 是否启用（若未启用，应用层登录是唯一门禁）。
-4. `sela.*` schema 归属：历史 importer 面是否仍有写入；当前正式 Sela runtime 不依赖它。
-5. 客户"阶段"与"判词"的取值。
+1. Cloudflare Access 是否启用（若未启用，应用层登录是唯一门禁）。
+2. `sela.*` schema 归属：历史 importer 面是否仍有写入；当前正式 Sela runtime 不依赖它。
+3. 客户"阶段"与"判词"的取值。
 
 ## 维护说明
 
@@ -131,7 +130,7 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 - **本机没有原生 Graphviz**（`brew install graphviz` 会走 rust/librsvg 源码构建并在 `ghcr.io` 上失败）。现有 SVG 由 Graphviz 16.0.0 的 WASM 构建渲染：`npm i @viz-js/viz`，再 `viz.renderString(src, {format:'svg'})`。若已装原生 `dot`，命令是 `dot -Tsvg <file>.dot -o <file>.svg`。
 - **模型会随工作树漂移**：`app.py` 建模期间就在变动。提交或发布后建议重新核对 L2 容器与路由分布，并与文末指纹表比对。
 
-## 基线指纹（发布前核验时刻 2026-09-12 16:00 CST）
+## 基线指纹（发布后核验时刻 2026-09-12 16:14 CST）
 
 | 文件 | SHA-256 前 16 位 |
 | --- | --- |
@@ -153,9 +152,9 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 
 | 文件 | SHA-256 前 16 位 | 说明 |
 | --- | --- | --- |
-| trosa-system.structurizr.dsl | `65dd2e8b5b72e908` | L1/L2/L3 图源 |
-| trosa-data-topology.dot | `6e2359cdfeb40fe8` | 图源（rankdir=LR） |
-| trosa-data-topology.svg | `bc9178f3a4ff2eeb` | 派生，Graphviz 16.0.0 WASM |
+| trosa-system.structurizr.dsl | `6cb618e4f00f131b` | L1/L2/L3 图源 |
+| trosa-data-topology.dot | `3c501d67b3413a7b` | 图源（rankdir=LR） |
+| trosa-data-topology.svg | `faa287f880097b08` | 派生，Graphviz 16.0.0 WASM |
 | trosa-runtime-topology.dot | `2ca0daa4d3ef895e` | 图源（rankdir=TB） |
 | trosa-runtime-topology.svg | `749e6b4cabf8ed49` | 派生，Graphviz 16.0.0 WASM |
 

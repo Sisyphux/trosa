@@ -71,8 +71,8 @@ TRADE_OS_DATABASE_URL=<非空 PostgreSQL DSN>
 ```
 
 并由 `/api/network/ping` 报告 `status=ok`、`backend=postgresql`、
-`runtime_contract=trosa-postgresql-v1`。演练通过不代表 ECS 已应用当前代码或迁移；
-线上状态仍需通过远端健康检查和发布记录确认。
+`runtime_contract=trosa-postgresql-v1`。本轮 ECS 已通过远端健康检查、发布记录和
+生产 `verify_schema`；后续演练通过仍必须重复同一线上核验，不得以本地结果替代。
 
 ## 4. 历史输入导入（可选、非正式运行）
 

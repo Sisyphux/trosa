@@ -5,9 +5,10 @@
 > 并在 `docs/CHANGELOG.md` 留下架构变更记录。产品层面用户可见变化仍记录在根目录
 > `CHANGELOG.md`（两者分工见本文 §10）。
 >
-> 审计基线：2026-09-12 16:00 CST 发布前工作树（`origin/main` 基线 `f12a614` + 收敛改动）。
-> 本轮已把正式运行契约、入口安全门、健康响应和开发入口收敛到 PostgreSQL；
-> 远端版本与正式数据库账本以同一 commit 的发布记录和健康响应为准。
+> 审计基线：2026-09-12 16:14 CST 发布后运行态（commit `7535b79`，release
+> `auto-20260912081434-7535b79`）。本轮已把正式运行契约、入口安全门、健康响应和开发入口
+> 收敛到 PostgreSQL；公网健康响应与受控 `verify_schema` 已确认远端正在运行该契约，且
+> `audit.schema_migrations` 已通过 0001–0029 全量校验。
 
 ## 1. 系统目标
 
@@ -73,7 +74,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | 业务域 | `trosa_domain.py` | Interaction/Task 唯一业务读写语义；Today/Customer共用排序；外联投递历史永不转为待办（SQL强制） | 在用，唯一写入通道 |
 | 数据层 | `db.py` / `postgres_compat.py` / `postgres_schema_contract.py` | PG启动迁移、兼容层、来源审计、schema契约 | 在用，关键接缝 |
 | 迁移 | `migrations/0001–0029` | 6 schema沉淀；0019退役旧AI/监控兼容视图；0020建customer_states事实；0023–0029收敛兼容写边界与审计 | 在用，ledger在`audit.schema_migrations`（SHA-256） |
-| 前端 | `app/static/` | 单页应用；Customer/Today/Inbox共同确认入口已本地完成待发布 | 在用 |
+| 前端 | `app/static/` | 单页应用；Customer/Today/Inbox共同确认入口已发布并通过公网健康门 | 在用 |
 | 采集扩展 | `browser-extension/` | MV3侧边栏，从网页邮箱/WhatsApp采集回POST `/api/extension/*` | 在用 |
 | Sela同步 | `/api/integrations/sela/*` 16条 | 只同步**已确认**外联；精确身份匹配+幂等键+REVIEW；不直连DB | 在用 |
 | Agent网关 | `/api/gateway/*` 11条 + `/api/agent/*` 8条 | 原子读取/确认式提案/受限幂等写入；提案与动作分离 | 在用 |
@@ -139,18 +140,17 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
    0013 只标记无域名依据合并为 review，共享 payload 内备注/跟进状态仍有串扰风险。
 3. **运行角色权限过大**：`tradeos_app` 疑似 SUPERUSER+BYPASSRLS，无 RLS；需独立 owner/runtime
    角色与权限矩阵演练，不可在生产库直接试改。
-4. **未提交改动积压**：审计时工作树存在既有修改和未跟踪条目（含
-   `migrations/0023–0029` 与 rehearsal 工具），云主机 `current` 未必包含；发布前必须
-   按文件审阅、重核指纹并避免带入无关改动。
-5. **ECS 实时状态尚未在本轮本地审计中复核**：代码已强制正式 PG 契约，但当前远端
-   release、迁移账本、`0029` 是否已应用以及 Sela 健康响应仍需通过受控远端检查确认。
+4. **发布链路依赖远端控制面**：Workbench 偶发超时时必须使用已配置的 SSH 回退；
+   发布脚本仍要先完成备份、基线校验、同一 commit 的原子切换和健康门，不能手工跳过。
+5. **ECS 正式契约与迁移账本已完成本轮验收**：当前 release 为
+   `auto-20260912081434-7535b79`，公网四字段健康门通过，受控 `verify_schema` 确认
+   0001–0029、完整 schema contract 与零 orphan reference。后续修改仍须重复该验收。
 
 ## 9. 下一阶段方向（不跳过路线图）
 
-顺序（见 `TROSA_MAINTENANCE.md`）：先按文件审阅并发布已验证的本地收敛改动，随后以
-远端四字段健康门复核 ECS；再推进 Sela 证据预填与 REVIEW 交接。保持本地回归与发布前
-检查，不扩张冻结功能，不新增页面与重复概念。Agent Gateway 共享业务写入可在“不新增
-第二条业务路径”边界内推进。
+顺序（见 `TROSA_MAINTENANCE.md`）：保持本地回归、备份、同一 commit 发布和远端四字段
+健康门；下一步再推进 Sela 证据预填与 REVIEW 交接。保持不扩张冻结功能、不新增页面与
+重复概念。Agent Gateway 共享业务写入可在“不新增第二条业务路径”边界内推进。
 
 ## 10. 文档职责（唯一入口在此）
 
@@ -188,12 +188,13 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 
 - 已确认事实：单体形态、无蓝图158路由、单向无环依赖、trosa_domain唯一写入通道、
   PG为正式唯一源、正式运行 guard/health 契约、兼容层可写触发器机制、Sela/Gmail/ICS/AI
-  边界、冻结清单、三类兼容层故障史、90个共享account计数（2026-09-07只读核验）。
-- 合理推断：ECS 设计目标与部署脚本均以 PG 为正式源；本轮未把未提交工作树发布到 ECS，
-  因而不能将本地代码契约当作远端版本证明。
-- 不确定：远端当前 release 是否含 `0023–0029`、生产库是否已应用 `0029`；Cloudflare Access 是否启用；
-  `sela.*` schema 当前是否仍在写入；`business_stage/role/judgment` 全量取值语义；
-  Inbox 判定规则书面化缺失；超管运行角色当前是否已降权。
+  边界、冻结清单、三类兼容层故障史、90个共享account计数（2026-09-07只读核验）；
+  ECS 当前 release 为 `auto-20260912081434-7535b79`，公网正式契约通过，生产库
+  `audit.schema_migrations` 0001–0029 全部通过，两个 legacy reference orphan count 为 0。
+- 合理推断：ECS 设计目标与部署脚本均以 PG 为正式源；当前生产运行态已由上述受控证据确认，
+  后续只需对新增发布重复同一验证。
+- 不确定：Cloudflare Access 是否启用；`sela.*` schema 当前是否仍在写入；
+  `business_stage/role/judgment` 全量取值语义；Inbox 判定规则书面化缺失；超管运行角色当前是否已降权。
 
 ## 13. 未来修改规则（铁律）
 

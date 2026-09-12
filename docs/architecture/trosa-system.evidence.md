@@ -7,22 +7,22 @@
 | 项 | 值 |
 | --- | --- |
 | 模型状态 | **当前状态**（current state），不含目标态 |
-| 指纹基线 | 2026-09-12 16:00 CST 发布前工作树（`origin/main` 基线 `f12a614` + 收敛改动） |
+| 指纹基线 | 2026-09-12 16:14 CST 发布后运行态（commit `7535b79`，release `auto-20260912081434-7535b79`） |
 | 覆盖范围 | 整个仓库：后端、前端静态资源、浏览器扩展、迁移与数据层、部署与运行环境 |
 | 未覆盖 | 列级外键与逐列数据血缘；`0001`–`0029` 全部 DDL 的逐条审计；Cloudflare Access 策略 |
 
 **基线注意事项**
 
-1. **本模型是发布前快照，不是移动靶**。`app.py` 当前为 15,152 行，所有数字以文末指纹表对应版本为准；发布后应重新核对远端 SHA 与迁移账本。
-2. **证据全部来自工作树而非已发布的 `HEAD`**。工作树包含既有未提交改动、`docs/`、
-   `migrations/0023–0029` 和 rehearsal 测试/工具。因此本模型描述「开发机上此刻的代码」，
-   不必然等于云主机上运行的版本；远端版本必须由发布记录和健康响应核实。
+1. **本模型对应已发布版本，不是移动靶**。`app.py` 当前为 15,152 行，所有数字以文末指纹表和
+   commit `7535b79` 为准；新增发布后应重新核对远端 SHA 与迁移账本。
+2. **远端证据已补齐**。ECS 当前 release 为 `auto-20260912081434-7535b79`；公网 ping
+   四字段健康门通过，受控 `verify_schema` 确认 0001–0029、schema contract 和数据完整性。
 
 ## 本轮复核记录（哪些结论被推翻或修正）
 
 | # | 上一轮结论 | 复核后的事实 | 处理 |
 | --- | --- | --- | --- |
-| 1 | 「`db.py` 迁移清单止于 0027，与 `tools/unified_postgres_migration.py` 含 0028 不一致」 | **已修正**：`db.py:90` 现含 `0028_canonical_operation_audit.sql`，两份清单一致 | 撤销该发现；改为「生产库是否已应用」这一剩余问题 |
+| 1 | 「`db.py` 迁移清单止于 0027，与 `tools/unified_postgres_migration.py` 含 0028 不一致」 | **已修正**：`db.py` 与迁移工具均含 `0028`、`0029`，生产 ledger/schema 也已通过全量校验 | 撤销该发现；后续发布重复 ledger 校验 |
 | 2 | 「`app.py` 14,534 行」 | `app.py` 现为 **15,152 行** | 已更新，并改为引用「约 1.5 万行」+ 指纹 |
 | 3 | 「路由分布：客户 36、Sela 16、gateway 11…」 | 前缀口径不完整。实测 **31 个 `/api` 前缀 / 154 条 API + 4 条非 API = 158** | 已改为完整分布 |
 | 4 | 「客户状态/等级取值未知」 | **等级取值已查明**：`db.py:992` `CUSTOMER_LEVEL_VALUES`，`db.py:1746` 拼进 SQL 强制 | 已补入业务文档；阶段/判词仍未核实 |
@@ -79,7 +79,7 @@
 | `serve.py` → `db` / `scheduler` | `serve.py:18-19` | high |
 | 模块间无循环依赖 | 上述边集的有向图无环 | high |
 
-模块行数（16:00 实测）：`app.py` **15,152** ｜ `app/static/app.js` 8,480 ｜ `db.py` 2,139 ｜ `app/engine.py` 1,550 ｜ `trosa_domain.py` 1,294 ｜ `gmail_sync.py` 1,263 ｜ `postgres_compat.py` 317 ｜ `postgres_schema_contract.py` 310 ｜ `email_verifier.py` 297 ｜ `scheduler.py` 161 ｜ `ical_gen.py` 143 ｜ `serve.py` 62 ｜ `config.py` 45。
+模块行数（16:14 实测）：`app.py` **15,152** ｜ `app/static/app.js` 8,480 ｜ `db.py` 2,139 ｜ `app/engine.py` 1,550 ｜ `trosa_domain.py` 1,294 ｜ `gmail_sync.py` 1,263 ｜ `postgres_compat.py` 317 ｜ `postgres_schema_contract.py` 310 ｜ `email_verifier.py` 297 ｜ `scheduler.py` 161 ｜ `ical_gen.py` 143 ｜ `serve.py` 62 ｜ `config.py` 45。
 
 ## 业务域证据（`trosa_domain.py`，函数行号本轮实测）
 
@@ -130,7 +130,7 @@
 | PostgreSQL 备份职责分离 | `db.py:579-581`；`app.py` 恢复接口在 PG 模式返回 409 `managed_externally` | high |
 | 生产备份与还原校验 | `deploy/postgres-production/backup.sh`、`restore-check.sh` | high |
 | 本地隔离 rehearsal | `tools/postgres_rehearsal.py`：`127.0.0.1:55432`、库 `trosa_rehearsal`、拒绝非回环主机 | high |
-| 正式运行契约已在代码中强制 | `db.py` 的 `trosa-postgresql-v1`、`serve.py` 启动 guard、`app.py` `/api/network/ping`；远端是否已运行该版本仍未核实 | high（本地代码）／**unknown（ECS live）** |
+| 正式运行契约已在代码中强制 | `db.py` 的 `trosa-postgresql-v1`、`serve.py` 启动 guard、`app.py` `/api/network/ping`；ECS release、公网 ping 与服务重启记录均已核实 | **high（本地代码 + ECS live）** |
 
 ## 假设（human-assumption，显式标注）
 
@@ -142,8 +142,8 @@
 
 | # | 问题 | 为什么重要 | 建议校验方式 |
 | --- | --- | --- | --- |
-| 1 | **ECS 是否已运行当前 release** | 本地代码已强制 `trosa-postgresql-v1`，但必须通过远端 `/api/network/ping` 同时返回 `status=ok`、`backend=postgresql`、`formal_runtime=true`、`runtime_contract=trosa-postgresql-v1` 以及发布记录确认 | 受控运行 `deploy/cloud/status-workbench.sh` 或 `status-remote.sh`，不输出密钥 |
-| 2 | **生产库是否已应用 `0029`** | 代码层迁移清单与契约已更新，但运行库是否有最新 ledger/schema 只能由受控生产验证 | 对运行库执行 schema verify，并检查 `audit.schema_migrations` |
+| 1 | **ECS 是否已运行当前 release** | **已确认**：release `auto-20260912081434-7535b79`，远端 `app=active`、`tunnel=active`、`health=ok`，公网 ping 四字段通过 | 后续发布重复 `deploy/cloud/status-workbench.sh` 和公网 ping 验收 |
+| 2 | **生产库是否已应用 `0029`** | **已确认**：受控 `verify_schema` 返回 `ok=true`，0001–0029 ledger/hash、schema contract 和 orphan reference 检查均通过 | 后续新增迁移沿用受控 `verify_schema` |
 | 3 | Cloudflare Access 是否启用 | `TROSA_MAINTENANCE.md:16` 画出 Access/Tunnel，但仓库脚本未强制任何 Access 策略；若未启用，应用层登录就是唯一门禁 | 检查 Cloudflare Zero Trust 控制台（仓库外） |
 | 4 | `sela.*` schema 是否仍有历史 importer 之外的写入 | 当前正式 Sela 运行不依赖该 schema，避免把历史导入面误当成运行内核 | 对运行库检查最近写入来源 |
 | 5 | 客户"阶段"与"判词"的全量取值语义及运行角色降权状态 | 关系隔离与权限仍需生产级验证 | 读 `trosa_domain.py`/迁移 SQL，并执行只读权限矩阵演练 |

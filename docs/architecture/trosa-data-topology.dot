@@ -204,7 +204,7 @@ digraph trosa_data_topology {
         audit_agent [label="agent_proposals\nagent_actions"];
         audit_undo [label="undo_snapshots\nevents\nmigration_issues"];
         audit_oplog [
-            label="operation_log_events（0028 + 0029）\n规范审计事实；app.py 的 _record_operation_log() 直接写入\n0029 仅保留旧 operation_logs 兼容写入桥接\n生产库是否已应用最新迁移 → 待 verify_schema 确认",
+            label="operation_log_events（0028 + 0029）\n规范审计事实；app.py 的 _record_operation_log() 直接写入\n0029 仅保留旧 operation_logs 兼容写入桥接\n生产库 0001–0029 已通过受控 verify_schema",
             style="filled",
             color="#8f7fc0",
             penwidth=2.0
