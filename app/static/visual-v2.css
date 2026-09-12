@@ -5982,6 +5982,49 @@ html.motion-lite .modal-customer-workspace > .modal-body {
   .customer-card-workspace [data-customer-column="website"] { display: block !important; }
   .customer-card-workspace.customer-hide-website [data-customer-column="website"] { display: block !important; }
 }
+
+/* Fine visual pass: make the single action that writes a business fact
+   unmistakable, while keeping supporting controls compact. */
+.page-header > .command-shelf .command-primary {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: auto !important;
+  min-width: 42px;
+  padding: 0 14px !important;
+  background: var(--v2-clay) !important;
+  color: #fff !important;
+  box-shadow: 0 5px 14px rgba(147,77,53,.18) !important;
+}
+.page-header > .command-shelf .command-primary:hover {
+  background: var(--v2-clay-hover) !important;
+  color: #fff !important;
+}
+.command-label { font-size: 12px; font-weight: 650; white-space: nowrap; }
+
+/* An empty decision queue should look intentionally calm, not unfinished. */
+#page-inbox .inbox-empty {
+  min-height: 132px;
+  box-sizing: border-box;
+  justify-content: center;
+  margin-top: 18px;
+  padding: 28px 30px !important;
+  border: 1px dashed rgba(92, 105, 102, .28);
+  border-radius: 14px;
+  background: rgba(255,253,249,.36);
+}
+#page-inbox .inbox-empty strong { font-size: 14px; }
+#page-inbox .inbox-empty span { font-size: 13px; }
+
+@media (max-width: 620px) {
+  .page-header > .command-shelf .command-primary {
+    width: 42px !important;
+    padding: 0 !important;
+  }
+  .command-label { display: none; }
+  #page-inbox .inbox-empty { min-height: 116px; padding: 24px !important; }
+}
 #page-customers .customer-next { font-family: var(--font-sans); line-height: 1.4; }
 #page-customers .customer-next small { display: block; margin-top: 4px; color: var(--v2-ink-muted); font-family: var(--font-sans); font-size: var(--fs-caption); letter-spacing: 0; white-space: nowrap; }
 
@@ -6101,6 +6144,24 @@ html.motion-lite .modal-customer-workspace > .modal-body {
   .page-header > .command-shelf .command-primary {
     background: rgba(255,255,255,.28) !important;
     box-shadow: inset 0 1px 0 rgba(255,255,255,.72), 0 3px 10px rgba(63,54,45,.07) !important;
+  }
+}
+
+/* Keep the labeled primary action fully visible after the collapsible-shelf
+   rules above have compacted secondary controls. */
+@media (min-width: 821px) {
+  .page-header > .command-shelf.is-collapsible {
+    width: auto !important;
+    max-width: none !important;
+    overflow: visible !important;
+  }
+  .page-header > .command-shelf.is-collapsible .command-primary {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 42px !important;
+    padding: 0 14px !important;
+    background: var(--v2-clay) !important;
+    color: #fff !important;
   }
 }
 
