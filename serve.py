@@ -15,7 +15,7 @@ from pathlib import Path
 
 from waitress import serve
 
-from db import init_all_dbs, require_formal_postgres_runtime, run_startup_maintenance
+from db import cancel_safety_backup, init_all_dbs, require_formal_postgres_runtime, run_startup_maintenance
 from scheduler import start_scheduler, stop_scheduler
 
 
@@ -35,6 +35,7 @@ def _load_flask_app():
 
 
 def shutdown(*_args):
+    cancel_safety_backup()
     stop_scheduler()
     raise SystemExit(0)
 

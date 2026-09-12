@@ -2,7 +2,7 @@
 // 场景技能：system-modeler ｜ 基础技能：c4model
 //
 // 视图：L1 系统上下文、L2 容器、L3 组件（Flask 应用进程内部）
-// 证据基线：2026-09-12 16:28 CST 发布后运行态（commit 0a25827，release auto-20260912082853-0a25827；包含功能收敛 commit 7535b79），
+// 证据基线：2026-09-12 16:36 CST 发布后运行态（commit d1d6972，release auto-20260912083340-d1d6972；包含功能收敛 commit 7535b79），
 //           指纹与远端核验见 trosa-system.summary.md / trosa-system.evidence.md
 // 证据索引与逐条置信度：trosa-system.evidence.md
 //

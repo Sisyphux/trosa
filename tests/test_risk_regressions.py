@@ -38,6 +38,7 @@ class IsolatedDatabaseTest(unittest.TestCase):
         os.environ.pop('CRM_SEED_DEMO_DATA', None)
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:
             os.environ.pop('CRM_SEED_DEMO_DATA', None)
@@ -213,6 +214,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         db.init_all_dbs()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:
             os.environ.pop('CRM_SEED_DEMO_DATA', None)
@@ -1650,6 +1652,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         db.init_all_dbs()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:
             os.environ.pop('CRM_SEED_DEMO_DATA', None)
@@ -2208,6 +2211,7 @@ class CommunicationAssistTest(unittest.TestCase):
         db.init_all_dbs()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:
             os.environ.pop('CRM_SEED_DEMO_DATA', None)
@@ -2515,6 +2519,7 @@ class CustomerFileAttachmentTest(unittest.TestCase):
         db.init_all_dbs()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         self.tempdir.cleanup()
 
@@ -2902,6 +2907,7 @@ class SmartWebsiteImportTest(unittest.TestCase):
         db.init_all_dbs()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         self.tempdir.cleanup()
 

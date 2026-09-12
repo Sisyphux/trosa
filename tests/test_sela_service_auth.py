@@ -52,6 +52,7 @@ class SelaServiceAuthTest(unittest.TestCase):
         self.module = load_app()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.set_db_user(None)
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:

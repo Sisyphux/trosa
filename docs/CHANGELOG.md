@@ -32,7 +32,7 @@ writer、把 Sela 当本地业务账本或在旧服务上继续开发的风险�
 
 当前状态：已完成正式发布。Trosa 160 项 Python 回归（1 项按环境跳过）、Sela 15 项回归、
 Python/JavaScript 静态检查、浏览器扩展回归和隔离 PostgreSQL 17 演练通过；ECS release
-为 `auto-20260912082853-0a25827`（包含功能收敛 commit `7535b79`），公网四字段健康门通过，生产 `verify_schema` 确认
+为 `auto-20260912083340-d1d6972`（包含功能收敛 commit `7535b79`），公网四字段健康门通过，生产 `verify_schema` 确认
 0001–0029 全部通过，Sela readiness 已恢复。
 
 ---

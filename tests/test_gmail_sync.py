@@ -60,6 +60,7 @@ class GmailSyncTest(unittest.TestCase):
         })
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         self.environment.stop()
         self.tempdir.cleanup()

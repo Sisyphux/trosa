@@ -31,6 +31,7 @@ class BrowserExtensionApiTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.DB_DIR = self.original_db_dir
         self.tempdir.cleanup()
 

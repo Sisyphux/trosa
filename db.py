@@ -741,6 +741,26 @@ def schedule_safety_backup(reason='data_change'):
         _safety_backup_timer.start()
 
 
+def cancel_safety_backup(wait=True):
+    """Cancel a pending debounced snapshot and optionally wait for completion.
+
+    This timer is independent from APScheduler.  Runtime shutdown and
+    isolated tests must quiesce it before changing the storage context;
+    otherwise a late snapshot can write into the next runtime's directory.
+    """
+    global _safety_backup_timer
+    with _safety_backup_lock:
+        timer = _safety_backup_timer
+        if timer is None:
+            return
+        timer.cancel()
+    if wait and timer is not threading.current_thread():
+        timer.join(timeout=30)
+    with _safety_backup_lock:
+        if _safety_backup_timer is timer:
+            _safety_backup_timer = None
+
+
 def _cleanup_old_backups(retain_days=None):
     """Retain recoverable automatic snapshots while capping high-frequency copies."""
     backup_root = os.path.join(DB_DIR, 'backups')

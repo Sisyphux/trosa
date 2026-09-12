@@ -74,6 +74,7 @@ class SelaReplyApiTest(unittest.TestCase):
         self.client = self.module.app.test_client()
 
     def tearDown(self):
+        db.cancel_safety_backup()
         db.set_db_user(None)
         db.DB_DIR = self.original_db_dir
         if self.original_demo is None:

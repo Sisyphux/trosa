@@ -46,7 +46,7 @@ from db import (
     runtime_contract_status,
     init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
     init_user_tables, refresh_users_registry,
-    backup_database, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
+    backup_database, cancel_safety_backup, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
     DB_DIR, run_startup_maintenance,
 )
 from ical_gen import build_icalendar
@@ -15134,6 +15134,7 @@ if __name__ == '__main__':
                 print('数据已备份')
         except Exception as e:
             print(f'关闭时备份失败: {e}')
+        cancel_safety_backup()
         stop_scheduler()
         cleanup_pid()
         os._exit(0)
