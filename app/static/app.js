@@ -1369,6 +1369,7 @@ function isInboxCommunicationCapture(item) {
 function inboxCategory(item) {
   if (item.item_type === 'sela_follow_up') return 'sela_follow_up';
   if (item.item_type === 'sela_agent_request') return 'sela_agent_request';
+  if (item.item_type === 'sela_identity_review') return 'sela_identity_review';
   if (item.item_type === 'customer_reply') return 'new_reply';
   if (isInboxCommunicationCapture(item)) return 'capture';
   return 'other';

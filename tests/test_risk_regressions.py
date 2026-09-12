@@ -1063,6 +1063,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         """Sela identity payloads stay available without making raw JSON the primary UI."""
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
         self.assertIn("sela_identity_review: 'sela 身份待确认'", javascript)
+        self.assertIn("if (item.item_type === 'sela_identity_review') return 'sela_identity_review';", javascript)
         self.assertIn('function parseSelaIdentityReview(item)', javascript)
         self.assertIn('function renderSelaIdentityReview(review, item)', javascript)
         self.assertIn('查看原始来源数据', javascript)
