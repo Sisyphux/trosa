@@ -2,8 +2,8 @@
 
 **产出方式**：`explore`（路由）→ `system-modeler`（主场景）+ `c4model` / `graphviz`（图源基础）
 **模型状态**：当前状态（current state）
-**基线**：2026-09-12 16:14 CST 的发布后运行态，commit `7535b79`、release
-`auto-20260912081434-7535b79`，见文末指纹表。
+**基线**：2026-09-12 16:28 CST 的发布后运行态，commit `0a25827`、release
+`auto-20260912082853-0a25827`（包含功能收敛 commit `7535b79`），见文末指纹表。
 **重要**：本模型对应已发布工作树；请以文末指纹表、远端发布记录和实时健康响应为准，
 不把快照误读成移动靶。
 
@@ -130,7 +130,7 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 - **本机没有原生 Graphviz**（`brew install graphviz` 会走 rust/librsvg 源码构建并在 `ghcr.io` 上失败）。现有 SVG 由 Graphviz 16.0.0 的 WASM 构建渲染：`npm i @viz-js/viz`，再 `viz.renderString(src, {format:'svg'})`。若已装原生 `dot`，命令是 `dot -Tsvg <file>.dot -o <file>.svg`。
 - **模型会随工作树漂移**：`app.py` 建模期间就在变动。提交或发布后建议重新核对 L2 容器与路由分布，并与文末指纹表比对。
 
-## 基线指纹（发布后核验时刻 2026-09-12 16:14 CST）
+## 基线指纹（发布后核验时刻 2026-09-12 16:28 CST）
 
 | 文件 | SHA-256 前 16 位 |
 | --- | --- |

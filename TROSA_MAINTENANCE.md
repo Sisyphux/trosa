@@ -1,6 +1,6 @@
 # Trosa 长期维护计划
 
-> 更新：2026-09-12。依据当前仓库、ECS 只读运行链路、正式 PostgreSQL 运行契约和本地真实 PostgreSQL 演练整理。本文是维护入口，不是重构方案；正式发布后的远端版本与数据库账本仍以 `status-workbench.sh` 和受控备份/核验记录为准。本轮已发布并验收 commit `7535b79`（release `auto-20260912081434-7535b79`）。
+> 更新：2026-09-12。依据当前仓库、ECS 只读运行链路、正式 PostgreSQL 运行契约和本地真实 PostgreSQL 演练整理。本文是维护入口，不是重构方案；正式发布后的远端版本与数据库账本仍以 `status-workbench.sh` 和受控备份/核验记录为准。本轮功能收敛 commit `7535b79` 已发布，当前线上 release 为 `auto-20260912082853-0a25827`（文档同步）。
 
 ## 先读这一页
 
@@ -25,7 +25,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 - 正式入口：`https://app.trosa.space`。
 - 正式运行契约：`trosa-postgresql-v1`。`CRM_ENV=production` 必须同时声明 `TRADE_OS_DATA_BACKEND=postgres`、非空 `TRADE_OS_DATABASE_URL`；`serve.py`、`init_all_dbs()` 和健康门均拒绝隐式 SQLite 回退。
 - 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
-- 2026-09-12 发布后只读检查：`trade-os=active/running`、`cloudflared=active`，当前 release 为 `auto-20260912081434-7535b79`；公网 ping 返回 `status=ok`、`backend=postgresql`、`formal_runtime=true`、`runtime_contract=trosa-postgresql-v1`。受控 `verify_schema` 已确认 0001–0029 全部通过、schema contract 完整、两个 legacy reference orphan count 均为 0。
+- 2026-09-12 发布后只读检查：`trade-os=active/running`、`cloudflared=active`，当前 release 为 `auto-20260912082853-0a25827`；公网 ping 返回 `status=ok`、`backend=postgresql`、`formal_runtime=true`、`runtime_contract=trosa-postgresql-v1`。受控 `verify_schema` 已确认 0001–0029 全部通过、schema contract 完整、两个 legacy reference orphan count 均为 0。
 - 普通代码任务完成后默认由 `deploy/cloud/auto-publish.sh` 自动验证、提交、推送 `main`，再由 `publish-workbench.sh` 让 ECS 拉取同一 commit、健康检查并原子切换 release。当前 ECS release 以 `deploy/cloud/status-workbench.sh` 的实时输出为准；发布前仍应核对状态和待发布 commit 的关系。数据库敏感改动先备份；疑似破坏性迁移需明确确认。
 - 工作区可能存在用户未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
 

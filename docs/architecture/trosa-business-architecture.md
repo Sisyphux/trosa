@@ -66,7 +66,7 @@ Trosa 是**三人使用的外贸 CRM 工作台**。它的核心闭环是一句�
 - 客户阶段/等级/判词存在 `trosa.customer_states`（0020 建立）。0026 专门修了一个缺陷：让兼容层写入读 `to_jsonb(NEW)`，**防止旧的 SQLite 形状视图把规范状态字段覆盖掉**。
 - 归档恢复、导入导出、备份恢复都必须保留来源、校验与审计；删除必须有明确目标、确认与可恢复快照（`AGENTS.md`）。
 
-**审计与回滚**：`audit` schema 承担全部审计职责——`legacy_records`（导入前逐行归档）、`undo_snapshots`（撤销快照）、`agent_proposals` / `agent_actions`（AI 提案与实际动作分离）、`integration_receipts` 与 `agent_gateway_idempotency`（幂等键）、`operation_log_events`（0028 新增）。正式 PostgreSQL runtime 由 `trosa-postgresql-v1` 契约守门；当前生产库 0001–0029 已通过受控 ledger/schema 校验，后续发布仍以线上校验为准。
+**审计与回滚**：`audit` schema 承担全部审计职责——`legacy_records`（导入前逐行归档）、`undo_snapshots`（撤销快照）、`agent_proposals` / `agent_actions`（AI 提案与实际动作分离）、`integration_receipts` 与 `agent_gateway_idempotency`（幂等键）、`operation_log_events`（0028 建立规范事实，0029 保留旧 `operation_logs` 兼容桥）。正式 PostgreSQL runtime 由 `trosa-postgresql-v1` 契约守门；当前生产库 0001–0029 已通过受控 ledger/schema 校验，后续发布仍以线上校验为准。
 
 ## 6. AI 与 Sela 的业务边界
 
