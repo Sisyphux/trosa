@@ -1456,13 +1456,16 @@ function renderInbox(counts) {
       var countryItems = byCountry[country];
       var ids = countryItems.map(function(item) { return Number(item.customer_id || 0); }).filter(Boolean);
       _inboxGroupCustomerIds[cat + '::' + country] = ids;
+      var showCountryHeader = !(cat === 'sela_identity_review' && country === '其他' && countryNames.length === 1);
       html += '<div class="inbox-country-group">';
-      html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
-      if (ids.length > 0 && cat !== 'sela_follow_up') {
-        html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupTodayFollow(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">今天跟进</button>';
-        html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupExportEmails(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">导出邮箱</button>';
+      if (showCountryHeader) {
+        html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
+        if (ids.length > 0 && cat !== 'sela_follow_up') {
+          html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupTodayFollow(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">今天跟进</button>';
+          html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupExportEmails(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">导出邮箱</button>';
+        }
+        html += '</div>';
       }
-      html += '</div>';
       countryItems.forEach(function(item) { html += renderInboxItemHtml(item); });
       html += '</div>';
     });
