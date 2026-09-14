@@ -709,6 +709,20 @@ def set_customer_deleted(conn: Any, *, customer_id: int, deleted: bool, changed_
     )
     if not changed.rowcount:
         raise ValueError('customer is not visible to the current user')
+    # customer_records prefers the caller's own legacy payload (0030) so a
+    # delete/restore must also land in that per-user snapshot.  Otherwise the
+    # canonical write is masked by the stale payload and the archive action
+    # looks like it disappeared.  Other users sharing the account keep their
+    # own payload untouched.
+    conn.execute(
+        '''UPDATE trosa.account_legacy_refs
+              SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                   || jsonb_build_object('is_deleted', ?::text, 'deleted_at', ?::text)
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id=?''',
+        ('1' if deleted else '0', changed_at if deleted else '', customer_id),
+    )
 
 
 def update_customer_priority(conn: Any, *, customer_id: int, action: str, changed_at: str = '') -> None:
@@ -747,6 +761,23 @@ def update_customer_priority(conn: Any, *, customer_id: int, action: str, change
     ).fetchone()
     if not customer:
         raise ValueError('customer is not visible to the current user')
+
+    def _sync_pin_payload(target_customer_id: int, *, is_pinned: bool, pinned_order: int, pinned_at: str) -> None:
+        # customer_records (0030) reads is_pinned/pinned_order/pinned_at from
+        # the caller's own legacy payload first.  The canonical Account write
+        # below must be mirrored here, otherwise the pin action is masked by
+        # the stale import snapshot and the highlight looks like it vanished.
+        conn.execute(
+            '''UPDATE trosa.account_legacy_refs
+                  SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                       || jsonb_build_object('is_pinned', ?::text, 'pinned_order', ?::text,
+                                             'pinned_at', ?::text)
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''',
+            ('1' if is_pinned else '0', str(pinned_order), pinned_at, target_customer_id),
+        )
+
     if action == 'pin':
         next_order = conn.execute(
             '''SELECT coalesce(max(account.pinned_order),0)+1 FROM trosa.accounts account
@@ -762,15 +793,18 @@ def update_customer_priority(conn: Any, *, customer_id: int, action: str, change
                ON CONFLICT (account_id) DO UPDATE SET pinned_at=excluded.pinned_at, updated_at=now()''',
             (customer['id'], changed_at),
         )
+        _sync_pin_payload(customer_id, is_pinned=True, pinned_order=int(next_order or 0),
+                          pinned_at=changed_at or '')
     elif action == 'unpin':
         conn.execute('UPDATE trosa.accounts SET is_pinned=false, pinned_order=0, updated_at=now() WHERE id=?',
                      (customer['id'],))
         conn.execute('UPDATE trosa.customer_details SET pinned_at=NULL, updated_at=now() WHERE account_id=?',
                      (customer['id'],))
+        _sync_pin_payload(customer_id, is_pinned=False, pinned_order=0, pinned_at='')
     else:
         operator, ordering = ('<', 'DESC') if action == 'up' else ('>', 'ASC')
         neighbor = conn.execute(
-            f'''SELECT account.id, account.pinned_order FROM trosa.accounts account
+            f'''SELECT account.id, account.pinned_order, ref.legacy_customer_id FROM trosa.accounts account
                  JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
                 WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
                   AND account.is_pinned AND account.deleted_at IS NULL AND account.pinned_order {operator} ?
@@ -782,6 +816,34 @@ def update_customer_priority(conn: Any, *, customer_id: int, action: str, change
                          (neighbor['pinned_order'], customer['id']))
             conn.execute('UPDATE trosa.accounts SET pinned_order=?, updated_at=now() WHERE id=?',
                          (customer['pinned_order'], neighbor['id']))
+            # Reordering keeps the original pin time; only mirror the swapped
+            # per-user order so the highlight stays visible in the same place.
+            for target_customer_id, target_order in (
+                (customer_id, int(neighbor['pinned_order'] or 0)),
+            ):
+                conn.execute(
+                    '''UPDATE trosa.account_legacy_refs
+                          SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                               || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
+                        WHERE organization_id=trosa.compat_org_id()
+                          AND legacy_user_id=trosa.compat_current_user()
+                          AND legacy_customer_id=?''',
+                    (str(target_order), target_customer_id),
+                )
+            try:
+                neighbor_customer_id = int(neighbor['legacy_customer_id'])
+            except (KeyError, TypeError, ValueError):
+                neighbor_customer_id = 0
+            if neighbor_customer_id:
+                conn.execute(
+                    '''UPDATE trosa.account_legacy_refs
+                          SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                               || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
+                        WHERE organization_id=trosa.compat_org_id()
+                          AND legacy_user_id=trosa.compat_current_user()
+                          AND legacy_customer_id=?''',
+                    (str(int(customer['pinned_order'] or 0)), neighbor_customer_id),
+                )
 
 
 def update_contact(conn: Any, *, contact_id: int, values: dict[str, Any]) -> None:

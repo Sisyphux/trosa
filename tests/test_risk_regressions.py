@@ -386,6 +386,32 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertNotIn('customer_level', summary_text)
         self.assertNotIn('stats', summary_text)
 
+    def test_weekly_summary_merges_shared_company_fan_out_into_one_card(self):
+        spec = importlib.util.spec_from_file_location('crm_app_weekly_dedupe_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # One canonical company owns two legacy customer rows for the same
+        # user; the PostgreSQL read models fan each underlying event out to
+        # every legacy row, so the weekly query sees each event twice under a
+        # different customer_id with identical company text.
+        fan_out_rows = []
+        for legacy_customer_id in (101, 102):
+            for event_id, day in ((201, '2026-09-08'), (202, '2026-09-08')):
+                fan_out_rows.append({
+                    'kind': 'communication', 'id': event_id, 'customer_id': legacy_customer_id,
+                    'customer_name': 'KPS', 'customer_company': 'KPS Global Solutions',
+                    'customer_country': '印度', 'occurred_on': day,
+                    'content': '根据展宇价格按15%报价', 'result': '客户反馈价格太高',
+                    'next_plan': '客户询问镜面板价格', 'created_at': day,
+                })
+        with mock.patch.object(module, '_weekly_interactions', return_value=fan_out_rows):
+            payload = module._build_weekly_summary('amy', '2026-09-08', '2026-09-14')
+        self.assertEqual(len(payload['reported_customers']), 1)
+        card = payload['reported_customers'][0]
+        self.assertEqual(card['customer_company'], 'KPS Global Solutions')
+        self.assertEqual(card['activity_count'], 2)
+        self.assertEqual(card['actual_work'].count('根据展宇价格按15%报价'), 1)
+
     def test_weekly_summary_filters_reported_rows_and_returns_customer_facts_only(self):
         spec = importlib.util.spec_from_file_location('crm_app_weekly_summary_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
@@ -1638,6 +1664,61 @@ class CalendarAndAccessTest(unittest.TestCase):
             self.assertEqual(rows, [(2, 1, 1), (1, 1, 2)])
         finally:
             conn.close()
+
+    def test_postgres_pin_and_delete_mirror_user_payload(self):
+        import trosa_domain
+
+        class FakeResult:
+            def __init__(self, sql):
+                self.sql = sql
+                self.rowcount = 1
+
+            def fetchone(self):
+                if 'max(account.pinned_order)' in self.sql:
+                    return [7]
+                if 'SELECT account.id' in self.sql:
+                    return {'id': 'acc-1', 'pinned_order': 3}
+                return {'id': 'acc-1'}
+
+        class FakeConn:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append((sql, tuple(params)))
+                return FakeResult(sql)
+
+        with mock.patch.object(trosa_domain, 'postgres_mode', return_value=True):
+            conn = FakeConn()
+            trosa_domain.update_customer_priority(
+                conn, customer_id=11, action='pin', changed_at='2026-09-14 10:00:00')
+            pin_sql = ' '.join(sql for sql, _ in conn.statements)
+            self.assertIn('UPDATE trosa.accounts SET is_pinned=true', pin_sql)
+            payload_updates = [params for sql, params in conn.statements
+                               if 'UPDATE trosa.account_legacy_refs' in sql and 'is_pinned' in sql]
+            self.assertTrue(payload_updates, conn.statements)
+            self.assertIn(('1', '7', '2026-09-14 10:00:00', 11), payload_updates)
+
+            conn = FakeConn()
+            trosa_domain.update_customer_priority(
+                conn, customer_id=11, action='unpin', changed_at='2026-09-14 10:00:00')
+            payload_updates = [params for sql, params in conn.statements
+                               if 'UPDATE trosa.account_legacy_refs' in sql and 'is_pinned' in sql]
+            self.assertIn(('0', '0', '', 11), payload_updates)
+
+            conn = FakeConn()
+            trosa_domain.set_customer_deleted(
+                conn, customer_id=11, deleted=True, changed_at='2026-09-14 10:00:00')
+            delete_payload = [params for sql, params in conn.statements
+                              if 'UPDATE trosa.account_legacy_refs' in sql and 'is_deleted' in sql]
+            self.assertIn(('1', '2026-09-14 10:00:00', 11), delete_payload)
+
+            conn = FakeConn()
+            trosa_domain.set_customer_deleted(
+                conn, customer_id=11, deleted=False, changed_at='2026-09-14 10:00:00')
+            restore_payload = [params for sql, params in conn.statements
+                               if 'UPDATE trosa.account_legacy_refs' in sql and 'is_deleted' in sql]
+            self.assertIn(('0', '', 11), restore_payload)
 
 
 class InputBoundaryRegressionTest(unittest.TestCase):

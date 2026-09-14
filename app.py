@@ -7131,6 +7131,18 @@ def save_customer_priority_order():
                       AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
                 (position, customer_id),
             )
+            # customer_records reads the per-user payload first (0030); mirror
+            # the new order there so a drag-sort does not vanish behind the
+            # stale import snapshot.
+            c.execute(
+                '''UPDATE trosa.account_legacy_refs
+                      SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                           || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND legacy_customer_id=?''',
+                (str(position), customer_id),
+            )
         conn.commit()
         conn.close()
         return jsonify({'success': True, 'ids': customer_ids})
