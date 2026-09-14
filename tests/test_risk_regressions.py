@@ -1850,7 +1850,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0029_compat_operation_audit_bridge.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0030_customer_records_user_scoped_projection.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
         self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
@@ -1868,6 +1868,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('0027_modern_customer_files_and_priority.sql', tool_source)
         self.assertIn('0028_canonical_operation_audit.sql', tool_source)
         self.assertIn('0029_compat_operation_audit_bridge.sql', tool_source)
+        self.assertIn('0030_customer_records_user_scoped_projection.sql', tool_source)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')
@@ -1881,6 +1882,54 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         date_projection = (ROOT / 'migrations' / '0025_customer_record_dates.sql').read_text(encoding='utf-8')
         self.assertIn('AS last_interaction_on', date_projection)
         self.assertIn('AS next_task_on', date_projection)
+
+    def test_customer_records_projection_stays_user_scoped_on_shared_accounts(self):
+        migration = (ROOT / 'migrations' / '0030_customer_records_user_scoped_projection.sql').read_text(encoding='utf-8')
+        self.assertIn('CREATE OR REPLACE VIEW trosa.customer_records', migration)
+        self.assertIn("ref.legacy_payload ? 'name'", migration)
+        self.assertIn("ref.legacy_payload ? 'company'", migration)
+        self.assertIn("ref.legacy_payload->>'is_deleted'", migration)
+        self.assertIn("ref.legacy_payload ? 'is_pinned'", migration)
+        self.assertIn('AND ref.legacy_user_id=trosa.compat_current_user()', migration)
+
+    def test_same_company_name_does_not_leak_archived_customer_across_users(self):
+        spec = importlib.util.spec_from_file_location('crm_app_shared_company_isolation_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        db.init_all_dbs()
+        for user, deleted in (('hamid', 0), ('amy', 1)):
+            conn = sqlite3.connect(db.get_user_db_path(user))
+            try:
+                conn.execute(
+                    "INSERT INTO customers (name, company, country, is_deleted) VALUES ('Unico Co.', 'Unico Co.', '科威特', ?)",
+                    (deleted,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        hamid_client = module.app.test_client()
+        self.assertEqual(hamid_client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        hamid_active = hamid_client.get('/api/customers?view=all')
+        self.assertEqual(hamid_active.status_code, 200, hamid_active.get_json())
+        self.assertEqual(
+            [row['company'] for row in hamid_active.get_json()['customers']],
+            ['Unico Co.'],
+        )
+        amy_client = module.app.test_client()
+        self.assertEqual(amy_client.post('/api/auth/login', json={'user': 'amy'}).status_code, 200)
+        amy_active = amy_client.get('/api/customers?view=all')
+        self.assertEqual(amy_active.status_code, 200, amy_active.get_json())
+        self.assertEqual(amy_active.get_json()['customers'], [])
+        # Query-string owner overrides must not move another user's customer.
+        spoofed = amy_client.get('/api/customers?view=all&owner=hamid&user=hamid&assigned_to=hamid')
+        self.assertEqual(spoofed.status_code, 200, spoofed.get_json())
+        self.assertEqual(spoofed.get_json()['customers'], [])
+        amy_archived = amy_client.get('/api/customers?view=archived')
+        self.assertEqual(amy_archived.status_code, 200, amy_archived.get_json())
+        self.assertEqual(
+            [row['company'] for row in amy_archived.get_json()['customers']],
+            ['Unico Co.'],
+        )
 
     def test_postgres_legacy_date_projection_keeps_sqlite_date_shape(self):
         migration = (ROOT / 'migrations' / '0015_postgres_legacy_date_projections.sql').read_text(encoding='utf-8')

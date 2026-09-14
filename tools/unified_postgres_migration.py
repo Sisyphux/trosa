@@ -72,6 +72,7 @@ SCHEMA_PATHS = (
     ROOT / "migrations" / "0027_modern_customer_files_and_priority.sql",
     ROOT / "migrations" / "0028_canonical_operation_audit.sql",
     ROOT / "migrations" / "0029_compat_operation_audit_bridge.sql",
+    ROOT / "migrations" / "0030_customer_records_user_scoped_projection.sql",
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

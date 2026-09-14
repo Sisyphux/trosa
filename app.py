@@ -14438,6 +14438,17 @@ def _join_weekly_text(values):
     return '\n'.join(result)
 
 
+def _normalize_weekly_company(value):
+    """Normalize the canonical company identity used by the weekly board.
+
+    The importer keys canonical accounts by company, so one company may own
+    several legacy customer rows for the same user. Grouping the weekly board
+    by raw ``customer_id`` then renders the same company (and the same
+    underlying events) as multiple identical cards.
+    """
+    return ' '.join(str(value or '').strip().casefold().split())
+
+
 def _build_weekly_summary(user, week_start, week_end):
     """Build only the customer-level facts needed by the weekly board.
 
@@ -14457,17 +14468,31 @@ def _build_weekly_summary(user, week_start, week_end):
         grouped = {}
         for row in rows:
             item = dict(row)
-            customer_key = item.get('customer_id') or f"{item['kind']}:{item['id']}"
+            # One company may own several legacy customer rows that point at
+            # the same canonical account. The PostgreSQL read models fan such
+            # an event out to every legacy row, so group by the normalized
+            # company (the canonical identity) and de-duplicate the underlying
+            # event instead of rendering one identical card per legacy id.
+            company_key = _normalize_weekly_company(item.get('customer_company'))
+            if company_key:
+                customer_key = 'company:' + company_key
+            else:
+                customer_key = item.get('customer_id') or f"{item['kind']}:{item['id']}"
             group = grouped.setdefault(customer_key, {
                 'customer_id': item.get('customer_id'),
                 'customer_name': item.get('customer_name', ''),
                 'customer_company': item.get('customer_company', ''),
                 'customer_country': item.get('customer_country', ''),
                 'date': item.get('occurred_on', ''),
+                '_seen_events': set(),
                 '_actual_work': [],
                 '_result': [],
                 '_next_steps': [],
             })
+            event_key = (item.get('kind'), item.get('id'))
+            if event_key in group['_seen_events']:
+                continue
+            group['_seen_events'].add(event_key)
             group['_actual_work'].append(item.get('content', ''))
             group['_result'].append(item.get('result', ''))
             group['_next_steps'].append(item.get('next_plan', ''))
