@@ -77,10 +77,12 @@ fi
 healthy=0
 for attempt in $(seq 1 15); do
   ping_body=$(curl --fail --silent --show-error --max-time 2 http://127.0.0.1:8080/api/network/ping || true)
+  app_body=$(curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8080/ || true)
   if printf '%s' "$ping_body" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
     && printf '%s' "$ping_body" | grep -q '"backend"[[:space:]]*:[[:space:]]*"postgresql"' \
     && printf '%s' "$ping_body" | grep -q '"runtime_contract"[[:space:]]*:[[:space:]]*"trosa-postgresql-v1"' \
-    && printf '%s' "$ping_body" | grep -q '"formal_runtime"[[:space:]]*:[[:space:]]*true'; then
+    && printf '%s' "$ping_body" | grep -q '"formal_runtime"[[:space:]]*:[[:space:]]*true' \
+    && printf '%s' "$app_body" | grep -qi '<!DOCTYPE html>'; then
     healthy=1
     break
   fi
@@ -97,5 +99,16 @@ if [ "$healthy" != 1 ]; then
 fi
 
 rm -f "$ARCHIVE_PATH"
-find "$REMOTE_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -print | sort -r | tail -n +6 | xargs -r rm -rf
+# Release IDs come from more than one publisher and are not chronologically
+# sortable. Keep the five newest directories by mtime and never remove the
+# directory selected by the atomic current symlink.
+CURRENT=$(readlink -f "$REMOTE_ROOT/current" 2>/dev/null || true)
+find "$REMOTE_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+  | sort -nr \
+  | awk 'NR > 5 { sub(/^[^ ]+ /, ""); print }' \
+  | while IFS= read -r stale_release; do
+      if [ -n "$stale_release" ] && [ "$stale_release" != "$CURRENT" ]; then
+        rm -rf -- "$stale_release"
+      fi
+    done
 printf 'published %s\n' "$RELEASE_ID"

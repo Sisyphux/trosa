@@ -118,6 +118,17 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertIn('TRADE_OS_DEV_SQLITE=1', (ROOT / 'desktop.py').read_text(encoding='utf-8'))
         self.assertIn('formal_runtime', (ROOT / 'Mac启动器.command').read_text(encoding='utf-8'))
 
+    def test_cloud_release_checks_real_app_and_never_deletes_current(self):
+        publisher = (ROOT / 'deploy/cloud/publish-remote.sh').read_text(encoding='utf-8')
+        status = (ROOT / 'deploy/cloud/status-remote.sh').read_text(encoding='utf-8')
+        self.assertIn('http://127.0.0.1:8080/', publisher)
+        self.assertIn('<!DOCTYPE html>', publisher)
+        self.assertIn('http://127.0.0.1:8080/', status)
+        self.assertIn('<!DOCTYPE html>', status)
+        self.assertIn('CURRENT=$(readlink -f "$REMOTE_ROOT/current"', publisher)
+        self.assertIn('[ "$stale_release" != "$CURRENT" ]', publisher)
+        self.assertNotIn('| sort -r | tail -n +6 | xargs -r rm -rf', publisher)
+
 
 if __name__ == '__main__':
     unittest.main()
