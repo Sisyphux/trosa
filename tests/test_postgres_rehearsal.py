@@ -102,6 +102,28 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             cls._loaded_app = module
         return module
 
+    def test_batch_customer_reads_preserve_results_with_constant_query_count(self):
+        from trosa_domain import active_customers, customer_facts, customer_contacts, customer_tasks, customer_interactions
+
+        ids = [row['id'] for row in active_customers(self.connection)]
+        self.assertTrue(ids)
+        ids = ids[:5] + [987654321]
+        expected = {}
+        for customer_id in ids:
+            expected.update(customer_facts(self.connection, [customer_id]))
+        with mock.patch.object(self.connection, 'execute', wraps=self.connection.execute) as execute:
+            self.assertEqual(customer_facts(self.connection, ids), expected)
+            self.assertEqual(execute.call_count, 2)
+        for reader in (customer_contacts, customer_tasks, customer_interactions):
+            batch = reader(self.connection, None, customer_ids=ids)
+            for customer_id in ids:
+                self.assertEqual([row for row in batch if row['customer_id'] == customer_id],
+                                 reader(self.connection, customer_id))
+        module = self._app_module()
+        with mock.patch.object(self.connection, 'execute', wraps=self.connection.execute) as execute:
+            module._customer_search_match_contexts(self.connection, ids, ['rehearsal'])
+            self.assertEqual(execute.call_count, 5)
+
     def test_schema_contract_and_migration_ledger(self):
         import db
         from tools.unified_postgres_migration import SCHEMA_PATHS

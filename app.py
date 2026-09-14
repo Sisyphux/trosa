@@ -6202,8 +6202,21 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                     'status': item.get('status') or '',
                     'action': 'record' if item.get('status') == 'open' else 'view',
                 })
+        interactions_by_customer = {customer_id: [] for customer_id in customer_ids}
+        outreach_by_customer = {customer_id: [] for customer_id in customer_ids}
+        contacts_by_customer = {customer_id: [] for customer_id in customer_ids}
+        tasks_by_customer = {customer_id: [] for customer_id in customer_ids}
+        for item in _customer_interactions(cursor, None, customer_ids=customer_ids):
+            interactions_by_customer[item['customer_id']].append(item)
+        for item in _modern_outreach_rows(cursor):
+            if item['customer_id'] in outreach_by_customer:
+                outreach_by_customer[item['customer_id']].append(item)
+        for item in _customer_contacts(cursor, None, customer_ids=customer_ids):
+            contacts_by_customer[item['customer_id']].append(item)
+        for item in _customer_tasks(cursor, None, include_done=True, customer_ids=customer_ids):
+            tasks_by_customer[item['customer_id']].append(item)
         for customer_id in customer_ids:
-            for item in _customer_interactions(cursor, customer_id):
+            for item in interactions_by_customer[customer_id]:
                 if matches((item.get('content'), item.get('result'), item.get('next_plan'), item.get('activity_type'))):
                     add_context(customer_id, {
                         'type': 'communication', 'label': '沟通记录', 'id': item.get('id'),
@@ -6215,7 +6228,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'activity_type': item.get('activity_type') or 'follow_up',
                         'contact_id': item.get('contact_id'), 'contact_name': '', 'action': 'view',
                     })
-            for item in _modern_outreach_rows(cursor, customer_id=customer_id):
+            for item in outreach_by_customer[customer_id]:
                 if matches((item.get('subject'), item.get('content'), item.get('reply_content'))):
                     add_context(customer_id, {
                         'type': 'communication', 'label': '开发邮件', 'id': item.get('id'),
@@ -6224,7 +6237,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'source': 'outreach_email', 'source_label': '开发邮件', 'direction': 'outbound',
                         'activity_type': 'email', 'contact_id': item.get('contact_id'), 'contact_name': '', 'action': 'view',
                     })
-            for item in _customer_contacts(cursor, customer_id):
+            for item in contacts_by_customer[customer_id]:
                 if matches((item.get('name'), item.get('email'), item.get('phone'), item.get('whatsapp'), item.get('linkedin'))):
                     add_context(customer_id, {
                         'type': 'contact', 'label': '联系人', 'id': item.get('id'),
@@ -6232,7 +6245,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'content': (item.get('name') or item.get('email') or item.get('phone') or '')[:240],
                         'action': 'view',
                     })
-            for item in _customer_tasks(cursor, customer_id, include_done=True):
+            for item in tasks_by_customer[customer_id]:
                 if matches((item.get('title'), item.get('content'), item.get('reason'))):
                     add_context(customer_id, {
                         'type': 'task', 'label': '待办', 'id': item.get('id'),
@@ -6594,9 +6607,9 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
 
     customer_ids = [item['id'] for item in customers]
     facts = _customer_business_facts(conn, customer_ids)
-    contacts_by_customer = {
-        customer_id: _customer_contacts(conn, customer_id) for customer_id in customer_ids
-    }
+    contacts_by_customer = {customer_id: [] for customer_id in customer_ids}
+    for item in _customer_contacts(conn, None, customer_ids=customer_ids):
+        contacts_by_customer[item['customer_id']].append(item)
     duplicate_counts = {}
     for item in customers:
         company_key = _search_normalize(item.get('company'))

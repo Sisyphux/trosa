@@ -26,7 +26,7 @@ def _ids(customer_ids: Iterable[int]) -> list[int]:
     return list(dict.fromkeys(int(value) for value in customer_ids if value is not None))
 
 
-def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False) -> list[dict]:
+def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False, customer_ids=None) -> list[dict]:
     """Return human tasks in the one ordering used by Today and Customer.
 
     Retired outreach scheduler rows are delivery history, not tasks.  They
@@ -34,16 +34,20 @@ def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False) -
     """
     if postgres_mode():
         done_clause = '' if include_done else "AND status='open'"
+        ids = _ids(customer_ids) if customer_ids is not None else [customer_id]
+        if not ids:
+            return []
+        marks = ','.join('?' for _ in ids)
         rows = conn.execute(
             f'''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
                        task_type AS reminder_type, source_activity_legacy_id AS source_activity_id,
                        CASE WHEN status='done' THEN 1 ELSE 0 END AS is_done,
                        completed_at, created_at
                   FROM trosa.customer_tasks
-                 WHERE customer_id=? {done_clause}
+                 WHERE customer_id IN ({marks}) {done_clause}
                  ORDER BY CASE WHEN status='open' THEN 0 ELSE 1 END,
                           due_date ASC, manual_order ASC, id ASC''',
-            (customer_id,),
+            ids,
         ).fetchall()
         return [dict(row) for row in rows]
     done_clause = '' if include_done else 'AND r.is_done=0'
@@ -61,14 +65,18 @@ def customer_tasks(conn: Any, customer_id: int, *, include_done: bool = False) -
     return [dict(row) for row in rows]
 
 
-def customer_contacts(conn: Any, customer_id: int) -> list[dict]:
+def customer_contacts(conn: Any, customer_id: int, *, customer_ids=None) -> list[dict]:
     """Return Contacts without making product callers depend on compat tables."""
     relation = 'trosa.customer_contacts' if postgres_mode() else 'contacts'
+    ids = _ids(customer_ids) if customer_ids is not None else [customer_id]
+    if not ids:
+        return []
+    marks = ','.join('?' for _ in ids)
     rows = conn.execute(
         f'''SELECT id, customer_id, name, title, email, phone, whatsapp, linkedin,
                    preferred_channel, contact_type, is_primary, notes, created_at
-              FROM {relation} WHERE customer_id=?
-             ORDER BY is_primary DESC, created_at DESC, id DESC''', (customer_id,),
+              FROM {relation} WHERE customer_id IN ({marks})
+             ORDER BY is_primary DESC, created_at DESC, id DESC''', ids,
     ).fetchall()
     return [dict(row) for row in rows]
 
@@ -1100,7 +1108,7 @@ def update_task(
 
 
 def customer_interactions(
-    conn: Any, customer_id: int, *, limit: int | None = None, offset: int = 0,
+    conn: Any, customer_id: int, *, limit: int | None = None, offset: int = 0, customer_ids=None,
 ) -> list[dict]:
     """Return a single product-level timeline across communication and email.
 
@@ -1110,13 +1118,17 @@ def customer_interactions(
     establish a customer relationship; that rule lives in ``customer_facts``.
     """
     if postgres_mode():
-        query = '''SELECT id, customer_id, kind, occurred_on, activity_type,
+        ids = _ids(customer_ids) if customer_ids is not None else [customer_id]
+        if not ids:
+            return []
+        marks = ','.join('?' for _ in ids)
+        query = f'''SELECT id, customer_id, kind, occurred_on, activity_type,
                           direction, content, result, next_plan, source,
                           is_reported, delivery_status, reply_date, created_at
                      FROM trosa.customer_interactions
-                    WHERE customer_id=?
+                    WHERE customer_id IN ({marks})
                     ORDER BY occurred_on DESC, created_at DESC, id DESC'''
-        params: list[Any] = [customer_id]
+        params: list[Any] = ids
         if limit is not None:
             query += ' LIMIT ? OFFSET ?'
             params.extend([max(1, int(limit)), max(0, int(offset))])
@@ -1197,13 +1209,15 @@ def customer_facts(conn: Any, customer_ids: Iterable[int]) -> dict[int, dict]:
         return facts
 
     if postgres_mode():
-        # These canonical views are intentionally the only PostgreSQL read
-        # dependency for current relationship and work meaning.  The bounded
-        # per-customer loop keeps the projection readable and is used only for
-        # the current page of customers (at most 100 records).
+        interactions_by_customer = {customer_id: [] for customer_id in ids}
+        tasks_by_customer = {customer_id: [] for customer_id in ids}
+        for item in customer_interactions(conn, None, customer_ids=ids):
+            interactions_by_customer[item['customer_id']].append(item)
+        for item in customer_tasks(conn, None, customer_ids=ids):
+            tasks_by_customer[item['customer_id']].append(item)
         for customer_id in ids:
             fact = facts[customer_id]
-            for item in customer_interactions(conn, customer_id):
+            for item in interactions_by_customer[customer_id]:
                 if item['kind'] == 'communication':
                     if not fact['latest_communication_date']:
                         fact['latest_communication_date'] = item.get('occurred_on') or ''
@@ -1218,7 +1232,7 @@ def customer_facts(conn: Any, customer_ids: Iterable[int]) -> dict[int, dict]:
                 if item['kind'] == 'email' and not fact['latest_email_date']:
                     fact['latest_email_date'] = item.get('occurred_on') or ''
                     fact['latest_email_status'] = item.get('delivery_status') or ''
-            tasks = customer_tasks(conn, customer_id)
+            tasks = tasks_by_customer[customer_id]
             if tasks:
                 fact['next_task'] = tasks[0]
                 fact['next_task_date'] = tasks[0].get('remind_date') or ''
