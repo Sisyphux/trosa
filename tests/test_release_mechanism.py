@@ -163,6 +163,7 @@ class PlanReleaseDbTests(unittest.TestCase):
         self.assertEqual(result["pending_migrations"], [
             "0031_customer_pin_payload_backfill.sql",
             "0032_one_follow_up_per_customer_day.sql",
+            "0033_today_task_alias_fanout.sql",
         ])
         self.assertEqual(result["category"], "compatible")
         self.assertEqual(result["destructive_files"], [])

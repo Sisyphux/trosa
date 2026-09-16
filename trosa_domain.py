@@ -87,7 +87,9 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
     Same-customer same-date open follow-ups are a write-path bug (see
     ``merge_open_task``), never two real commitments.  The read collapses them
     to the earliest row so Today shows one entry per customer per date even
-    when legacy data still holds duplicates.
+    when legacy data still holds duplicates.  The canonical task id is the
+    first key because one account can still have multiple legacy customer
+    aliases; a view fan-out must never turn one task into multiple Today cards.
     """
     if postgres_mode():
         query = '''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
@@ -105,13 +107,19 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
                     ORDER BY r.remind_date, r.manual_order, r.id'''
     params: list[Any] = [due_on_or_before]
     rows = [dict(row) for row in conn.execute(query, params).fetchall()]
-    seen: set[tuple[Any, str]] = set()
+    seen_task_ids: set[Any] = set()
+    seen_customer_days: set[tuple[Any, str]] = set()
     collapsed: list[dict] = []
     for row in rows:
-        key = (row.get('customer_id'), str(row.get('remind_date') or '')[:10])
-        if key in seen:
+        task_id = row.get('id')
+        customer_day = (row.get('customer_id'), str(row.get('remind_date') or '')[:10])
+        if customer_day in seen_customer_days:
             continue
-        seen.add(key)
+        if task_id not in (None, ''):
+            if task_id in seen_task_ids:
+                continue
+            seen_task_ids.add(task_id)
+        seen_customer_days.add(customer_day)
         collapsed.append(row)
     if limit is not None:
         collapsed = collapsed[:max(1, int(limit))]

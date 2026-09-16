@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -16,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import db
+import trosa_domain
 
 
 class TodayDuplicateRegressionTest(unittest.TestCase):
@@ -148,6 +150,31 @@ class TodayDuplicateRegressionTest(unittest.TestCase):
                 )
         finally:
             connection.close()
+
+    def test_canonical_task_id_collapses_legacy_alias_fanout(self):
+        class FakeResult:
+            def fetchall(self):
+                return [
+                    {
+                        "id": 2121, "customer_id": 18,
+                        "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
+                    },
+                    {
+                        "id": 2121, "customer_id": 87,
+                        "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
+                    },
+                ]
+
+        class FakeConnection:
+            def execute(self, query, params):
+                return FakeResult()
+
+        with mock.patch.object(trosa_domain, "postgres_mode", return_value=True):
+            rows = trosa_domain.today_tasks(
+                FakeConnection(), due_on_or_before="2026-09-16"
+            )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], 2121)
 
 
 if __name__ == "__main__":

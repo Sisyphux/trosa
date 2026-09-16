@@ -1223,6 +1223,75 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(count, 1)
 
+    def test_today_projection_dedupes_same_task_across_customer_aliases(self):
+        """One canonical task must not fan out into two Today rows."""
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        task_id = ids['task_id']
+        alias_customer_id = 990001
+        alias_task_id = 990001
+        account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()['account_id']
+        try:
+            self.connection.execute(
+                '''INSERT INTO trosa.account_legacy_refs
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id,
+                    source_db, legacy_payload)
+                   VALUES (trosa.compat_org_id(), 'hamid', ?, ?,
+                           'today-alias-probe', ?::jsonb)''',
+                (alias_customer_id, account,
+                 '{"name":"Historical alias","company":"Historical alias"}'),
+            )
+            self.connection.execute(
+                '''INSERT INTO trosa.legacy_row_refs
+                   (organization_id, legacy_user_id, table_name, legacy_id, target_id)
+                   SELECT trosa.compat_org_id(), 'hamid', 'reminders', ?, target_id
+                     FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND table_name='reminders'
+                      AND legacy_id=?''',
+                (alias_task_id, task_id),
+            )
+            self.connection.commit()
+
+            rows = self.connection.execute(
+                '''SELECT id, customer_id FROM trosa.today_tasks
+                    WHERE id IN (?, ?)''',
+                (task_id, alias_task_id),
+            ).fetchall()
+            self.assertEqual(len(rows), 1, rows)
+            self.assertEqual(rows[0]['id'], task_id)
+            self.assertEqual(rows[0]['customer_id'], customer_id)
+            projected = [
+                row for row in trosa_domain.today_tasks(
+                    self.connection, due_on_or_before='2031-12-31'
+                )
+                if row['id'] in (task_id, alias_task_id)
+            ]
+            self.assertEqual(len(projected), 1, projected)
+        finally:
+            self.connection.execute(
+                '''DELETE FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND table_name='reminders'
+                      AND legacy_id=?''',
+                (alias_task_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+                (alias_customer_id,),
+            )
+            self.connection.commit()
+
     def test_compat_view_same_day_insert_merges_into_one_row(self):
         """Direct compat-view writes obey the same one-task invariant."""
         from tools.postgres_rehearsal import load_fixture

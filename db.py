@@ -140,6 +140,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0030_customer_records_user_scoped_projection.sql'),
         os.path.join(root, 'migrations', '0031_customer_pin_payload_backfill.sql'),
         os.path.join(root, 'migrations', '0032_one_follow_up_per_customer_day.sql'),
+        os.path.join(root, 'migrations', '0033_today_task_alias_fanout.sql'),
     )
 
 
