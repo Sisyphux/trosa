@@ -361,6 +361,90 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             False,
         )
 
+    def test_shared_account_customer_facts_do_not_cross_users(self):
+        """A shared imported account must retain separate Customer records."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        hamid_customer_id = ids['customer_id']
+        hamid_contact_id = ids['contact_id']
+        account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (hamid_customer_id,),
+        ).fetchone()['account_id']
+        contact = self.connection.execute(
+            '''SELECT * FROM trosa.contact_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_contact_id=?''', (hamid_contact_id,),
+        ).fetchone()
+        amy_customer_id, amy_contact_id = 900001, 900001
+        self.connection.execute(
+            '''INSERT INTO trosa.account_legacy_refs
+               (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+               VALUES (trosa.compat_org_id(), 'amy', ?, ?, 'shared-fixture-amy', ?::jsonb)
+               ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id) DO UPDATE
+               SET account_id=excluded.account_id, legacy_payload=excluded.legacy_payload''',
+            (amy_customer_id, account, '''{"name":"Amy original","company":"Amy Co","country":"CA","level":"C","website":"https://amy.example","profile":"amy","field":"amy field","industry":"amy industry","company_size":"1-10","annual_revenue":"10","tags":"amy","status":"Amy status","notes":"Amy note","system_notes":"Amy system","import_source":"amy","last_contact":"2026-01-01","next_follow_up":"2026-01-02","manual_next_follow":true,"is_pinned":"0","pinned_order":"0","pinned_at":"","is_deleted":"0","deleted_at":""}'''),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.contact_legacy_refs
+               (organization_id, legacy_user_id, legacy_contact_id, legacy_customer_id, account_id,
+                person_id, contact_method_id, name, title, phone, whatsapp, linkedin, preferred_channel,
+                contact_type, is_primary, notes)
+               VALUES (trosa.compat_org_id(), 'amy', ?, ?, ?, ?, ?, 'Amy buyer', 'Buyer', '', '', '',
+                       'email', 'person', true, 'Amy contact note')
+               ON CONFLICT (organization_id, legacy_user_id, legacy_contact_id) DO UPDATE
+               SET legacy_customer_id=excluded.legacy_customer_id, account_id=excluded.account_id,
+                   person_id=excluded.person_id, contact_method_id=excluded.contact_method_id,
+                   name=excluded.name, title=excluded.title, notes=excluded.notes''',
+            (amy_contact_id, amy_customer_id, account, contact['person_id'], contact['contact_method_id']),
+        )
+        self.connection.commit()
+
+        trosa_domain.update_customer(self.connection, customer_id=hamid_customer_id, values={
+            'name': 'Hamid changed', 'company': 'Hamid Co', 'country': 'US', 'level': 'A',
+            'website': 'https://hamid.example', 'profile': 'hamid', 'field': 'hamid field',
+            'industry': 'hamid industry', 'company_size': '51-200', 'annual_revenue': '20',
+            'tags': 'hamid', 'status': 'Hamid status', 'notes': 'Hamid note',
+            'system_notes': 'Hamid system', 'import_source': 'hamid', 'last_contact': '2026-02-01',
+            'next_follow_up': '2026-02-02', 'manual_next_follow': True,
+            'business_stage': '成交', 'business_role': '终端', 'customer_judgment': 'hamid judgment',
+        })
+        trosa_domain.update_customer_priority(self.connection, customer_id=hamid_customer_id,
+                                              action='pin', changed_at='2026-02-03')
+        trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id,
+                                          deleted=True, changed_at='2026-02-04')
+        trosa_domain.update_contact(self.connection, contact_id=hamid_contact_id, values={
+            'name': 'Hamid buyer', 'title': 'Director', 'email': 'hamid-buyer@example.test',
+            'phone': '+1 555 0101', 'whatsapp': '', 'linkedin': '', 'preferred_channel': 'email',
+            'contact_type': 'person', 'is_primary': True, 'notes': 'Hamid contact note',
+        })
+        self.connection.commit()
+
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_record = trosa_domain.customer_record(amy_connection, amy_customer_id)
+            self.assertIsNotNone(amy_record)
+            self.assertEqual(amy_record['name'], 'Amy original')
+            self.assertEqual(amy_record['company'], 'Amy Co')
+            self.assertFalse(amy_record['is_pinned'])
+            self.assertEqual(amy_record['last_interaction_on'], '2026-01-01')
+            amy_contacts = trosa_domain.customer_contacts(amy_connection, amy_customer_id)
+            self.assertEqual(amy_contacts[0]['name'], 'Amy buyer')
+            self.assertEqual(amy_contacts[0]['email'], 'buyer@rehearsal.example')
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+        self.assertIsNone(trosa_domain.customer_record(self.connection, hamid_customer_id))
+        trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id, deleted=False)
+        self.assertEqual(trosa_domain.customer_record(self.connection, hamid_customer_id)['name'], 'Hamid changed')
+        self.connection.commit()
+
     def test_flask_acceptance_routes_use_canonical_postgres(self):
         """Exercise the normal HTTP workflow against real PostgreSQL."""
         module = self._app_module()
@@ -530,26 +614,24 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(second_validation.get_json()['results'][0]['deliverability_status'], 'likely_deliverable')
 
         row = self.connection.execute(
-            '''SELECT a.display_name, c.canonical_name, d.notes, a.priority_level,
+            '''SELECT customer.name, customer.company, customer.notes, customer.level,
                       count(DISTINCT event.id) AS interactions,
                       count(DISTINCT task.id) FILTER (WHERE task.status='open') AS open_tasks,
                       count(DISTINCT file_object.id) AS files
                  FROM trosa.account_legacy_refs ref
-                 JOIN trosa.accounts a ON a.id=ref.account_id
-                 JOIN core.companies c ON c.id=a.company_id
-                 JOIN trosa.customer_details d ON d.account_id=a.id
-                 LEFT JOIN trosa.timeline_events event ON event.account_id=a.id
-                 LEFT JOIN trosa.tasks task ON task.account_id=a.id
-                 LEFT JOIN core.entity_files entity_file ON entity_file.account_id=a.id
+                 JOIN trosa.customer_records customer ON customer.id=ref.legacy_customer_id
+                 LEFT JOIN trosa.timeline_events event ON event.account_id=ref.account_id
+                 LEFT JOIN trosa.tasks task ON task.account_id=ref.account_id
+                 LEFT JOIN core.entity_files entity_file ON entity_file.account_id=ref.account_id
                  LEFT JOIN core.file_objects file_object ON file_object.id=entity_file.file_object_id
                 WHERE ref.organization_id=trosa.compat_org_id()
                   AND ref.legacy_user_id=? AND ref.legacy_customer_id=?
-                GROUP BY a.display_name, c.canonical_name, d.notes, a.priority_level''',
+                GROUP BY customer.name, customer.company, customer.notes, customer.level''',
             ('hamid', customer_id),
         ).fetchone()
-        self.assertEqual(row['display_name'], 'API Acceptance Customer Updated')
-        self.assertEqual(row['canonical_name'], 'API Acceptance Co')
-        self.assertEqual(row['priority_level'], 'B+')
+        self.assertEqual(row['name'], 'API Acceptance Customer Updated')
+        self.assertEqual(row['company'], 'API Acceptance Co')
+        self.assertEqual(row['level'], 'B+')
         self.assertGreaterEqual(row['interactions'], 3)
         self.assertGreaterEqual(row['open_tasks'], 1)
         self.assertEqual(row['files'], 1)
@@ -944,6 +1026,9 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
 
     def test_z_agent_gateway_undo_and_operation_audit_boundary(self):
         """Agent/audit writes stay canonical while old integer views remain projections."""
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()['customer_id']
         module = self._app_module()
         session_client = module.app.test_client()
         self.assertEqual(session_client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
@@ -959,7 +1044,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         gateway = module.app.test_client()
 
         proposal_body = {
-            'action': 'record_communication', 'customer_id': 1,
+            'action': 'record_communication', 'customer_id': customer_id,
             'payload': {
                 'content': 'Agent audit rehearsal fact', 'direction': 'inbound',
                 'activity_type': 'email', 'follow_date': '2026-09-23',

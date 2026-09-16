@@ -1665,7 +1665,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_postgres_pin_and_delete_mirror_user_payload(self):
+    def test_postgres_pin_and_delete_stay_in_user_payload(self):
         import trosa_domain
 
         class FakeResult:
@@ -1674,9 +1674,9 @@ class CalendarAndAccessTest(unittest.TestCase):
                 self.rowcount = 1
 
             def fetchone(self):
-                if 'max(account.pinned_order)' in self.sql:
+                if 'max(pinned_order)' in self.sql:
                     return [7]
-                if 'SELECT account.id' in self.sql:
+                if 'SELECT id, pinned_order FROM trosa.customer_records' in self.sql:
                     return {'id': 'acc-1', 'pinned_order': 3}
                 return {'id': 'acc-1'}
 
@@ -1693,7 +1693,7 @@ class CalendarAndAccessTest(unittest.TestCase):
             trosa_domain.update_customer_priority(
                 conn, customer_id=11, action='pin', changed_at='2026-09-14 10:00:00')
             pin_sql = ' '.join(sql for sql, _ in conn.statements)
-            self.assertIn('UPDATE trosa.accounts SET is_pinned=true', pin_sql)
+            self.assertNotIn('UPDATE trosa.accounts SET is_pinned=true', pin_sql)
             payload_updates = [params for sql, params in conn.statements
                                if 'UPDATE trosa.account_legacy_refs' in sql and 'is_pinned' in sql]
             self.assertTrue(payload_updates, conn.statements)
@@ -1931,7 +1931,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0030_customer_records_user_scoped_projection.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0031_customer_pin_payload_backfill.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
         self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
@@ -1950,6 +1950,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('0028_canonical_operation_audit.sql', tool_source)
         self.assertIn('0029_compat_operation_audit_bridge.sql', tool_source)
         self.assertIn('0030_customer_records_user_scoped_projection.sql', tool_source)
+        self.assertIn('0031_customer_pin_payload_backfill.sql', tool_source)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')
@@ -1963,6 +1964,18 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         date_projection = (ROOT / 'migrations' / '0025_customer_record_dates.sql').read_text(encoding='utf-8')
         self.assertIn('AS last_interaction_on', date_projection)
         self.assertIn('AS next_task_on', date_projection)
+
+    def test_customer_pin_backfill_repairs_stale_payloads_without_touching_archive(self):
+        migration = (ROOT / 'migrations' / '0031_customer_pin_payload_backfill.sql').read_text(encoding='utf-8')
+        self.assertIn('trosa.account_legacy_refs', migration)
+        self.assertIn("'is_pinned', '1'", migration)
+        self.assertIn("'pinned_order', a.pinned_order::text", migration)
+        self.assertIn('a.is_pinned', migration)
+        self.assertIn('NOT EXISTS', migration)
+        # Archive isolation from 0030 must stay untouched: the backfill may
+        # only repair the three pin snapshot keys, never delete/archive state.
+        self.assertNotIn("'is_deleted'", migration)
+        self.assertNotIn("'deleted_at'", migration)
 
     def test_customer_records_projection_stays_user_scoped_on_shared_accounts(self):
         migration = (ROOT / 'migrations' / '0030_customer_records_user_scoped_projection.sql').read_text(encoding='utf-8')

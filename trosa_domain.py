@@ -691,30 +691,16 @@ def set_interaction_flag(conn: Any, *, interaction_id: int, field: str, value: b
 
 
 def set_customer_deleted(conn: Any, *, customer_id: int, deleted: bool, changed_at: str = '') -> None:
-    """Soft-delete or restore the canonical Customer Account."""
+    """Soft-delete or restore the current user's Customer projection."""
     if not postgres_mode():
         conn.execute(
             'UPDATE customers SET is_deleted=?, deleted_at=?, updated_at=? WHERE id=?',
             (1 if deleted else 0, changed_at if deleted else '', changed_at, customer_id),
         )
         return
+    # An account can have more than one legacy reference; archive belongs to
+    # the caller's Customer record, never to the shared account.
     changed = conn.execute(
-        '''UPDATE trosa.accounts account
-              SET deleted_at=CASE WHEN ? THEN coalesce(trosa.compat_time(?), now()) ELSE NULL END,
-                  updated_at=now()
-             FROM trosa.account_legacy_refs ref
-            WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
-              AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
-        (deleted, changed_at, customer_id),
-    )
-    if not changed.rowcount:
-        raise ValueError('customer is not visible to the current user')
-    # customer_records prefers the caller's own legacy payload (0030) so a
-    # delete/restore must also land in that per-user snapshot.  Otherwise the
-    # canonical write is masked by the stale payload and the archive action
-    # looks like it disappeared.  Other users sharing the account keep their
-    # own payload untouched.
-    conn.execute(
         '''UPDATE trosa.account_legacy_refs
               SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
                    || jsonb_build_object('is_deleted', ?::text, 'deleted_at', ?::text)
@@ -723,10 +709,12 @@ def set_customer_deleted(conn: Any, *, customer_id: int, deleted: bool, changed_
               AND legacy_customer_id=?''',
         ('1' if deleted else '0', changed_at if deleted else '', customer_id),
     )
+    if not changed.rowcount:
+        raise ValueError('customer is not visible to the current user')
 
 
 def update_customer_priority(conn: Any, *, customer_id: int, action: str, changed_at: str = '') -> None:
-    """Apply a Customer pin action to canonical Account and detail facts."""
+    """Apply a pin action to the current user's Customer projection."""
     if action not in {'pin', 'unpin', 'up', 'down'}:
         raise ValueError('unsupported priority action')
     if not postgres_mode():
@@ -754,19 +742,13 @@ def update_customer_priority(conn: Any, *, customer_id: int, action: str, change
                 conn.execute('UPDATE customers SET pinned_order=? WHERE id=?', (customer['pinned_order'], neighbor['id']))
         return
     customer = conn.execute(
-        '''SELECT account.id, account.pinned_order FROM trosa.accounts account
-             JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
-            WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
-              AND ref.legacy_customer_id=? AND account.deleted_at IS NULL''', (customer_id,),
+        '''SELECT id, pinned_order FROM trosa.customer_records
+            WHERE id=? AND deleted_at IS NULL''', (customer_id,),
     ).fetchone()
     if not customer:
         raise ValueError('customer is not visible to the current user')
 
     def _sync_pin_payload(target_customer_id: int, *, is_pinned: bool, pinned_order: int, pinned_at: str) -> None:
-        # customer_records (0030) reads is_pinned/pinned_order/pinned_at from
-        # the caller's own legacy payload first.  The canonical Account write
-        # below must be mirrored here, otherwise the pin action is masked by
-        # the stale import snapshot and the highlight looks like it vanished.
         conn.execute(
             '''UPDATE trosa.account_legacy_refs
                   SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
@@ -780,70 +762,26 @@ def update_customer_priority(conn: Any, *, customer_id: int, action: str, change
 
     if action == 'pin':
         next_order = conn.execute(
-            '''SELECT coalesce(max(account.pinned_order),0)+1 FROM trosa.accounts account
-                 JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
-                WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND account.is_pinned AND account.deleted_at IS NULL''',
+            '''SELECT coalesce(max(pinned_order),0)+1 FROM trosa.customer_records
+                WHERE is_pinned AND deleted_at IS NULL''',
         ).fetchone()[0]
-        conn.execute('UPDATE trosa.accounts SET is_pinned=true, pinned_order=?, updated_at=now() WHERE id=?',
-                     (next_order, customer['id']))
-        conn.execute(
-            '''INSERT INTO trosa.customer_details (account_id, pinned_at, updated_at)
-               VALUES (?, trosa.compat_time(?), now())
-               ON CONFLICT (account_id) DO UPDATE SET pinned_at=excluded.pinned_at, updated_at=now()''',
-            (customer['id'], changed_at),
-        )
         _sync_pin_payload(customer_id, is_pinned=True, pinned_order=int(next_order or 0),
                           pinned_at=changed_at or '')
     elif action == 'unpin':
-        conn.execute('UPDATE trosa.accounts SET is_pinned=false, pinned_order=0, updated_at=now() WHERE id=?',
-                     (customer['id'],))
-        conn.execute('UPDATE trosa.customer_details SET pinned_at=NULL, updated_at=now() WHERE account_id=?',
-                     (customer['id'],))
         _sync_pin_payload(customer_id, is_pinned=False, pinned_order=0, pinned_at='')
     else:
         operator, ordering = ('<', 'DESC') if action == 'up' else ('>', 'ASC')
         neighbor = conn.execute(
-            f'''SELECT account.id, account.pinned_order, ref.legacy_customer_id FROM trosa.accounts account
-                 JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
-                WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND account.is_pinned AND account.deleted_at IS NULL AND account.pinned_order {operator} ?
-                ORDER BY account.pinned_order {ordering} LIMIT 1''',
+            f'''SELECT id, pinned_order FROM trosa.customer_records
+                WHERE is_pinned AND deleted_at IS NULL AND pinned_order {operator} ?
+                ORDER BY pinned_order {ordering} LIMIT 1''',
             (customer['pinned_order'],),
         ).fetchone()
         if neighbor:
-            conn.execute('UPDATE trosa.accounts SET pinned_order=?, updated_at=now() WHERE id=?',
-                         (neighbor['pinned_order'], customer['id']))
-            conn.execute('UPDATE trosa.accounts SET pinned_order=?, updated_at=now() WHERE id=?',
-                         (customer['pinned_order'], neighbor['id']))
-            # Reordering keeps the original pin time; only mirror the swapped
-            # per-user order so the highlight stays visible in the same place.
-            for target_customer_id, target_order in (
-                (customer_id, int(neighbor['pinned_order'] or 0)),
-            ):
-                conn.execute(
-                    '''UPDATE trosa.account_legacy_refs
-                          SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
-                               || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
-                        WHERE organization_id=trosa.compat_org_id()
-                          AND legacy_user_id=trosa.compat_current_user()
-                          AND legacy_customer_id=?''',
-                    (str(target_order), target_customer_id),
-                )
-            try:
-                neighbor_customer_id = int(neighbor['legacy_customer_id'])
-            except (KeyError, TypeError, ValueError):
-                neighbor_customer_id = 0
-            if neighbor_customer_id:
-                conn.execute(
-                    '''UPDATE trosa.account_legacy_refs
-                          SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
-                               || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
-                        WHERE organization_id=trosa.compat_org_id()
-                          AND legacy_user_id=trosa.compat_current_user()
-                          AND legacy_customer_id=?''',
-                    (str(int(customer['pinned_order'] or 0)), neighbor_customer_id),
-                )
+            _sync_pin_payload(customer_id, is_pinned=True,
+                              pinned_order=int(neighbor['pinned_order'] or 0), pinned_at='')
+            _sync_pin_payload(int(neighbor['id']), is_pinned=True,
+                              pinned_order=int(customer['pinned_order'] or 0), pinned_at='')
 
 
 def update_contact(conn: Any, *, contact_id: int, values: dict[str, Any]) -> None:
@@ -863,12 +801,18 @@ def update_contact(conn: Any, *, contact_id: int, values: dict[str, Any]) -> Non
     ).fetchone()
     if not ref:
         raise ValueError('contact is not visible to the current user')
-    conn.execute('UPDATE core.people SET full_name=?, normalized_name=lower(?) WHERE id=?',
-                 (values.get('name', ''), values.get('name', ''), ref['person_id']))
-    if ref['contact_method_id']:
-        conn.execute('UPDATE core.contact_methods SET value=?, normalized_value=lower(?), updated_at=now() WHERE id=?',
-                     (values.get('email', ''), values.get('email', ''), ref['contact_method_id']))
-    elif values.get('email'):
+    # The ref supplies the visible name.  Do not update a deduplicated Person
+    # or ContactMethod in place: both can be referenced by another user.
+    email = values.get('email', '')
+    method_id = None
+    if email:
+        existing_method = conn.execute(
+            '''SELECT id FROM core.contact_methods
+                WHERE organization_id=trosa.compat_org_id() AND kind='email'
+                  AND normalized_value=lower(?) LIMIT 1''', (email,),
+        ).fetchone()
+        method_id = existing_method['id'] if existing_method else None
+    if email and not method_id:
         method_id = conn.execute(
             "SELECT trosa.compat_uuid('contact-method:' || trosa.compat_current_user() || ':' || ?::text)",
             (contact_id,),
@@ -879,20 +823,14 @@ def update_contact(conn: Any, *, contact_id: int, values: dict[str, Any]) -> Non
                VALUES (?, trosa.compat_org_id(), ?, 'email', ?, lower(?))''',
             (method_id, ref['person_id'], values.get('email', ''), values.get('email', '')),
         )
-        conn.execute(
-            '''UPDATE trosa.contact_legacy_refs SET contact_method_id=?
-                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
-                  AND legacy_contact_id=?''',
-            (method_id, contact_id),
-        )
     conn.execute(
         '''UPDATE trosa.contact_legacy_refs SET name=?, title=?, phone=?, whatsapp=?, linkedin=?,
-               preferred_channel=?, contact_type=?, is_primary=?, notes=?, updated_at=now()
+               preferred_channel=?, contact_type=?, is_primary=?, notes=?, contact_method_id=?, updated_at=now()
              WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
                AND legacy_contact_id=?''',
         (values.get('name', ''), values.get('title', ''), values.get('phone', ''), values.get('whatsapp', ''),
          values.get('linkedin', ''), values.get('preferred_channel', ''), values.get('contact_type', 'person'),
-         bool(values.get('is_primary')), values.get('notes', ''), contact_id),
+         bool(values.get('is_primary')), values.get('notes', ''), method_id, contact_id),
     )
 
 
@@ -989,7 +927,7 @@ def set_customer_stage(conn: Any, *, customer_ids: Iterable[int], stage: str) ->
 
 
 def set_customer_level(conn: Any, *, customer_ids: Iterable[int], level: str) -> int:
-    """Set the canonical Customer priority level."""
+    """Set the current user's Customer priority level."""
     ids = _ids(customer_ids)
     if not ids:
         return 0
@@ -1000,16 +938,17 @@ def set_customer_level(conn: Any, *, customer_ids: Iterable[int], level: str) ->
             [level, *ids],
         ).rowcount or 0)
     return int(conn.execute(
-        f'''UPDATE trosa.accounts account SET priority_level=?, updated_at=now()
-              FROM trosa.account_legacy_refs ref
-             WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
-               AND ref.legacy_customer_id IN ({placeholders}) AND account.id=ref.account_id''',
+        f'''UPDATE trosa.account_legacy_refs
+               SET legacy_payload=coalesce(legacy_payload, '{{}}'::jsonb)
+                    || jsonb_build_object('level', ?::text)
+             WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
+               AND legacy_customer_id IN ({placeholders})''',
         [level, *ids],
     ).rowcount or 0)
 
 
 def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> None:
-    """Update the canonical Customer aggregate without writing a legacy row."""
+    """Update the current user's Customer record without changing a shared Account."""
     if not postgres_mode():
         raise ValueError('SQLite callers retain their local aggregate adapter')
     ref = conn.execute(
@@ -1021,27 +960,6 @@ def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> N
     if not ref:
         raise ValueError('customer is not visible to the current user')
     conn.execute(
-        '''UPDATE core.companies SET canonical_name=?, normalized_name=lower(?), country_code=?, website=?, updated_at=now()
-             WHERE id=?''',
-        (values.get('company', ''), values.get('company', ''), values.get('country', ''), values.get('website', ''), ref['company_id']),
-    )
-    conn.execute(
-        '''UPDATE trosa.accounts SET display_name=?, priority_level=?, profile=?, field=?, industry=?, company_size=?,
-               annual_revenue=?, tags=?, last_contact_at=trosa.compat_time(?), next_follow_up_at=trosa.compat_time(?),
-               updated_at=now() WHERE id=?''',
-        (values.get('name', ''), values.get('level', ''), values.get('profile', ''), values.get('field', ''),
-         values.get('industry', ''), values.get('company_size', ''), values.get('annual_revenue', ''),
-         values.get('tags', ''), values.get('last_contact', ''), values.get('next_follow_up', ''), ref['account_id']),
-    )
-    conn.execute(
-        '''INSERT INTO trosa.customer_details (account_id, notes, system_notes, import_source, manual_next_task, updated_at)
-           VALUES (?, ?, ?, ?, ?, now()) ON CONFLICT (account_id) DO UPDATE
-           SET notes=excluded.notes, system_notes=excluded.system_notes, import_source=excluded.import_source,
-               manual_next_task=excluded.manual_next_task, updated_at=now()''',
-        (ref['account_id'], values.get('notes', ''), values.get('system_notes', ''), values.get('import_source', ''),
-         bool(values.get('manual_next_follow'))),
-    )
-    conn.execute(
         '''INSERT INTO trosa.customer_states
                (organization_id, legacy_user_id, legacy_customer_id, account_id, business_stage, business_role, customer_judgment, updated_at)
            VALUES (trosa.compat_org_id(), trosa.compat_current_user(), ?, ?, ?, ?, ?, now())
@@ -1051,32 +969,29 @@ def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> N
         (customer_id, ref['account_id'], values.get('business_stage', ''), values.get('business_role', ''),
          values.get('customer_judgment', '')),
     )
-    # Modern Customer edits must not leave stale SQLite-shaped fields in the
-    # compatibility payload.  The payload remains useful provenance, but the
-    # old projection must fall back to the canonical Account/Company/Details
-    # facts after a modern write instead of replaying an earlier snapshot.
-    legacy_customer_fields = [
-        'name', 'company', 'country', 'level', 'type', 'website', 'profile',
-        'field', 'status', 'last_contact', 'next_follow_up', 'manual_next_follow',
-        'customer_type', 'industry', 'company_size', 'annual_revenue', 'tags',
-        'import_source', 'external_source', 'external_id', 'attention_state',
-        'attention_reason', 'attention_updated_at', 'attention_review_date',
-        'is_pinned', 'pinned_order', 'pinned_at', 'is_deleted', 'deleted_at',
-        'business_stage', 'business_role', 'customer_judgment',
-    ]
+    customer_payload = {
+        'name': values.get('name', ''), 'company': values.get('company', ''),
+        'country': values.get('country', ''), 'level': values.get('level', ''),
+        'type': values.get('customer_type', values.get('type', '')),
+        'website': values.get('website', ''), 'profile': values.get('profile', ''),
+        'field': values.get('field', ''), 'industry': values.get('industry', ''),
+        'company_size': values.get('company_size', ''), 'annual_revenue': values.get('annual_revenue', ''),
+        'tags': values.get('tags', ''), 'status': values.get('status', ''),
+        'notes': values.get('notes', ''), 'system_notes': values.get('system_notes', ''),
+        'import_source': values.get('import_source', ''), 'external_source': values.get('external_source', ''),
+        'external_id': values.get('external_id', ''), 'last_contact': values.get('last_contact', ''),
+        'next_follow_up': values.get('next_follow_up', ''),
+        'manual_next_follow': bool(values.get('manual_next_follow')),
+    }
     conn.execute(
         '''UPDATE trosa.account_legacy_refs
-              SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb) - %s::text[]
+              SET legacy_payload=(coalesce(legacy_payload, '{}'::jsonb)
+                                  - ARRAY['business_stage', 'business_role', 'customer_judgment'])
+                                 || ?::jsonb
             WHERE organization_id=trosa.compat_org_id()
               AND legacy_user_id=trosa.compat_current_user()
               AND legacy_customer_id=?''',
-        (legacy_customer_fields, customer_id),
-    )
-    conn.execute(
-        '''UPDATE trosa.accounts
-              SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb) - %s::text[]
-            WHERE id=?''',
-        (legacy_customer_fields, ref['account_id']),
+        (json.dumps(customer_payload), customer_id),
     )
 
 

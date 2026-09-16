@@ -138,6 +138,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0028_canonical_operation_audit.sql'),
         os.path.join(root, 'migrations', '0029_compat_operation_audit_bridge.sql'),
         os.path.join(root, 'migrations', '0030_customer_records_user_scoped_projection.sql'),
+        os.path.join(root, 'migrations', '0031_customer_pin_payload_backfill.sql'),
     )
 
 

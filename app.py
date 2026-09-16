@@ -1654,23 +1654,14 @@ def _refresh_customer_follow_up(c, customer_id, now):
         tasks = _customer_tasks(c, customer_id)
         next_open = (tasks[0].get('remind_date') or '') if tasks else ''
         c.execute(
-            '''UPDATE trosa.accounts account
-                  SET next_follow_up_at=trosa.compat_time(?), updated_at=now()
-                 FROM trosa.account_legacy_refs ref
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
-            (next_open, customer_id),
-        )
-        c.execute(
-            '''INSERT INTO trosa.customer_details (account_id, manual_next_task, updated_at)
-               SELECT ref.account_id, ?, now() FROM trosa.account_legacy_refs ref
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.legacy_customer_id=?
-               ON CONFLICT (account_id) DO UPDATE
-                 SET manual_next_task=excluded.manual_next_task, updated_at=now()''',
-            (bool(next_open), customer_id),
+            '''UPDATE trosa.account_legacy_refs
+                  SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                       || jsonb_build_object('next_follow_up', ?::text,
+                                             'manual_next_follow', ?::boolean)
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''',
+            (next_open, bool(next_open), customer_id),
         )
         return next_open
     next_open = c.execute('''SELECT MIN(remind_date) FROM reminders
@@ -1700,24 +1691,15 @@ def _refresh_customer_activity_rollups(c, customer_id, now):
         )
         next_follow_up = (tasks[0].get('remind_date') or '') if tasks else ''
         c.execute(
-            '''UPDATE trosa.accounts account
-                  SET last_contact_at=trosa.compat_time(?), next_follow_up_at=trosa.compat_time(?),
-                      updated_at=now()
-                 FROM trosa.account_legacy_refs ref
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
-            (last_contact, next_follow_up, customer_id),
-        )
-        c.execute(
-            '''INSERT INTO trosa.customer_details (account_id, manual_next_task, updated_at)
-               SELECT ref.account_id, ?, now() FROM trosa.account_legacy_refs ref
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.legacy_customer_id=?
-               ON CONFLICT (account_id) DO UPDATE
-                 SET manual_next_task=excluded.manual_next_task, updated_at=now()''',
-            (bool(next_follow_up), customer_id),
+            '''UPDATE trosa.account_legacy_refs
+                  SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                       || jsonb_build_object('last_contact', ?::text,
+                                             'next_follow_up', ?::text,
+                                             'manual_next_follow', ?::boolean)
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''',
+            (last_contact, next_follow_up, bool(next_follow_up), customer_id),
         )
         return last_contact, next_follow_up
     last_contact = c.execute(
@@ -7124,17 +7106,6 @@ def save_customer_priority_order():
             return jsonify({'error': '客户列表已变化，请刷新后重试'}), 409
         for position, customer_id in enumerate(customer_ids, 1):
             c.execute(
-                '''UPDATE trosa.accounts account SET pinned_order=?, updated_at=now()
-                     FROM trosa.account_legacy_refs ref
-                    WHERE ref.organization_id=trosa.compat_org_id()
-                      AND ref.legacy_user_id=trosa.compat_current_user()
-                      AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
-                (position, customer_id),
-            )
-            # customer_records reads the per-user payload first (0030); mirror
-            # the new order there so a drag-sort does not vanish behind the
-            # stale import snapshot.
-            c.execute(
                 '''UPDATE trosa.account_legacy_refs
                       SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
                            || jsonb_build_object('is_pinned', '1', 'pinned_order', ?::text)
@@ -7155,17 +7126,7 @@ def save_customer_priority_order():
         conn.close()
         return jsonify({'error': '客户列表已变化，请刷新后重试'}), 409
     for position, customer_id in enumerate(customer_ids, 1):
-        if postgres_mode():
-            c.execute(
-                '''UPDATE trosa.accounts account SET pinned_order=?, updated_at=now()
-                     FROM trosa.account_legacy_refs ref
-                    WHERE ref.organization_id=trosa.compat_org_id()
-                      AND ref.legacy_user_id=trosa.compat_current_user()
-                      AND ref.legacy_customer_id=? AND account.id=ref.account_id''',
-                (position, customer_id),
-            )
-        else:
-            c.execute('UPDATE customers SET pinned_order=? WHERE id=?', (position, customer_id))
+        c.execute('UPDATE customers SET pinned_order=? WHERE id=?', (position, customer_id))
     conn.commit()
     conn.close()
     return jsonify({'success': True, 'ids': customer_ids})
