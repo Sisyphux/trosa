@@ -150,3 +150,24 @@ for label in com.tradeos.app com.tradeos.tunnel com.tradeos.health; do
   launchctl bootstrap "gui/$USER_ID" "$HOME/Library/LaunchAgents/$label.plist"
 done
 ```
+
+## 多 Agent 任务隔离
+
+多个 Agent 共用同一个 working tree 时，改动、暂存、测试会互相污染，还会触发
+`auto-publish.sh` 的保护门禁导致谁都发布不了。`agent-worktree.sh`
+给每个任务独立的 worktree + 独立分支（`agent/<id>`，目录默认在仓库同级的
+`trosa-worktrees/`，`workbench.env` 从不复制进隔离区）：
+
+```bash
+deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区，复用主仓 .venv/node_modules
+deploy/cloud/agent-worktree.sh test --task <id>     # 隔离数据目录跑完整回归（含扩展测试）
+deploy/cloud/agent-worktree.sh sync --task <id>     # 变基到最新 main
+deploy/cloud/agent-worktree.sh publish --task <id> --message "说明"  # 合入并发布
+deploy/cloud/agent-worktree.sh remove --task <id>   # 回收（默认保留分支）
+```
+
+发布没有放宽任何门禁：任务区与主工作区必须都没有已跟踪改动（否则拒绝，
+不会卷入他人在途工作）；合入用 `merge --no-commit --no-ff`（冲突则 abort）；
+之后全权委托未经修改的 `auto-publish.sh --staged` 走完回归、ECS 状态、备份、
+提交、推送、`trosa-release publish` 与公网健康检查。完整说明见
+`agent-worktree.sh --help` 与脚本头注释。
