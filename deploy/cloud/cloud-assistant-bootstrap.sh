@@ -23,6 +23,7 @@ remote_root=$1 service_name=$2 release_id=$3 commit=$4 github_remote=$5 mode=$6 
 [[ "$github_remote" == https://github.com/Sisyphux/trosa ]] || exit 2
 [[ "$mode" == publish || "$mode" == rollback ]] || exit 2
 [[ "$allow_destructive" == 0 || "$allow_destructive" == 1 ]] || exit 2
+if [[ "$mode" == publish ]]; then mode=deploy; fi
 runner_file="/tmp/trosa-release-remote-${release_id}.sh"
 runner_url="https://raw.githubusercontent.com/Sisyphux/trosa/${commit}/deploy/cloud/release-remote.sh"
 curl --fail --location --silent --show-error --max-time 60 "$runner_url" -o "$runner_file"
