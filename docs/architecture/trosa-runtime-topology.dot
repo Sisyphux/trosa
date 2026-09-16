@@ -176,7 +176,7 @@ digraph trosa_runtime_topology {
             style="filled,rounded",
             fillcolor="#fff3cd",
             color="#b8860b",
-            label="deploy/cloud/auto-publish.sh\n发布前门禁：仅 main 分支 · 拒绝 git add . · 拒绝破坏性 SQL\n临时 CRM_DB_PATH 跑单测 · py_compile · node --check · npm test"
+            label="deploy/cloud/auto-publish.sh\ncommit/branch → 干净 release worktree → 完整门禁\n拒绝运行数据/密钥/破坏性 SQL · CRM_DB_PATH 隔离\npy_compile · node --check · npm test · ECS 健康"
         ];
         local_dev [
             shape=box,

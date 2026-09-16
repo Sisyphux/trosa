@@ -4,29 +4,41 @@
 
 ## 日常代码发布
 
-默认流程是：代码任务完成并通过自动验证后，由 Codex 调用
-`deploy/cloud/auto-publish.sh`，自动完成“提交 → 推送 `main` → ECS 发布 →
-公网健康检查”。不需要再手动进入服务器，也不需要逐次确认上线。
-
-自动入口要求显式列出本次任务涉及的文件，避免把用户的其他修改带进发布：
+默认流程是：每个代码任务在独立 worktree 中完成一个逻辑完整的 commit，
+通过验证后由 Codex 调用 `deploy/cloud/auto-publish.sh`，自动完成“构建干净
+release worktree → 完整回归 → 推送 release commit 到 `main` → ECS 发布 →
+公网健康检查”。发布过程不读取调用者的 dirty working tree。
 
 ```bash
-deploy/cloud/auto-publish.sh \
-  --message "说明本次变化" -- \
-  app.py app/static/app.js
+# 发布一个已完成的 commit
+deploy/cloud/auto-publish.sh --commit abc1234
+
+# 发布一个任务分支相对 origin/main 的全部 commit
+deploy/cloud/auto-publish.sh --branch fix/modal-exit
 ```
 
-它会使用项目 `.venv` 执行 Python 回归、Python/JavaScript 语法检查和浏览器扩展回归；发布前读取 ECS 状态，普通改动直接发布。涉及 PostgreSQL schema、迁移或导入边界的改动会先执行已校验的数据库和附件备份；检测到疑似破坏性 SQL 时默认停止，只有明确确认并设置
+它会在临时 release worktree 中 cherry-pick 输入 commit，使用项目 `.venv` 执行
+Python 回归、Python/JavaScript 语法检查和浏览器扩展回归；发布前读取 ECS 状态，
+普通改动直接发布。涉及 PostgreSQL schema、迁移或导入边界的改动会先执行已校验的数据库和附件备份；检测到疑似破坏性 SQL 时默认停止，只有明确确认并设置
 `TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB=1` 才会继续。
 
-ECS 发布失败时保留 GitHub commit，但发布脚本自动恢复上一份应用 release；如果 ECS 本机健康而公网健康检查暂时失败，不会因可能的 Cloudflare Tunnel/网络抖动自动回滚，而是报告需要处理。明确说“只本地运行”“不要上线”或“只诊断”时，不调用自动入口。
-
-需要预览流程但不产生外部写入时，可运行：
+开发任务的最低交付边界是：
 
 ```bash
-deploy/cloud/auto-publish.sh --dry-run \
-  --message "预览本次发布" -- app.py
+git status
+git diff
+git add -A
+git commit -m "fix: 说明本次变化"
+
+# 先只构建、测试并回收临时 release worktree，不推送、不发布
+deploy/cloud/auto-publish.sh --dry-run --commit HEAD
 ```
+
+`--commit` 可重复传入；`--branch` 会按拓扑顺序收集分支相对
+`origin/main` 的 commit。输入 commit 已经在 `origin/main` 时会报告已存在并安全结束。
+发布只移动远程 `main` 和 ECS，不移动调用者的本地分支，也不使用其暂存区、未暂存改动或未跟踪文件。
+
+ECS 发布失败时保留 GitHub commit，但发布脚本自动恢复上一份应用 release；如果 ECS 本机健康而公网健康检查暂时失败，不会因可能的 Cloudflare Tunnel/网络抖动自动回滚，而是报告需要处理。明确说“只本地运行”“不要上线”或“只诊断”时，不调用自动入口。
 
 底层 `deploy/cloud/publish-workbench.sh` 仍保留，用于已经存在的 commit 的单独发布和故障处理；单独 `git push` 只更新 GitHub，不保证 ECS 已上线。
 

@@ -98,7 +98,7 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 - `serve.py` 在迁移、调度器和端口启动前强制 `trosa-postgresql-v1`；正式 ping 必须报告
   `status=ok`、`backend=postgresql`、`formal_runtime=true` 和该契约名。`app.py`/`desktop.py` 不是正式启动入口。
 - 发布以 **commit SHA 为锚点**：本地门禁通过 → push `main` → 云主机从 GitHub 拉该 SHA 的压缩包 → 解包到新版本目录 → 原子切换符号链接 → 重启服务 → 本机健康检查失败则回滚，保留最近 5 个版本。
-- **本地门禁相当严格**：只允许 `main`、拒绝 `git add .`、拒绝未暂存改动、提交黑名单（`data|*.db|.env*`）、对 DB 敏感文件扫描破坏性 SQL、用临时 `CRM_DB_PATH` 跑单测。
+- **本地门禁相当严格**：发布只接受 commit/branch，在基于 `origin/main` 的临时 release worktree 中组装候选；拒绝运行数据、密钥、生成运行时和破坏性 SQL，并用临时 `CRM_DB_PATH` 跑单测。
 - **一个容易被误读的差异**：`publish-workbench.sh` / `publish-remote.sh` 在**本机健康检查**失败时会回滚；但 `auto-publish.sh` 在**公网健康检查**失败时明确**不自动回滚**，只报错退出。
 - 备份职责已分离：PostgreSQL 备份归数据库操作层（`pg_dump` + 一次性库还原校验），应用层的 SQLite 恢复接口在 PG 模式返回 `409 managed_externally`。
 

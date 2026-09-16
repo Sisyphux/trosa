@@ -40,8 +40,8 @@ import os
 import re
 import sys
 
-# Mirrors the heuristic already used by deploy/cloud/auto-publish.sh so the
-# local gate and the server-side runner agree on what "destructive" means.
+# Mirrors the heuristic used by deploy/cloud/release-commit.sh and the server-
+# side runner so the local gate and ECS agree on what "destructive" means.
 # Scope is data loss: dropping tables/columns/schemas, truncating, or
 # deleting rows at migration time. Dropping a CONSTRAINT or INDEX is routine
 # index-replacement practice in this repo (the new unique index is created in

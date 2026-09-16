@@ -2,31 +2,31 @@
 # Trosa 多 Agent 任务隔离：一个任务 = 一个 git worktree + 一个独立分支。
 #
 # 背景：多个 Agent 共用同一个 working tree 时，各自的修改、暂存、测试会互相
-# 污染，还会触发 auto-publish.sh 的保护门禁（index 非空 / 有未暂存改动就拒绝），
-# 导致谁都发布不了。本脚本让每个任务在独立目录、独立分支上工作：
+# 污染，而且发布入口被迫理解“发布哪些文件”，于是谁都发布不了。本脚本让每个
+# 任务在独立目录、独立分支上工作，并把发布输入收敛为 commit：
 #
 #   deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区 + agent/<id> 分支
 #   deploy/cloud/agent-worktree.sh list                 # 看所有任务隔离区
 #   deploy/cloud/agent-worktree.sh test --task <id>     # 在隔离区跑完整验证
 #   deploy/cloud/agent-worktree.sh sync --task <id>     # 变基到最新 main
-#   deploy/cloud/agent-worktree.sh publish --task <id> --message "说明"  # 合入并发布
+#   deploy/cloud/agent-worktree.sh publish --task <id>  # 发布本任务的 commit
 #   deploy/cloud/agent-worktree.sh remove --task <id>   # 回收隔离区
 #
 # 隔离保证：
 # - 工作区：worktree 目录在仓库之外（默认与仓库同级的 trosa-worktrees/），
 #   改动、暂存、未跟踪文件互不可见；主工作区的未提交改动不受任何影响。
-# - 测试：沿用 auto-publish.sh 的隔离模式（CRM_DB_PATH=临时目录），且 worktree
-#   内即使有 stray 写入也只落在一次性目录里；测试无固定端口绑定，可并行跑。
+# - 测试：委托 deploy/cloud/release-test.sh（与发布候选同一份门禁），
+#   CRM_DB_PATH 指向一次性目录。
 # - 环境：复用主仓 .venv 与 browser-extension/node_modules（symlink），不复制、
 #   不重装；workbench.env 从不复制进 worktree（密钥不跨区）。
 #
 # 发布保证（没有放宽任何门禁）：
-# - publish 只接受：任务 worktree 完全干净（先 commit/push 分支）、主工作区
-#   完全干净（有任何已跟踪改动就拒绝，避免卷入他人在途工作）。
-# - 合入方式是 git merge --no-commit --no-ff，冲突则 abort，主分支保持原样。
-# - 合入后全权委托未经修改的 auto-publish.sh --staged：本地回归、只读 ECS
-#   状态、数据库备份、破坏性检查、提交、推送、trosa-release publish、公网
-#   健康检查——全部照常执行。最终 ECS 上线的仍然是一个明确的 commit。
+# - publish 只接受：任务 worktree 完全干净（改动必须先 commit 到 agent/<id>）。
+# - 主工作区不参与发布，也不再需要干净：publish 委托 release-commit.sh --branch
+#   agent/<id>，在基于 origin/main 的临时 release worktree 里 cherry-pick 本任务
+#   的 commit，跑完整门禁后再推送并发布。任何在途改动、脏 index、未跟踪文件都
+#   不会被读取、暂存或修改。
+# - 测试与发布候选使用同一份 release-test.sh，避免“开发机绿、候选红”。
 set -euo pipefail
 export LC_ALL=C
 
@@ -40,9 +40,6 @@ MAIN_ROOT="$(cd "$GIT_COMMON_DIR/.." 2>/dev/null && pwd)"
 [[ "$MAIN_ROOT" == /* ]] || { printf '任务隔离未完成：无法解析主仓库根目录\n' >&2; exit 1; }
 WORKTREE_ROOT="${TRADE_OS_WORKTREE_ROOT:-$(dirname "$MAIN_ROOT")/trosa-worktrees}"
 TARGET_BRANCH="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
-AUTO_PUBLISH_TMPDIR="${TMPDIR:-/tmp}"
-LOCK_DIR="$AUTO_PUBLISH_TMPDIR/trosa-auto-publish.lock"
-TASK_TEST_DATA_DIR=""
 
 fail() {
   printf '任务隔离未完成：%s\n' "$*" >&2
@@ -56,13 +53,19 @@ Usage:
   agent-worktree.sh list
   agent-worktree.sh test --task <id> [--quick]
   agent-worktree.sh sync --task <id> [--fetch-base]
-  agent-worktree.sh publish --task <id> --message "说明本次变化"
+  agent-worktree.sh publish --task <id> [--message "仅记录用的说明"]
   agent-worktree.sh remove --task <id> [--force] [--delete-branch]
 
 <id> 只能包含字母、数字、点、下划线、连字符；对应分支为 agent/<id>，
 隔离目录默认为 <仓库同级>/trosa-worktrees/<id>（可用
-TRADE_OS_WORKTREE_ROOT 覆盖）。publish 要求任务区与主工作区都没有
-已跟踪改动，合入后委托 auto-publish.sh --staged 走完全部现有门禁。
+TRADE_OS_WORKTREE_ROOT 覆盖）。
+
+test 委托 release-test.sh，与发布候选使用同一份门禁。
+publish 只要求任务区干净（先把改动 commit 到 agent/<id>），随后委托
+release-commit.sh --branch agent/<id>：在基于 origin/main 的临时 release
+worktree 里 cherry-pick 本任务的 commit、跑完整门禁、推送并发布。调用者
+工作区（含主工作区的在途改动）不参与发布，也不会被修改。发布说明应写在
+commit message 里；--message 仅用于终端记录。
 EOF
 }
 
@@ -90,12 +93,11 @@ find_task_path() {
   fail "找不到任务 $task 的隔离区（先用 create 创建）"
 }
 
-require_clean_tracked() {
-  local repo=$1 label=$2 staged unstaged
-  staged="$(git -C "$repo" diff --cached --name-only)"
-  unstaged="$(git -C "$repo" diff --name-only)"
-  if [[ -n "$staged" || -n "$unstaged" ]]; then
-    printf '任务隔离未完成：%s 存在已跟踪改动，请先提交：\n%s\n%s\n' "$label" "$staged" "$unstaged" >&2
+require_clean() {
+  local repo=$1 label=$2 status
+  status="$(git -C "$repo" status --porcelain --untracked-files=all)"
+  if [[ -n "$status" ]]; then
+    printf '任务隔离未完成：%s 不是干净 worktree，请先提交或处理：\n%s\n' "$label" "$status" >&2
     exit 1
   fi
 }
@@ -138,8 +140,10 @@ cmd_create() {
   else
     printf '警告：主仓 browser-extension/node_modules 缺失，扩展回归前需先 npm install。\n' >&2
   fi
-  "$wt/.venv/bin/python" --version >/dev/null 2>&1 \
-    || fail "隔离区 Python 自检失败：$wt/.venv"
+  if [[ -x "$wt/.venv/bin/python" ]]; then
+    "$wt/.venv/bin/python" --version >/dev/null 2>&1 \
+      || fail "隔离区 Python 自检失败：$wt/.venv"
+  fi
   node --check "$wt/app/static/app.js" \
     || fail "隔离区前端自检失败"
   printf '\n任务隔离区已就绪：\n  目录：%s\n  分支：%s（基线 %s）\n' "$wt" "$(branch_of "$task")" "$base"
@@ -181,32 +185,18 @@ cmd_test() {
   done
   [[ -n "$task" ]] || fail 'test 需要 --task <id>'
   validate_task_id "$task"
-  local wt python_bin
+  local wt args=() gate
   wt="$(find_task_path "$task")"
   [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
-  python_bin="$wt/.venv/bin/python"
-  [[ -x "$python_bin" ]] || fail "隔离区 Python 不可用（symlink 断裂时重建隔离区）"
-  command -v node >/dev/null 2>&1 || fail '找不到 node'
-  cleanup() {
-    if [[ -n "$TASK_TEST_DATA_DIR" && -d "$TASK_TEST_DATA_DIR" ]]; then rm -rf -- "$TASK_TEST_DATA_DIR"; fi
-  }
-  trap cleanup EXIT
-  printf '\n==> [%s] Python 语法检查\n' "$task"
-  "$python_bin" -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py
-  printf '完成：Python 语法检查\n'
-  printf '\n==> [%s] 前端 JavaScript 语法检查\n' "$task"
-  (cd "$wt" && node --check app/static/app.js)
-  printf '完成：前端 JavaScript 语法检查\n'
-  if [[ "$quick" == 1 ]]; then printf '\n任务 %s 快速检查通过。\n' "$task"; return 0; fi
-  command -v npm >/dev/null 2>&1 || fail '找不到 npm，无法执行浏览器扩展回归'
-  printf '\n==> [%s] Python 回归测试（隔离数据目录）\n' "$task"
-  TASK_TEST_DATA_DIR="$(mktemp -d "${AUTO_PUBLISH_TMPDIR%/}/trosa-task-tests.XXXXXX")"
-  (cd "$wt" && CRM_DB_PATH="$TASK_TEST_DATA_DIR" "$python_bin" -m unittest discover -s tests -p 'test_*.py' -v)
-  printf '完成：Python 回归测试\n'
-  printf '\n==> [%s] 浏览器扩展回归测试\n' "$task"
-  (cd "$wt/browser-extension" && npm test)
-  printf '完成：浏览器扩展回归测试\n'
-  printf '\n任务 %s 完整验证通过。\n' "$task"
+  # If the task branch already contains the gate, test that exact version;
+  # otherwise use the repository's committed gate while bootstrapping it.
+  gate="$wt/deploy/cloud/release-test.sh"
+  [[ -r "$gate" ]] || gate="$MAIN_ROOT/deploy/cloud/release-test.sh"
+  [[ -r "$gate" ]] || fail "找不到发布门禁 $MAIN_ROOT/deploy/cloud/release-test.sh"
+  args=(--dir "$wt")
+  if [[ "$quick" == 1 ]]; then args+=(--quick); fi
+  bash "$gate" ${args[@]+"${args[@]}"}
+  printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
 }
 
 cmd_sync() {
@@ -222,7 +212,7 @@ cmd_sync() {
   validate_task_id "$task"
   local wt
   wt="$(find_task_path "$task")"
-  require_clean_tracked "$wt" "任务 $task"
+  require_clean "$wt" "任务 $task"
   local base="$TARGET_BRANCH"
   if [[ "$fetch_base" == 1 ]]; then
     git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" || fail 'fetch 失败'
@@ -241,50 +231,28 @@ cmd_publish() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
-      --message|-m) [[ $# -ge 2 ]] || fail '--message 需要说明文字'; message=$2; shift 2 ;;
-      *) fail "publish 未知参数：$1（发布只接受明确 commit，不接受文件列表之外的范围）" ;;
+      --message|-m) [[ $# -ge 2 ]] || fail '--message 需要文字'; message=$2; shift 2 ;;
+      *) fail "publish 未知参数：$1（发布输入是 commit，不接受文件清单）" ;;
     esac
   done
   [[ -n "$task" ]] || fail 'publish 需要 --task <id>'
-  [[ -n "$message" ]] || fail 'publish 需要 --message "说明本次变化"'
   validate_task_id "$task"
-  local wt branch
+  local wt branch head
   wt="$(find_task_path "$task")"
   branch="$(branch_of "$task")"
-  require_clean_tracked "$wt" "任务 $task（改动先 commit 到 $branch）"
-  require_clean_tracked "$MAIN_ROOT" "主工作区（他人在途工作未处理，本次停止）"
-  if [[ -d "$LOCK_DIR" ]]; then fail "已有另一个自动发布正在运行（锁：$LOCK_DIR），稍后重试"; fi
-  git -C "$wt" push --force-with-lease origin "$branch" || fail "推送 $branch 失败"
-  git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" || fail 'fetch 远端基线失败'
-  local remote_head
-  remote_head="$(git -C "$MAIN_ROOT" rev-parse "refs/remotes/origin/$TARGET_BRANCH")"
-  git -C "$MAIN_ROOT" merge-base --is-ancestor "$remote_head" HEAD \
-    || fail "本地 $TARGET_BRANCH 落后或与远端分叉；先处理主分支再发布"
-  local merged=0
-  abort_merge() {
-    if [[ "$merged" == 1 ]] && git -C "$MAIN_ROOT" rev-parse --verify --quiet MERGE_HEAD >/dev/null; then
-      git -C "$MAIN_ROOT" merge --abort || true
-    fi
-  }
-  trap abort_merge EXIT
-  if git -C "$MAIN_ROOT" merge --no-commit --no-ff -m "$message" "$branch"; then
-    merged=1
-  else
-    fail "合入 $branch 冲突，已 abort；请进任务区 sync 变基解冲突后再发布"
+  require_clean "$wt" "任务 $task（改动先 commit 到 $branch）"
+  head="$(git -C "$wt" rev-parse HEAD)"
+  if [[ -n "$message" ]]; then
+    printf '说明（仅记录用；实际 commit message 来自任务分支的 commit）：%s\n' "$message"
   fi
-  trap - EXIT
-  # 合入结果已暂存；之后全部委托未经修改的 auto-publish.sh --staged，
-  # 本脚本不再做任何提交、推送与发布动作，全部现有门禁照常执行。
-  # 若它中途失败，用 merge --abort 恢复主分支（树原本干净，无损）。
-  if bash "$MAIN_ROOT/deploy/cloud/auto-publish.sh" --staged --message "$message"; then
-    printf '\n任务 %s 已合入并发布。\n' "$task"
-  else
-    abort_merge_after_fail() {
-      git -C "$MAIN_ROOT" merge --abort 2>/dev/null || true
-    }
-    abort_merge_after_fail
-    fail 'auto-publish 未完成（原因见上）；合入已回退，主分支保持原样'
-  fi
+  [[ -r "$MAIN_ROOT/deploy/cloud/auto-publish.sh" ]] \
+    || fail "找不到发布入口 $MAIN_ROOT/deploy/cloud/auto-publish.sh"
+  # The branch remains a local task artifact. auto-publish resolves its commits
+  # from the shared object database, builds a clean release worktree, and only
+  # pushes the resulting release candidate to main.
+  printf '\n发布任务 %s：%s（HEAD %s）→ origin/%s\n' "$task" "$branch" "${head:0:9}" "$TARGET_BRANCH"
+  bash "$MAIN_ROOT/deploy/cloud/auto-publish.sh" --branch "$branch"
+  printf '\n任务 %s 已发布。\n' "$task"
 }
 
 cmd_remove() {
@@ -302,7 +270,7 @@ cmd_remove() {
   local wt
   wt="$(find_task_path "$task")"
   if [[ "$force" != 1 ]]; then
-    require_clean_tracked "$wt" "任务 $task（未提交改动会丢失；确认丢弃请加 --force）"
+    require_clean "$wt" "任务 $task（未提交改动会丢失；确认丢弃请加 --force）"
     git -C "$MAIN_ROOT" worktree remove -- "$wt"
   else
     git -C "$MAIN_ROOT" worktree remove --force -- "$wt"

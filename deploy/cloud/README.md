@@ -90,15 +90,22 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
 
-代码同步与云端发布现在由 `auto-publish.sh` 串联：Codex 在任务完成并通过本地验证后，显式传入本次改动文件，脚本自动提交到 `main`、推送公开的 `Sisyphux/trosa`，读取发布前 ECS 状态，再通过 Cloud Assistant 发布同一个 commit 并检查公网健康。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
+代码同步与云端发布现在由 commit 驱动：每个 Agent 在自己的 worktree 和任务分支中完成一个逻辑完整的 commit，`auto-publish.sh` 接收 commit 或 branch，先在基于 `origin/main` 的临时 release worktree 中 cherry-pick 并跑完整门禁，再推送 release candidate 到公开的 `Sisyphux/trosa`、读取发布前 ECS 状态、通过 Cloud Assistant 发布并检查公网健康。调用者的 dirty working tree、index 和未跟踪文件都不参与发布。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
 
 日常自动入口：
 
 ```bash
-deploy/cloud/auto-publish.sh --message "说明本次变化" -- FILE1 FILE2
+# 单个任务成果
+deploy/cloud/auto-publish.sh --commit abc1234
+
+# 任务分支的全部成果
+deploy/cloud/auto-publish.sh --branch fix/modal-exit
+
+# 只构建临时 release worktree 并跑门禁
+deploy/cloud/auto-publish.sh --dry-run --commit abc1234
 ```
 
-脚本不会使用 `git add .`，会拒绝运行数据、密钥、本地环境文件和已跟踪的其他未暂存修改；数据库敏感改动会先运行 `backup-workbench.sh`。`--dry-run` 只执行本地回归、只读 ECS 状态和远程基线检查，不会备份、提交、推送或发布。
+发布输入只有 commit 或 branch，不接受文件清单，也不会使用调用者的 index、未暂存改动或未跟踪文件。脚本会在基于 `origin/main` 的临时 worktree 中按顺序 cherry-pick 输入，拒绝运行数据、密钥、本地环境文件和生成运行时；数据库敏感改动会先运行 `backup-workbench.sh`。`--dry-run` 只构建候选并执行本地门禁，不访问 ECS、不备份、不推送、不发布。
 
 底层 `publish-workbench.sh` 仍可用于发布已提交且已推送的本地 `HEAD`；当前仓库公开，因此 ECS 可以直接下载对应 commit 的 GitHub 归档。仓库目前没有 GitHub Actions 或 Webhook 自动部署。
 
@@ -107,7 +114,7 @@ deploy/cloud/auto-publish.sh --message "说明本次变化" -- FILE1 FILE2
 ```bash
 deploy/cloud/status-workbench.sh
 deploy/cloud/logs-workbench.sh
-deploy/cloud/auto-publish.sh --message "说明本次变化" -- FILE1 FILE2
+deploy/cloud/auto-publish.sh --commit <sha>
 deploy/cloud/publish-workbench.sh
 deploy/cloud/rollback-workbench.sh
 deploy/cloud/backup-workbench.sh
@@ -129,9 +136,10 @@ deploy/cloud/rollback-workbench.sh
 deploy/cloud/logs-workbench.sh
 ```
 
-`auto-publish.sh` 是日常入口；`trosa-release publish` 是统一发布器。`auto-publish.sh`
-先做本地回归、只读 ECS 状态、提交并推送，再调用 `trosa-release publish`
-发布同一个 commit。底层发布器让 ECS 后台任务下载指定 commit 的公开归档，
+`auto-publish.sh` 是日常入口；`release-commit.sh` 负责构建发布候选，
+`trosa-release publish` 是 ECS 统一发布器。`release-commit.sh` 先在干净临时
+worktree 中完成 cherry-pick、回归、只读 ECS 状态和必要备份，再推送唯一的
+release commit，最后调用 `trosa-release publish`。底层发布器让 ECS 后台任务下载指定 commit 的公开归档，
 按阶段执行：fetch → db-plan（显式迁移分类）→ backup（仅有数据库变化时，
 服务端本地快照）→ migrate（切换流量之前）→ activate（原子切换 `current`
 符号链接并重启）→ health（契约 + 页面 + systemd + 迁移账本 +
@@ -167,21 +175,19 @@ done
 
 ## 多 Agent 任务隔离
 
-多个 Agent 共用同一个 working tree 时，改动、暂存、测试会互相污染，还会触发
-`auto-publish.sh` 的保护门禁导致谁都发布不了。`agent-worktree.sh`
-给每个任务独立的 worktree + 独立分支（`agent/<id>`，目录默认在仓库同级的
-`trosa-worktrees/`，`workbench.env` 从不复制进隔离区）：
+每个 Agent 都在一个独立 worktree 和任务分支中工作（`agent/<id>`，目录默认在
+仓库同级的 `trosa-worktrees/`，`workbench.env` 从不复制进隔离区）。任务完成时
+先提交一个逻辑完整的 commit；发布系统不理解文件 hunk，也不读取其他 worktree：
 
 ```bash
 deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区，复用主仓 .venv/node_modules
 deploy/cloud/agent-worktree.sh test --task <id>     # 隔离数据目录跑完整回归（含扩展测试）
 deploy/cloud/agent-worktree.sh sync --task <id>     # 变基到最新 main
-deploy/cloud/agent-worktree.sh publish --task <id> --message "说明"  # 合入并发布
+deploy/cloud/agent-worktree.sh publish --task <id>  # 发布任务分支的已提交成果
 deploy/cloud/agent-worktree.sh remove --task <id>   # 回收（默认保留分支）
 ```
 
-发布没有放宽任何门禁：任务区与主工作区必须都没有已跟踪改动（否则拒绝，
-不会卷入他人在途工作）；合入用 `merge --no-commit --no-ff`（冲突则 abort）；
-之后全权委托未经修改的 `auto-publish.sh --staged` 走完回归、ECS 状态、备份、
-提交、推送、`trosa-release publish` 与公网健康检查。完整说明见
-`agent-worktree.sh --help` 与脚本头注释。
+发布要求任务 worktree 完全干净（包含没有未跟踪文件）；随后在基于
+`origin/main` 的临时 release worktree 中 cherry-pick 任务 commit，跑同一份
+`release-test.sh`，冲突则停止且不修改调用者工作区。主 worktree 可以继续有其他
+Agent 的在途改动。完整说明见 `agent-worktree.sh --help` 与脚本头注释。

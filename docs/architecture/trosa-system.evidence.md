@@ -125,7 +125,7 @@
 | 数据库凭据注入 | 文档记录为 systemd drop-in `/etc/systemd/system/trade-os.service.d/postgres.conf`（`TROSA_MAINTENANCE.md:26`），**不在仓库中** | medium |
 | 发布以 commit SHA 为锚 | `deploy/cloud/publish-workbench.sh:65-70` | high |
 | 远端发布步骤 | `deploy/cloud/publish-remote.sh`：`flock` → 下载 `codeload` 压缩包 → 解包到 `/opt/trade-os/releases/$RELEASE_ID` → `pip install` → `py_compile` → 原子符号链接切换 → `systemctl restart` → 健康探测，失败回滚并保留 5 个版本 | high |
-| 发布前本地门禁 | `deploy/cloud/auto-publish.sh`：仅 `main`、拒绝 `git add .`、拒绝未暂存已跟踪改动、提交黑名单、DB 敏感文件的破坏性 SQL 扫描、临时 `CRM_DB_PATH` 单测、`py_compile`、`node --check`、扩展 `npm test` | high |
+| 发布前本地门禁 | `deploy/cloud/auto-publish.sh` / `release-commit.sh`：只接受 commit/branch，在基于 `origin/main` 的临时 release worktree 中 cherry-pick，拒绝运行数据/密钥/生成运行时与破坏性 SQL，使用隔离 `CRM_DB_PATH` 跑单测、`py_compile`、`node --check`、扩展 `npm test` | high |
 | 发布后公网健康检查失败**不自动回滚** | `auto-publish.sh:325-337` | high |
 | PostgreSQL 备份职责分离 | `db.py:579-581`；`app.py` 恢复接口在 PG 模式返回 409 `managed_externally` | high |
 | 生产备份与还原校验 | `deploy/postgres-production/backup.sh`、`restore-check.sh` | high |

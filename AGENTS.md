@@ -4,7 +4,7 @@
 
 Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上下文 → 执行已确认动作 → 记录实际事实 → 按需确认下一步及日期。沟通记录可以没有下一步；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务在自动验证通过后，默认使用 `deploy/cloud/auto-publish.sh` 自动提交、推送并发布 ECS；只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后默认使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>` 构建干净候选并发布 ECS，发布不读取主工作区的 dirty 改动。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
 
 ## 运行与数据边界
 
@@ -14,7 +14,7 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 - 业务数据单一事实源是 ECS PostgreSQL；SQLite 仅用于隔离开发、导入/导出和明确批准的历史恢复边界。Excel 仅用于导入、导出和历史恢复；Apple 日历仅订阅 ICS，不能回写 CRM。
 - `app.py`、`desktop.py` 和根目录启动器不是正式启动命令：根目录入口只打开已验证的正式工作台；需要 SQLite 旧形状回归时必须显式设置 `CRM_ENV=development TRADE_OS_DEV_SQLITE=1`，PostgreSQL 演练使用 `serve_rehearsal.py` 或 `tools/postgres_rehearsal.py`，并且只允许 loopback 固定演练库。
 - 修改前先查看 `git status --short`。工作区可能有用户未提交的改动，绝不覆盖、回退、删除或格式化无关文件。
-- 自动发布时只传入本次任务涉及的文件路径，不使用 `git add .`；已有无关修改必须保留，不能混入 commit。
+- 自动发布时只传入已完成的 commit 或 branch，不传文件路径；release 候选在独立临时 worktree 中组装，主工作区已有的无关修改必须保留，不能混入发布。
 
 ## 核心模块与不可破坏能力
 

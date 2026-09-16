@@ -26,7 +26,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 - 正式运行契约：`trosa-postgresql-v1`。`CRM_ENV=production` 必须同时声明 `TRADE_OS_DATA_BACKEND=postgres`、非空 `TRADE_OS_DATABASE_URL`；`serve.py`、`init_all_dbs()` 和健康门均拒绝隐式 SQLite 回退。
 - 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
 - 2026-09-12 发布后只读检查：`trade-os=active/running`、`cloudflared=active`，最近一次运行代码 release 为 `auto-20260912085022-9d7d87b`；公网 ping 返回 `status=ok`、`backend=postgresql`、`formal_runtime=true`、`runtime_contract=trosa-postgresql-v1`。受控 `verify_schema` 已确认 0001–0029 全部通过、schema contract 完整、两个 legacy reference orphan count 均为 0。
-- 普通代码任务完成后默认由 `deploy/cloud/auto-publish.sh` 自动验证、提交、推送 `main`，再由 `trosa-release publish` 让 ECS 后台任务拉取同一 commit、按阶段发布并做深度健康检查。当前 ECS release 以 `deploy/cloud/trosa-release status --json` 的实时输出为准；发布前仍应核对状态和待发布 commit 的关系。有数据库变化的改动自动先做服务端预迁移备份；疑似破坏性迁移需明确确认（`--allow-destructive-db`）。
+- 普通代码任务先在独立 worktree 中提交为逻辑完整的 commit，再由 `deploy/cloud/auto-publish.sh --commit ...` 或 `--branch ...` 构建干净 release worktree、跑完整门禁、推送 release commit 到 `main`，再由 `trosa-release publish` 让 ECS 后台任务拉取并按阶段发布。调用者的 dirty working tree 不参与发布；当前 ECS release 以 `deploy/cloud/trosa-release status --json` 的实时输出为准。有数据库变化的改动自动先做服务端预迁移备份；疑似破坏性迁移需明确确认（`--allow-destructive-db`）。
 - 工作区可能存在用户未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
 
 ### 核心架构地图
@@ -204,7 +204,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
 3. **使用项目依赖跑回归**：根目录使用 `.venv`，由 `requirements.txt` 固定 Python 依赖；浏览器扩展在 `browser-extension/` 中执行 `npm install`，由 `package-lock.json` 固定测试依赖。不要使用系统 Python 或为了让测试绿而放宽测试。
 4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search；涉及 PG 时再运行 `python3 tools/postgres_rehearsal.py test`。
-5. **自动发布入口**：普通代码任务使用 `deploy/cloud/auto-publish.sh --message ... -- FILE...`；它会执行本地回归、发布前只读 ECS 状态、提交、推送、原子发布和公网健康检查。不得用 `git add .` 混入无关修改。
+5. **自动发布入口**：普通代码任务先在自己的 worktree 完成 commit，再使用 `deploy/cloud/auto-publish.sh --commit <sha>`；多个成果可重复传入 `--commit`，或使用 `--branch <ref>`。入口只从临时 release worktree 发布候选，执行本地回归、发布前只读 ECS 状态、必要备份、推送、原子发布和公网健康检查，不读取调用者的 index、未暂存改动或未跟踪文件。
 6. **数据库改动保护**：涉及 schema、迁移或导入边界时，自动入口先执行 PostgreSQL logical dump + 附件 bundle 备份；疑似破坏性 SQL 不自动执行。
 7. **发布后事实检查**：健康接口、三位用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
 
