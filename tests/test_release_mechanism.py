@@ -140,11 +140,30 @@ class PlanReleaseDbTests(unittest.TestCase):
         result = plan.plan_release_db(self.mdir, {"0001_a.sql"}, ["app/static/app.js"])
         self.assertEqual(result["category"], "none")
 
-    def test_unreadable_ledger_is_conservative(self):
+    def test_unreadable_ledger_is_rejected(self):
         self._write("0001_a.sql")
-        result = plan.plan_release_db(self.mdir, None, [])
+        with self.assertRaisesRegex(ValueError, "ledger is required"):
+            plan.plan_release_db(self.mdir, None, [])
+
+    def test_error_text_cannot_be_an_applied_migration_name(self):
+        self._write("0001_a.sql")
+        with self.assertRaisesRegex(ValueError, "invalid applied migration filename"):
+            plan.plan_release_db(self.mdir, {"LEDGER_UNREADABLE: psycopg missing"}, [])
+
+    def test_production_ledger_leaves_only_0031_compatible(self):
+        migration_dir = ROOT / "migrations"
+        # Use the actual files rather than synthesizing names: this confirms
+        # a historic destructive migration is excluded before classification.
+        applied = {
+            path.name for path in migration_dir.glob("*.sql")
+            if path.name[:4].isdigit() and int(path.name[:4]) <= 30
+        }
+        self.assertEqual(len(applied), 30)
+        result = plan.plan_release_db(str(migration_dir), applied, [])
+        self.assertEqual(result["pending_migrations"], ["0031_customer_pin_payload_backfill.sql"])
         self.assertEqual(result["category"], "compatible")
-        self.assertEqual(result["pending_migrations"], ["0001_a.sql"])
+        self.assertEqual(result["destructive_files"], [])
+        self.assertNotIn("0009_postgres_final_integrity_boundaries.sql", result["pending_migrations"])
 
     def test_cli_emits_machine_readable_json(self):
         self._write("0001_a.sql")
@@ -153,6 +172,13 @@ class PlanReleaseDbTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         doc = json.loads(proc.stdout)
         self.assertEqual(doc["category"], "none")
+
+    def test_cli_rejects_error_text_as_applied_ledger(self):
+        self._write("0001_a.sql")
+        proc = run([sys.executable, "tools/release_db_plan.py", self.mdir,
+                    "--applied", "LEDGER_UNREADABLE:psycopg missing"])
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("invalid applied migration ledger", proc.stderr)
 
 
 class UnifiedEntrypointTests(unittest.TestCase):
@@ -174,7 +200,7 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def test_db_plan_preflight_works_offline(self):
         proc = run(["bash", "deploy/cloud/trosa-release", "db-plan",
-                    "--applied", "none-such", "--changed", "app.py"])
+                    "--applied", "0001_unified_trade_os.sql", "--changed", "app.py"])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         doc = json.loads(proc.stdout)
         self.assertIn(doc["category"], ("compatible", "destructive"))
@@ -197,6 +223,32 @@ class UnifiedEntrypointTests(unittest.TestCase):
                      "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")
+
+    def test_remote_runner_uses_formal_venv_and_fails_before_classifier(self):
+        text = (ROOT / "deploy" / "cloud" / "release-remote.sh").read_text(encoding="utf-8")
+        ledger_start = text.index("# ---- db plan")
+        ledger_failure = text.index('write_result "failed" "db_plan" "migration ledger unreadable"', ledger_start)
+        classifier = text.index('release_db_plan.py', ledger_start)
+        destructive_refusal = text.index('write_result "refused" "db_plan" "destructive database change', ledger_start)
+        self.assertIn('formal_python="$REMOTE_ROOT/venv/bin/python"', text)
+        self.assertLess(ledger_failure, classifier)
+        self.assertLess(ledger_failure, destructive_refusal)
+        self.assertNotIn("LEDGER_UNREADABLE", text[ledger_start:])
+
+    def test_readonly_ecs_db_plan_capability_is_fixed_and_secret_free(self):
+        text = (ROOT / "deploy" / "cloud" / "cloud-assistant-bootstrap.sh").read_text(encoding="utf-8")
+        self.assertIn("db-plan-readonly accepts no arguments", text)
+        self.assertIn("install -d -m 0711 -o root -g root /usr/local/lib/trosa", text)
+        self.assertIn("TROSA_DB_PLAN_COMMIT must be an exact 40-character", text)
+        self.assertIn("/usr/local/lib/trosa/release_db_plan.py", text)
+        self.assertIn("runuser -u tradeos", text)
+        self.assertIn("SELECT name FROM audit.schema_migrations", text)
+        self.assertIn("release_db_plan.py", text)
+        self.assertIn('db-plan-readonly ""', text)
+        self.assertIn('"migration_ledger_unreadable"', text)
+        self.assertNotIn("print(database_url", text)
+        self.assertNotIn("print(pgpassfile", text)
+        self.assertNotIn("str(exc)", text)
 
     def test_remote_runner_rejects_bad_arguments_without_side_effects(self):
         proc = run(["bash", "deploy/cloud/release-remote.sh",

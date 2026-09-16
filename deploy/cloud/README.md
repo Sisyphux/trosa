@@ -47,6 +47,15 @@ Cloud Assistant 使用 Workbench 的本机受保护 AK profile（`~/.workbench/c
 登录的 `trosa-operator`，日常 status/logs 以该用户执行；发布只允许它 sudo 到一个
 固定、参数校验过的包装器，包装器仍只启动已有 `release-remote.sh`。
 
+同一 bootstrap 还安装 `sudo /usr/local/lib/trosa/db-plan-readonly`：它不接受参数，
+只切换至 `tradeos` service account，对当前 release 的 migration ledger 执行固定
+`SELECT name` 并调用同一份 `release_db_plan.py`。输出仅为脱敏 JSON（ledger 状态、
+已应用范围/count、pending、category、destructive files）；不输出 DSN、密码、
+PGPASSFILE 内容或其他环境变量，也不能执行 SQL、迁移、重启或切换 release。
+安装该只读能力时需把经过审阅、已推送的 Trosa commit 作为
+`TROSA_DB_PLAN_COMMIT` 传给 root bootstrap；ECS 会从该精确公开 commit 安装同一份
+`release_db_plan.py` 到 root 管理的位置，旧 release 没有 planner 时也不会复制一套规则。
+
 首次配置还需要由维护者安全写入 `/etc/trade-os/trade-os.env`、`/etc/cloudflared/config.yml` 和 Tunnel 凭据，然后再启用：
 
 ```bash

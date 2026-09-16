@@ -152,6 +152,31 @@ def list_migration_files(migrations_dir: str) -> list[str]:
     )
 
 
+def validate_applied_migration_names(applied_names: set[str] | None) -> set[str]:
+    """Return a ledger value only when it is a list of migration filenames.
+
+    The planner is deliberately file-only.  A database/transport error is not
+    a migration name and must never be allowed to turn the whole history into
+    a pending plan (for example, ``LEDGER_UNREADABLE: ...``).  The release
+    runner treats a failed ledger query as a terminal error before it invokes
+    this planner; this validation is a second boundary for every caller.
+    """
+    if applied_names is None:
+        raise ValueError("applied migration ledger is required")
+    if not isinstance(applied_names, set):
+        raise ValueError("applied migration ledger must be a set of filenames")
+    invalid = sorted(
+        name for name in applied_names
+        if not isinstance(name, str)
+        or not name.endswith(MIGRATION_SUFFIX)
+        or os.path.basename(name) != name
+        or not name
+    )
+    if invalid:
+        raise ValueError("invalid applied migration filename(s): " + ", ".join(map(str, invalid)))
+    return set(applied_names)
+
+
 def plan_release_db(
     migrations_dir: str,
     applied_names: set[str] | None = None,
@@ -159,12 +184,12 @@ def plan_release_db(
 ) -> dict:
     """Build the machine-readable database plan for one release.
 
-    ``applied_names`` is the live ``audit.schema_migrations`` ledger from
-    production (may be None when the DB is unreachable — then every local
-    file counts as pending and the plan is conservative). ``changed_paths``
-    is the list of repo paths changed by this release vs. production.
+    ``applied_names`` is the successfully read live
+    ``audit.schema_migrations`` ledger from production. It is required and
+    must contain only migration file names. ``changed_paths`` is the list of
+    repo paths changed by this release vs. production.
     """
-    applied = set(applied_names or [])
+    applied = validate_applied_migration_names(applied_names)
     changed = list(changed_paths or [])
     local_files = list_migration_files(migrations_dir)
 
@@ -246,7 +271,12 @@ def main(argv: list[str]) -> int:
         else:
             print(f"unknown argument: {argv[index]}", file=sys.stderr)
             return 2
-    print(json.dumps(plan_release_db(migrations_dir, applied, changed), indent=2, sort_keys=True))
+    try:
+        result = plan_release_db(migrations_dir, applied, changed)
+    except ValueError as exc:
+        print(f"invalid applied migration ledger: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

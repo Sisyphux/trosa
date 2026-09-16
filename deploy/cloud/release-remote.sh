@@ -184,16 +184,16 @@ deep_health_json() {
   if [ "$svc" = "active" ]; then svc_ok=1; fi
   # Migration ledger: every migration file shipped by the CURRENT release must
   # be recorded in audit.schema_migrations. Needs production env for DSN.
-  if [ -n "${TRADE_OS_DATABASE_URL:-}" ] && command -v python3 >/dev/null 2>&1; then
+  if [ -n "${TRADE_OS_DATABASE_URL:-}" ] && [ -x "$REMOTE_ROOT/venv/bin/python" ]; then
     local cur_dir
     cur_dir=$(readlink -f "$REMOTE_ROOT/current" 2>/dev/null || true)
-    if python3 - "$cur_dir" <<'PYEOF' >/dev/null 2>&1; then
+    if "$REMOTE_ROOT/venv/bin/python" - "$cur_dir" <<'PYEOF' >/dev/null 2>&1; then
 import os, sys
 cur = sys.argv[1]
 try:
     import psycopg
 except Exception:
-    sys.exit(0)  # driver missing: do not fail health on the check itself
+    sys.exit(1)
 names = sorted(f for f in os.listdir(os.path.join(cur, "migrations")) if f.endswith(".sql")) if cur and os.path.isdir(os.path.join(cur, "migrations")) else []
 if not names:
     sys.exit(0)
@@ -299,24 +299,53 @@ EOF
   "$REMOTE_ROOT/venv/bin/pip" install --disable-pip-version-check -q -r "$RELEASE_DIR/requirements.txt"
 
   # ---- db plan (explicit phase; production untouched) ----
+  # The formal venv carries psycopg.  Do not use the system Python here: a
+  # missing driver must fail the release before any migration classifier sees
+  # an error string as if it were an applied filename.
+  local formal_python="$REMOTE_ROOT/venv/bin/python"
   local applied_ledger=""
-  if [ -n "${TRADE_OS_DATABASE_URL:-}" ]; then
-    applied_ledger=$(TRADE_OS_DATABASE_URL="$TRADE_OS_DATABASE_URL" PGPASSFILE="${PGPASSFILE:-}" python3 - <<'PYEOF' 2>/dev/null || true
+  if [ ! -x "$formal_python" ]; then
+    write_result "failed" "db_plan" "formal Python unavailable: $formal_python" \
+      "repair the Trosa formal venv, then re-run the same release; production unchanged"
+    return 1
+  fi
+  if [ -z "${TRADE_OS_DATABASE_URL:-}" ]; then
+    write_result "failed" "db_plan" "migration ledger unreadable: TRADE_OS_DATABASE_URL is unset" \
+      "restore the formal PostgreSQL configuration, then re-run the same release; production unchanged"
+    return 1
+  fi
+  if ! applied_ledger=$(TRADE_OS_DATABASE_URL="$TRADE_OS_DATABASE_URL" PGPASSFILE="${PGPASSFILE:-}" "$formal_python" - "$RELEASE_DIR/migrations" <<'PYEOF'
 import os
+import sys
 try:
     import psycopg
     with psycopg.connect(os.environ["TRADE_OS_DATABASE_URL"]) as conn:
         with conn.cursor() as c:
             c.execute("SELECT name FROM audit.schema_migrations")
-            print(",".join(sorted(r[0] for r in c.fetchall())), end="")
-except Exception as e:
-    print("LEDGER_UNREADABLE:" + str(e)[:200], end="")
+            applied = {r[0] for r in c.fetchall()}
+    local = {name for name in os.listdir(sys.argv[1]) if name.endswith(".sql")}
+    if not all(isinstance(name, str) and name.endswith(".sql") and os.path.basename(name) == name for name in applied):
+        raise ValueError("ledger contains an invalid migration filename")
+    # The classifier receives only actual migration filenames from this
+    # release. Ledger entries from an older release are irrelevant to its
+    # pending-file comparison.
+    print(",".join(sorted(applied & local)), end="")
+except Exception as exc:
+    print("migration ledger query failed: " + str(exc)[:200], file=sys.stderr)
+    sys.exit(1)
 PYEOF
-)
+); then
+    write_result "failed" "db_plan" "migration ledger unreadable" \
+      "check PostgreSQL and the formal venv, then re-run the same release; production unchanged"
+    return 1
   fi
   local plan_json plan_category pending_list=""
   if [ -x "$RELEASE_DIR/tools/release_db_plan.py" ] || [ -f "$RELEASE_DIR/tools/release_db_plan.py" ]; then
-    plan_json=$(python3 "$RELEASE_DIR/tools/release_db_plan.py" "$RELEASE_DIR/migrations" --applied "$applied_ledger" 2>/dev/null || true)
+    if ! plan_json=$("$formal_python" "$RELEASE_DIR/tools/release_db_plan.py" "$RELEASE_DIR/migrations" --applied "$applied_ledger"); then
+      write_result "failed" "db_plan" "database plan generation failed" \
+        "inspect the release planner and re-run the same release; production unchanged"
+      return 1
+    fi
   fi
   if [ -z "${plan_json:-}" ]; then
     # Fallback heuristic when the release predates the planner: any migration
@@ -386,12 +415,6 @@ EOF
       "re-run publish with explicit destructive approval after reviewing pending migrations; production unchanged"
     return 0
   fi
-  if [ "${applied_ledger#LEDGER_UNREADABLE}" != "$applied_ledger" ]; then
-    write_result "failed" "db_plan" "migration ledger unreadable: $applied_ledger" \
-      "check PostgreSQL availability, then re-run the same release; production unchanged"
-    return 1
-  fi
-
   # ---- backup (server-local pre-migration snapshot; no download in publish path) ----
   local needs_backup
   needs_backup=$(printf '%s' "$plan_json" | python3 -c "import json,sys;print('1' if json.load(sys.stdin).get('requires_backup') else '0')" 2>/dev/null || printf '0')

@@ -47,8 +47,9 @@ if [ -n "${TRADE_OS_DATABASE_URL:-}" ] && [ -f /etc/trade-os/trade-os.env ]; the
   . /etc/trade-os/trade-os.env 2>/dev/null || true
   set +a
 fi
-if [ -n "${TRADE_OS_DATABASE_URL:-}" ]; then
-  migration_ledger=$(python3 - <<'PYEOF' 2>/dev/null || printf 'null'
+FORMAL_PYTHON=/opt/trade-os/venv/bin/python
+if [ -n "${TRADE_OS_DATABASE_URL:-}" ] && [ -x "$FORMAL_PYTHON" ]; then
+  migration_ledger=$("$FORMAL_PYTHON" - <<'PYEOF' 2>/dev/null || printf 'null'
 import json, os
 try:
     import psycopg

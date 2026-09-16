@@ -1,3 +1,10 @@
+## 2026-09-16 — 修复发布 runner 的迁移账本误判
+
+- 修复：ECS 发布 runner 读取 PostgreSQL migration ledger 统一使用正式 Trosa venv；账本查询或计划生成失败会在 db-plan 阶段立即失败，不再把错误文本当作 migration 名称交给 classifier。
+- 修复：账本失败检查移至 destructive 分类与拒绝之前；planner 只接受合法的 migration 文件名，已应用的历史破坏性 migration 不会重新参与判定。
+- 验证：32 项发布机制回归通过；`0001–0030` 已应用时仅 `0031_customer_pin_payload_backfill.sql` pending，分类为 compatible、无 destructive files。
+- 安全验证：新增固定零参数的 ECS 只读 db-plan wrapper；Cloud Assistant 的 `trosa-operator` 只能 sudo 调用该 wrapper，由 `tradeos` service account 查询 ledger 并输出脱敏计划 JSON，不提供 shell、SQL、DSN 或密码文件访问。
+
 ## 2026-09-16 — 客户工作区移除重复的下一步入口
 
 - 修复：客户简报“下一步”卡片里的“调整下一步 / 安排下一步”与右侧“执行动作”打开同一个弹窗，属重复入口且新建流程覆盖不了已有的下一步；现简报只展示动作与日期，安排与调整统一走右侧“安排下一步”与“全部待办”，完成 / 明天 / 3 天后保持不变。
