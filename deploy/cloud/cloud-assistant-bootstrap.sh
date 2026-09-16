@@ -51,7 +51,7 @@ RUNNER
 # select a database, SQL statement, release, or file: trosa-operator can only
 # ask the service account to inspect the currently active Trosa release.
 install -m 0755 -o root -g root /dev/stdin /usr/local/lib/trosa/db-plan-readonly-service <<'SERVICE'
-#!/usr/bin/env python3
+#!/opt/trade-os/venv/bin/python
 """Emit a secret-free database plan for the active Trosa release.
 
 This program runs as the formal ``tradeos`` account.  It reads no operator

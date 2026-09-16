@@ -242,6 +242,7 @@ class UnifiedEntrypointTests(unittest.TestCase):
         self.assertIn("TROSA_DB_PLAN_COMMIT must be an exact 40-character", text)
         self.assertIn("/usr/local/lib/trosa/release_db_plan.py", text)
         self.assertIn("runuser -u tradeos", text)
+        self.assertIn("#!/opt/trade-os/venv/bin/python", text)
         self.assertIn("SELECT name FROM audit.schema_migrations", text)
         self.assertIn("release_db_plan.py", text)
         self.assertIn('db-plan-readonly ""', text)
