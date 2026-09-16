@@ -189,8 +189,36 @@ while IFS= read -r path; do
 done <<< "$STAGED_FILES"
 
 if [[ "$DB_SENSITIVE" == 1 ]]; then
-  DB_DIFF="$(git diff --cached --unified=0 -- "${DB_FILES[@]}")"
-  if printf '%s\n' "$DB_DIFF" | grep -Eiq '^\+[^+].*(DROP[[:space:]]+(TABLE|TABLES|COLUMN|SCHEMA|DATABASE|INDEX)|TRUNCATE[[:space:]]+(TABLE|TABLES)|DELETE[[:space:]]+FROM|ALTER[[:space:]]+TABLE.*DROP)'; then
+  # 破坏性定义与 tools/release_db_plan.py 一致：DROP TABLE/COLUMN/SCHEMA、
+  # TRUNCATE、DELETE FROM、ALTER TABLE DROP COLUMN；DROP INDEX/CONSTRAINT
+  # 与触发器函数体内的行同步 DELETE 不算（仍会先备份）。
+  DESTRUCTIVE_GREP='^\+[^+].*(DROP[[:space:]]+(TABLE|TABLES|COLUMN|SCHEMA|DATABASE)|TRUNCATE[[:space:]]+(TABLE|TABLES)|DELETE[[:space:]]+FROM|ALTER[[:space:]]+TABLE.*DROP[[:space:]]+COLUMN)'
+  DB_DIFF_FILES=()
+  PLAN_PYTHON="$SOURCE_DIR/.venv/bin/python"
+  [[ -x "$PLAN_PYTHON" ]] || PLAN_PYTHON="$(command -v python3 || true)"
+  while IFS= read -r path; do
+    case "$path" in
+      migrations/*.sql) DB_DIFF_FILES+=("$path") ;;
+    esac
+  done <<< "$STAGED_FILES"
+  DESTRUCTIVE_HIT=""
+  if [[ ${#DB_DIFF_FILES[@]} -gt 0 ]]; then
+    if DESTRUCTIVE_HIT="$("$PLAN_PYTHON" "$SOURCE_DIR/tools/release_db_plan.py" --check-files "$SOURCE_DIR" "${DB_DIFF_FILES[@]}" 2>/dev/null)"; then
+      DESTRUCTIVE_HIT=""
+    fi
+    if [[ -z "$DESTRUCTIVE_HIT" ]]; then
+      DB_DIFF="$(git diff --cached --unified=0 -- "${DB_FILES[@]}")"
+      if printf '%s\n' "$DB_DIFF" | grep -Eiq "$DESTRUCTIVE_GREP"; then
+        DESTRUCTIVE_HIT="(grep fallback on runtime files)"
+      fi
+    fi
+  else
+    DB_DIFF="$(git diff --cached --unified=0 -- "${DB_FILES[@]}")"
+    if printf '%s\n' "$DB_DIFF" | grep -Eiq "$DESTRUCTIVE_GREP"; then
+      DESTRUCTIVE_HIT="(grep fallback on runtime files)"
+    fi
+  fi
+  if [[ -n "$DESTRUCTIVE_HIT" ]]; then
     if [[ "${TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB:-0}" != 1 ]]; then
       fail '检测到疑似破坏性数据库操作；需得到明确确认后设置 TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB=1 再发布'
     fi
@@ -310,15 +338,21 @@ if ! remote_after="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk 'NR 
 fi
 [[ "$remote_after" == "$COMMIT_SHA" ]] || fail "GitHub main 未确认到本次 commit：本地=$COMMIT_SHA 远程=$remote_after"
 
-RELEASE_ID="${TRADE_OS_RELEASE_ID:-auto-$(date -u +%Y%m%d%H%M%S)-$SHORT_SHA}"
+RELEASE_ID="${TRADE_OS_RELEASE_ID:-rel-$(date -u +%Y%m%d%H%M%S)-$SHORT_SHA}"
 publish_output=""
 publish_status=0
-if publish_output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_SOURCE_DIR="$SOURCE_DIR" TRADE_OS_RELEASE_ID="$RELEASE_ID" bash "$SCRIPT_DIR/publish-workbench.sh" 2>&1)"; then
+# 统一发布入口：trosa-release 在 ECS 后台执行幂等发布，本机只做发射+轮询；
+# 传输强制走 Workbench 控制面，不再经过 SSH（22 端口不再是发布链路）。
+publish_args=(publish --commit "$COMMIT_SHA" --release-id "$RELEASE_ID")
+if [[ "${TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB:-0}" == 1 ]]; then
+  publish_args+=(--allow-destructive-db)
+fi
+if publish_output="$(TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_SOURCE_DIR="$SOURCE_DIR" bash "$SCRIPT_DIR/trosa-release" "${publish_args[@]}" 2>&1)"; then
   :
 else
   publish_status=$?
   printf '%s\n' "$publish_output" >&2
-  printf 'GitHub 已保存 commit=%s，但 ECS 未确认上线；发布脚本应已自动保留上一 release。\n' "$COMMIT_SHA" >&2
+  printf 'GitHub 已保存 commit=%s，但 ECS 未确认上线；服务端 runner 已保留上一健康 release，重跑同一命令是安全的。\n' "$COMMIT_SHA" >&2
   exit "$publish_status"
 fi
 printf '%s\n' "$publish_output"

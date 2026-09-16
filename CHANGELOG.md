@@ -1,3 +1,13 @@
+## 2026-09-16 — 正式发布机制重做：统一入口与服务端幂等发布
+
+- 背景：多次发布在代码与测试全绿后，因 SSH（`Connection closed by port 22`）、备份下载、远程执行等部署链路问题失败，且中断后无法确定生产状态。新机制不再修单个 SSH 错误，而是替换整条链路。
+- 发布入口统一为 `deploy/cloud/trosa-release`（publish / status --json / rollback / db-plan）；`auto-publish.sh` 改为调用它，`publish-workbench.sh` / `rollback-workbench.sh` 冻结为 DEPRECATED 垫片，待一次真实发布验证后删除。
+- 发布全程在 ECS 后台幂等执行（fetch → db-plan → backup → migrate → activate → health），本机只发射加轮询；传输强制走 Workbench 控制面，22 端口不再是发布链路。同一 release 可断网重跑、Agent 退出重进，已是生产版本时直接返回 success。
+- 数据库成为正式阶段：`tools/release_db_plan.py` 给出 none / compatible / destructive / sensitive_runtime 四类（本地门禁与服务端 runner 共用定义）；有变化才做服务端本地预迁移快照，破坏性操作默认拒绝，需显式批准。
+- 状态确定：每个 release 有 `release.json` + `DEPLOY_RESULT.json`，ECS 有 `.deploy-state.json`（production / previous / previous_healthy）；深度健康检查含正式契约、页面、systemd、迁移账本、release 指针五项；回滚按 previous_healthy 指针执行（数据库前向不降级）。
+- 验证：新增 `tests/test_release_mechanism.py`（28 项，含故障语义与真实迁移分类）；194 项 Python 回归、`py_compile`、`node --check`、浏览器扩展测试通过。ECS 端验证（一次真实发布 + status/rollback 演练）待执行，步骤见 `deploy/cloud/README.md`。
+- 生产安全：本次未触碰 ECS、未改业务代码与数据库；新脚本随下一次正常代码发布一起上 ECS（release tarball 自带），旧链路保留到验证完成。
+
 ## 2026-09-14 — 修复 PostgreSQL 共用主档写入串用户
 
 - 修复：共用同一公司主档时，客户资料、归档、置顶/排序、沟通与待办的日期汇总、客户等级和联系人编辑仍可能写入共享 PostgreSQL 行；现在这些 Customer/Contact 事实只更新当前用户的投影。Hamid 与 Amy 可同时保有同一公司，而名称、状态、归档、联系人、沟通汇总和客户列表互不污染。

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Switch to the newest release that is not currently active, then verify it.
+#
+# DEPRECATED: 请使用 deploy/cloud/trosa-release rollback（按 previous_healthy
+# 指针回滚、带深度健康检查与机器可读结果）。本脚本冻结保留至新机制验证后删除。
 set -euo pipefail
+printf 'DEPRECATED: rollback-workbench.sh 已冻结，请改用 deploy/cloud/trosa-release rollback\n' >&2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"

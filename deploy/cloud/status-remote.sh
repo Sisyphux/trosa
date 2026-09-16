@@ -20,6 +20,51 @@ release=${release##*/}
 if [ -z "$release" ]; then release=none; fi
 printf 'TROSA_MANAGER_STATUS app=%s tunnel=%s health=%s release=%s\n' "$app_status" "$tunnel_status" "$health_status" "$release"
 
+# Machine-readable deployment record for trosa-release status --json.
+# Always emitted; values fall back to explicit "unknown" instead of guessing.
+if [ -f /opt/trade-os/.deploy-state.json ]; then
+  deploy_state=$(cat /opt/trade-os/.deploy-state.json 2>/dev/null | tr -d '\n' || true)
+else
+  deploy_state=''
+fi
+if [ -z "$deploy_state" ]; then
+  deploy_state='{"production":{"id":"'"$release"'","commit":"unknown"},"previous":{"id":"unknown","commit":"unknown"},"previous_healthy":{"id":"unknown","commit":"unknown"},"deploy_state":"legacy","note":"no .deploy-state.json yet; production pointer is the current symlink"}'
+fi
+if [ -f /opt/trade-os/.last-deploy-result.json ]; then
+  last_result=$(cat /opt/trade-os/.last-deploy-result.json 2>/dev/null | tr -d '\n' || true)
+else
+  last_result='null'
+fi
+if [ -f "/opt/trade-os/releases/$release/release.json" ]; then
+  release_manifest=$(cat "/opt/trade-os/releases/$release/release.json" 2>/dev/null | tr -d '\n' || true)
+else
+  release_manifest='null'
+fi
+migration_ledger='null'
+if [ -n "${TRADE_OS_DATABASE_URL:-}" ] && [ -f /etc/trade-os/trade-os.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/trade-os/trade-os.env 2>/dev/null || true
+  set +a
+fi
+if [ -n "${TRADE_OS_DATABASE_URL:-}" ]; then
+  migration_ledger=$(python3 - <<'PYEOF' 2>/dev/null || printf 'null'
+import json, os
+try:
+    import psycopg
+    with psycopg.connect(os.environ["TRADE_OS_DATABASE_URL"]) as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT count(*), max(applied_at) FROM audit.schema_migrations")
+            count, applied_at = c.fetchone()
+    print(json.dumps({"applied_count": count, "last_applied_at": str(applied_at)}))
+except Exception as e:
+    print(json.dumps({"error": str(e)[:200]}))
+PYEOF
+)
+fi
+printf 'TROSA_DEPLOY_JSON {"deploy_state":%s,"last_result":%s,"release_manifest":%s,"migration_ledger":%s}\n' \
+  "$deploy_state" "$last_result" "$release_manifest" "$migration_ledger"
+
 # Keep the resource line stable and machine-readable so the Mac workbench can
 # present host facts without scraping the human-oriented diagnostic output.
 cpu_snapshot() {

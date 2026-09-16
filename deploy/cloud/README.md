@@ -1,5 +1,35 @@
 # ECS + Workbench 发布流程
 
+> 正式发布统一入口：`deploy/cloud/trosa-release`。Codex、Qoder、人工、其他
+> Agent 一律使用它；不要手写 SSH 命令、不要直调底层脚本。
+>
+> ```bash
+> deploy/cloud/trosa-release status --json   # production / previous / migration / backup / health
+> deploy/cloud/trosa-release publish --commit <sha> [--release-id ID]
+> deploy/cloud/trosa-release rollback        # 切回 previous_healthy（数据库不降级）
+> ```
+>
+> 原理（一句话）：本机只做“发射 + 轮询”，真正的发布在 ECS 上由
+> `release-remote.sh` 以后台任务幂等执行；传输强制走 Workbench 控制面，
+> SSH 的 22 端口不再是发布链路——本机断网、Agent 退出后重进，都只是重新
+> 轮询同一个 release。每次发布对应 `releases/<id>/release.json` 与
+> `DEPLOY_RESULT.json`（release/commit/mode/phase/status/production/
+> previous/backup/migration/health/error/next_action），`status --json`
+> 直接给出机器可读结论。
+>
+> 数据库分类（`tools/release_db_plan.py`，本地与服务端共用同一定义）：
+> `none`（无变化，不备份）、`compatible`（新增前向迁移/数据回填/索引替换，
+> 自动做服务端预迁移备份后执行）、`destructive`（迁移时执行的 DROP
+> TABLE/COLUMN、TRUNCATE、DELETE 等数据丢失操作，拒绝自动发布，需明确
+> `--allow-destructive-db`）、`sensitive_runtime`（迁移代码变化但无新文件，
+> 按 compatible 处理）。触发器函数体内的行同步 DELETE 与 DROP
+> INDEX/CONSTRAINT 不算破坏性。备份是服务端本地快照（发布链路内），下载
+> 到 Mac 的异地归档只在需要时用 `backup-workbench.sh` 按需拉取，不再是
+> 每次发布的前置步骤。
+>
+> `publish-workbench.sh` / `rollback-workbench.sh` 已冻结为兼容垫片（会打印
+> DEPRECATED 警告），待新机制经一次真实发布验证后删除。
+
 Trade OS 使用一台持久磁盘 ECS、一个 Waitress 进程、一个 PostgreSQL 写入源和一个 Cloudflare Tunnel。不要启动第二个 Trade OS 实例，也不要把 `data/`、`.env` 或 `.venv` 上传到发布包。ECS 主机防火墙只允许 SSH，应用只监听 `127.0.0.1:8080`；PostgreSQL 只监听 ECS `127.0.0.1:5432`。
 
 首次配置：
@@ -85,7 +115,15 @@ deploy/cloud/rollback-workbench.sh
 deploy/cloud/logs-workbench.sh
 ```
 
-`auto-publish.sh` 是日常入口；`publish-workbench.sh` 是底层发布器。底层发布器让 ECS 通过 SSM 下载指定 commit 的公开归档，解压到新的 release 目录，安装依赖，执行 Python 语法检查，原子切换 `current` 符号链接，重启服务并验证本机健康接口；失败时会自动切回上一个 release。ECS 发布锁保证同一时间只有一个 release 在切换。发布包来自已推送的 commit，不包含本机未提交修改，也不上传本地数据、密钥或虚拟环境。
+`auto-publish.sh` 是日常入口；`trosa-release publish` 是统一发布器。`auto-publish.sh`
+先做本地回归、只读 ECS 状态、提交并推送，再调用 `trosa-release publish`
+发布同一个 commit。底层发布器让 ECS 后台任务下载指定 commit 的公开归档，
+按阶段执行：fetch → db-plan（显式迁移分类）→ backup（仅有数据库变化时，
+服务端本地快照）→ migrate（切换流量之前）→ activate（原子切换 `current`
+符号链接并重启）→ health（契约 + 页面 + systemd + 迁移账本 +
+release 指针五项深度检查）；失败时按阶段自动回滚代码并写入机器可读结果。
+ECS 发布锁保证同一时间只有一个 release 在执行；同一 release 重复执行是
+幂等的（已是生产版本且健康时直接返回 success）。
 
 `backup-workbench.sh` 会调用 ECS PostgreSQL 生产目录的 verified logical dump，核对 dump
 的 SHA-256 和 `pg_restore --list`，再把数据库 dump、客户附件和 manifest 打包下载到 Mac 的

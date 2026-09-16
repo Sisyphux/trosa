@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Publish the current worktree as an atomic release through Workbench.
+#
+# DEPRECATED: 日常发布请使用 deploy/cloud/trosa-release（统一入口、ECS 后台
+# 幂等执行、强制 Workbench 传输）。本脚本仅作为新机制验证完成前的冻结兼容
+# 垫片保留，不再演进；待新机制经一次真实发布验证后删除。
 set -euo pipefail
+printf 'DEPRECATED: publish-workbench.sh 已冻结，请改用 deploy/cloud/trosa-release publish\n' >&2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"

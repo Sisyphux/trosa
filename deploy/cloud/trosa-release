@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Trosa 正式发布统一入口。
+#
+# Codex、Qoder、人工、其他 Agent —— 所有发布都走这一个命令：
+#   deploy/cloud/trosa-release publish --commit <sha> [--release-id ID] [--allow-destructive-db]
+#   deploy/cloud/trosa-release status [--json]
+#   deploy/cloud/trosa-release rollback
+#
+# 设计原则：
+# 1. 本机只做"发射 + 轮询"，真正的发布全程在 ECS 上由 release-remote.sh
+#    以 setsid 后台任务执行。本机网络中断、Agent 退出后重进，都只是重新
+#    轮询同一个 release，不会产生半发布。
+# 2. 传输层强制走 Workbench 控制面（exec / download），绝不使用 SSH。
+#    这消除了 "Connection closed by ... port 22" 整类故障：22 端口不再是
+#    发布链路的一部分。实现方式是清空 TRADE_OS_SSH_HOST 并强制
+#    TRADE_OS_PREFER_WORKBENCH=1，再调用 run-workbench-command.sh。
+# 3. 同一个 release 重复执行是幂等的：服务端按 release id + commit 去重，
+#    已是生产版本且健康时直接返回 success/already_production。
+# 4. 所有输出都是机器可读的：RESULT JSON 包含 release / production /
+#    previous / backup / migration / health / rollback 状态与 next_action。
+set -euo pipefail
+export LC_ALL=C
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
+SOURCE_DIR="${TRADE_OS_SOURCE_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  trosa-release publish --commit <sha> [--release-id ID] [--allow-destructive-db]
+  trosa-release status [--json]
+  trosa-release rollback [--allow-destructive-db]
+  trosa-release db-plan [--applied a,b,c] [--changed p1,p2]
+
+publish  把已推送到 GitHub 的 commit 发布为一个明确 release（幂等，可重跑）。
+status   查看 production / previous / migration / backup / health 的确定状态。
+rollback 切回上一个健康 release（数据库 forward-only，不降级 schema）。
+db-plan  本地预检本次改动的数据库分类（none/compatible/destructive）。
+EOF
+}
+
+fail() { printf 'trosa-release: %s\n' "$*" >&2; exit 1; }
+
+[[ -r "$ENV_FILE" ]] || fail "找不到发布配置 $ENV_FILE；请先复制 workbench.env.example"
+# workbench.env 只允许路由元数据；解析仓库根后以其为准。
+PROJECT_ROOT="$SOURCE_DIR"
+source "$ENV_FILE"
+SOURCE_DIR="$PROJECT_ROOT"
+
+: "${TRADE_OS_ECS_REGION:?TRADE_OS_ECS_REGION is required}"
+: "${TRADE_OS_ECS_INSTANCE_ID:?TRADE_OS_ECS_INSTANCE_ID is required}"
+REMOTE_ROOT="${TRADE_OS_REMOTE_ROOT:-/opt/trade-os}"
+SERVICE_NAME="${TRADE_OS_SERVICE_NAME:-trade-os}"
+GITHUB_REMOTE="${TRADE_OS_GITHUB_REPOSITORY:-$(git -C "$SOURCE_DIR" remote get-url origin 2>/dev/null || true)}"
+
+case "$GITHUB_REMOTE" in
+  https://github.com/*.git) GITHUB_REMOTE="${GITHUB_REMOTE%.git}" ;;
+  https://github.com/*) ;;
+  git@github.com:*) GITHUB_REMOTE="https://github.com/${GITHUB_REMOTE#git@github.com:}"; GITHUB_REMOTE="${GITHUB_REMOTE%.git}" ;;
+  *) fail "发布需要公开 GitHub origin（ECS 直接下载该 commit 归档），当前为：$GITHUB_REMOTE" ;;
+esac
+GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
+
+# ---- 强制 Workbench，彻底绕开 SSH -------------------------------------------
+# run-workbench-command.sh 在配置了 TRADE_OS_SSH_HOST 时默认优先 SSH，
+# 这正是过去 "Connection closed by port 22" 打断发布/备份的根因。
+# 发布链路一律清空 SSH 配置、强制 Workbench 控制面。
+export TRADE_OS_SSH_HOST=""
+export TRADE_OS_PREFER_WORKBENCH=1
+
+wb_exec() {
+  # 短命令、只读轮询或发射器；单次调用永不超过 Workbench 超时。
+  bash "$SCRIPT_DIR/run-workbench-command.sh" \
+    "$TRADE_OS_ECS_INSTANCE_ID" "$TRADE_OS_ECS_REGION" "$1"
+}
+
+remote_sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+cmd=${1:-}
+case "$cmd" in
+  db-plan)
+    shift
+    exec python3 "$SOURCE_DIR/tools/release_db_plan.py" "$SOURCE_DIR/migrations" "$@"
+    ;;
+  status)
+    shift
+    as_json=0
+    for arg in "$@"; do
+      case "$arg" in
+        --json) as_json=1 ;;
+        *) fail "status 未知参数：$arg" ;;
+      esac
+    done
+    # status-remote.sh 已包含 TROSA_DEPLOY_JSON 行；--json 只抽取机器部分。
+    output="$(TROSA_WORKBENCH_EXPECT_TIMEOUT=45 wb_exec "bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'")" || {
+      printf '%s\n' "$output" >&2
+      fail "无法读取 ECS 状态（Workbench 控制面失败），production 状态未知——未做任何变更，可稍后重跑 status"
+    }
+    if [[ "$as_json" == 1 ]]; then
+      json_line="$(printf '%s\n' "$output" | grep '^TROSA_DEPLOY_JSON ' | tail -n 1 | sed 's/^TROSA_DEPLOY_JSON //')"
+      status_line="$(printf '%s\n' "$output" | grep '^TROSA_MANAGER_STATUS ' | tail -n 1)"
+      if [[ -n "$json_line" ]]; then
+        printf '%s\n' "$json_line" | python3 -c "
+import json,sys
+doc=json.load(sys.stdin); doc['manager_status']='$status_line'; print(json.dumps(doc,indent=2,sort_keys=True,ensure_ascii=False))"
+      else
+        # 旧 release 尚无 DEPLOY_JSON：明确报告未知，而不是猜测。
+        python3 -c "
+import json
+print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布脚本，尚无部署状态账本','manager_status':'$status_line','next_action':'用新机制发布一次后即可获得确定状态'},indent=2,ensure_ascii=False))"
+      fi
+    else
+      printf '%s\n' "$output"
+    fi
+    ;;
+  publish|rollback)
+    mode=$cmd
+    shift
+    COMMIT=""
+    RELEASE_ID=""
+    ALLOW_DESTRUCTIVE=0
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --commit) [[ $# -ge 2 ]] || fail "--commit 需要一个值"; COMMIT=$2; shift 2 ;;
+        --release-id) [[ $# -ge 2 ]] || fail "--release-id 需要一个值"; RELEASE_ID=$2; shift 2 ;;
+        --allow-destructive-db) ALLOW_DESTRUCTIVE=1; shift ;;
+        *) fail "未知参数：$1" ;;
+      esac
+    done
+    if [[ "$mode" == "publish" ]]; then
+      [[ -n "$COMMIT" ]] || fail "publish 需要 --commit（必须是已推送到 GitHub 的 commit）"
+      [[ "$COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || fail "commit 必须是 40 位 SHA：$COMMIT"
+      if ! git -C "$SOURCE_DIR" cat-file -e "$COMMIT" 2>/dev/null; then
+        fail "本地仓库找不到 commit $COMMIT"
+      fi
+      if [[ -z "$RELEASE_ID" ]]; then
+        RELEASE_ID="rel-$(date -u +%Y%m%d%H%M%S)-${COMMIT:0:7}"
+      fi
+    else
+      # rollback 结果写入独立目录，不与任何代码 release 混淆。
+      [[ -z "$RELEASE_ID" ]] && RELEASE_ID="rollback-$(date -u +%Y%m%d%H%M%S)"
+      [[ -n "$COMMIT" ]] || COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || printf '0000000000000000000000000000000000000000')"
+    fi
+    case "$RELEASE_ID" in ''|*[!A-Za-z0-9._-]*) fail "非法 release id：$RELEASE_ID" ;; esac
+
+    # 发射：把 runner 本体从该 commit 的 GitHub raw 取到 ECS，并以 setsid
+    # 后台启动。发射命令本身只有几行，SSM 输入不会损坏；真正耗时的
+    # pip install / pg_dump / migration / restart 全在 ECS 后台跑，
+    # 本机断网不会中断它们。
+    RUNNER_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$COMMIT/deploy/cloud/release-remote.sh"
+    launch=$(cat <<EOF
+set -euo pipefail
+RUNNER_FILE='/tmp/trosa-release-remote-$RELEASE_ID.sh'
+curl --fail --location --silent --show-error --max-time 60 '$RUNNER_URL' -o "\$RUNNER_FILE"
+chmod +x "\$RUNNER_FILE"
+setsid nohup bash "\$RUNNER_FILE" '$REMOTE_ROOT' '$SERVICE_NAME' '$RELEASE_ID' '$COMMIT' '$GITHUB_REMOTE' '$mode' '$ALLOW_DESTRUCTIVE' >'/tmp/trosa-release-$RELEASE_ID.launch.log' 2>&1 < /dev/null &
+printf 'launched %s mode=%s\n' '$RELEASE_ID' '$mode'
+EOF
+)
+    if ! launch_out="$(wb_exec "$launch")"; then
+      printf '%s\n' "$launch_out" >&2
+      fail "发射失败（Workbench 控制面错误）。服务端未启动新任务，production 未变更；可直接重跑"
+    fi
+    printf '%s\n' "$launch_out" | grep -q "launched $RELEASE_ID" || {
+      printf '%s\n' "$launch_out" >&2
+      fail "发射未确认。production 未变更；可直接重跑"
+    }
+
+    # 轮询：只读 cat 结果文件，单次调用都是短命令，可安全重试。
+    # 任何一次轮询失败都只意味着"本次没问到"，不代表发布失败。
+    deadline=$((SECONDS + 600))
+    last_status=""
+    while [[ $SECONDS -lt $deadline ]]; do
+      sleep 5
+      poll_out="$(wb_exec "cat '$REMOTE_ROOT/.last-deploy-result.json' 2>/dev/null; echo; cat '$REMOTE_ROOT/releases/$RELEASE_ID/DEPLOY_RESULT.json' 2>/dev/null" 2>/dev/null || true)"
+      doc="$(printf '%s\n' "$poll_out" | python3 -c "
+import json,sys
+best=None
+for line in sys.stdin.read().splitlines():
+    line=line.strip()
+    if not line.startswith('{'): continue
+    try: d=json.loads(line)
+    except Exception: continue
+    if d.get('release')=='$RELEASE_ID': best=d
+print(json.dumps(best) if best else '')" 2>/dev/null || true)"
+      if [[ -z "$doc" ]]; then
+        # runner 还没写出首个结果（仍在 fetch 阶段）；继续等。
+        continue
+      fi
+      last_status="$(printf '%s' "$doc" | python3 -c "import json,sys;print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
+      if [[ "$last_status" != "in_progress" && -n "$last_status" ]]; then
+        printf '%s\n' "$doc" | python3 -m json.tool
+        case "$last_status" in
+          success) printf 'TROSA_RELEASE_SUCCESS release=%s\n' "$RELEASE_ID"; exit 0 ;;
+          refused)
+            printf 'TROSA_RELEASE_REFUSED release=%s（production 未变更，见 next_action）\n' "$RELEASE_ID" >&2; exit 3 ;;
+          rolled_back)
+            printf 'TROSA_RELEASE_ROLLED_BACK release=%s（已自动恢复上一健康版本，见 next_action）\n' "$RELEASE_ID" >&2; exit 4 ;;
+          *) printf 'TROSA_RELEASE_FAILED release=%s status=%s（见 error/next_action）\n' "$RELEASE_ID" "$last_status" >&2; exit 1 ;;
+        esac
+      fi
+    done
+    printf '轮询超时（10 分钟）。release %s 仍在服务端执行或结果不可读。\n' "$RELEASE_ID" >&2
+    printf 'production 状态未知但服务端任务不受本机影响：重跑 status 查看，或重跑同一 publish（幂等）。\n' >&2
+    exit 5
+    ;;
+  ""|--help|-h|help)
+    usage
+    ;;
+  *)
+    fail "未知命令：$cmd（可用：publish / status / rollback / db-plan）"
+    ;;
+esac
