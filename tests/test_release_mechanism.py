@@ -241,6 +241,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
         self.assertIn("install -d -m 0711 -o root -g root /usr/local/lib/trosa", text)
         self.assertIn("TROSA_DB_PLAN_COMMIT must be an exact 40-character", text)
         self.assertIn("/usr/local/lib/trosa/release_db_plan.py", text)
+        self.assertIn("https://codeload.github.com/Sisyphux/trosa/tar.gz/${planner_commit}", text)
+        self.assertIn("/usr/local/lib/trosa/db-plan-migrations", text)
         self.assertIn("runuser -u tradeos", text)
         self.assertIn("#!/opt/trade-os/venv/bin/python", text)
         self.assertIn("SELECT name FROM audit.schema_migrations", text)

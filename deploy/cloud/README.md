@@ -54,7 +54,8 @@ Cloud Assistant 使用 Workbench 的本机受保护 AK profile（`~/.workbench/c
 PGPASSFILE 内容或其他环境变量，也不能执行 SQL、迁移、重启或切换 release。
 安装该只读能力时需把经过审阅、已推送的 Trosa commit 作为
 `TROSA_DB_PLAN_COMMIT` 传给 root bootstrap；ECS 会从该精确公开 commit 安装同一份
-`release_db_plan.py` 到 root 管理的位置，旧 release 没有 planner 时也不会复制一套规则。
+`release_db_plan.py` 和只读 migration 清单到 root 管理的位置，旧 release 没有 planner
+或尚未包含候选迁移时也不会复制一套规则。该安装不切换运行 release。
 
 首次配置还需要由维护者安全写入 `/etc/trade-os/trade-os.env`、`/etc/cloudflared/config.yml` 和 Tunnel 凭据，然后再启用：
 

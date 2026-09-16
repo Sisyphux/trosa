@@ -14,11 +14,29 @@ if [[ ! "$planner_commit" =~ ^[0-9a-fA-F]{40}$ ]]; then
   exit 2
 fi
 planner_tmp="/tmp/trosa-release-db-plan-${planner_commit}.py"
+source_archive="/tmp/trosa-db-plan-source-${planner_commit}.tar.gz"
+source_stage="/tmp/trosa-db-plan-source-${planner_commit}"
+source_migrations="$source_stage/migrations"
 curl --fail --location --silent --show-error --max-time 60 \
   "https://raw.githubusercontent.com/Sisyphux/trosa/${planner_commit}/tools/release_db_plan.py" \
   -o "$planner_tmp"
 install -m 0555 -o root -g root "$planner_tmp" /usr/local/lib/trosa/release_db_plan.py
 rm -f "$planner_tmp"
+curl --fail --location --silent --show-error --max-time 120 \
+  "https://codeload.github.com/Sisyphux/trosa/tar.gz/${planner_commit}" -o "$source_archive"
+rm -rf "$source_stage"
+mkdir -p "$source_stage"
+tar -xzf "$source_archive" -C "$source_stage" --strip-components=1
+rm -f "$source_archive"
+if [[ ! -d "$source_migrations" ]]; then
+  printf '%s\n' 'Pinned Trosa commit has no migrations directory.' >&2
+  exit 1
+fi
+rm -rf /usr/local/lib/trosa/db-plan-migrations
+cp -a "$source_migrations" /usr/local/lib/trosa/db-plan-migrations
+chown -R root:root /usr/local/lib/trosa/db-plan-migrations
+chmod -R a+rX /usr/local/lib/trosa/db-plan-migrations
+rm -rf "$source_stage"
 if ! id -u trosa-operator >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/trosa-operator \
     --shell /usr/sbin/nologin --user-group trosa-operator
@@ -78,8 +96,7 @@ if len(sys.argv) != 1:
 
 remote_root = "/opt/trade-os"
 python_bin = f"{remote_root}/venv/bin/python"
-current = os.path.realpath(f"{remote_root}/current")
-migrations = os.path.join(current, "migrations")
+migrations = "/usr/local/lib/trosa/db-plan-migrations"
 planner = "/usr/local/lib/trosa/release_db_plan.py"
 if not (os.path.isfile(python_bin) and os.path.isdir(migrations) and os.path.isfile(planner)):
     emit_error("formal_runtime_unavailable")
