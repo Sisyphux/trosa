@@ -34,7 +34,7 @@ Usage:
 
 --quick 只做 Python/JavaScript 语法检查，用于快速反馈；
 默认执行完整门禁：语法检查 → 隔离数据目录 Python 回归（失败重跑一次）→
-浏览器扩展回归。退出码非 0 表示这棵树不可发布。
+真实 PostgreSQL 演练 → 真实 Chromium 页面验收 → 浏览器扩展回归。退出码非 0 表示这棵树不可发布。
 EOF
 }
 
@@ -147,6 +147,23 @@ else
     fail "Python 回归测试两次均失败（第一次 %s，第二次 %s）" "$first_status" "$second_status"
   fi
 fi
+
+printf '\n==> PostgreSQL rehearsal（真实 loopback PostgreSQL）\n'
+REHEARSAL_GATE_PORT="${TROSA_RELEASE_REHEARSAL_PORT:-}"
+if [[ -z "$REHEARSAL_GATE_PORT" ]]; then
+  REHEARSAL_GATE_PORT="$("$PYTHON_BIN" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+fi
+TROSA_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" CRM_ENV=rehearsal \
+  "$PYTHON_BIN" "$TREE/tools/postgres_rehearsal.py" test \
+  || fail 'PostgreSQL rehearsal failed; this gate never converts it to SKIP'
+printf '完成：PostgreSQL rehearsal\n'
+
+printf '\n==> 真实 Chromium 页面验收（Customer → 沟通 → Today → Inbox → Search）\n'
+[[ -x "$TREE/tools/browser_acceptance.sh" ]] \
+  || fail "找不到真实浏览器验收入口：$TREE/tools/browser_acceptance.sh"
+"$TREE/tools/browser_acceptance.sh" \
+  || fail '真实 Chromium 页面验收失败；不会以 DOM/语法测试代替'
+printf '完成：真实 Chromium 页面验收\n'
 
 printf '\n==> 浏览器扩展回归测试\n'
 (cd "$TREE/browser-extension" && npm test) || fail '浏览器扩展回归测试失败'

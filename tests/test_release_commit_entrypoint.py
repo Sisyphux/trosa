@@ -58,10 +58,24 @@ class CommitReleaseEntrypointTests(unittest.TestCase):
         for token in ("CRM_ENV=development", "TRADE_OS_DEV_SQLITE=1",
                       "TRADE_OS_DATA_BACKEND=sqlite", 'CRM_DB_PATH="$TEST_DATA_DIR"',
                       'TRADE_OS_WORKBENCH_ENV="$TEST_ENV_FILE"',
-                      "unittest discover", "npm test"):
+                      "unittest discover", "tools/postgres_rehearsal.py",
+                      "browser_acceptance.sh", "npm test"):
             self.assertIn(token, gate)
         task_script = read("deploy/cloud/agent-worktree.sh")
         self.assertIn("release-test.sh", task_script)
+
+    def test_real_browser_acceptance_has_no_skip_path(self):
+        script = read("tools/browser_acceptance.sh")
+        for token in ("tabbit-cli", "不会把浏览器验收标记为 SKIP",
+                      "tools/postgres_rehearsal.py", "serve_rehearsal.py",
+                      "nodejs"):
+            self.assertIn(token, script)
+        program = read("tools/browser_acceptance.js")
+        for token in ("#loginOverlay", "#inboxReplyContent",
+                      "#inboxReplyNextDate", "page-dashboard",
+                      "page-inbox", "globalPageSearch", "Customer",
+                      "Today", "Inbox", "Search"):
+            self.assertIn(token, program)
 
     def test_legacy_file_list_is_not_accepted(self):
         proc = subprocess.run(

@@ -41,6 +41,10 @@ deploy/cloud/workbench.env
 .venv/
 .venv-mac/
 node_modules/
+# agent worktrees reuse these runtimes through symlinks; directory-only
+# patterns do not ignore a symlink itself.
+.venv
+browser-extension/node_modules
 .pytest_cache/
 .rehearsal/
 .local/postgres-rehearsal/

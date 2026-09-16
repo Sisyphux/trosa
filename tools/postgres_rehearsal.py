@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -35,7 +37,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 STATE_DIR = ROOT / ".local" / "postgres-rehearsal"
 DATA_DIR = STATE_DIR / "data"
-SOCKET_DIR = STATE_DIR / "socket"
+# PostgreSQL appends ``.s.PGSQL.<port>`` to this directory.  A release
+# worktree lives below macOS's long temporary path, which can exceed the
+# Unix-domain socket limit even though the data directory itself is valid.
+# Keep the socket path short and deterministic per isolated data directory.
+_SOCKET_KEY = hashlib.sha256(str(DATA_DIR).encode("utf-8")).hexdigest()[:12]
+SOCKET_DIR = Path(tempfile.gettempdir()) / f"trosa-pg-{_SOCKET_KEY}"
 LOG_PATH = STATE_DIR / "postgres.log"
 DEFAULT_PORT = 55432
 DEFAULT_DATABASE = "trosa_rehearsal"
@@ -158,8 +165,17 @@ def start_server() -> None:
     _ensure_cluster()
     if _pg_ctl_status():
         if not _ready():
-            raise RuntimeError("The rehearsal cluster is running but not accepting local connections")
-        return
+            # A previous acceptance process may have sent fast-shutdown and
+            # exited while PostgreSQL was still draining connections.  This is
+            # our dedicated DATA_DIR, so it is safe to finish that shutdown
+            # before starting the repeatable rehearsal again.
+            _run([_tool("pg_ctl"), "-D", str(DATA_DIR), "-m", "fast", "-w", "stop"], check=False)
+            if _pg_ctl_status():
+                raise RuntimeError(
+                    "The rehearsal cluster is running but not accepting local connections"
+                )
+        else:
+            return
     # A different process must never be mistaken for this cluster.  Refuse to
     # start if the dedicated port is already occupied by an unrelated server.
     if _ready():

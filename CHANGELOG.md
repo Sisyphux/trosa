@@ -2231,4 +2231,10 @@
 
 - 运维变化：`trosa-release`、状态与日志读取改为 Alibaba Cloud Assistant 的 `RunCommand` / `DescribeInvocations`；正式发布仍由 ECS 上既有的 `release-remote.sh`、其状态机、迁移备份、健康检查与回滚执行。
 - 安全：不再依赖 Workbench 的实例 root/SSH 类认证或保存的 root 密码。新增不可登录的 `trosa-operator`；其 sudo 权限仅能调用一个固定、参数校验的发布包装器。RAM 凭据继续只存本机 0600 Workbench 配置，不进入仓库、环境示例或 Agent 提示词。
-- 验证：Cloud Assistant Agent 在线；root 密码认证失败时仍成功执行 Cloud Assistant 命令，且 `trosa-operator` 状态查询返回 production `app=active`、`tunnel=active`、`health=ok`。
+ - 验证：Cloud Assistant Agent 在线；root 密码认证失败时仍成功执行 Cloud Assistant 命令，且 `trosa-operator` 状态查询返回 production `app=active`、`tunnel=active`、`health=ok`。
+
+## 2026-09-16 — 发布门禁纳入真实 PostgreSQL 与 Chromium 验收
+
+- 发布候选现在必须真实重建隔离 PostgreSQL、应用全部迁移并通过 PostgreSQL 集成演练；不再把缺少 DSN、数据库工具或服务不可用静默记为 SKIP。
+- 新增 Tabbit Chromium 页面验收：真实登录后完成 Customer → 沟通与明确日期待办 → Today → Inbox → Search，并核对页面可见结果；同源残留 service worker 会在验收开始时清理，避免把其他本地应用误当成 Trosa。
+- 发布候选继续在独立 release worktree 中运行这些门禁，主工作区的未提交修改、暂存区和未跟踪文件不参与发布。
