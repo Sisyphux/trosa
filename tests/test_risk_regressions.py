@@ -2274,10 +2274,12 @@ class InputBoundaryRegressionTest(unittest.TestCase):
     def test_saved_communication_refreshes_its_open_workspace_and_parent_list(self):
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
         handler = javascript[javascript.index('async function addFollowHistory()'):javascript.index('async function saveCustomerWorkspaceAndExit()')]
-        self.assertIn('syncCustomerWorkspaceAfterCommunication(id, activity)', handler)
+        self.assertIn('syncCustomerWorkspaceAfterCommunication(id, activity, changedKey)', handler)
         self.assertIn("if (currentPage === 'dashboard') loadDashboard();", handler)
         self.assertIn("else if (currentPage === 'customers') loadCustomers({ preservePosition: true });", handler)
-        self.assertIn('function syncCustomerWorkspaceAfterCommunication(customerId, activity)', javascript)
+        self.assertIn('function syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey)', javascript)
+        self.assertIn('upsertCustomerTimelineEntry(activity)', handler)
+        self.assertIn('reconcileCustomerTimeline({ includeSummary: true })', handler)
         self.assertIn('recentFactFromCommunication(activity)', javascript)
         self.assertIn('recent_facts: _customerDetailCache.recent_facts', javascript)
         self.assertIn("_customerDetailCache.current_next_step = saved.next_step", handler)
@@ -3117,6 +3119,69 @@ class CustomerTaskActionRegressionTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('customer task action regression: OK', result.stdout)
+
+
+class ModalExitRegressionTest(unittest.TestCase):
+    """Every modal keeps a working exit; the unsaved-changes prompt stays reachable."""
+
+    def test_open_modal_raises_the_new_dialog_above_open_ones(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.assertIn('function raiseModalAboveOpenDialogs(modal)', javascript)
+        open_modal = javascript[javascript.index('function openModal(id) {'):javascript.index('function closeModal(id, force) {')]
+        self.assertIn('raiseModalAboveOpenDialogs(modal);', open_modal)
+        raiser = javascript[javascript.index('function raiseModalAboveOpenDialogs(modal) {'):javascript.index('function openModal(id) {')]
+        self.assertIn("document.querySelectorAll('.modal-overlay.show')", raiser)
+        self.assertIn('document.body.appendChild(modal);', raiser)
+
+    def test_unsaved_prompt_is_shown_on_top_of_the_modal_it_protects(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        guard = javascript[javascript.index('_pendingCustomerModalClose = id;'):javascript.index("if (id === 'customerEditModal') {")]
+        self.assertIn("openModal('unsavedChangesModal');", guard)
+        self.assertNotIn("document.getElementById('unsavedChangesModal').classList.add('show')", guard)
+
+    def test_escape_dismisses_the_topmost_modal(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        handler = javascript[javascript.index("if (e.key !== 'Escape') return;"):javascript.index("window.addEventListener('beforeunload'")]
+        self.assertIn("if (top.id === 'unsavedChangesModal') continueEditingCustomerForm();", handler)
+        self.assertIn('else closeModal(top.id);', handler)
+
+    def test_modal_exit_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'modal_exit_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('modal exit regression: OK', result.stdout)
+
+
+class TimelineLocalEchoRegressionTest(unittest.TestCase):
+    """Customer timeline writes paint locally and use the shared motion states."""
+
+    def test_timeline_local_echo_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'timeline_local_echo_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('timeline local echo regression: OK', result.stdout)
 
 
 if __name__ == '__main__':

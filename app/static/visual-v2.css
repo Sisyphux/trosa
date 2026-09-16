@@ -3288,6 +3288,24 @@ html:not(.supports-view-transitions) .page-section.active {
   animation: trade-os-list-enter var(--motion-base) var(--motion-ease-out) both;
 }
 
+/* A write has three short visual states: arrive, confirm, then settle. The
+   leaving class is kept on the old node until the keyed reconciler removes it,
+   so the surrounding timeline can reflow without a flash. */
+.motion-list-leave {
+  pointer-events: none;
+  animation: trade-os-list-leave var(--motion-exit) ease-in both;
+}
+
+.motion-updated {
+  animation: trade-os-list-confirm var(--motion-slow) var(--motion-ease-out) both;
+}
+
+.motion-list-enter.motion-updated {
+  animation:
+    trade-os-list-enter var(--motion-base) var(--motion-ease-out) both,
+    trade-os-list-confirm var(--motion-slow) var(--motion-ease-out) both;
+}
+
 #customerTableBody,
 #inboxList {
   transition: opacity var(--motion-fast) ease;
@@ -3325,6 +3343,17 @@ html:not(.supports-view-transitions) .page-section.active {
 @keyframes trade-os-list-enter {
   from { opacity: 0; transform: translate3d(0,4px,0); }
   to { opacity: 1; transform: translate3d(0,0,0); }
+}
+
+@keyframes trade-os-list-leave {
+  from { opacity: 1; transform: translate3d(0,0,0); }
+  to { opacity: 0; transform: translate3d(0,-4px,0); }
+}
+
+@keyframes trade-os-list-confirm {
+  0% { background-color: rgba(239,225,216,.72); }
+  55% { background-color: rgba(239,225,216,.36); }
+  100% { background-color: transparent; }
 }
 
 .btn,
@@ -3416,6 +3445,8 @@ html:not(.supports-view-transitions) .page-section.active {
   .modal-overlay.is-closing > .modal,
   .toast,
   .motion-list-enter,
+  .motion-list-leave,
+  .motion-updated,
   html:not(.supports-view-transitions) .page-section.active {
     animation: none !important;
   }
@@ -3736,6 +3767,8 @@ html.motion-lite .liquid-option {
 html.motion-lite .weekly-work-card { background-color: rgba(255,253,248,.62) !important; }
 html.motion-lite .page-section.active,
 html.motion-lite .motion-list-enter,
+html.motion-lite .motion-list-leave,
+html.motion-lite .motion-updated,
 html.motion-lite .customer-row-card,
 html.motion-lite .today-task-row,
 html.motion-lite .weekly-work-card,

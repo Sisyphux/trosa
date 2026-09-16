@@ -427,12 +427,19 @@ function createElementFromHtml(html) {
 }
 
 function syncElementFromTemplate(target, fresh) {
+  var transientMotionClasses = ['motion-list-enter', 'motion-list-leave', 'motion-updated'].filter(function(className) {
+    return target.classList.contains(className);
+  });
   Array.from(target.attributes).forEach(function(attribute) {
     if (!fresh.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
   });
   Array.from(fresh.attributes).forEach(function(attribute) {
     target.setAttribute(attribute.name, attribute.value);
   });
+  // A fast background reconciliation must not cancel the confirmation that was
+  // just painted by the write path. These classes are ephemeral UI state, not
+  // part of the server template, so restore them after syncing attributes.
+  transientMotionClasses.forEach(function(className) { target.classList.add(className); });
   target.innerHTML = fresh.innerHTML;
 }
 
@@ -460,6 +467,30 @@ function animateKeyedReflow(nodes, previousRects) {
   });
 }
 
+// A new row keeps its enter animation until it has actually run.  Dropping the
+// class on the next frame cancels the keyframes before a single animated frame
+// is painted, so new records used to appear with no motion at all.
+function playListEnter(node) {
+  if (!shouldAnimateLists()) return;
+  node.classList.add('motion-list-enter');
+  var cleanup = function() { node.classList.remove('motion-list-enter'); };
+  node.addEventListener('animationend', cleanup, { once: true });
+  window.setTimeout(cleanup, 400);
+}
+
+// Opt-in exit motion for lists where a record leaving is itself the message (a
+// removed communication, a completed task).  The node is flagged while it
+// collapses, so a re-render that arrives meanwhile neither reuses nor re-animates
+// a row that is already on its way out.
+function collapseListElement(node) {
+  if (!shouldAnimateLists() || !node.isConnected) { node.remove(); return; }
+  node.setAttribute('data-motion-leaving', '');
+  node.classList.add('motion-list-leave');
+  var remove = function() { node.remove(); };
+  node.addEventListener('animationend', remove, { once: true });
+  window.setTimeout(remove, 300);
+}
+
 function reconcileKeyedElements(container, records, options) {
   if (!container) return;
   var selector = options.selector;
@@ -468,7 +499,7 @@ function reconcileKeyedElements(container, records, options) {
   var existing = new Map();
   Array.from(container.querySelectorAll(selector)).forEach(function(node) {
     var key = node.dataset.motionKey;
-    if (!key) return;
+    if (!key || node.hasAttribute('data-motion-leaving')) return;
     if (shouldAnimate) previousRects.set(key, node.getBoundingClientRect());
     existing.set(key, node);
   });
@@ -491,14 +522,12 @@ function reconcileKeyedElements(container, records, options) {
         appendChunk();
       });
     }
+    // The first paint of a list stays still: motion explains a change, and at
+    // this point nothing has changed yet.
     container.innerHTML = records.map(function(record, index) { return options.render(record, index); }).join('');
     var initialNodes = Array.from(container.querySelectorAll(selector));
     initialNodes.forEach(function(node, index) {
       node.dataset.motionKey = String(options.key(records[index]));
-      if (shouldAnimate) node.classList.add('motion-list-enter');
-    });
-    if (shouldAnimate) requestAnimationFrame(function() {
-      initialNodes.forEach(function(node) { node.classList.remove('motion-list-enter'); });
     });
     return Promise.resolve(initialNodes);
   }
@@ -507,22 +536,26 @@ function reconcileKeyedElements(container, records, options) {
     var fresh = createElementFromHtml(options.render(record, index));
     fresh.dataset.motionKey = key;
     var node = existing.get(key);
-    if (node) syncElementFromTemplate(node, fresh);
-    else {
+    if (node) {
+      var previousHtml = node.innerHTML;
+      syncElementFromTemplate(node, fresh);
+      if (options.changed && node.innerHTML !== previousHtml) options.changed(record, node, false);
+    } else {
       node = fresh;
-      if (shouldAnimate) node.classList.add('motion-list-enter');
+      playListEnter(node);
+      if (options.changed) options.changed(record, node, true);
     }
     existing.delete(key);
     return node;
   });
-  existing.forEach(function(node) { node.remove(); });
+  existing.forEach(function(node) {
+    if (options.leave) collapseListElement(node);
+    else node.remove();
+  });
   var fragment = document.createDocumentFragment();
   nextNodes.forEach(function(node) { fragment.appendChild(node); });
   container.appendChild(fragment);
   animateKeyedReflow(nextNodes, previousRects);
-  if (shouldAnimate) requestAnimationFrame(function() {
-    nextNodes.forEach(function(node) { node.classList.remove('motion-list-enter'); });
-  });
   return Promise.resolve(nextNodes);
 }
 
@@ -2182,6 +2215,7 @@ async function saveInboxReply() {
   button.disabled = true;
   button.textContent = '正在记录…';
   try {
+    var saved = null;
     if (context.agentProposalId) {
       var proposalPayload = Object.assign({}, context.agentProposalPayload || {}, {
         content: content, activity_content: content, follow_date: followDate,
@@ -2191,9 +2225,9 @@ async function saveInboxReply() {
         inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
       });
       await api('/api/agent/proposals/' + context.agentProposalId, { method: 'PUT', body: JSON.stringify(proposalPayload) });
-      await api('/api/agent/proposals/' + context.agentProposalId + '/confirm', { method: 'POST' });
+      saved = await api('/api/agent/proposals/' + context.agentProposalId + '/confirm', { method: 'POST' });
     } else if (context.reminderId) {
-      await api('/api/reminders/' + context.reminderId, {
+      saved = await api('/api/reminders/' + context.reminderId, {
         method: 'PUT', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
@@ -2201,7 +2235,7 @@ async function saveInboxReply() {
         })
       });
     } else {
-      await api('/api/customers/' + customerId + '/follow_history', {
+      saved = await api('/api/customers/' + customerId + '/follow_history', {
         method: 'POST', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
@@ -2211,6 +2245,24 @@ async function saveInboxReply() {
       });
     }
     closeModal('inboxReplyModal', true);
+    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+      var activity = saved && saved.activity ? Object.assign({ type: 'follow' }, saved.activity) : Object.assign({
+        type: 'follow', id: saved && (saved.activity_id || (!context.agentProposalId && saved.id)),
+        follow_date: followDate, content: content,
+        result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
+        next_plan: nextTask, activity_type: context.activityType || 'customer_reply',
+        direction: context.direction || 'unknown', is_reported: false
+      }, saved && saved.activity ? saved.activity : {});
+      if (activity.id) {
+        var changedKey = upsertCustomerTimelineEntry(activity);
+        var reminders = (_customerDetailCache.reminders || []).slice();
+        if (saved && saved.completed_task) reminders = reminders.filter(function(task) { return Number(task.id) !== Number(saved.completed_task.id); });
+        if (saved && saved.next_step) reminders = reminders.filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]);
+        if (saved && (saved.completed_task || saved.next_step)) applyCustomerTaskSnapshot(reminders);
+        syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey);
+      }
+      reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    }
     showToast(hasNext ? '沟通已记录，下一步已安排' : '沟通已保存到时间线', 'success');
     loadInbox();
     if (currentPage === 'dashboard') loadDashboard();
@@ -4943,18 +4995,60 @@ function renderCustomerNextTask(reminders) {
   }
 }
 
-function renderCustomerTasks(tasks) {
+function customerTaskMotionKey(task) {
+  return task && task.id ? 'task-' + task.id : '';
+}
+
+function customerTaskHtml(task) {
+  var overdue = isOverdue((task.remind_date || '').substring(0, 10));
+  return '<article class="customer-task-row' + (overdue ? ' is-overdue' : '') + '">' +
+    '<div><strong>' + escapeHtml(task.title || task.content || '待办') + '</strong>' +
+    (task.reason ? '<p>' + escapeHtml(task.reason) + '</p>' : '') + '</div>' +
+    '<time>' + escapeHtml(formatChineseDate(task.remind_date || '')) + '</time></article>';
+}
+
+function renderCustomerTaskEmpty(list) {
+  var activeRows = list && list.querySelectorAll('.customer-task-row:not([data-motion-leaving])');
+  var rows = list && list.querySelectorAll('.customer-task-row');
+  if (list && rows && rows.length && shouldAnimateLists()) {
+    var token = String(Date.now()) + '-' + Math.random();
+    list.dataset.taskEmptyToken = token;
+    if (activeRows && activeRows.length) reconcileKeyedElements(list, [], {
+      selector: '.customer-task-row', leave: true,
+      key: customerTaskMotionKey, render: customerTaskHtml
+    });
+    window.setTimeout(function() {
+      if (list.dataset.taskEmptyToken !== token || list.querySelector('.customer-task-row')) return;
+      delete list.dataset.taskEmptyToken;
+      list.innerHTML = '<div class="customer-task-empty">暂无明确的未完成待办。可以在右侧安排下一步。</div>';
+    }, 330);
+    return;
+  }
+  delete list.dataset.taskEmptyToken;
+  list.innerHTML = '<div class="customer-task-empty">暂无明确的未完成待办。可以在右侧安排下一步。</div>';
+}
+
+function renderCustomerTasks(tasks, changedKeys) {
   var list = document.getElementById('customerTasksList');
   if (!list) return;
   var explicit = tasks || [];
   list.classList.add('customer-task-list');
-  list.innerHTML = explicit.length ? explicit.map(function(task) {
-    var overdue = isOverdue((task.remind_date || '').substring(0, 10));
-    return '<article class="customer-task-row' + (overdue ? ' is-overdue' : '') + '">' +
-      '<div><strong>' + escapeHtml(task.title || task.content || '待办') + '</strong>' +
-      (task.reason ? '<p>' + escapeHtml(task.reason) + '</p>' : '') + '</div>' +
-      '<time>' + escapeHtml(formatChineseDate(task.remind_date || '')) + '</time></article>';
-  }).join('') : '<div class="customer-task-empty">暂无明确的未完成待办。可以在右侧安排下一步。</div>';
+  if (!explicit.length) {
+    renderCustomerTaskEmpty(list);
+    return;
+  }
+  delete list.dataset.taskEmptyToken;
+  var changed = {};
+  (changedKeys || []).forEach(function(key) { if (key) changed[key] = true; });
+  reconcileKeyedElements(list, explicit, {
+    selector: '.customer-task-row',
+    leave: true,
+    key: customerTaskMotionKey,
+    render: customerTaskHtml,
+    changed: function(task, node, isNew) {
+      if (isNew || changed[customerTaskMotionKey(task)]) markElementConfirmed(node);
+    }
+  });
 }
 
 function focusCustomerGap(tabId) {
@@ -5000,7 +5094,7 @@ function renderCustomerFactsBrief(customer) {
   var recentHtml = recentFacts.length ? recentFacts.slice(0, 1).map(function(fact) {
     var factText = fact.content || fact.subject || '已记录沟通';
     var sourceLabel = customerFactLabel(fact.type, fact.source_detail);
-    return '<article class="customer-fact-event"><div class="customer-fact-event-meta"><span>' + escapeHtml(sourceLabel) + '</span><time>' + escapeHtml(formatChineseDate(fact.date || '')) + '</time></div>' +
+    return '<article class="customer-fact-event" data-fact-key="' + escapeHtml(customerTimelineKey(fact)) + '"><div class="customer-fact-event-meta"><span>' + escapeHtml(sourceLabel) + '</span><time>' + escapeHtml(formatChineseDate(fact.date || '')) + '</time></div>' +
       '<p>' + (fact.type === 'follow' ? renderRichText(factText) : escapeHtml(factText)) + '</p>' +
       (fact.result ? '<small><b>结果</b> ' + (fact.type === 'follow' ? renderRichText(fact.result) : escapeHtml(fact.result)) + '</small>' : '') +
     '</article>';
@@ -5231,17 +5325,14 @@ function setActionFeedback(button, state, label) {
   };
 }
 
-function applyCustomerTaskSnapshot(tasks) {
+function applyCustomerTaskSnapshot(tasks, changedKey) {
   var cache = _customerDetailCache;
   if (!cache) return;
   var openTasks = (tasks || []).slice().sort(function(a, b) {
     return String(a.remind_date || '').localeCompare(String(b.remind_date || '')) || Number(a.id || 0) - Number(b.id || 0);
   });
   cache.reminders = openTasks;
-  if (Array.isArray(cache.tasks)) {
-    cache.tasks = openTasks;
-    renderCustomerTasks(cache.tasks);
-  }
+  if (Array.isArray(cache.tasks)) cache.tasks = openTasks;
   cache.next_task = openTasks[0] || null;
   cache.next_follow_up = cache.next_task ? (cache.next_task.remind_date || '') : '';
   cache.current_next_step = cache.next_task ? {
@@ -5251,7 +5342,9 @@ function applyCustomerTaskSnapshot(tasks) {
   var nextDateInput = document.getElementById('editNextFollowUp');
   if (nextDateInput) nextDateInput.value = cache.next_follow_up;
   renderCustomerNextTask(openTasks);
+  if (Array.isArray(cache.tasks)) renderCustomerTasks(cache.tasks, changedKey ? [changedKey] : []);
   renderCustomerFactsBrief(cache);
+  markElementConfirmed(document.getElementById('customerNextTask'));
   var cachedWorkspace = _customerWorkspaceCache[cache.id];
   if (cachedWorkspace) {
     cachedWorkspace.summary = Object.assign({}, cachedWorkspace.summary || {}, {
@@ -5268,11 +5361,29 @@ async function completeCustomerNextTask(button) {
   if (!next) return;
   var reset = setActionFeedback(button, 'pending', '处理中…');
   try {
-    await api('/api/reminders/' + next.id, { method: 'PUT', body: JSON.stringify({ result: '已完成', activity_type: 'task_completed' }) });
-    await refreshCustomerWorkspace();
+    var saved = await api('/api/reminders/' + next.id, { method: 'PUT', body: JSON.stringify({ result: '已完成', activity_type: 'task_completed' }) });
+    var customerId = _customerDetailCache && _customerDetailCache.id;
+    if (_customerDetailCache && customerId) {
+      var remaining = (_customerDetailCache.reminders || []).filter(function(task) {
+        return Number(task.id) !== Number(next.id);
+      });
+      applyCustomerTaskSnapshot(remaining);
+      if (saved && saved.activity_id) {
+        var activity = {
+          type: 'follow', id: saved.activity_id, follow_date: localDateString(),
+          content: '已完成', result: '', next_plan: '', activity_type: 'task_completed',
+          direction: 'unknown', is_reported: false, source: 'manual'
+        };
+        var changedKey = upsertCustomerTimelineEntry(activity);
+        syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey);
+      }
+    }
+    // The confirmed local echo is already painted. These reads repair any
+    // server-derived rollups without making the visible response wait on them.
+    Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]).catch(function() {});
     // 客户详情覆盖在 Today 之上；完成详情里的待办后同步刷新底层列表，
     // 避免关闭详情后仍看到已经完成的今日事项。
-    if (currentPage === 'dashboard') await loadDashboard();
+    if (currentPage === 'dashboard') loadDashboard();
     // The panel itself changes to the next state, so a second success toast
     // would only repeat what the user can already see.
     reset();
@@ -5290,11 +5401,22 @@ async function postponeCustomerNextTask(days, button) {
   due.setDate(due.getDate() + days);
   var reset = setActionFeedback(button, 'pending', '正在调整…');
   try {
-    await api('/api/reminders/' + next.id + '/reschedule', { method: 'POST', body: JSON.stringify({ remind_date: localDateString(due) }) });
-    await refreshCustomerWorkspace();
+    var saved = await api('/api/reminders/' + next.id + '/reschedule', { method: 'POST', body: JSON.stringify({ remind_date: localDateString(due) }) });
+    if (_customerDetailCache) {
+      var updatedTask = saved && saved.reminder ? saved.reminder : Object.assign({}, next, {
+        remind_date: (saved && saved.remind_date) || localDateString(due)
+      });
+      var remaining = (_customerDetailCache.reminders || []).filter(function(task) {
+        return Number(task.id) !== Number(next.id) &&
+          Number(task.id) !== Number(saved && saved.merged_into || 0);
+      });
+      if (!updatedTask.is_done) remaining.push(updatedTask);
+      applyCustomerTaskSnapshot(remaining, customerTaskMotionKey(updatedTask));
+    }
+    Promise.all([refreshCustomerWorkspace(), refreshCustomerTimeline()]).catch(function() {});
     // 客户详情会覆盖在今日待办之上；延后后同步刷新底层列表，
     // 让已移到未来的提醒立刻离开今日待办。
-    await loadDashboard();
+    loadDashboard();
     // The refreshed next-step card now shows the new date; keep the feedback
     // local to the button and let the changed card be the confirmation.
     reset();
@@ -5312,7 +5434,7 @@ async function createCustomerTask(button) {
   if (!title || !dueDate) { showToast('请填写具体动作和日期', 'warning'); return; }
   var proposalId = _agentTaskProposalId;
   var modal = document.getElementById('customerTaskModal');
-  var editTaskId = Number((button && button.dataset.editTaskId) || (modal && modal.dataset.editTaskId) || 0);
+  var editTaskId = proposalId ? 0 : Number((button && button.dataset.editTaskId) || (modal && modal.dataset.editTaskId) || 0);
   var reset = setActionFeedback(button, 'pending', editTaskId ? '正在保存…' : '正在创建…');
   try {
     var created;
@@ -5346,8 +5468,28 @@ async function createCustomerTask(button) {
           return Number(item.id) !== editTaskId && Number(item.id) !== mergedInto && Number(item.id) !== Number(task.id);
         });
         if (!task.is_done) visibleTasks.push(task);
+        visibleTasks.sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
       }
-      applyCustomerTaskSnapshot(visibleTasks);
+      applyCustomerTaskSnapshot(visibleTasks, task ? customerTaskMotionKey(task) : '');
+      document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up || '';
+      renderCustomerNextTask(_customerDetailCache.reminders || []);
+      markElementConfirmed(document.getElementById('customerNextTask'));
+      renderCustomerFactsBrief(_customerDetailCache);
+      // The customer workspace may be reopened from its short-lived summary
+      // cache. Keep that cache aligned with the durable write as well, or the
+      // newly created task disappears again when the detail modal is opened.
+      var cachedWorkspace = _customerWorkspaceCache[customerId];
+      if (cachedWorkspace) {
+        cachedWorkspace.summary = Object.assign({}, cachedWorkspace.summary || {}, {
+          next_follow_up: _customerDetailCache.next_follow_up || '',
+          next_task: _customerDetailCache.next_task || null,
+          current_next_step: _customerDetailCache.current_next_step || (_customerDetailCache.next_task ? {
+            label: _customerDetailCache.next_task.title || _customerDetailCache.next_task.content || '没有明确下一步',
+            date: _customerDetailCache.next_task.remind_date || '', source: '待办记录'
+          } : { label: '没有明确下一步', date: '', source: '系统事实' })
+        });
+        cachedWorkspace.savedAt = Date.now();
+      }
     }
     // Closing the composer and rendering the new card is sufficient success
     // feedback. Toasts are reserved for problems or non-visible outcomes.
@@ -5918,10 +6060,12 @@ async function loadMoreCustomerTimeline() {
   }
 }
 
-async function refreshCustomerTimeline() {
+async function refreshCustomerTimeline(options) {
+  options = options || {};
   var customerId = _customerDetailCache && _customerDetailCache.id;
   if (!customerId) return;
-  var data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + _customerTimelinePerPage);
+  var data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + _customerTimelinePerPage,
+    { silentError: !!options.silentError });
   if (_customerWorkspaceCache[customerId]) {
     _customerWorkspaceCache[customerId].timeline = data;
     _customerWorkspaceCache[customerId].savedAt = Date.now();
@@ -5933,6 +6077,167 @@ async function refreshCustomerTimeline() {
   _customerDetailCache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
   _customerTimelinePage = 1;
   renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails);
+  renderCustomerTimelineMore(_customerDetailCache.timeline_pagination);
+}
+
+// ---------- 写后即时回显（local echo） ----------
+// Every timeline write already answers with the durable row it created or
+// changed.  Painting that answer is what makes the change visible at the moment
+// it is saved; the timeline read afterwards only reconciles, so a slow tunnel
+// or an unreachable server can no longer look like "nothing happened".
+
+function customerTimelineKey(entry) {
+  if (!entry || !entry.id) return '';
+  var isOutreach = entry.type === 'outreach' || entry.type === 'email';
+  return (isOutreach ? 'outreach-' : 'follow-') + entry.id;
+}
+
+// The server has already confirmed the write, so the tint is a one-shot
+// confirmation of *which* record changed, never a stored state.
+function markElementConfirmed(node) {
+  if (!node || !node.classList || !shouldAnimateLists()) return;
+  if (node._motionConfirmTimer) window.clearTimeout(node._motionConfirmTimer);
+  node.classList.add('motion-updated');
+  node._motionConfirmTimer = window.setTimeout(function() {
+    node.classList.remove('motion-updated');
+    node._motionConfirmTimer = null;
+  }, 1100);
+}
+
+function markCustomerFactConfirmed(key) {
+  var summary = document.getElementById('customerWorkspaceSummary');
+  if (!summary || !key) return;
+  markElementConfirmed(summary.querySelector('[data-fact-key="' + key + '"]'));
+}
+
+function markTimelineEntryConfirmed(key) {
+  var list = document.getElementById('outreachList');
+  if (!list || !key) return;
+  markElementConfirmed(list.querySelector('.tl-item[data-motion-key="' + key + '"]'));
+}
+
+function syncCustomerLatestContact(cache) {
+  if (!cache) return;
+  var dates = (cache.timeline_items || []).filter(function(item) {
+    return item.type === 'follow';
+  }).map(function(item) {
+    return String(item.follow_date || item.date || '').substring(0, 10);
+  }).filter(Boolean).sort().reverse();
+  // The first timeline page can contain only outreach rows. In that partial
+  // view an empty follow-up slice is not proof that the customer has no prior
+  // communication, so keep the summary value until the background summary read
+  // supplies the authoritative rollup.
+  if (dates.length || !(cache.timeline_pagination && cache.timeline_pagination.has_next)) {
+    cache.last_contact = dates[0] || '';
+  }
+}
+
+function findCustomerTimelineEntry(type, id) {
+  var cache = _customerDetailCache;
+  if (!cache) return null;
+  var recordType = type === 'outreach' ? 'outreach' : 'follow';
+  var entry = (cache.timeline_items || []).find(function(item) {
+    return item.type === recordType && Number(item.id) === Number(id);
+  });
+  if (entry) return Object.assign({}, entry);
+  if (recordType === 'follow' && _followTimelineCache[id]) {
+    return Object.assign({ type: 'follow' }, _followTimelineCache[id]);
+  }
+  return null;
+}
+
+// Reconcile the cached workspace with the row the server just returned.  Ordering
+// follows the timeline itself (newest first), so an edited date moves the record
+// exactly where a later read will place it.
+function upsertCustomerTimelineEntry(entry, options) {
+  options = options || {};
+  var cache = _customerDetailCache;
+  if (!cache || !entry || !entry.id) return '';
+  var isOutreach = entry.type === 'outreach' || entry.type === 'email';
+  var recordType = isOutreach ? 'outreach' : 'follow';
+  var key = customerTimelineKey({ type: recordType, id: entry.id });
+  var raw = isOutreach ? Object.assign({}, entry, {
+    type: 'outreach', id: entry.id, date: entry.sent_date || entry.date || '',
+    sent_date: entry.sent_date || entry.date || '', subject: entry.subject || entry.content || '开发邮件',
+    content: entry.content || '', reply_content: entry.reply_content || entry.result || '',
+    reply_status: entry.reply_status || 'pending', is_reported: entry.is_reported || false
+  }) : Object.assign({}, entry, {
+    type: 'follow', id: entry.id,
+    date: entry.follow_date || entry.date || '',
+    follow_date: entry.follow_date || entry.date || ''
+  });
+  var items = (cache.timeline_items || []).filter(function(item) {
+    return !(item.type === recordType && Number(item.id) === Number(entry.id));
+  });
+  items.push(raw);
+  items.sort(function(a, b) {
+    var dateOrder = String(b.date || b.follow_date || b.sent_date || '')
+      .localeCompare(String(a.date || a.follow_date || a.sent_date || ''));
+    if (dateOrder) return dateOrder;
+    return String(b.created_at || '').localeCompare(String(a.created_at || '')) || Number(b.id || 0) - Number(a.id || 0);
+  });
+  cache.timeline_items = items;
+  cache.follow_history = items.filter(function(item) { return item.type === 'follow'; });
+  cache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
+  if (!isOutreach) syncCustomerLatestContact(cache);
+  if (options.skipRender !== true) renderFollowTimeline(cache.follow_history, cache.outreach_emails, [key]);
+  var workspace = _customerWorkspaceCache[cache.id];
+  if (workspace) {
+    workspace.timeline = Object.assign({}, workspace.timeline || {}, {
+      items: cache.timeline_items, pagination: cache.timeline_pagination || {}
+    });
+    workspace.savedAt = Date.now();
+  }
+  return key;
+}
+
+function removeCustomerTimelineEntry(type, id, options) {
+  options = options || {};
+  var cache = _customerDetailCache;
+  if (!cache) return '';
+  var recordType = type === 'outreach' ? 'outreach' : 'follow';
+  var key = customerTimelineKey({ type: recordType, id: id });
+  var items = (cache.timeline_items || []).filter(function(item) {
+    return !(item.type === recordType && Number(item.id) === Number(id));
+  });
+  cache.timeline_items = items;
+  cache.follow_history = items.filter(function(item) { return item.type === 'follow'; });
+  cache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
+  if (recordType === 'follow') syncCustomerLatestContact(cache);
+  if (cache.recent_facts) {
+    cache.recent_facts = cache.recent_facts.filter(function(fact) {
+      return !(String(fact.type || '') === recordType && Number(fact.id) === Number(id));
+    });
+  }
+  var workspace = _customerWorkspaceCache[cache.id];
+  if (workspace) {
+    workspace.timeline = Object.assign({}, workspace.timeline || {}, {
+      items: cache.timeline_items, pagination: cache.timeline_pagination || {}
+    });
+    if (workspace.summary) workspace.summary = Object.assign({}, workspace.summary, {
+      last_contact: cache.last_contact || '', recent_facts: cache.recent_facts || []
+    });
+    workspace.savedAt = Date.now();
+  }
+  if (options.skipRender !== true) {
+    renderFollowTimeline(cache.follow_history, cache.outreach_emails);
+    renderCustomerFactsBrief(cache);
+  }
+  return key;
+}
+
+// A read that is still showing earlier pages must not collapse back to the first
+// page, and a failed read must not undo a write the user already confirmed.
+async function reconcileCustomerTimeline(options) {
+  options = options || {};
+  if (!_customerDetailCache || !_customerDetailCache.id || _customerTimelinePage !== 1) return;
+  try {
+    await refreshCustomerTimeline({ silentError: true });
+    if (options.includeSummary) await refreshCustomerWorkspace();
+  } catch (error) {
+    // The confirmed row stays on screen; opening the customer again reconciles
+    // anything that changed meanwhile.
+  }
 }
 
 function recentFactFromCommunication(activity) {
@@ -5944,37 +6249,125 @@ function recentFactFromCommunication(activity) {
   };
 }
 
-function syncCustomerWorkspaceAfterCommunication(customerId, activity) {
-  customerId = Number(customerId);
-  if (!customerId || !_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
-  // The workspace summary is deliberately cached while its tabs are open.
-  // A successful write must therefore update the summary too, not only the
-  // timeline, otherwise the "现在 / 下一步" card keeps showing pre-save data
-  // until the entire browser page is reloaded.
-  var newFact = recentFactFromCommunication(activity);
-  var existingFacts = Array.isArray(_customerDetailCache.recent_facts) ? _customerDetailCache.recent_facts : [];
-  _customerDetailCache.recent_facts = [newFact].concat(existingFacts.filter(function(fact) {
-    return !(String(fact.type || '') === 'follow' && Number(fact.id) === Number(newFact.id));
-  })).slice(0, 3);
-  var cached = _customerWorkspaceCache[customerId];
-  if (!cached) return;
-  cached.summary = Object.assign({}, cached.summary || {}, {
-    last_contact: _customerDetailCache.last_contact || '',
-    next_follow_up: _customerDetailCache.next_follow_up || '',
-    next_task: (_customerDetailCache.reminders || [])[0] || null,
-    customer_judgment: _customerDetailCache.customer_judgment || '',
-    current_next_step: _customerDetailCache.current_next_step || {},
-    recent_facts: _customerDetailCache.recent_facts
-  });
-  cached.timeline = Object.assign({}, cached.timeline || {}, {
-    items: _customerDetailCache.timeline_items || [],
-    pagination: _customerDetailCache.timeline_pagination || {}
-  });
-  cached.savedAt = Date.now();
+function recentFactFromOutreach(outreach) {
+  outreach = outreach || {};
+  return {
+    type: 'outreach', id: outreach.id, date: outreach.sent_date || outreach.date || '',
+    activity_type: '', content: outreach.subject || outreach.content || '',
+    result: outreach.reply_content || outreach.result || '', source: '开发邮件', source_detail: 'outreach'
+  };
 }
 
-function renderFollowTimeline(followLogs, outreachEmails) {
+// The workspace summary is deliberately cached while its tabs are open.
+// A successful write must therefore update the summary and the "现在" card too,
+// not only the timeline, otherwise those keep showing pre-save data until the
+// entire browser page is reloaded.
+function syncCustomerWorkspaceAfterMutation(customerId, fact, changedKey) {
+  customerId = Number(customerId);
+  if (!customerId || !fact || !_customerDetailCache || Number(_customerDetailCache.id) !== customerId) return;
+  var existingFacts = Array.isArray(_customerDetailCache.recent_facts) ? _customerDetailCache.recent_facts : [];
+  _customerDetailCache.recent_facts = [fact].concat(existingFacts.filter(function(item) {
+    return !(String(item.type || '') === String(fact.type || '') && Number(item.id) === Number(fact.id));
+  })).slice(0, 3);
+  var cached = _customerWorkspaceCache[customerId];
+  if (cached) {
+    cached.summary = Object.assign({}, cached.summary || {}, {
+      last_contact: _customerDetailCache.last_contact || '',
+      next_follow_up: _customerDetailCache.next_follow_up || '',
+      next_task: (_customerDetailCache.reminders || [])[0] || null,
+      customer_judgment: _customerDetailCache.customer_judgment || '',
+      current_next_step: _customerDetailCache.current_next_step || {},
+      recent_facts: _customerDetailCache.recent_facts
+    });
+    cached.timeline = Object.assign({}, cached.timeline || {}, {
+      items: _customerDetailCache.timeline_items || [],
+      pagination: _customerDetailCache.timeline_pagination || {}
+    });
+    cached.savedAt = Date.now();
+  }
+  renderCustomerFactsBrief(_customerDetailCache);
+  markCustomerFactConfirmed(changedKey);
+  markTimelineEntryConfirmed(changedKey);
+}
+
+function syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey) {
+  syncCustomerWorkspaceAfterMutation(customerId, recentFactFromCommunication(activity),
+    changedKey || customerTimelineKey({ type: 'follow', id: activity && activity.id }));
+}
+
+function syncCustomerWorkspaceAfterOutreach(customerId, outreach, changedKey) {
+  syncCustomerWorkspaceAfterMutation(customerId, recentFactFromOutreach(outreach),
+    changedKey || customerTimelineKey({ type: 'outreach', id: outreach && outreach.id }));
+}
+
+function timelineItemHtml(item) {
+  var typeLabel = item.type === 'email' ? '开发信' : communicationTypeLabel(item.activity_type);
+  var typeIcon = item.type === 'email' ? uiIcon('mail') : uiIcon('message');
+  var typeClass = item.type === 'email' ? 'tl-outreach' : 'tl-follow';
+  var reportIcon = uiIcon('star');
+  var reportTitle = item.is_reported ? '从本周工作中移除' : '加入本周工作';
+  var reportClass = item.is_reported ? 'tl-report active' : 'tl-report';
+  var weeklyStatus = item.is_reported
+    ? '<span class="tl-weekly-status" aria-label="已纳入本周工作" title="已纳入本周工作">' + reportIcon + '<span>已纳入本周</span></span>'
+    : '';
+
+  var html = '<div class="tl-item ' + typeClass + '"><div class="tl-dot"></div><div class="tl-card">';
+  var showDirection = item.type === 'activity' && item.activity_type !== 'task_completed';
+  var directionClass = communicationDirectionClass(item.direction);
+  var directionTitle = '用于快速查看沟通脉络，并帮助系统判断后续工作重点';
+  html += '<div class="tl-card-hd"><span class="tl-type-badge">' + typeIcon + ' ' + typeLabel + '</span>' + (showDirection ? '<span class="tl-direction-badge ' + directionClass + '" title="' + directionTitle + '">' + escapeHtml(communicationDirectionLabel(item.direction)) + '</span>' : '') + weeklyStatus + '<span class="tl-date">' + formatDate(item.date) + '</span><div class="tl-card-actions">';
+  var reportType = item.type === 'email' ? 'outreach' : 'follow';
+  html += '<button class="tl-report-btn ' + reportClass + '" onclick="toggleReport(\'' + reportType + '\',' + item.id + ')" aria-label="' + reportTitle + '" aria-pressed="' + (item.is_reported ? 'true' : 'false') + '" title="' + reportTitle + '">' + reportIcon + '</button>';
+  if (item.type === 'activity') html += '<button class="tl-action-btn" onclick="openFollowEditModal(' + item.id + ')" title="编辑记录">编辑</button><button class="tl-action-btn danger" onclick="deleteFollowLog(' + item.id + ')" title="删除记录">删除</button>';
+  if (item.type === 'email') html += '<button class="btn btn-sm btn-danger" onclick="deleteOutreach(' + item.id + ')" style="font-size:0.68rem;padding:2px 6px;">删除</button>';
+  var richAttrs = item.type === 'activity' ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
+  var titleHtml = renderRichText(item.title);
+  if (String(item.title || '').length > 280) {
+    titleHtml = '<details class="timeline-long-content"><summary><span class="timeline-long-preview">' + titleHtml + '</span></summary></details>';
+  }
+  html += '</div></div><div class="tl-card-title"' + richAttrs + '>' + titleHtml + '</div>';
+  if (item.meta_text) html += '<div class="tl-card-meta" data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</div>';
+  if (item.type === 'activity' && item.next_plan) html += '<div class="tl-card-plan">由此安排：<span data-rich-log-id="' + item.id + '" data-rich-field="next_plan">' + renderRichText(item.next_plan) + '</span></div>';
+  if (item.type === 'email') html += '<div class="tl-card-meta">' + statusBadge(item.reply_status) + '</div>';
+  html += '</div></div>';
+  return html;
+}
+
+function renderCustomerTimelineEmpty(el) {
+  var list = el && el.querySelector('.timeline');
+  var activeRows = list && list.querySelectorAll('.tl-item:not([data-motion-leaving])');
+  var rows = list && list.querySelectorAll('.tl-item');
+  if (list && rows && rows.length && shouldAnimateLists()) {
+    var token = String(Date.now()) + '-' + Math.random();
+    el.dataset.timelineEmptyToken = token;
+    if (activeRows && activeRows.length) reconcileKeyedElements(list, [], {
+      selector: '.tl-item', leave: true,
+      key: function(item) { return item.motionKey; },
+      render: timelineItemHtml
+    });
+    window.setTimeout(function() {
+      if (el.dataset.timelineEmptyToken !== token || list.querySelector('.tl-item')) return;
+      delete el.dataset.timelineEmptyToken;
+      el.textContent = '';
+      el.innerHTML = '<div class="empty-state" style="padding:30px;"><p>暂无关系动态</p></div>';
+    }, 330);
+    renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
+    return;
+  }
+  delete el.dataset.timelineEmptyToken;
+  el.textContent = '';
+  el.innerHTML = '<div class="empty-state" style="padding:30px;"><p>暂无关系动态</p></div>';
+}
+
+// The timeline is reconciled by record identity instead of being replaced as a
+// block: a saved record slides in where it belongs, an edited one keeps its
+// place and is tinted once so the user can see which fact the confirmation
+// refers to.  `changedKeys` names the records this render was triggered by.
+function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
   var el = document.getElementById('outreachList');
+  if (!el) return;
+  var changed = {};
+  (changedKeys || []).forEach(function(key) { if (key) changed[key] = true; });
   var items = [];
   _followTimelineCache = {};
   (followLogs || []).forEach(function(f) {
@@ -5982,6 +6375,7 @@ function renderFollowTimeline(followLogs, outreachEmails) {
     var displayedDirection = f.direction || 'unknown';
     if (displayedDirection === 'unknown') displayedDirection = inferCommunicationDirectionFromText(f.content || f.result || '');
     items.push({
+      motionKey: 'follow-' + f.id,
       type: 'activity', activity_type: f.activity_type || 'follow_up', direction: displayedDirection, id: f.id,
       date: f.follow_date || '', title: f.content || f.result || '沟通记录', content: f.content || '',
       result: f.result || '', next_plan: f.next_plan || '', is_reported: f.is_reported || false,
@@ -5990,6 +6384,7 @@ function renderFollowTimeline(followLogs, outreachEmails) {
   });
   (outreachEmails || []).forEach(function(o) {
     items.push({
+      motionKey: 'outreach-' + o.id,
       type: 'email', id: o.id, date: o.sent_date || '', title: o.subject || '开发信',
       content: o.content || '', reply_status: o.reply_status || 'pending', is_reported: o.is_reported || false,
       meta_text: o.content ? o.content.substring(0, 100) + (o.content.length > 100 ? '...' : '') : ''
@@ -5998,43 +6393,30 @@ function renderFollowTimeline(followLogs, outreachEmails) {
   items.sort(function(a, b) { return b.date.localeCompare(a.date); });
 
   if (items.length === 0) {
-    el.innerHTML = '<div class="empty-state" style="padding:30px;"><p>暂无关系动态</p></div>';
+    renderCustomerTimelineEmpty(el);
+    renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
     return;
   }
+  delete el.dataset.timelineEmptyToken;
 
-  var html = '<div class="timeline">';
-  items.forEach(function(item) {
-    var typeLabel = item.type === 'email' ? '开发信' : communicationTypeLabel(item.activity_type);
-    var typeIcon = item.type === 'email' ? uiIcon('mail') : uiIcon('message');
-    var typeClass = item.type === 'email' ? 'tl-outreach' : 'tl-follow';
-    var reportIcon = uiIcon('star');
-    var reportTitle = item.is_reported ? '从本周工作中移除' : '加入本周工作';
-    var reportClass = item.is_reported ? 'tl-report active' : 'tl-report';
-    var weeklyStatus = item.is_reported
-      ? '<span class="tl-weekly-status" aria-label="已纳入本周工作" title="已纳入本周工作">' + reportIcon + '<span>已纳入本周</span></span>'
-      : '';
-
-    html += '<div class="tl-item ' + typeClass + '"><div class="tl-dot"></div><div class="tl-card">';
-    var showDirection = item.type === 'activity' && item.activity_type !== 'task_completed';
-    var directionClass = communicationDirectionClass(item.direction);
-    var directionTitle = '用于快速查看沟通脉络，并帮助系统判断后续工作重点';
-    html += '<div class="tl-card-hd"><span class="tl-type-badge">' + typeIcon + ' ' + typeLabel + '</span>' + (showDirection ? '<span class="tl-direction-badge ' + directionClass + '" title="' + directionTitle + '">' + escapeHtml(communicationDirectionLabel(item.direction)) + '</span>' : '') + weeklyStatus + '<span class="tl-date">' + formatDate(item.date) + '</span><div class="tl-card-actions">';
-    var reportType = item.type === 'email' ? 'outreach' : 'follow';
-    html += '<button class="tl-report-btn ' + reportClass + '" onclick="toggleReport(\'' + reportType + '\',' + item.id + ')" aria-label="' + reportTitle + '" aria-pressed="' + (item.is_reported ? 'true' : 'false') + '" title="' + reportTitle + '">' + reportIcon + '</button>';
-    if (item.type === 'activity') html += '<button class="tl-action-btn" onclick="openFollowEditModal(' + item.id + ')" title="编辑记录">编辑</button><button class="tl-action-btn danger" onclick="deleteFollowLog(' + item.id + ')" title="删除记录">删除</button>';
-    if (item.type === 'email') html += '<button class="btn btn-sm btn-danger" onclick="deleteOutreach(' + item.id + ')" style="font-size:0.68rem;padding:2px 6px;">删除</button>';
-    var richAttrs = item.type === 'activity' ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
-    var titleHtml = renderRichText(item.title);
-    if (String(item.title || '').length > 280) {
-      titleHtml = '<details class="timeline-long-content"><summary><span class="timeline-long-preview">' + titleHtml + '</span></summary></details>';
+  var list = el.querySelector('.timeline');
+  if (!list) {
+    el.textContent = '';
+    list = document.createElement('div');
+    list.className = 'timeline';
+    el.appendChild(list);
+  }
+  reconcileKeyedElements(list, items, {
+    selector: '.tl-item',
+    leave: true,
+    key: function(item) { return item.motionKey; },
+    render: function(item) { return timelineItemHtml(item); },
+    changed: function(item, node, isNew) {
+      // A brand-new record already slides in; only the confirmation tint is
+      // added on top so "this is the record I just saved" stays readable.
+      if (isNew || changed[item.motionKey]) markElementConfirmed(node);
     }
-    html += '</div></div><div class="tl-card-title"' + richAttrs + '>' + titleHtml + '</div>';
-    if (item.meta_text) html += '<div class="tl-card-meta" data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</div>';
-    if (item.type === 'activity' && item.next_plan) html += '<div class="tl-card-plan">由此安排：<span data-rich-log-id="' + item.id + '" data-rich-field="next_plan">' + renderRichText(item.next_plan) + '</span></div>';
-    if (item.type === 'email') html += '<div class="tl-card-meta">' + statusBadge(item.reply_status) + '</div>';
-    html += '</div></div>';
   });
-  el.innerHTML = html + '</div>';
   renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
 }
 
@@ -6057,7 +6439,8 @@ async function toggleReport(type, id) {
     if (_customerDetailCache) {
       _customerDetailCache.follow_history = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
       _customerDetailCache.outreach_emails = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
-      renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails);
+      renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails,
+        [customerTimelineKey({ type: recordType, id: id })]);
     }
     var workspace = customerId && _customerWorkspaceCache[customerId];
     if (workspace && workspace.timeline && Array.isArray(workspace.timeline.items)) {
@@ -6066,7 +6449,7 @@ async function toggleReport(type, id) {
       });
       workspace.savedAt = Date.now();
     }
-    try { await refreshCustomerTimeline(); } catch (refreshError) {}
+    reconcileCustomerTimeline().catch(function() {});
   } catch(e) { showToast('本周工作状态未能保存，请重试', 'error'); }
 }
 
@@ -6116,39 +6499,40 @@ async function addFollowHistory() {
     updateAutoDirectionPreview('history');
     var composer = document.getElementById('followCompose');
     if (composer) composer.open = false;
-    var activity = saved.activity || {
+    var activity = Object.assign({ type: 'follow' }, saved.activity || {
       id: saved.id, follow_date: saved.recent_contact_date || localDateString(),
       content: data.activity_content, result: data.activity_result, next_plan: data.next_task,
       activity_type: data.activity_type, direction: direction, is_reported: data.is_reported
-    };
-    _customerDetailCache.timeline_items = _customerDetailCache.timeline_items || [];
-    _customerDetailCache.timeline_items.unshift(Object.assign({ type: 'follow', date: activity.follow_date }, activity));
-    _customerDetailCache.follow_history.unshift(activity);
-    if (saved.completed_task) {
-      _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.completed_task.id); });
+    });
+    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(id)) {
+      var changedKey = upsertCustomerTimelineEntry(activity);
+      _customerDetailCache.follow_history = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'follow'; });
+      _customerDetailCache.outreach_emails = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'outreach'; });
+      if (saved.completed_task) {
+        _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.completed_task.id); });
+      }
+      if (saved.next_step) {
+        _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]).sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
+      }
+      // `current_next_step` drives the summary label, while `next_task` is its
+      // fallback. Keep both views together so a completed task cannot leave its
+      // old date visible beside “没有明确下一步”.
+      _customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null;
+      _customerDetailCache.last_contact = saved.recent_contact_date || _customerDetailCache.last_contact;
+      _customerDetailCache.next_follow_up = saved.next_follow_up || '';
+      _customerDetailCache.current_next_step = saved.next_step ? {
+        label: saved.next_step.title || saved.next_step.content || '没有明确下一步',
+        date: saved.next_step.remind_date || '', source: '待办记录'
+      } : { label: '没有明确下一步', date: '', source: '系统事实' };
+      document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up;
+      renderCustomerNextTask(_customerDetailCache.reminders || []);
+      syncCustomerWorkspaceAfterCommunication(id, activity, changedKey);
     }
-    if (saved.next_step) {
-      _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]).sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
-    }
-    // `current_next_step` drives the summary label, while `next_task` is its
-    // fallback. Keep both views together so a completed task cannot leave its
-    // old date visible beside “没有明确下一步”.
-    _customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null;
-    _customerDetailCache.last_contact = saved.recent_contact_date || _customerDetailCache.last_contact;
-    _customerDetailCache.next_follow_up = saved.next_follow_up || '';
-    _customerDetailCache.current_next_step = saved.next_step ? {
-      label: saved.next_step.title || saved.next_step.content || '没有明确下一步',
-      date: saved.next_step.remind_date || '', source: '待办记录'
-    } : { label: '没有明确下一步', date: '', source: '系统事实' };
-    document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up;
-    renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails);
-    renderCustomerNextTask(_customerDetailCache.reminders || []);
-    syncCustomerWorkspaceAfterCommunication(id, activity);
-    renderCustomerFactsBrief(_customerDetailCache);
     // 客户详情可能是从 Today 打开的。后端已经完成了到期待办，
     // 这里刷新底层工作台，让关闭详情后不会留下旧的今日事项。
     if (currentPage === 'dashboard') loadDashboard();
     else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
+    reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     return true;
   } catch(e) { return false; }
   finally {
@@ -6182,22 +6566,30 @@ async function addOutreach() {
   if (!subject) { showToast('请粘贴邮件或填写主题', 'warning'); return; }
   var data = { subject: subject, content: document.getElementById('outreachContent').value.trim(), sent_date: document.getElementById('outreachDate').value, reply_status: document.getElementById('outreachReply').value };
   try {
-    await api('/api/customers/' + id + '/outreach', { method: 'POST', body: JSON.stringify(data) });
+    var saved = await api('/api/customers/' + id + '/outreach', { method: 'POST', body: JSON.stringify(data) });
+    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(id) && saved && saved.outreach) {
+      var changedKey = upsertCustomerTimelineEntry(Object.assign({ type: 'outreach' }, saved.outreach));
+      syncCustomerWorkspaceAfterOutreach(id, saved.outreach, changedKey);
+    }
     showToast('记录已添加', 'success');
     document.getElementById('outreachPaste').value = ''; document.getElementById('outreachSubject').value = ''; document.getElementById('outreachContent').value = '';
     document.getElementById('outreachDate').value = ''; document.getElementById('outreachReply').value = 'pending';
     var composer = document.getElementById('followCompose');
     if (composer) composer.open = false;
-    await Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]);
+    reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
   } catch(e) {}
 }
 
 async function deleteOutreach(outreachId) {
   if (!await showAppConfirm({ title: '删除记录', message: '确认删除这条记录？', submitLabel: '删除' })) return;
   try {
+    var customerModal = document.getElementById('customerEditModal').classList.contains('show');
     await api('/api/outreach/' + outreachId, { method: 'DELETE' });
     showToast('记录已删除', 'success');
-    await refreshCustomerTimeline();
+    if (customerModal) {
+      removeCustomerTimelineEntry('outreach', outreachId);
+      reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    } else loadHistory();
   } catch(e) {}
 }
 
@@ -7147,7 +7539,23 @@ async function saveTimelineHighlight(target) {
       follow_date: log.follow_date || '', activity_type: log.activity_type || 'follow_up',
       direction: log.direction || 'unknown', content: log.content || '', result: log.result || '', next_plan: log.next_plan || ''
     }) });
+    if (_customerDetailCache) {
+      (_customerDetailCache.timeline_items || []).forEach(function(item) {
+        if (item.type === 'follow' && Number(item.id) === Number(target.logId)) item[target.field] = log[target.field];
+      });
+      _customerDetailCache.follow_history = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
+      _customerDetailCache.outreach_emails = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
+      renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails,
+        [customerTimelineKey({ type: 'follow', id: target.logId })]);
+      if (_customerWorkspaceCache[_customerDetailCache.id]) {
+        _customerWorkspaceCache[_customerDetailCache.id].timeline = Object.assign({}, _customerWorkspaceCache[_customerDetailCache.id].timeline || {}, {
+          items: _customerDetailCache.timeline_items
+        });
+        _customerWorkspaceCache[_customerDetailCache.id].savedAt = Date.now();
+      }
+    }
     showToast('高亮已保存', 'success');
+    reconcileCustomerTimeline().catch(function() {});
   } catch (e) { showToast('高亮保存失败', 'error'); }
 }
 
@@ -7234,27 +7642,41 @@ async function saveFollowEdit() {
     next_plan: richTextHtml(document.getElementById('followEditNextPlan'))
   };
   try {
-    await api('/api/follow-history/' + id, { method: 'PUT', body: JSON.stringify(data) });
+    var saved = await api('/api/follow-history/' + id, { method: 'PUT', body: JSON.stringify(data) });
+    var customerModal = document.getElementById('customerEditModal').classList.contains('show');
+    var customerId = (_customerDetailCache && _customerDetailCache.id) || (_followCache && _followCache.customer_id);
+    var updated = Object.assign({ type: 'follow' }, _followCache || {}, data, saved || {}, { id: Number(id) });
+    if (customerModal && _customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+      var changedKey = upsertCustomerTimelineEntry(updated);
+      syncCustomerWorkspaceAfterCommunication(customerId, updated, changedKey);
+    } else {
+      _followTimelineCache[id] = updated;
+    }
     showToast('跟进记录已更新', 'success');
     closeModal('followEditModal', true);
-    if (document.getElementById('customerEditModal').classList.contains('show')) {
-      await Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]);
-    } else loadHistory();
+    if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    else loadHistory();
   } catch(e) { showToast('更新失败', 'error'); }
 }
 
 async function deleteFollowLog(logId) {
   if (!await showAppConfirm({ title: '移除跟进记录', message: '确认移除这条跟进记录？移除后仍可撤销。', submitLabel: '移除' })) return;
   try {
+    var customerModal = document.getElementById('customerEditModal').classList.contains('show');
+    var removed = customerModal ? findCustomerTimelineEntry('follow', logId) : null;
     await api('/api/follow-history/' + logId, { method: 'DELETE' });
-    showFollowUndoToast(logId);
-    if (document.getElementById('customerEditModal').classList.contains('show')) {
-      await Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]);
-    } else loadHistory();
+    if (customerModal) {
+      removeCustomerTimelineEntry('follow', logId);
+      showFollowUndoToast(logId, removed);
+      reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    } else {
+      showFollowUndoToast(logId, removed);
+      loadHistory();
+    }
   } catch(e) { showToast('删除失败', 'error'); }
 }
 
-function showFollowUndoToast(logId) {
+function showFollowUndoToast(logId, removed) {
   var container = document.getElementById('toastContainer');
   var toast = document.createElement('div');
   toast.className = 'toast success toast-with-action';
@@ -7262,11 +7684,16 @@ function showFollowUndoToast(logId) {
   toast.querySelector('button').onclick = async function() {
     try {
       await api('/api/follow-history/' + logId + '/restore', { method: 'POST' });
+      var customerModal = document.getElementById('customerEditModal').classList.contains('show');
+      var customerId = (_customerDetailCache && _customerDetailCache.id) || (removed && removed.customer_id);
+      if (customerModal && removed && _customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+        var changedKey = upsertCustomerTimelineEntry(Object.assign({ type: 'follow' }, removed));
+        syncCustomerWorkspaceAfterCommunication(customerId, removed, changedKey);
+      }
       toast.remove();
       showToast('记录已恢复', 'success');
-      if (document.getElementById('customerEditModal').classList.contains('show')) {
-        await Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]);
-      } else loadHistory();
+      if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+      else loadHistory();
     } catch(e) {}
   };
   container.appendChild(toast);
@@ -7677,6 +8104,19 @@ function submitAppDialog() {
 
 function dismissAppDialog() { finishAppDialog(_appDialogMode === 'confirm' ? false : null); }
 
+// Every `.modal-overlay` covers the whole viewport and shares one z-index, so the
+// browser paints and hit-tests open overlays in DOM order: whatever sits last in
+// the body receives the click. A modal opened on top of an already-open dialog
+// (the unsaved-changes prompt over 安排下一步 / 记录沟通 / 批量操作, an in-app
+// confirm over a composer) must therefore move to the end of the body, otherwise
+// it is painted behind the dialog it belongs to and cannot be used at all.
+function raiseModalAboveOpenDialogs(modal) {
+  if (!modal || !modal.parentNode) return;
+  var openOverlays = Array.prototype.slice.call(document.querySelectorAll('.modal-overlay.show'));
+  var topOverlay = openOverlays[openOverlays.length - 1];
+  if (topOverlay && topOverlay !== modal) document.body.appendChild(modal);
+}
+
 function openModal(id) {
   var modal = document.getElementById(id);
   if (!modal) return;
@@ -7686,6 +8126,7 @@ function openModal(id) {
     clearTimeout(_modalCloseTimers[id]);
     delete _modalCloseTimers[id];
   }
+  raiseModalAboveOpenDialogs(modal);
   modal.classList.remove('is-closing');
   modal.classList.add('show');
   if (modalNeedsUnsavedGuard(id)) markModalClean(id);
@@ -7725,8 +8166,10 @@ function closeModal(id, force) {
     if (subtitle) subtitle.textContent = (title ? '“' + title.textContent.trim() + '”中的' : '你刚才填写的') + '内容还没有保存。';
     var saveButton = document.getElementById('unsavedSaveButton');
     if (saveButton) saveButton.style.display = _modalSaveHandlers[id] ? '' : 'none';
-    document.getElementById('unsavedChangesModal').classList.add('show');
-    syncModalBodyLock();
+    // Show the prompt through openModal so it is raised above the modal it
+    // protects and receives focus; otherwise it is unreachable and the user is
+    // trapped in the composer with no way back to 继续编辑 / 放弃修改.
+    openModal('unsavedChangesModal');
     return false;
   }
   if (id === 'customerEditModal') {
@@ -7808,10 +8251,15 @@ document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
 });
 document.addEventListener('keydown', function(e) {
   if (e.key !== 'Escape') return;
+  // Open modals are kept in DOM order by openModal, so the last `.show` overlay
+  // is the topmost one. Escape must dismiss what the user actually sees: the
+  // unsaved-changes prompt goes back to editing, every other modal is closed
+  // normally (which re-raises the prompt when there are unsaved edits).
   var openModals = Array.from(document.querySelectorAll('.modal-overlay.show'));
   var top = openModals[openModals.length - 1];
   if (top) {
-    closeModal(top.id, top.id === 'unsavedChangesModal');
+    if (top.id === 'unsavedChangesModal') continueEditingCustomerForm();
+    else closeModal(top.id);
     return;
   }
   var sidebar = document.getElementById('sidebar');
