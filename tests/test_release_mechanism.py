@@ -182,25 +182,49 @@ class PlanReleaseDbTests(unittest.TestCase):
 
 
 class UnifiedEntrypointTests(unittest.TestCase):
+    """trosa-release must be exercisable from any clean checkout.
+
+    Its routing file (`deploy/cloud/workbench.env`) is local-only and never
+    committed, so every invocation here supplies its own dummy routing file
+    instead of depending on the one machine that owns the real thing. A gate
+    that only passes where local secrets happen to exist is not a gate: the
+    same checks must hold in a fresh clone, a task worktree and the release
+    worktree, where no routing file exists by design.
+    """
+
+    def setUp(self):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix="-workbench.env", delete=False, encoding="utf-8")
+        handle.write("TRADE_OS_ECS_REGION=test-region\n")
+        handle.write("TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n")
+        handle.write(f"PROJECT_ROOT={ROOT}\n")
+        handle.close()
+        self.env_file = handle.name
+        self.addCleanup(os.remove, self.env_file)
+
+    def release(self, *args):
+        return run(["bash", "deploy/cloud/trosa-release", *args],
+                   env={**os.environ, "TRADE_OS_WORKBENCH_ENV": self.env_file})
+
     def test_help_lists_single_entry_commands(self):
-        proc = run(["bash", "deploy/cloud/trosa-release", "--help"])
+        proc = self.release("--help")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         for token in ("publish", "status", "rollback", "db-plan"):
             self.assertIn(token, proc.stdout)
 
     def test_unknown_command_fails_fast(self):
-        proc = run(["bash", "deploy/cloud/trosa-release", "upload-by-hand"])
+        proc = self.release("upload-by-hand")
         self.assertNotEqual(proc.returncode, 0)
 
     def test_publish_requires_pushed_commit_sha(self):
-        proc = run(["bash", "deploy/cloud/trosa-release", "publish",
-                    "--commit", "not-a-sha"])
+        proc = self.release("publish", "--commit", "not-a-sha")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("commit", proc.stderr.lower())
 
     def test_db_plan_preflight_works_offline(self):
-        proc = run(["bash", "deploy/cloud/trosa-release", "db-plan",
-                    "--applied", "0001_unified_trade_os.sql", "--changed", "app.py"])
+        proc = self.release("db-plan",
+                            "--applied", "0001_unified_trade_os.sql",
+                            "--changed", "app.py")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         doc = json.loads(proc.stdout)
         self.assertIn(doc["category"], ("compatible", "destructive"))
