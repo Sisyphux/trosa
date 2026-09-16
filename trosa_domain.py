@@ -82,7 +82,13 @@ def customer_contacts(conn: Any, customer_id: int, *, customer_ids=None) -> list
 
 
 def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -> list[dict]:
-    """The one Today work view.  It is a projection of open Tasks, never a second queue."""
+    """The one Today work view.  It is a projection of open Tasks, never a second queue.
+
+    Same-customer same-date open follow-ups are a write-path bug (see
+    ``merge_open_task``), never two real commitments.  The read collapses them
+    to the earliest row so Today shows one entry per customer per date even
+    when legacy data still holds duplicates.
+    """
     if postgres_mode():
         query = '''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
                           task_type AS reminder_type, manual_order, customer_name, customer_company
@@ -98,10 +104,96 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
                       AND (c.is_deleted=0 OR c.is_deleted IS NULL)
                     ORDER BY r.remind_date, r.manual_order, r.id'''
     params: list[Any] = [due_on_or_before]
+    rows = [dict(row) for row in conn.execute(query, params).fetchall()]
+    seen: set[tuple[Any, str]] = set()
+    collapsed: list[dict] = []
+    for row in rows:
+        key = (row.get('customer_id'), str(row.get('remind_date') or '')[:10])
+        if key in seen:
+            continue
+        seen.add(key)
+        collapsed.append(row)
     if limit is not None:
-        query += ' LIMIT ?'
-        params.append(max(1, int(limit)))
-    return [dict(row) for row in conn.execute(query, params).fetchall()]
+        collapsed = collapsed[:max(1, int(limit))]
+    return collapsed
+
+
+def deduplicate_open_follow_ups(conn: Any) -> int:
+    """Merge legacy same-customer same-date open follow-ups, keeping the earliest.
+
+    Returns the number of duplicate rows completed.  Survivor rows keep the
+    earliest id and gain the merged ``reason`` (``' / '``-joined).  This is the
+    offline repair for rows created before reschedule/edit paths merged on
+    collision; new writes must not create them in the first place.
+    """
+    merged = 0
+    if postgres_mode():
+        groups = conn.execute(
+            '''SELECT customer_id, due_date, array_agg(id ORDER BY id) AS ids
+                 FROM trosa.customer_tasks
+                WHERE status='open' AND task_type='follow_up'
+                GROUP BY customer_id, due_date HAVING count(*) > 1''',
+        ).fetchall()
+        for group in groups:
+            ids = list(group['ids'] or [])
+            if len(ids) < 2:
+                continue
+            survivor = min(ids)
+            reasons: list[str] = []
+            for task_id in sorted(ids):
+                row = conn.execute(
+                    'SELECT reason FROM trosa.customer_tasks WHERE id=?', (task_id,),
+                ).fetchone()
+                if row and str(row['reason'] or '').strip() and str(row['reason']).strip() not in reasons:
+                    reasons.append(str(row['reason']).strip())
+            conn.execute(
+                '''UPDATE trosa.tasks task SET reason=?, updated_at=now()
+                     FROM trosa.legacy_row_refs ref
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id=trosa.compat_current_user()
+                      AND ref.table_name='reminders' AND ref.legacy_id=?
+                      AND task.id=ref.target_id AND task.status='open' ''',
+                (' / '.join(reasons)[:2000], survivor),
+            )
+            for duplicate_id in sorted(ids):
+                if duplicate_id == survivor:
+                    continue
+                conn.execute(
+                    '''UPDATE trosa.tasks task SET status='done',
+                           completed_at=coalesce(completed_at, now()), updated_at=now()
+                      FROM trosa.legacy_row_refs ref
+                     WHERE ref.organization_id=trosa.compat_org_id()
+                       AND ref.legacy_user_id=trosa.compat_current_user()
+                       AND ref.table_name='reminders' AND ref.legacy_id=?
+                       AND task.id=ref.target_id AND task.status='open' ''',
+                    (duplicate_id,),
+                )
+                merged += 1
+        return merged
+    groups = conn.execute(
+        '''SELECT customer_id, remind_date, group_concat(id) AS ids, count(*) AS n
+             FROM reminders
+            WHERE is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
+            GROUP BY customer_id, remind_date HAVING n > 1''',
+    ).fetchall()
+    for group in groups:
+        ids = sorted(int(value) for value in str(group['ids'] or '').split(',') if value.strip())
+        if len(ids) < 2:
+            continue
+        survivor = ids[0]
+        reasons = []
+        for task_id in ids:
+            row = conn.execute('SELECT reason FROM reminders WHERE id=?', (task_id,)).fetchone()
+            if row and str(row['reason'] or '').strip() and str(row['reason']).strip() not in reasons:
+                reasons.append(str(row['reason']).strip())
+        conn.execute('UPDATE reminders SET reason=? WHERE id=?', (' / '.join(reasons)[:2000], survivor))
+        for duplicate_id in ids[1:]:
+            conn.execute(
+                "UPDATE reminders SET is_done=1, completed_at=datetime('now','localtime') WHERE id=? AND is_done=0",
+                (duplicate_id,),
+            )
+            merged += 1
+    return merged
 
 
 def customer_record(conn: Any, customer_id: int) -> dict | None:
@@ -260,7 +352,7 @@ def merge_open_task(
             return int(cursor.lastrowid)
         existing = conn.execute(
             '''SELECT id, title, reason FROM reminders
-                 WHERE customer_id=? AND is_done=0 AND reminder_type='follow_up'
+                 WHERE customer_id=? AND is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
                    AND remind_date=? ORDER BY id ASC LIMIT 1''',
             (customer_id, due_on),
         ).fetchone()

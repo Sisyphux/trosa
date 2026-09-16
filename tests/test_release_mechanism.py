@@ -150,7 +150,7 @@ class PlanReleaseDbTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid applied migration filename"):
             plan.plan_release_db(self.mdir, {"LEDGER_UNREADABLE: psycopg missing"}, [])
 
-    def test_production_ledger_leaves_only_0031_compatible(self):
+    def test_production_ledger_leaves_compatible_migrations(self):
         migration_dir = ROOT / "migrations"
         # Use the actual files rather than synthesizing names: this confirms
         # a historic destructive migration is excluded before classification.
@@ -160,7 +160,10 @@ class PlanReleaseDbTests(unittest.TestCase):
         }
         self.assertEqual(len(applied), 30)
         result = plan.plan_release_db(str(migration_dir), applied, [])
-        self.assertEqual(result["pending_migrations"], ["0031_customer_pin_payload_backfill.sql"])
+        self.assertEqual(result["pending_migrations"], [
+            "0031_customer_pin_payload_backfill.sql",
+            "0032_one_follow_up_per_customer_day.sql",
+        ])
         self.assertEqual(result["category"], "compatible")
         self.assertEqual(result["destructive_files"], [])
         self.assertNotIn("0009_postgres_final_integrity_boundaries.sql", result["pending_migrations"])
@@ -240,6 +243,17 @@ class UnifiedEntrypointTests(unittest.TestCase):
                 continue
             self.assertNotRegex(stripped, r"(^|\s)(ssh|scp)\s",
                                 f"SSH transport leaked into unified entry: {line}")
+
+    def test_cloud_assistant_client_does_not_require_executable_bit(self):
+        text = (ROOT / "deploy" / "cloud" / "run-cloud-assistant-command.sh").read_text(encoding="utf-8")
+        self.assertIn('python3 "$script_dir/cloud-assistant.py" run', text)
+        self.assertIn('python3 "$script_dir/cloud-assistant.py" get', text)
+
+    def test_workbench_noninteractive_commands_explicitly_use_bash(self):
+        text = (ROOT / "deploy" / "cloud" / "run-workbench-command.sh").read_text(encoding="utf-8")
+        self.assertIn('command_payload="$(printf', text)
+        self.assertIn('workbench_command="bash -c', text)
+        self.assertIn('--command "$workbench_command"', text)
 
     def test_shell_syntax_valid(self):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",

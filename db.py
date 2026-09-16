@@ -139,6 +139,7 @@ def _postgres_migration_paths():
         os.path.join(root, 'migrations', '0029_compat_operation_audit_bridge.sql'),
         os.path.join(root, 'migrations', '0030_customer_records_user_scoped_projection.sql'),
         os.path.join(root, 'migrations', '0031_customer_pin_payload_backfill.sql'),
+        os.path.join(root, 'migrations', '0032_one_follow_up_per_customer_day.sql'),
     )
 
 
@@ -1924,6 +1925,35 @@ def init_user_tables(user):
                      ON reminders(is_done, remind_date, customer_id)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_reminders_customer_open_date
                      ON reminders(customer_id, is_done, remind_date)''')
+        # One customer keeps one open follow-up per date.  Heal rows created
+        # before reschedule/edit paths merged on collision, then enforce the
+        # invariant so Today can never show the same customer twice for a day.
+        for _group in c.execute(
+            '''SELECT customer_id, remind_date, group_concat(id) AS ids, count(*) AS n
+                 FROM reminders
+                WHERE is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
+                  AND NULLIF(TRIM(COALESCE(remind_date, '')), '') IS NOT NULL
+                GROUP BY customer_id, remind_date HAVING n > 1'''
+        ).fetchall():
+            _ids = sorted(int(value) for value in str(_group[2] or '').split(',') if value.strip())
+            if len(_ids) < 2:
+                continue
+            _reasons: list[str] = []
+            for _task_id in _ids:
+                _row = c.execute('SELECT reason FROM reminders WHERE id=?', (_task_id,)).fetchone()
+                if _row and str(_row[0] or '').strip() and str(_row[0]).strip() not in _reasons:
+                    _reasons.append(str(_row[0]).strip())
+            c.execute('UPDATE reminders SET reason=? WHERE id=?', (' / '.join(_reasons)[:2000], _ids[0]))
+            for _duplicate_id in _ids[1:]:
+                c.execute(
+                    "UPDATE reminders SET is_done=1, completed_at=datetime('now','localtime')"
+                    ' WHERE id=? AND is_done=0',
+                    (_duplicate_id,),
+                )
+        c.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_reminders_one_open_follow_up_per_day
+                     ON reminders(customer_id, remind_date)
+                     WHERE is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
+                       AND NULLIF(TRIM(COALESCE(remind_date, '')), '') IS NOT NULL ''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_contacts_customer_primary
                      ON contacts(customer_id, is_primary DESC, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_contacts_email_lookup

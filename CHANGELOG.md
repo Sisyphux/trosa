@@ -1,3 +1,9 @@
+## 2026-09-16 — Today 同客户同天待办只保留一条
+
+- 修复：Today 不再把同一客户同一天的多条跟进并排显示；新建、改期、编辑待办落到已有同天待办时会自动合并，历史遗留重复会在启动/迁移时合并，只留最早一条并保留审计 tombstone。
+- 数据不变量：同一客户、同一日期、open 的 `follow_up` 最多一条。应用写入、PostgreSQL 兼容视图、SQLite 撤销恢复和并发竞写都服从该约束，Today 读取另有去重兜底；不同日期的后续任务不受影响。
+- 验证：新增 `TodayDuplicateRegressionTest` 与 PostgreSQL 兼容视图直写回归；209 项 Python 回归通过（1 项按环境跳过），PostgreSQL 演练 14 项通过，`py_compile`、`node --check` 与差异检查通过。
+
 ## 2026-09-16 — 修复发布 runner 的迁移账本误判
 
 - 修复：ECS 发布 runner 读取 PostgreSQL migration ledger 统一使用正式 Trosa venv；账本查询或计划生成失败会在 db-plan 阶段立即失败，不再把错误文本当作 migration 名称交给 classifier。

@@ -1580,6 +1580,31 @@ def _restore_undo_entity(conn, entity):
         columns = {row['name'] for row in conn.execute(f'PRAGMA table_info({table_name})').fetchall()}
         values = {key: value for key, value in before.items() if key in columns and key != 'id'}
         relation = table_name
+    if table_name == 'reminders' and not postgres_mode():
+        # The one-open-follow-up-per-day invariant is enforced per statement,
+        # so a restore that would reopen onto an occupied date must merge
+        # first: the occupant keeps its identity, the restored reason folds in,
+        # and the restored row lands completed instead of 500ing on the index.
+        # (PostgreSQL restores flow through compat_reminders_write, which does
+        # the same merge inside the trigger.)
+        would_be_open = (not values.get('is_done')
+                         and str(values.get('reminder_type') or 'follow_up') == 'follow_up'
+                         and str(values.get('remind_date') or '').strip()
+                         and values.get('customer_id'))
+        if would_be_open:
+            occupant = conn.execute(
+                '''SELECT id, reason FROM reminders
+                   WHERE customer_id=? AND is_done=0
+                     AND COALESCE(reminder_type, 'follow_up')='follow_up'
+                     AND remind_date=? AND id<>?
+                   ORDER BY id LIMIT 1''',
+                (values.get('customer_id'), values.get('remind_date'), entity_id)).fetchone()
+            if occupant:
+                conn.execute('UPDATE reminders SET reason=? WHERE id=?',
+                             (_merge_reason_parts(occupant['reason'], values.get('reason')),
+                              occupant['id']))
+                values['is_done'] = 1
+                values['completed_at'] = values.get('completed_at') or _calendar_now_text()
     if not _snapshot_entity(conn, table_name, entity_id):
         insert_columns = ['id'] + list(values.keys())
         placeholders = ','.join('?' for _ in insert_columns)
@@ -10939,6 +10964,35 @@ def edit_reminder(reminder_id):
     }
     if 'title' in provided and 'content' not in provided:
         values['content'] = values['title']
+    moving_type = str(before.get('reminder_type') or 'follow_up')
+    survivor = (_find_same_day_open_follow_up(conn, c, customer_id, values['remind_date'], exclude_id=reminder_id)
+                if moving_type == 'follow_up' else None)
+    if survivor and int(survivor['id']) != int(reminder_id):
+        survivor_before = _snapshot_entity(conn, 'reminders', survivor['id'])
+        merged_reason = _merge_reason_parts(survivor.get('reason'), values['reason'])
+        merged_title = values['title'] or survivor.get('title') or ''
+        merged_content = values['content'] or survivor.get('content') or merged_title
+        _update_task(conn, task_id=survivor['id'], title=merged_title, content=merged_content,
+                     reason=merged_reason, due_on=values['remind_date'], now=now)
+        _complete_task(conn, task_id=reminder_id, completed_at=now)
+        _refresh_customer_follow_up(c, customer_id, now)
+        survivor_after = _snapshot_entity(conn, 'reminders', survivor['id'])
+        after = _snapshot_entity(conn, 'reminders', reminder_id)
+        customer_after = _snapshot_entity(conn, 'customers', customer_id)
+        description = f'撤销待办修改：{before.get("title") or before.get("content") or "待办"}'
+        undo_token = _create_undo_action(
+            conn, 'UPDATE_TASK', 'reminder', survivor['id'],
+            [_undo_entity('reminders', reminder_id, before, after),
+             _undo_entity('reminders', survivor['id'], survivor_before, survivor_after),
+             _undo_entity('customers', customer_id, customer_before, customer_after)],
+            description,
+        )
+        conn.commit()
+        updated = _reminder_with_customer(conn, survivor['id'])
+        conn.close()
+        log_operation('UPDATE', 'reminder', reminder_id, f'修改待办并合并同日待办: {values["title"]} ({values["remind_date"]})')
+        return jsonify({'success': True, 'reminder': updated, 'merged_into': survivor['id'],
+                        'undo_token': undo_token, 'undo_description': description})
     _update_task(conn, task_id=reminder_id, title=values['title'], content=values['content'],
                  reason=values['reason'], due_on=values['remind_date'], now=now)
     _refresh_customer_follow_up(c, customer_id, now)
@@ -11138,7 +11192,8 @@ def complete_customer_task(reminder_id, data, before_commit=None):
         if next_task and next_follow_date:
             if postgres_mode():
                 existing_next = next((task for task in _customer_tasks(conn, customer_id)
-                                      if str(task.get('remind_date') or '')[:10] == next_follow_date), None)
+                                      if str(task.get('reminder_type') or 'follow_up') == 'follow_up'
+                                      and str(task.get('remind_date') or '')[:10] == next_follow_date), None)
             else:
                 existing_next = c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
                                              AND reminder_type='follow_up' AND remind_date=?
@@ -11224,6 +11279,36 @@ def reschedule_reminder(reminder_id):
         return jsonify({'error': '待办与客户不匹配，未调整日期'}), 409
     customer_before = _snapshot_entity(conn, 'customers', customer_id)
     now = _calendar_now_text()
+    moving_type = str(before.get('reminder_type') or 'follow_up')
+    survivor = (_find_same_day_open_follow_up(conn, c, customer_id, remind_date, exclude_id=reminder_id)
+                if moving_type == 'follow_up' else None)
+    if survivor and int(survivor['id']) != int(reminder_id):
+        survivor_before = _snapshot_entity(conn, 'reminders', survivor['id'])
+        merged_reason = _merge_reason_parts(survivor.get('reason'), before.get('reason'))
+        merged_title = (before.get('title') or survivor.get('title') or '').strip() or survivor.get('title') or ''
+        merged_content = (before.get('content') or survivor.get('content') or '').strip() or merged_title
+        _update_task(conn, task_id=survivor['id'], title=merged_title, content=merged_content,
+                     reason=merged_reason, due_on=remind_date, now=now)
+        _complete_task(conn, task_id=reminder_id, completed_at=now)
+        next_open = _refresh_customer_follow_up(c, customer_id, now)
+        survivor_after = _snapshot_entity(conn, 'reminders', survivor['id'])
+        after = _snapshot_entity(conn, 'reminders', reminder_id)
+        customer_after = _snapshot_entity(conn, 'customers', customer_id)
+        description = f'撤销待办日期调整：{before.get("title") or before.get("content") or "待办"}'
+        undo_token = _create_undo_action(
+            conn, 'RESCHEDULE_TASK', 'reminder', survivor['id'],
+            [_undo_entity('reminders', reminder_id, before, after),
+             _undo_entity('reminders', survivor['id'], survivor_before, survivor_after),
+             _undo_entity('customers', customer_id, customer_before, customer_after)],
+            description,
+        )
+        conn.commit()
+        updated = _reminder_with_customer(conn, survivor['id'])
+        conn.close()
+        log_operation('RESCHEDULE', 'reminder', reminder_id, f'延后至 {remind_date}（与同日待办合并）')
+        return jsonify({'success': True, 'remind_date': remind_date, 'next_follow_up': next_open,
+                        'reminder': updated, 'merged_into': survivor['id'],
+                        'undo_token': undo_token, 'undo_description': description})
     _update_task(conn, task_id=reminder_id, title=before.get('title') or '',
                  content=before.get('content') or '', reason=before.get('reason') or '',
                  due_on=remind_date, now=now)
@@ -11526,7 +11611,8 @@ def create_customer_follow_up_task(customer_id, data, before_commit=None):
         now = _calendar_now_text()
         if postgres_mode():
             existing_same_day = next((task for task in _customer_tasks(conn, customer_id)
-                                      if str(task.get('remind_date') or '')[:10] == due_date), None)
+                                      if str(task.get('reminder_type') or 'follow_up') == 'follow_up'
+                                      and str(task.get('remind_date') or '')[:10] == due_date), None)
         else:
             existing_same_day = c.execute('''SELECT id FROM reminders WHERE customer_id=? AND is_done=0
                                              AND reminder_type='follow_up' AND remind_date=?
@@ -11580,6 +11666,28 @@ def update_customer_follow_up_task(reminder_id, data, before_commit=None):
         values = {key: str(data.get(key) if key in provided else before.get(key) or '').strip() for key in allowed}
         values['remind_date'] = provided_remind_date or existing_remind_date
         if 'title' in provided and 'content' not in provided: values['content'] = values['title']
+        moving_type = str(before.get('reminder_type') or 'follow_up')
+        survivor = (_find_same_day_open_follow_up(conn, c, customer_id, values['remind_date'], exclude_id=reminder_id)
+                    if moving_type == 'follow_up' else None)
+        if survivor and int(survivor['id']) != int(reminder_id):
+            survivor_before = _snapshot_entity(conn, 'reminders', survivor['id'])
+            merged_reason = _merge_reason_parts(survivor.get('reason'), values['reason'])
+            merged_title = values['title'] or survivor.get('title') or ''
+            merged_content = values['content'] or survivor.get('content') or merged_title
+            _update_task(conn, task_id=survivor['id'], title=merged_title, content=merged_content,
+                         reason=merged_reason, due_on=values['remind_date'], now=now)
+            _complete_task(conn, task_id=reminder_id, completed_at=now)
+            _refresh_customer_activity_rollups(c, customer_id, now)
+            survivor_after = _snapshot_entity(conn, 'reminders', survivor['id'])
+            after = _snapshot_entity(conn, 'reminders', reminder_id)
+            customer_after = _snapshot_entity(conn, 'customers', customer_id)
+            undo_token = _create_undo_action(conn, 'UPDATE_TASK', 'reminder', survivor['id'],
+                [_undo_entity('reminders', reminder_id, before, after),
+                 _undo_entity('reminders', survivor['id'], survivor_before, survivor_after),
+                 _undo_entity('customers', customer_id, customer_before, customer_after)],
+                f'撤销待办修改：{before.get("title") or before.get("content") or "待办"}')
+            return {'id': survivor['id'], 'customer_id': customer_id, 'task': survivor_after,
+                    'merged_into': survivor['id'], 'undo_token': undo_token, 'undo_description': '撤销待办修改'}
         _update_task(conn, task_id=reminder_id, title=values['title'], content=values['content'],
                      reason=values['reason'], due_on=values['remind_date'], now=now)
         _refresh_customer_activity_rollups(c, customer_id, now)
@@ -12386,6 +12494,40 @@ def _recalculate_customer_dates(c, customer_id, now=None):
     _refresh_customer_activity_rollups(c, customer_id, now)
 
 
+def _merge_reason_parts(*parts):
+    """Join distinct non-empty reasons with ' / ', preserving first-seen order."""
+    merged = []
+    for part in parts:
+        text = str(part or '').strip()
+        if text and text not in merged:
+            merged.append(text)
+    return ' / '.join(merged)[:2000]
+
+
+def _find_same_day_open_follow_up(conn, c, customer_id, due_date, exclude_id=None):
+    """Return another open follow-up for the same customer and date, if any.
+
+    Moving or editing a task onto a date that already holds an open follow-up
+    must merge into one row instead of leaving two identical Today entries.
+    """
+    if postgres_mode():
+        for task in _customer_tasks(conn, customer_id):
+            if int(task.get('id') or 0) == int(exclude_id or 0):
+                continue
+            if str(task.get('reminder_type') or 'follow_up') != 'follow_up':
+                continue
+            if str(task.get('remind_date') or '')[:10] != str(due_date or '')[:10]:
+                continue
+            return task
+        return None
+    row = c.execute('''SELECT id, title, content, reason, remind_date, reminder_type
+                       FROM reminders WHERE customer_id=? AND is_done=0
+                         AND COALESCE(reminder_type, 'follow_up')='follow_up' AND remind_date=?
+                         AND id<>? ORDER BY id LIMIT 1''',
+                    (customer_id, due_date, int(exclude_id or 0))).fetchone()
+    return dict(row) if row else None
+
+
 def _merge_or_create_reminder(c, customer_id, title, content, reason, remind_date,
                               reminder_type='follow_up', source_activity_id=None, now=None):
     """Insert a follow-up reminder or merge into an existing open one for the same day.
@@ -12408,7 +12550,7 @@ def _merge_or_create_reminder(c, customer_id, title, content, reason, remind_dat
                   (customer_id, title, content, reason, remind_date, reminder_type, source_activity_id, now))
         return c.lastrowid
     c.execute('''SELECT id, title, content, reason FROM reminders
-                 WHERE customer_id=? AND is_done=0 AND reminder_type='follow_up'
+                 WHERE customer_id=? AND is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
                    AND remind_date=?
                  ORDER BY id ASC LIMIT 1''',
               (customer_id, remind_date))
@@ -12420,10 +12562,29 @@ def _merge_or_create_reminder(c, customer_id, title, content, reason, remind_dat
                      WHERE id=?''',
                   (merged_title, content or merged_title, merged_reason, now, existing['id']))
         return existing['id']
-    c.execute('''INSERT INTO reminders
-                 (customer_id, title, content, reason, remind_date, is_done, reminder_type, source_activity_id, created_at)
-                 VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)''',
-              (customer_id, title, content, reason, remind_date, reminder_type, source_activity_id, now))
+    try:
+        c.execute('''INSERT INTO reminders
+                     (customer_id, title, content, reason, remind_date, is_done, reminder_type, source_activity_id, created_at)
+                     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)''',
+                  (customer_id, title, content, reason, remind_date, reminder_type, source_activity_id, now))
+    except sqlite3.IntegrityError:
+        # A concurrent writer won the check-then-insert race against the
+        # one-open-follow-up-per-day index.  Merge into its row instead of
+        # failing the whole business action with a 500.
+        c.execute('''SELECT id, title, content, reason FROM reminders
+                     WHERE customer_id=? AND is_done=0 AND COALESCE(reminder_type, 'follow_up')='follow_up'
+                       AND remind_date=?
+                     ORDER BY id ASC LIMIT 1''',
+                  (customer_id, remind_date))
+        existing = c.fetchone()
+        if not existing:
+            raise
+        merged_title = title or existing['title']
+        merged_reason = ' / '.join(part for part in (existing['reason'], reason) if part)
+        c.execute('''UPDATE reminders SET title=?, content=?, reason=?, updated_at=?
+                     WHERE id=?''',
+                  (merged_title, content or merged_title, merged_reason, now, existing['id']))
+        return existing['id']
     return c.lastrowid
 
 

@@ -1223,6 +1223,47 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(count, 1)
 
+    def test_compat_view_same_day_insert_merges_into_one_row(self):
+        """Direct compat-view writes obey the same one-task invariant."""
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()["customer_id"]
+        due_on = "2031-06-15"
+        self.connection.execute(
+            """INSERT INTO trosa.reminders
+                (customer_id, title, content, reason, remind_date, reminder_type)
+               VALUES (%s, 'compat one', 'compat one', 'reason one', %s, 'follow_up')""",
+            (customer_id, due_on),
+        )
+        first = int(self.connection.execute(
+            "SELECT current_setting('trade_os.lastrowid', true)"
+        ).fetchone()[0])
+        self.connection.execute(
+            """INSERT INTO trosa.reminders
+                (customer_id, title, content, reason, remind_date, reminder_type)
+               VALUES (%s, 'compat two', 'compat two', 'reason two', %s, 'follow_up')""",
+            (customer_id, due_on),
+        )
+        second = int(self.connection.execute(
+            "SELECT current_setting('trade_os.lastrowid', true)"
+        ).fetchone()[0])
+        self.assertEqual(second, first)
+        count = self.connection.execute(
+            """SELECT count(*) FROM trosa.tasks task
+                 JOIN trosa.account_legacy_refs ref ON ref.account_id=task.account_id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid' AND ref.legacy_customer_id=%s
+                  AND task.status='open' AND task.task_type='follow_up'
+                  AND trosa.compat_local_date(task.due_at)=%s""",
+            (customer_id, due_on),
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
+        reason = self.connection.execute(
+            "SELECT reason FROM trosa.customer_tasks WHERE id=%s", (first,)
+        ).fetchone()[0]
+        self.assertIn("reason one", reason)
+        self.assertIn("reason two", reason)
+
     def test_concurrent_inbox_dedupe_returns_single_item(self):
         """A replayed dedupe key must resolve to one row, never a 500."""
         import threading

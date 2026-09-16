@@ -1931,7 +1931,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0031_customer_pin_payload_backfill.sql')
+        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0032_one_follow_up_per_customer_day.sql')
         tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
         self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
         self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)

@@ -15,11 +15,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 username="${TRADE_OS_CLOUD_ASSISTANT_USER:-trosa-operator}"
 timeout="${TRADE_OS_CLOUD_ASSISTANT_TIMEOUT:-120}"
 
-launch="$("$script_dir/cloud-assistant.py" run --region "$region" --instance-id "$instance_id" --username "$username" --timeout "$timeout" --command "$remote_command")"
+launch="$(python3 "$script_dir/cloud-assistant.py" run --region "$region" --instance-id "$instance_id" --username "$username" --timeout "$timeout" --command "$remote_command")"
 read -r invoke_id command_id < <(printf '%s' "$launch" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["InvokeId"], d["CommandId"])')
 deadline=$((SECONDS + timeout + 30))
 while (( SECONDS < deadline )); do
-  response="$("$script_dir/cloud-assistant.py" get --region "$region" --invoke-id "$invoke_id" --command-id "$command_id")"
+  response="$(python3 "$script_dir/cloud-assistant.py" get --region "$region" --invoke-id "$invoke_id" --command-id "$command_id")"
   result="$(printf '%s' "$response" | python3 -c '
 import base64,json,sys
 d=json.load(sys.stdin); rows=d.get("Invocations",{}).get("Invocation",[])

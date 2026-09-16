@@ -62,12 +62,18 @@ fi
 # monitoring page look broken. If an older CLI or an SSM-only session rejects
 # exec, continue to the interactive compatibility path below.
 if [[ "$prefer_workbench" == "1" ]]; then
+  # Workbench's non-interactive command runner invokes /bin/sh. Release
+  # maintenance commands are Bash scripts and use pipefail, so materialize
+  # the exact payload and invoke Bash explicitly instead of relying on the
+  # instance's default shell.
+  command_payload="$(printf '%s' "$remote_command" | base64 | tr -d '\n')"
+  workbench_command="bash -c \"\$(printf '%s' '$command_payload' | base64 -d)\""
   if output="$("$workbench_bin" exec \
       --instance-id "$instance_id" \
       --region "$region" \
       --user-name root \
       --timeout 120 \
-      --command "$remote_command" 2>&1)"; then
+      --command "$workbench_command" 2>&1)"; then
     printf '%s\n' "$output"
     exit 0
   else
