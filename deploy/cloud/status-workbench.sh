@@ -20,14 +20,11 @@ esac
 # shipped inside the release and runs on ECS, where /proc and systemd exist.
 remote_command="bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'"
 
-# Status is read-only and must remain available when the local SSH path is
-# blocked while the Workbench control plane is healthy. The command runner
-# keeps the interactive Workbench session as a compatibility fallback.
-# Keep the compatibility path bounded as well; a failed read must not occupy
-# the workbench refresh loop for the full maintenance-command timeout.
-TRADE_OS_PREFER_WORKBENCH=1 \
-TROSA_WORKBENCH_EXPECT_TIMEOUT=45 \
-  bash "$SCRIPT_DIR/run-workbench-command.sh" \
+# Keep the established filename for callers, but execute over the Cloud
+# Assistant control plane. It remains available when port 22 and Workbench
+# instance-login authentication are unavailable.
+TRADE_OS_CLOUD_ASSISTANT_TIMEOUT=60 \
+  bash "$SCRIPT_DIR/run-cloud-assistant-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "$remote_command"

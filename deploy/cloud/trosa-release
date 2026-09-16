@@ -10,10 +10,8 @@
 # 1. 本机只做"发射 + 轮询"，真正的发布全程在 ECS 上由 release-remote.sh
 #    以 setsid 后台任务执行。本机网络中断、Agent 退出后重进，都只是重新
 #    轮询同一个 release，不会产生半发布。
-# 2. 传输层强制走 Workbench 控制面（exec / download），绝不使用 SSH。
-#    这消除了 "Connection closed by ... port 22" 整类故障：22 端口不再是
-#    发布链路的一部分。实现方式是清空 TRADE_OS_SSH_HOST 并强制
-#    TRADE_OS_PREFER_WORKBENCH=1，再调用 run-workbench-command.sh。
+# 2. 传输层只走 Alibaba Cloud Assistant RunCommand/DescribeInvocations，绝不
+#    使用 SSH、Workbench interactive session 或实例 root 密码。
 # 3. 同一个 release 重复执行是幂等的：服务端按 release id + commit 去重，
 #    已是生产版本且健康时直接返回 success/already_production。
 # 4. 所有输出都是机器可读的：RESULT JSON 包含 release / production /
@@ -62,16 +60,9 @@ case "$GITHUB_REMOTE" in
 esac
 GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
 
-# ---- 强制 Workbench，彻底绕开 SSH -------------------------------------------
-# run-workbench-command.sh 在配置了 TRADE_OS_SSH_HOST 时默认优先 SSH，
-# 这正是过去 "Connection closed by port 22" 打断发布/备份的根因。
-# 发布链路一律清空 SSH 配置、强制 Workbench 控制面。
-export TRADE_OS_SSH_HOST=""
-export TRADE_OS_PREFER_WORKBENCH=1
-
-wb_exec() {
-  # 短命令、只读轮询或发射器；单次调用永不超过 Workbench 超时。
-  bash "$SCRIPT_DIR/run-workbench-command.sh" \
+# ---- Cloud Assistant：无 SSH、无实例密码 ------------------------------------
+ca_exec() {
+  bash "$SCRIPT_DIR/run-cloud-assistant-command.sh" \
     "$TRADE_OS_ECS_INSTANCE_ID" "$TRADE_OS_ECS_REGION" "$1"
 }
 
@@ -93,13 +84,13 @@ case "$cmd" in
       esac
     done
     # status-remote.sh 已包含 TROSA_DEPLOY_JSON 行；--json 只抽取机器部分。
-    output="$(TROSA_WORKBENCH_EXPECT_TIMEOUT=45 wb_exec "bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'")" || {
+    output="$(ca_exec "bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'")" || {
       printf '%s\n' "$output" >&2
-      fail "无法读取 ECS 状态（Workbench 控制面失败），production 状态未知——未做任何变更，可稍后重跑 status"
+      fail "无法读取 ECS 状态（Cloud Assistant 失败），production 状态未知——未做任何变更，可稍后重跑 status"
     }
     if [[ "$as_json" == 1 ]]; then
-      json_line="$(printf '%s\n' "$output" | grep '^TROSA_DEPLOY_JSON ' | tail -n 1 | sed 's/^TROSA_DEPLOY_JSON //')"
-      status_line="$(printf '%s\n' "$output" | grep '^TROSA_MANAGER_STATUS ' | tail -n 1)"
+      json_line="$(printf '%s\n' "$output" | grep '^TROSA_DEPLOY_JSON ' | tail -n 1 | sed 's/^TROSA_DEPLOY_JSON //' || true)"
+      status_line="$(printf '%s\n' "$output" | grep '^TROSA_MANAGER_STATUS ' | tail -n 1 || true)"
       if [[ -n "$json_line" ]]; then
         printf '%s\n' "$json_line" | python3 -c "
 import json,sys
@@ -144,23 +135,12 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
     fi
     case "$RELEASE_ID" in ''|*[!A-Za-z0-9._-]*) fail "非法 release id：$RELEASE_ID" ;; esac
 
-    # 发射：把 runner 本体从该 commit 的 GitHub raw 取到 ECS，并以 setsid
-    # 后台启动。发射命令本身只有几行，SSM 输入不会损坏；真正耗时的
-    # pip install / pg_dump / migration / restart 全在 ECS 后台跑，
-    # 本机断网不会中断它们。
-    RUNNER_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$COMMIT/deploy/cloud/release-remote.sh"
-    launch=$(cat <<EOF
-set -euo pipefail
-RUNNER_FILE='/tmp/trosa-release-remote-$RELEASE_ID.sh'
-curl --fail --location --silent --show-error --max-time 60 '$RUNNER_URL' -o "\$RUNNER_FILE"
-chmod +x "\$RUNNER_FILE"
-setsid nohup bash "\$RUNNER_FILE" '$REMOTE_ROOT' '$SERVICE_NAME' '$RELEASE_ID' '$COMMIT' '$GITHUB_REMOTE' '$mode' '$ALLOW_DESTRUCTIVE' >'/tmp/trosa-release-$RELEASE_ID.launch.log' 2>&1 < /dev/null &
-printf 'launched %s mode=%s\n' '$RELEASE_ID' '$mode'
-EOF
-)
-    if ! launch_out="$(wb_exec "$launch")"; then
+    # trosa-operator 不能登录、不能获得通用 root shell；它只可 sudo 到 ECS
+    # 上参数校验过的包装器。包装器下载并 detached 启动既有 release-remote.sh。
+    launch="sudo /usr/local/lib/trosa/release-runner '$REMOTE_ROOT' '$SERVICE_NAME' '$RELEASE_ID' '$COMMIT' '$GITHUB_REMOTE' '$mode' '$ALLOW_DESTRUCTIVE'"
+    if ! launch_out="$(ca_exec "$launch")"; then
       printf '%s\n' "$launch_out" >&2
-      fail "发射失败（Workbench 控制面错误）。服务端未启动新任务，production 未变更；可直接重跑"
+      fail "发射失败（Cloud Assistant 错误）。服务端未启动新任务，production 未变更；可直接重跑"
     fi
     printf '%s\n' "$launch_out" | grep -q "launched $RELEASE_ID" || {
       printf '%s\n' "$launch_out" >&2
@@ -173,7 +153,7 @@ EOF
     last_status=""
     while [[ $SECONDS -lt $deadline ]]; do
       sleep 5
-      poll_out="$(wb_exec "cat '$REMOTE_ROOT/.last-deploy-result.json' 2>/dev/null; echo; cat '$REMOTE_ROOT/releases/$RELEASE_ID/DEPLOY_RESULT.json' 2>/dev/null" 2>/dev/null || true)"
+      poll_out="$(ca_exec "cat '$REMOTE_ROOT/.last-deploy-result.json' 2>/dev/null; echo; cat '$REMOTE_ROOT/releases/$RELEASE_ID/DEPLOY_RESULT.json' 2>/dev/null" 2>/dev/null || true)"
       doc="$(printf '%s\n' "$poll_out" | python3 -c "
 import json,sys
 best=None

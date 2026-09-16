@@ -2214,3 +2214,8 @@
 - 优化：Inbox 清空状态改为有边界的安静提示区，保留页面的轻量感，同时避免工作区看起来像未加载完成。
 - 优化：本周沟通的空状态明确说明缺少的是已确认沟通，并解释汇总出现的位置，避免“没有选择内容”的歧义。
 - 保持：仅调整静态 HTML/CSS，不修改任何业务流程、数据、权限或 API。
+## 2026-09-16 — ECS 自动运维改为 Cloud Assistant 无密码通道
+
+- 运维变化：`trosa-release`、状态与日志读取改为 Alibaba Cloud Assistant 的 `RunCommand` / `DescribeInvocations`；正式发布仍由 ECS 上既有的 `release-remote.sh`、其状态机、迁移备份、健康检查与回滚执行。
+- 安全：不再依赖 Workbench 的实例 root/SSH 类认证或保存的 root 密码。新增不可登录的 `trosa-operator`；其 sudo 权限仅能调用一个固定、参数校验的发布包装器。RAM 凭据继续只存本机 0600 Workbench 配置，不进入仓库、环境示例或 Agent 提示词。
+- 验证：Cloud Assistant Agent 在线；root 密码认证失败时仍成功执行 Cloud Assistant 命令，且 `trosa-operator` 状态查询返回 production `app=active`、`tunnel=active`、`health=ok`。

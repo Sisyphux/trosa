@@ -1,4 +1,4 @@
-# ECS + Workbench 发布流程
+# ECS + Cloud Assistant 发布流程
 
 > 正式发布统一入口：`deploy/cloud/trosa-release`。Codex、Qoder、人工、其他
 > Agent 一律使用它；不要手写 SSH 命令、不要直调底层脚本。
@@ -10,8 +10,9 @@
 > ```
 >
 > 原理（一句话）：本机只做“发射 + 轮询”，真正的发布在 ECS 上由
-> `release-remote.sh` 以后台任务幂等执行；传输强制走 Workbench 控制面，
-> SSH 的 22 端口不再是发布链路——本机断网、Agent 退出后重进，都只是重新
+> `release-remote.sh` 以后台任务幂等执行；传输强制走 Alibaba Cloud Assistant
+> 的 `RunCommand` / `DescribeInvocations`，不使用 SSH、Workbench session 或
+> 实例 root 密码。22 端口不再是发布链路——本机断网、Agent 退出后重进，都只是重新
 > 轮询同一个 release。每次发布对应 `releases/<id>/release.json` 与
 > `DEPLOY_RESULT.json`（release/commit/mode/phase/status/production/
 > previous/backup/migration/health/error/next_action），`status --json`
@@ -39,6 +40,12 @@ cp deploy/cloud/workbench.env.example deploy/cloud/workbench.env
 # 编辑实例 ID 等路由信息，不要写入任何密钥
 deploy/cloud/bootstrap-workbench.sh
 ```
+
+Cloud Assistant 使用 Workbench 的本机受保护 AK profile（`~/.workbench/config.json`，
+权限 0600）签名 API；`workbench.env` 永远只放实例路由信息。首次切换可运行
+`cloud-assistant-bootstrap.sh` 作为一条 **root Cloud Assistant** 命令：它会创建不可
+登录的 `trosa-operator`，日常 status/logs 以该用户执行；发布只允许它 sudo 到一个
+固定、参数校验过的包装器，包装器仍只启动已有 `release-remote.sh`。
 
 首次配置还需要由维护者安全写入 `/etc/trade-os/trade-os.env`、`/etc/cloudflared/config.yml` 和 Tunnel 凭据，然后再启用：
 
@@ -73,7 +80,7 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
 
-代码同步与云端发布现在由 `auto-publish.sh` 串联：Codex 在任务完成并通过本地验证后，显式传入本次改动文件，脚本自动提交到 `main`、推送公开的 `Sisyphux/trosa`，读取发布前 ECS 状态，再通过 SSM 发布同一个 commit 并检查公网健康。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
+代码同步与云端发布现在由 `auto-publish.sh` 串联：Codex 在任务完成并通过本地验证后，显式传入本次改动文件，脚本自动提交到 `main`、推送公开的 `Sisyphux/trosa`，读取发布前 ECS 状态，再通过 Cloud Assistant 发布同一个 commit 并检查公网健康。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
 
 日常自动入口：
 
@@ -99,12 +106,9 @@ deploy/cloud/backup-workbench.sh
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及
 CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
-只读状态检查优先走 Workbench 控制面，即使本地配置了 SSH 主机别名；这样本机 SSH
-暂时无法握手时，工作台仍有机会读取网站和服务器状态。如果 Workbench 非交互请求临时失败，脚本会先使用已配置的 SSH
-主机别名回退，再尝试旧版 Workbench 的交互式会话，避免把控制面短暂错误显示成服务器故障。
-当目标实例无法通过 SSH 连接、Workbench 降级到 Session Manager（SSM）模式时，脚本会
-通过一次短生命周期的交互式 Shell 读取同样的状态；这是因为 Workbench 的 SSM 模式不支持
-非交互式 `exec`。会话结束后立即关闭，不保留后台终端。
+只读状态检查使用 Cloud Assistant API，因此本机 SSH 不可握手、22 端口关闭或 Workbench
+实例认证失败时，仍可查询网站和服务器状态。每条命令都有 InvokeId/CommandId，可在网络
+恢复后用 `DescribeInvocations` 查询同一远端执行结果；不保留交互式 shell。
 
 发布前建议先查看状态；发布失败时脚本会自动回退，手动回退使用：
 

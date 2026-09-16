@@ -181,8 +181,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def test_release_path_never_uses_ssh_transport(self):
         text = (ROOT / "deploy" / "cloud" / "trosa-release").read_text(encoding="utf-8")
-        self.assertIn('export TRADE_OS_SSH_HOST=""', text)
-        self.assertIn("export TRADE_OS_PREFER_WORKBENCH=1", text)
+        self.assertIn("run-cloud-assistant-command.sh", text)
+        self.assertIn("Cloud Assistant", text)
         # No scp/ssh invocation may remain in the release path.
         for line in text.splitlines():
             stripped = line.strip()
@@ -193,7 +193,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def test_shell_syntax_valid(self):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",
-                     "auto-publish.sh", "run-workbench-command.sh"):
+                     "auto-publish.sh", "run-workbench-command.sh",
+                     "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")
 
