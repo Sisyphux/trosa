@@ -122,6 +122,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   if [[ -n "$REL_DIR" && -d "$REL_DIR" ]]; then
+    cd "$SOURCE_DIR" 2>/dev/null || true
     git -C "$SOURCE_DIR" worktree remove --force -- "$REL_DIR" >/dev/null 2>&1 \
       || rm -rf -- "$REL_DIR"
   fi
@@ -129,7 +130,8 @@ cleanup() {
     git -C "$SOURCE_DIR" worktree prune >/dev/null 2>&1 || true
   fi
   if [[ -d "$LOCK_DIR" ]]; then
-    rmdir -- "$LOCK_DIR" 2>/dev/null || true
+    # macOS /usr/bin/rmdir does not accept GNU's `--` sentinel.
+    rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
   exit "$status"
 }
@@ -198,20 +200,24 @@ add_commit() {
     printf '跳过 %s：已包含在 origin/%s 中\n' "${sha:0:9}" "$TARGET_BRANCH"
     return 0
   fi
-  for existing in "${RELEASE_COMMITS[@]}"; do
-    if [[ "$existing" == "$sha" ]]; then
-      printf '跳过 %s：本次已列出\n' "${sha:0:9}"
-      return 0
-    fi
-  done
+  if [[ ${#RELEASE_COMMITS[@]} -gt 0 ]]; then
+    for existing in "${RELEASE_COMMITS[@]}"; do
+      if [[ "$existing" == "$sha" ]]; then
+        printf '跳过 %s：本次已列出\n' "${sha:0:9}"
+        return 0
+      fi
+    done
+  fi
   RELEASE_COMMITS+=("$sha")
 }
 
-for spec in "${COMMIT_SPECS[@]}"; do
-  resolved="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
-  [[ -n "$resolved" ]] || fail "本地仓库找不到 commit：$spec（先在任务区完成 commit）"
-  add_commit "$resolved"
-done
+if [[ ${#COMMIT_SPECS[@]} -gt 0 ]]; then
+  for spec in "${COMMIT_SPECS[@]}"; do
+    resolved="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
+    [[ -n "$resolved" ]] || fail "本地仓库找不到 commit：$spec（先在任务区完成 commit）"
+    add_commit "$resolved"
+  done
+fi
 
 if [[ ${#BRANCH_SPECS[@]} -gt 0 ]]; then
   rev_base="$BASE_SHA"

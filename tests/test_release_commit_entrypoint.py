@@ -57,6 +57,7 @@ class CommitReleaseEntrypointTests(unittest.TestCase):
         gate = read("deploy/cloud/release-test.sh")
         for token in ("CRM_ENV=development", "TRADE_OS_DEV_SQLITE=1",
                       "TRADE_OS_DATA_BACKEND=sqlite", 'CRM_DB_PATH="$TEST_DATA_DIR"',
+                      'TRADE_OS_WORKBENCH_ENV="$TEST_ENV_FILE"',
                       "unittest discover", "npm test"):
             self.assertIn(token, gate)
         task_script = read("deploy/cloud/agent-worktree.sh")

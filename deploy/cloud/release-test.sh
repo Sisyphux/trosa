@@ -25,6 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TREE="$(cd "$SCRIPT_DIR/../.." && pwd)"
 QUICK=0
 TEST_DATA_DIR=""
+TEST_ENV_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -62,6 +63,9 @@ cleanup() {
   if [[ -n "$TEST_DATA_DIR" && -d "$TEST_DATA_DIR" ]]; then
     rm -rf -- "$TEST_DATA_DIR"
   fi
+  if [[ -n "$TEST_ENV_FILE" && -f "$TEST_ENV_FILE" ]]; then
+    rm -f "$TEST_ENV_FILE"
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -98,6 +102,16 @@ command -v npm >/dev/null 2>&1 || fail '找不到 npm，无法执行浏览器扩
 [[ -d "$TREE/browser-extension/node_modules" ]] \
   || fail "找不到 $TREE/browser-extension/node_modules（先在 browser-extension 执行 npm install；隔离区可用 symlink 复用主仓）"
 
+# Some source-level release tests invoke trosa-release for argument/routing
+# checks. They must not depend on a developer's real workbench.env (which is
+# intentionally absent from clean clones and release worktrees), and they must
+# never inherit credentials or production routing during a local regression.
+TEST_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/trosa-release-test-env.XXXXXX")"
+{
+  printf 'TRADE_OS_ECS_REGION=test-region\n'
+  printf 'TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n'
+} >"$TEST_ENV_FILE"
+
 run_python_regression() {
   if [[ -n "$TEST_DATA_DIR" && -d "$TEST_DATA_DIR" ]]; then
     rm -rf -- "$TEST_DATA_DIR"
@@ -114,6 +128,7 @@ run_python_regression() {
     CRM_ENV=development \
     TRADE_OS_DEV_SQLITE=1 \
     TRADE_OS_DATA_BACKEND=sqlite \
+    TRADE_OS_WORKBENCH_ENV="$TEST_ENV_FILE" \
     CRM_DB_PATH="$TEST_DATA_DIR" \
     "$PYTHON_BIN" -m unittest discover -s tests -p 'test_*.py' -v
 }
