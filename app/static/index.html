@@ -671,7 +671,7 @@
           </div>
 
           <div class="tab-content" id="editTabTasks">
-            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>只显示已明确安排、带日期的下一步。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal()">安排下一步</button></div>
+            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>只显示已明确安排、带日期的下一步。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal('create')">新增待办</button></div>
             <div id="customerTasksList"></div>
           </div>
 
@@ -694,7 +694,7 @@
           <div class="customer-next-task" id="customerNextTask" hidden></div>
           <div class="workspace-action-grid">
             <button class="btn workspace-action-btn" onclick="openCustomerFollowComposer()">记录沟通</button>
-            <button class="btn workspace-action-btn" onclick="openCustomerTaskModal()">安排下一步</button>
+            <button class="btn workspace-action-btn" id="customerTaskActionButton" onclick="openCustomerTaskModal()">安排下一步</button>
           </div>
           <div class="workspace-task-quick-actions" id="customerTaskQuickActions" hidden>
             <button class="text-action" onclick="completeCustomerNextTask(this)">完成</button>
@@ -923,7 +923,7 @@
     <div class="modal-header">
       <div>
         <div class="workspace-kicker">下一步</div>
-        <h3>安排下一步</h3>
+        <h3 id="customerTaskModalTitle">安排下一步</h3>
         <p class="task-modal-customer" id="customerTaskModalCustomer"></p>
       </div>
       <button class="modal-close" onclick="closeModal('customerTaskModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
@@ -946,7 +946,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('customerTaskModal')">取消</button>
-      <button class="btn btn-primary" onclick="createCustomerTask(this)">创建下一步</button>
+      <button class="btn btn-primary" id="customerTaskSubmit" onclick="createCustomerTask(this)">创建下一步</button>
     </div>
   </div>
 </div>

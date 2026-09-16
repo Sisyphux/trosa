@@ -1828,7 +1828,7 @@ async function openAgentProposalConfirmation(proposalId) {
   var action = proposal.proposal_action || (proposal.proposal_type === 'task' ? 'create_task' : 'record_communication');
   if (action === 'create_task') {
     await openEditModal(proposal.customer_id);
-    openCustomerTaskModal();
+    openCustomerTaskModal('create');
     _agentTaskProposalId = proposal.id;
     document.getElementById('customerTaskTitle').value = payload.title || '';
     document.getElementById('customerTaskDate').value = payload.due_date || '';
@@ -4873,11 +4873,21 @@ function openCustomerFollowComposer() {
     direction: 'unknown', activityType: 'follow_up' });
 }
 
-function openCustomerTaskModal() {
+function openCustomerTaskModal(mode) {
   var customerName = document.getElementById('customerEditTitle').textContent || '当前客户';
+  var modal = document.getElementById('customerTaskModal');
+  var currentTask = mode === 'create' ? null : (_customerDetailCache && (_customerDetailCache.reminders || [])[0]);
+  var isEditing = !!(currentTask && currentTask.id);
   document.getElementById('customerTaskModalCustomer').textContent = customerName;
-  document.getElementById('customerTaskTitle').value = '';
-  document.getElementById('customerTaskDate').value = '';
+  document.getElementById('customerTaskModalTitle').textContent = isEditing ? '调整下一步' : '安排下一步';
+  document.getElementById('customerTaskTitle').value = isEditing ? (currentTask.title || currentTask.content || '') : '';
+  document.getElementById('customerTaskDate').value = isEditing ? (currentTask.remind_date || '').substring(0, 10) : '';
+  if (modal) modal.dataset.editTaskId = isEditing ? String(currentTask.id) : '';
+  var submit = document.getElementById('customerTaskSubmit');
+  if (submit) {
+    submit.textContent = isEditing ? '保存下一步' : '创建下一步';
+    submit.dataset.editTaskId = isEditing ? String(currentTask.id) : '';
+  }
   _agentTaskProposalId = null;
   document.querySelectorAll('#customerTaskModal .task-date-choices button').forEach(function(choice) {
     choice.classList.remove('is-selected');
@@ -4908,10 +4918,13 @@ function renderCustomerNextTask(reminders) {
   var el = document.getElementById('customerNextTask');
   var quickActions = document.getElementById('customerTaskQuickActions');
   var otherEl = document.getElementById('customerOtherTasks');
+  var actionButton = document.getElementById('customerTaskActionButton');
   var openTasks = reminders || [];
   var next = (reminders || [])[0];
   if (!next) {
     el.innerHTML = '<span class="workspace-muted">尚未安排下一步</span>';
+    el.hidden = false;
+    if (actionButton) actionButton.textContent = '安排下一步';
     if (quickActions) quickActions.hidden = true;
     if (otherEl) otherEl.innerHTML = '';
     return;
@@ -4919,6 +4932,8 @@ function renderCustomerNextTask(reminders) {
   var title = next.title || next.content || '联系客户';
   el.innerHTML = '<strong>' + escapeHtml(title) + '</strong><span>' + formatChineseDate(next.remind_date) + '</span>' +
     (next.reason ? '<p>' + escapeHtml(next.reason) + '</p>' : '');
+  el.hidden = false;
+  if (actionButton) actionButton.textContent = '调整下一步';
   if (quickActions) quickActions.hidden = false;
   if (otherEl) {
     var others = openTasks.slice(1, 4);
@@ -5216,6 +5231,38 @@ function setActionFeedback(button, state, label) {
   };
 }
 
+function applyCustomerTaskSnapshot(tasks) {
+  var cache = _customerDetailCache;
+  if (!cache) return;
+  var openTasks = (tasks || []).slice().sort(function(a, b) {
+    return String(a.remind_date || '').localeCompare(String(b.remind_date || '')) || Number(a.id || 0) - Number(b.id || 0);
+  });
+  cache.reminders = openTasks;
+  if (Array.isArray(cache.tasks)) {
+    cache.tasks = openTasks;
+    renderCustomerTasks(cache.tasks);
+  }
+  cache.next_task = openTasks[0] || null;
+  cache.next_follow_up = cache.next_task ? (cache.next_task.remind_date || '') : '';
+  cache.current_next_step = cache.next_task ? {
+    label: cache.next_task.title || cache.next_task.content || '没有明确下一步',
+    date: cache.next_task.remind_date || '', source: '待办记录'
+  } : { label: '没有明确下一步', date: '', source: '系统事实' };
+  var nextDateInput = document.getElementById('editNextFollowUp');
+  if (nextDateInput) nextDateInput.value = cache.next_follow_up;
+  renderCustomerNextTask(openTasks);
+  renderCustomerFactsBrief(cache);
+  var cachedWorkspace = _customerWorkspaceCache[cache.id];
+  if (cachedWorkspace) {
+    cachedWorkspace.summary = Object.assign({}, cachedWorkspace.summary || {}, {
+      next_follow_up: cache.next_follow_up,
+      next_task: cache.next_task,
+      current_next_step: cache.current_next_step
+    });
+    cachedWorkspace.savedAt = Date.now();
+  }
+}
+
 async function completeCustomerNextTask(button) {
   var next = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
   if (!next) return;
@@ -5263,13 +5310,21 @@ async function createCustomerTask(button) {
   var title = document.getElementById('customerTaskTitle').value.trim();
   var dueDate = document.getElementById('customerTaskDate').value;
   if (!title || !dueDate) { showToast('请填写具体动作和日期', 'warning'); return; }
-  var reset = setActionFeedback(button, 'pending', '正在创建…');
+  var proposalId = _agentTaskProposalId;
+  var modal = document.getElementById('customerTaskModal');
+  var editTaskId = Number((button && button.dataset.editTaskId) || (modal && modal.dataset.editTaskId) || 0);
+  var reset = setActionFeedback(button, 'pending', editTaskId ? '正在保存…' : '正在创建…');
   try {
     var created;
-    if (_agentTaskProposalId) {
-      await api('/api/agent/proposals/' + _agentTaskProposalId, { method: 'PUT', body: JSON.stringify({ title: title, due_date: dueDate }) });
-      created = await api('/api/agent/proposals/' + _agentTaskProposalId + '/confirm', { method: 'POST' });
+    if (proposalId) {
+      await api('/api/agent/proposals/' + proposalId, { method: 'PUT', body: JSON.stringify({ title: title, due_date: dueDate }) });
+      created = await api('/api/agent/proposals/' + proposalId + '/confirm', { method: 'POST' });
       _agentTaskProposalId = null;
+    } else if (editTaskId) {
+      created = await api('/api/reminders/' + editTaskId, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: title, content: title, remind_date: dueDate })
+      });
     } else created = await api('/api/customers/' + customerId + '/tasks', {
       method: 'POST',
       body: JSON.stringify({ title: title, due_date: dueDate })
@@ -5281,21 +5336,18 @@ async function createCustomerTask(button) {
     // immediately so the handled customer leaves the current list.
     if (currentPage === 'inbox') await loadInbox();
     if (_customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
-      var task = created && (created.task || created.next_task);
-      _customerDetailCache.next_follow_up = (created && created.next_follow_up) || dueDate;
-      _customerDetailCache.next_task = task || _customerDetailCache.next_task;
-      if (Array.isArray(_customerDetailCache.tasks) && task) {
-        _customerDetailCache.tasks = _customerDetailCache.tasks.filter(function(item) { return Number(item.id) !== Number(task.id); });
-        _customerDetailCache.tasks.push(task);
-        _customerDetailCache.tasks.sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
-        _customerDetailCache.reminders = _customerDetailCache.tasks;
-        renderCustomerTasks(_customerDetailCache.tasks);
-      } else {
-        _customerDetailCache.reminders = task ? [task] : [];
+      var task = created && (created.task || created.next_task || created.reminder);
+      var mergedInto = Number(created && created.merged_into || 0);
+      var visibleTasks = Array.isArray(_customerDetailCache.tasks)
+        ? _customerDetailCache.tasks.slice()
+        : (_customerDetailCache.reminders || []).slice();
+      if (task) {
+        visibleTasks = visibleTasks.filter(function(item) {
+          return Number(item.id) !== editTaskId && Number(item.id) !== mergedInto && Number(item.id) !== Number(task.id);
+        });
+        if (!task.is_done) visibleTasks.push(task);
       }
-      document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up || '';
-      renderCustomerNextTask(_customerDetailCache.reminders || []);
-      renderCustomerFactsBrief(_customerDetailCache);
+      applyCustomerTaskSnapshot(visibleTasks);
     }
     // Closing the composer and rendering the new card is sufficient success
     // feedback. Toasts are reserved for problems or non-visible outcomes.

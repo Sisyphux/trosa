@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import subprocess
@@ -3095,6 +3096,27 @@ class SmartWebsiteImportTest(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 0)
         finally:
             conn.close()
+
+
+class CustomerTaskActionRegressionTest(unittest.TestCase):
+    """The Customer action updates the current task and paints the result."""
+
+    def test_customer_task_action_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'customer_task_action_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('customer task action regression: OK', result.stdout)
 
 
 if __name__ == '__main__':
