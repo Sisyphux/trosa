@@ -8583,6 +8583,14 @@ def update_customer(customer_id):
         return jsonify({'message': '客户更新成功', 'undo_token': undo_token,
                         'undo_description': undo_description})
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
         logger.error(f'update_customer error: {e}', exc_info=True)
         return jsonify({'error': f'更新失败: {str(e)}'}), 500
 
@@ -8877,36 +8885,22 @@ def permanent_delete_customer(customer_id):
         row = c.fetchone()
     customer_name = row['name'] if row else '未知'
     if postgres_mode():
-        if not row:
+        try:
+            result = _permanent_delete_customer_pg(conn, customer_id)
+            conn.commit()
+        except CrmWriteError as error:
+            conn.rollback()
             conn.close()
-            return jsonify({'error': '客户不存在'}), 404
-        account_id = row.get('account_id')
-        company_id = conn.execute(
-            'SELECT company_id FROM trosa.accounts WHERE id=?', (account_id,)
-        ).fetchone()[0]
-        conn.execute('DELETE FROM trosa.agent_prospect_profiles WHERE customer_id=?', (customer_id,))
-        conn.execute('DELETE FROM trosa.customer_states WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-        conn.execute('DELETE FROM trosa.legacy_row_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND table_name IN (\'customers\',\'contacts\',\'reminders\',\'follow_up_logs\',\'outreach_emails\',\'inbox_items\') AND (table_name=\'customers\' AND legacy_id=? OR target_id IN (SELECT id FROM trosa.tasks WHERE account_id=? UNION ALL SELECT id FROM trosa.timeline_events WHERE account_id=? UNION ALL SELECT id FROM trosa.outreach_messages WHERE account_id=? UNION ALL SELECT id FROM trosa.inbox_items WHERE account_id=?))', (customer_id, account_id, account_id, account_id, account_id))
-        contact_refs = conn.execute(
-            '''SELECT person_id, contact_method_id FROM trosa.contact_legacy_refs
-                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
-                  AND legacy_customer_id=?''', (customer_id,)
-        ).fetchall()
-        conn.execute('DELETE FROM trosa.contact_legacy_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-        conn.execute('DELETE FROM trosa.account_legacy_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-        conn.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
-        for contact in contact_refs:
-            if contact['contact_method_id']:
-                conn.execute('DELETE FROM core.contact_methods WHERE id=? AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE contact_method_id=?)', (contact['contact_method_id'], contact['contact_method_id']))
-            if contact['person_id']:
-                conn.execute('DELETE FROM core.people WHERE id=? AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE person_id=?) AND NOT EXISTS (SELECT 1 FROM core.company_people WHERE person_id=?)', (contact['person_id'], contact['person_id'], contact['person_id']))
-        conn.execute('DELETE FROM core.company_people WHERE company_id=?', (company_id,))
-        conn.execute('DELETE FROM core.companies WHERE id=? AND NOT EXISTS (SELECT 1 FROM trosa.accounts WHERE company_id=?)', (company_id, company_id))
-        conn.commit()
+            return jsonify({'error': error.message}), error.status
+        except Exception as error:
+            conn.rollback()
+            conn.close()
+            logger.error(f'permanent_delete_customer error: {error}', exc_info=True)
+            return jsonify({'error': '永久删除失败，未更改任何数据'}), 500
         conn.close()
-        _remove_customer_files_dir(customer_id)
-        log_operation('PERMANENT_DELETE', 'customer', customer_id, f'永久删除: {customer_name}')
-        return jsonify({'message': f'永久删除 {customer_name}'})
+        _remove_customer_files_selective(result['files_dir'], result['file_paths'])
+        log_operation('PERMANENT_DELETE', 'customer', customer_id, f'永久删除: {result["name"]}')
+        return jsonify({'message': f'永久删除 {result["name"]}'})
     c.execute('DELETE FROM follow_up_logs WHERE customer_id = ?', (customer_id,))
     c.execute('DELETE FROM reminders WHERE customer_id = ?', (customer_id,))
     c.execute('DELETE FROM contacts WHERE customer_id = ?', (customer_id,))
@@ -8931,6 +8925,205 @@ def _remove_customer_files_dir(customer_id):
             logger.warning(f'清理客户文件目录失败: {e}')
 
 
+def _remove_customer_files_selective(customer_id, own_file_paths):
+    """Remove only the deleted customer's own tracked files.
+
+    The on-disk directory is keyed by legacy customer id without a user
+    namespace, so another user's customer with the same numeric id may keep
+    files in the same directory.  Deleting the whole directory would destroy
+    their attachments while their database rows still reference them.
+    """
+    base = os.path.realpath(CUSTOMER_FILE_DIR)
+    for file_path in own_file_paths or []:
+        candidate = os.path.realpath(os.path.join(get_app_root(), str(file_path or '')))
+        if candidate.startswith(base + os.sep) and os.path.isfile(candidate):
+            try:
+                os.remove(candidate)
+            except OSError as e:
+                logger.warning(f'清理客户文件失败: {e}')
+    target = os.path.realpath(os.path.join(CUSTOMER_FILE_DIR, str(customer_id)))
+    if target.startswith(base + os.sep) and os.path.isdir(target):
+        try:
+            if not os.listdir(target):
+                os.rmdir(target)
+        except OSError as e:
+            logger.warning(f'清理客户文件目录失败: {e}')
+
+
+def _permanent_delete_customer_pg(conn, customer_id):
+    """Permanently remove one customer projection and its unshared canonical rows.
+
+    Must run inside the caller's transaction; the caller commits.  Returns a
+    dict with the customer's display name, whether the canonical account is
+    shared with other projections, the removed file paths and the files
+    directory id.  Raises CrmWriteError when the customer is not visible.
+    """
+    row = next((item for item in _active_customers(conn, include_deleted=True)
+                if int(item['id']) == customer_id), None)
+    if not row:
+        raise CrmWriteError('客户不存在', 404)
+    customer_name = row.get('name') or row.get('company') or '未知'
+    account_id = row.get('account_id')
+    company_row = conn.execute(
+        'SELECT company_id FROM trosa.accounts WHERE id=?', (account_id,)
+    ).fetchone()
+    company_id = company_row[0] if company_row else None
+    shared = bool(conn.execute(
+        '''SELECT 1 FROM trosa.account_legacy_refs
+            WHERE account_id=? AND NOT (organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?)
+            LIMIT 1''',
+        (account_id, customer_id),
+    ).fetchone())
+    file_rows = conn.execute(
+        '''SELECT file_object_id, file_path FROM trade_os_compat.customer_file_rows
+            WHERE legacy_user_id=trosa.compat_current_user() AND customer_id=?''',
+        (customer_id,),
+    ).fetchall()
+    file_paths = [item['file_path'] for item in file_rows]
+    file_object_ids = [item['file_object_id'] for item in file_rows]
+    # The projection rows belong to the caller even when the canonical
+    # account is shared; they are the only writes in shared mode.
+    conn.execute(
+        '''DELETE FROM trosa.agent_prospect_profiles
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND customer_id=?''',
+        (customer_id,),
+    )
+    conn.execute(
+        '''DELETE FROM trosa.customer_states
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+        (customer_id,),
+    )
+    contact_refs = conn.execute(
+        '''SELECT person_id, contact_method_id FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+        (customer_id,),
+    ).fetchall()
+    conn.execute(
+        '''DELETE FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+        (customer_id,),
+    )
+    for contact in contact_refs:
+        if contact['contact_method_id']:
+            conn.execute(
+                'DELETE FROM core.email_verification_observations WHERE contact_method_id=?',
+                (contact['contact_method_id'],),
+            )
+            conn.execute(
+                '''DELETE FROM core.contact_methods WHERE id=?
+                   AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE contact_method_id=?)
+                   AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE contact_method_id=?)''',
+                (contact['contact_method_id'], contact['contact_method_id'], contact['contact_method_id']),
+            )
+        if contact['person_id']:
+            conn.execute(
+                '''DELETE FROM core.people WHERE id=?
+                   AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE person_id=?)
+                   AND NOT EXISTS (SELECT 1 FROM core.company_people WHERE person_id=?)''',
+                (contact['person_id'], contact['person_id'], contact['person_id']),
+            )
+    conn.execute(
+        '''DELETE FROM trosa.account_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+        (customer_id,),
+    )
+    if shared:
+        # Other projections still read this account.  Removing shared tasks,
+        # timeline events or the account itself would corrupt their views.
+        # The caller's own file objects are still safe to remove: they are
+        # namespaced per user and unreachable once this projection is gone.
+        conn.execute(
+            '''DELETE FROM trade_os_compat.customer_file_rows
+                WHERE legacy_user_id=trosa.compat_current_user() AND customer_id=?''',
+            (customer_id,),
+        )
+        for file_object_id in file_object_ids:
+            conn.execute('DELETE FROM core.entity_files WHERE file_object_id=?', (file_object_id,))
+            conn.execute(
+                '''DELETE FROM core.file_objects WHERE id=?
+                   AND NOT EXISTS (SELECT 1 FROM core.entity_files WHERE file_object_id=?)''',
+                (file_object_id, file_object_id),
+            )
+        return {'name': customer_name, 'shared': True,
+                'file_paths': file_paths, 'files_dir': customer_id}
+    # Exclusive account: remove every canonical row that only this customer
+    # lineage could reference, in foreign-key order.
+    conn.execute(
+        '''DELETE FROM trosa.email_delivery_events WHERE outreach_message_id IN
+           (SELECT id FROM trosa.outreach_messages WHERE account_id=?)''',
+        (account_id,),
+    )
+    conn.execute(
+        '''DELETE FROM trosa.communication_source_items WHERE communication_source_id IN
+           (SELECT id FROM trosa.communication_sources WHERE timeline_event_id IN
+            (SELECT id FROM trosa.timeline_events WHERE account_id=?))''',
+        (account_id,),
+    )
+    conn.execute(
+        '''DELETE FROM trosa.communication_sources WHERE timeline_event_id IN
+           (SELECT id FROM trosa.timeline_events WHERE account_id=?)''',
+        (account_id,),
+    )
+    conn.execute(
+        '''DELETE FROM trosa.email_message_receipts
+            WHERE timeline_event_id IN (SELECT id FROM trosa.timeline_events WHERE account_id=?)
+               OR inbox_item_id IN (SELECT id FROM trosa.inbox_items WHERE account_id=?)''',
+        (account_id, account_id),
+    )
+    conn.execute(
+        '''DELETE FROM trosa.legacy_row_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND target_id IN (SELECT id FROM trosa.tasks WHERE account_id=?
+                                UNION ALL SELECT id FROM trosa.timeline_events WHERE account_id=?
+                                UNION ALL SELECT id FROM trosa.outreach_messages WHERE account_id=?
+                                UNION ALL SELECT id FROM trosa.inbox_items WHERE account_id=?)''',
+        (account_id, account_id, account_id, account_id),
+    )
+    for frozen_table in ('research_reports', 'external_analysis_notes', 'account_understandings',
+                         'ai_recommendations', 'web_monitor_observations'):
+        conn.execute(f'DELETE FROM trosa.{frozen_table} WHERE account_id=?', (account_id,))
+    conn.execute('DELETE FROM trosa.tasks WHERE account_id=?', (account_id,))
+    conn.execute('DELETE FROM trosa.timeline_events WHERE account_id=?', (account_id,))
+    conn.execute('DELETE FROM trosa.outreach_messages WHERE account_id=?', (account_id,))
+    conn.execute('DELETE FROM trosa.inbox_items WHERE account_id=?', (account_id,))
+    conn.execute(
+        '''DELETE FROM trade_os_compat.customer_file_rows
+            WHERE legacy_user_id=trosa.compat_current_user() AND customer_id=?''',
+        (customer_id,),
+    )
+    conn.execute('DELETE FROM core.entity_files WHERE account_id=?', (account_id,))
+    for file_object_id in file_object_ids:
+        conn.execute(
+            '''DELETE FROM core.file_objects WHERE id=?
+               AND NOT EXISTS (SELECT 1 FROM core.entity_files WHERE file_object_id=?)''',
+            (file_object_id, file_object_id),
+        )
+    # trosa.customer_details cascades from the account delete below.
+    conn.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
+    if company_id:
+        conn.execute('DELETE FROM core.company_domains WHERE company_id=?', (company_id,))
+        conn.execute('DELETE FROM core.company_aliases WHERE company_id=?', (company_id,))
+        conn.execute('DELETE FROM core.company_people WHERE company_id=?', (company_id,))
+        conn.execute(
+            'UPDATE core.contact_methods SET company_id=NULL WHERE company_id=?', (company_id,)
+        )
+        conn.execute(
+            '''DELETE FROM core.companies WHERE id=?
+               AND NOT EXISTS (SELECT 1 FROM trosa.accounts WHERE company_id=?)
+               AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE company_id=?)''',
+            (company_id, company_id, company_id),
+        )
+    return {'name': customer_name, 'shared': False,
+            'file_paths': file_paths, 'files_dir': customer_id}
+
+
 @app.route('/api/customers/recycle-bin/empty', methods=['POST'])
 @login_required
 def empty_recycle_bin():
@@ -8941,24 +9134,25 @@ def empty_recycle_bin():
         if not deleted:
             conn.close()
             return jsonify({'message': '回收站已为空'})
-        for item in deleted:
-            customer_id = int(item['id'])
-            account_id = item.get('account_id')
-            company_id = conn.execute('SELECT company_id FROM trosa.accounts WHERE id=?', (account_id,)).fetchone()[0]
-            conn.execute('DELETE FROM trosa.agent_prospect_profiles WHERE customer_id=?', (customer_id,))
-            conn.execute('DELETE FROM trosa.customer_states WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-            conn.execute('DELETE FROM trosa.legacy_row_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND target_id IN (SELECT id FROM trosa.tasks WHERE account_id=? UNION ALL SELECT id FROM trosa.timeline_events WHERE account_id=? UNION ALL SELECT id FROM trosa.outreach_messages WHERE account_id=? UNION ALL SELECT id FROM trosa.inbox_items WHERE account_id=?)', (account_id, account_id, account_id, account_id))
-            conn.execute('DELETE FROM trosa.contact_legacy_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-            conn.execute('DELETE FROM trosa.account_legacy_refs WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?', (customer_id,))
-            conn.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
-            conn.execute('DELETE FROM core.company_people WHERE company_id=?', (company_id,))
-            conn.execute('DELETE FROM core.companies WHERE id=? AND NOT EXISTS (SELECT 1 FROM trosa.accounts WHERE company_id=?)', (company_id, company_id))
-        conn.commit()
+        removed = []
+        try:
+            for item in deleted:
+                removed.append(_permanent_delete_customer_pg(conn, int(item['id'])))
+            conn.commit()
+        except CrmWriteError as error:
+            conn.rollback()
+            conn.close()
+            return jsonify({'error': error.message}), error.status
+        except Exception as error:
+            conn.rollback()
+            conn.close()
+            logger.error(f'empty_recycle_bin error: {error}', exc_info=True)
+            return jsonify({'error': '清空回收站失败，未更改任何数据'}), 500
         conn.close()
-        for item in deleted:
-            _remove_customer_files_dir(int(item['id']))
-        log_operation('EMPTY_RECYCLE_BIN', 'customer', None, f'清空回收站，永久删除 {len(deleted)} 个客户')
-        return jsonify({'message': f'清空回收站，永久删除 {len(deleted)} 个客户'})
+        for entry in removed:
+            _remove_customer_files_selective(entry['files_dir'], entry['file_paths'])
+        log_operation('EMPTY_RECYCLE_BIN', 'customer', None, f'清空回收站，永久删除 {len(removed)} 个客户')
+        return jsonify({'message': f'清空回收站，永久删除 {len(removed)} 个客户'})
     c.execute('SELECT COUNT(*) as cnt FROM customers WHERE is_deleted = 1')
     count = c.fetchone()['cnt']
     if count == 0:

@@ -291,6 +291,15 @@ def merge_open_task(
         raise ValueError('customer is not visible to the current user')
     account_id = account['account_id']
     if task_type == 'follow_up':
+        # Serialize the check-then-insert on this account and date.  Without
+        # the lock two concurrent writers both observe no open task and each
+        # insert their own row, leaving duplicate same-day entries in Today.
+        # The lock is transaction-scoped, so it is held until the caller's
+        # commit or rollback and only serializes writers for one due date.
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+            ('trosa:merge-task', f'{account_id}:{due_on}'),
+        )
         existing = conn.execute(
             '''SELECT row_ref.legacy_id, task.id, task.title, task.reason
                  FROM trosa.tasks task
@@ -628,19 +637,43 @@ def create_inbox_item(
         (legacy_id,),
     ).fetchone()[0]
     payload = json.dumps({'compat_dedupe_key': dedupe_key}) if dedupe_key else '{}'
-    conn.execute(
+    inserted = conn.execute(
         '''INSERT INTO trosa.inbox_items
            (id, account_id, item_type, title, content, dedupe_key, status, created_at,
             resolved_at, resolution_reason, resolution_note, legacy_payload)
            VALUES (?, ?, ?, ?, ?, CASE WHEN ?='' THEN '' ELSE 'compat:' || trosa.compat_current_user() || ':' || ? END, ?, coalesce(trosa.compat_time(?), now()),
-                   trosa.compat_time(?), ?, ?, ?::jsonb)''',
+                   trosa.compat_time(?), ?, ?, ?::jsonb)
+           ON CONFLICT (dedupe_key) WHERE dedupe_key <> '' DO NOTHING''',
         (target_id, account_id, item_type, title, content, dedupe_key, dedupe_key, status,
          created_at, resolved_at, resolution_reason, resolution_note, payload),
     )
+    if dedupe_key and not inserted.rowcount:
+        # A concurrent writer won the dedupe race: fall back to its row
+        # instead of failing the whole business action with a 500.
+        existing = conn.execute(
+            '''SELECT ref.legacy_id, item.id FROM trosa.inbox_items item
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id=trosa.compat_current_user()
+                  AND ref.table_name='inbox_items'
+                  AND item.dedupe_key='compat:' || trosa.compat_current_user() || ':' || ?
+                ORDER BY item.created_at, ref.legacy_id LIMIT 1''',
+            (dedupe_key,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
+                       resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?
+                     WHERE id=?''',
+                (account_id, item_type, title, content, status, resolved_at, resolution_reason,
+                 resolution_note, existing['id']),
+            )
+            return int(existing['legacy_id'])
     conn.execute(
         '''INSERT INTO trosa.legacy_row_refs
            (organization_id, legacy_user_id, table_name, legacy_id, target_id)
-           VALUES (trosa.compat_org_id(), trosa.compat_current_user(), 'inbox_items', ?, ?)''',
+           VALUES (trosa.compat_org_id(), trosa.compat_current_user(), 'inbox_items', ?, ?)
+           ON CONFLICT (organization_id, legacy_user_id, table_name, legacy_id) DO NOTHING''',
         (legacy_id, target_id),
     )
     return int(legacy_id)
@@ -1071,13 +1104,16 @@ def update_task(
         assignments += ', manual_order=?'
         values.append(manual_order)
     values.append(task_id)
+    # The status predicate makes the reschedule-vs-complete race atomic: a
+    # task completed concurrently is reported as gone instead of being
+    # silently resurrected as an open task.
     changed = conn.execute(
         f'''UPDATE trosa.tasks task SET {assignments}
               FROM trosa.legacy_row_refs ref
              WHERE ref.organization_id=trosa.compat_org_id()
                AND ref.legacy_user_id=trosa.compat_current_user()
                AND ref.table_name='reminders' AND ref.legacy_id=?
-               AND task.id=ref.target_id''',
+               AND task.id=ref.target_id AND task.status='open' ''',
         values,
     )
     if not changed.rowcount:

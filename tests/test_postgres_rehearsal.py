@@ -1173,5 +1173,293 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertTrue(operation_logs.get_json())
 
 
+    def test_concurrent_same_day_task_merge_creates_single_task(self):
+        """Two writers racing on one due date must not duplicate the Task."""
+        import threading
+
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()['customer_id']
+        due_on = '2031-05-01'
+        results, errors = [], []
+
+        def merge(index):
+            try:
+                db.set_db_user('hamid')
+                connection = db.get_db()
+                try:
+                    connection.execute('BEGIN')
+                    results.append(trosa_domain.merge_open_task(
+                        connection, customer_id=customer_id, title=f'race {index}',
+                        content='race', reason='race', due_on=due_on,
+                        now='2026-09-14 10:00:00',
+                    ))
+                    connection.commit()
+                finally:
+                    connection.close()
+            except Exception as exc:  # pragma: no cover - serialized path
+                errors.append(repr(exc))
+            finally:
+                db.set_db_user(None)
+
+        threads = [threading.Thread(target=merge, args=(index,)) for index in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 8)
+        self.assertEqual(len(set(results)), 1, results)
+        count = self.connection.execute(
+            """SELECT count(*) FROM trosa.tasks task
+                 JOIN trosa.account_legacy_refs ref ON ref.account_id=task.account_id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid' AND ref.legacy_customer_id=?
+                  AND task.status='open' AND task.task_type='follow_up'
+                  AND trosa.compat_local_date(task.due_at)=?""",
+            (customer_id, due_on),
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_concurrent_inbox_dedupe_returns_single_item(self):
+        """A replayed dedupe key must resolve to one row, never a 500."""
+        import threading
+
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()['customer_id']
+        dedupe_key = 'rehearsal-race-dedupe-1'
+        results, errors = [], []
+
+        def create(index):
+            try:
+                db.set_db_user('hamid')
+                connection = db.get_db()
+                try:
+                    connection.execute('BEGIN')
+                    results.append(trosa_domain.create_inbox_item(
+                        connection, item_type='customer_reply', title=f'race {index}',
+                        content='race', customer_id=customer_id, dedupe_key=dedupe_key,
+                    ))
+                    connection.commit()
+                finally:
+                    connection.close()
+            except Exception as exc:  # pragma: no cover - dedupe must hold
+                errors.append(repr(exc))
+            finally:
+                db.set_db_user(None)
+
+        threads = [threading.Thread(target=create, args=(index,)) for index in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(set(results)), 1, results)
+        count = self.connection.execute(
+            """SELECT count(*) FROM trosa.inbox_items item
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid' AND ref.table_name='inbox_items'
+                  AND item.legacy_payload->>'compat_dedupe_key'=?""",
+            (dedupe_key,),
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
+
+    def test_failed_write_leaves_no_partial_state(self):
+        """A mid-transaction failure must roll back the whole business action."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()['customer_id']
+        before_events = self.connection.execute('SELECT count(*) FROM trosa.timeline_events').fetchone()[0]
+        before_tasks = self.connection.execute('SELECT count(*) FROM trosa.tasks').fetchone()[0]
+        module = self._app_module()
+
+        def boom(connection, cursor, result):
+            raise RuntimeError('injected mid-transaction failure')
+
+        db.set_db_user('hamid')
+        try:
+            with module.app.test_request_context('/'):
+                module.g.current_user = 'hamid'
+                with self.assertRaises(RuntimeError):
+                    module.record_customer_communication(
+                        customer_id,
+                        {'activity_content': 'atomicity probe', 'follow_date': '2026-09-14'},
+                        before_commit=boom,
+                    )
+        finally:
+            db.set_db_user(None)
+        self.assertEqual(
+            self.connection.execute('SELECT count(*) FROM trosa.timeline_events').fetchone()[0],
+            before_events,
+        )
+        self.assertEqual(
+            self.connection.execute('SELECT count(*) FROM trosa.tasks').fetchone()[0],
+            before_tasks,
+        )
+        # The rolled-back legacy id must be reusable without unique conflicts.
+        db.set_db_user('hamid')
+        retry_connection = db.get_db()
+        try:
+            retry_connection.execute('BEGIN')
+            retry_id = trosa_domain.merge_open_task(
+                retry_connection, customer_id=customer_id, title='after rollback',
+                content='after rollback', reason='probe', due_on='2031-06-01',
+                now='2026-09-14 10:00:00',
+            )
+            retry_connection.commit()
+        finally:
+            retry_connection.close()
+            db.set_db_user(None)
+        self.assertTrue(retry_id)
+
+    def test_reschedule_completed_task_is_rejected_atomically(self):
+        """Completing a task wins over a concurrent reschedule; no resurrection."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        customer_id = load_fixture()['customer_id']
+        db.set_db_user('hamid')
+        connection = db.get_db()
+        try:
+            connection.execute('BEGIN')
+            task_id = trosa_domain.merge_open_task(
+                connection, customer_id=customer_id, title='reschedule guard',
+                content='reschedule guard', reason='probe', due_on='2031-07-01',
+                now='2026-09-14 10:00:00',
+            )
+            connection.commit()
+            connection.execute('BEGIN')
+            trosa_domain.complete_task(connection, task_id=task_id, completed_at='2026-09-14 10:00:00')
+            connection.commit()
+            connection.execute('BEGIN')
+            with self.assertRaises(ValueError):
+                trosa_domain.update_task(
+                    connection, task_id=task_id, title='resurrected', content='resurrected',
+                    reason='probe', due_on='2031-07-02', now='2026-09-14 10:00:00',
+                )
+            connection.rollback()
+        finally:
+            connection.close()
+            db.set_db_user(None)
+        status = self.connection.execute(
+            """SELECT task.status FROM trosa.tasks task
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=task.id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid' AND ref.table_name='reminders'
+                  AND ref.legacy_id=?""",
+            (task_id,),
+        ).fetchone()[0]
+        self.assertEqual(status, 'done')
+
+    def test_permanent_delete_removes_children_and_protects_shared_account(self):
+        """Permanent delete cascades in FK order; a shared account survives."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        created = client.post('/api/customers', json={
+            'name': 'Delete Cascade Customer', 'company': 'Delete Cascade Co',
+            'country': 'US', 'next_follow_up': '2026-10-01',
+            'task_title': 'Cascade task',
+            'contacts': [{'name': 'Cascade Buyer', 'email': 'cascade@delete.example'}],
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+        contact_id = client.get(f'/api/customers/{customer_id}').get_json()['contacts'][0]['id']
+        self.assertEqual(client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': 'Cascade fact', 'follow_date': '2026-09-14',
+        }).status_code, 200)
+        self.assertEqual(client.post(f'/api/customers/{customer_id}/outreach', json={
+            'subject': 'Cascade quote', 'content': 'Cascade body', 'sent_date': '2026-09-13',
+        }).status_code, 201)
+        inbox_id = client.post('/api/inbox/reply', json={
+            'customer_id': customer_id, 'content': 'Cascade inbox reply.',
+        }).get_json()['id']
+        account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (customer_id,),
+        ).fetchone()['account_id']
+
+        # Amy shares the same canonical account with her own projection.
+        self.connection.execute(
+            '''INSERT INTO trosa.account_legacy_refs
+               (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+               VALUES (trosa.compat_org_id(), 'amy', 920001, ?, 'shared-delete-probe', '{}'::jsonb)
+               ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id)
+               DO UPDATE SET account_id=excluded.account_id''',
+            (account,),
+        )
+        self.connection.commit()
+
+        deleted = client.delete(f'/api/customers/{customer_id}/permanent')
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertEqual(client.get(f'/api/customers/{customer_id}').status_code, 404)
+        # Hamid's projection is gone but Amy's shared view is intact.
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_record = trosa_domain.customer_record(amy_connection, 920001)
+            self.assertIsNotNone(amy_record)
+            self.assertEqual(
+                amy_connection.execute(
+                    'SELECT count(*) FROM trosa.tasks WHERE account_id=?', (account,),
+                ).fetchone()[0],
+                1,
+            )
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+        orphans = self.connection.execute(
+            '''SELECT count(*) FROM trosa.account_legacy_refs ref
+                 LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                WHERE account.id IS NULL''',
+        ).fetchone()[0]
+        self.assertEqual(orphans, 0)
+
+        # Amy's own permanent delete is now exclusive and removes everything.
+        amy_client = module.app.test_client()
+        self.assertEqual(amy_client.post('/api/auth/login', json={'user': 'amy'}).status_code, 200)
+        self.assertEqual(
+            amy_client.delete('/api/customers/920001/permanent').status_code, 200,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                'SELECT count(*) FROM trosa.accounts WHERE id=?', (account,),
+            ).fetchone()[0],
+            0,
+        )
+        remaining = self.connection.execute(
+            '''SELECT (SELECT count(*) FROM trosa.tasks WHERE account_id=?)
+                    + (SELECT count(*) FROM trosa.timeline_events WHERE account_id=?)
+                    + (SELECT count(*) FROM trosa.outreach_messages WHERE account_id=?)
+                    + (SELECT count(*) FROM trosa.inbox_items WHERE account_id=?)''',
+            (account, account, account, account),
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
+        orphans = self.connection.execute(
+            '''SELECT count(*) FROM trosa.account_legacy_refs ref
+                 LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                WHERE account.id IS NULL''',
+        ).fetchone()[0]
+        self.assertEqual(orphans, 0)
+        module._INBOX_CACHE.clear()
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)
