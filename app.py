@@ -1527,7 +1527,12 @@ def _snapshot_entity(conn, table_name, entity_id):
     if table_name not in _UNDO_TABLES or not entity_id:
         return None
     relation = f'trade_os_compat.{table_name}' if postgres_mode() else table_name
-    row = conn.execute(f'SELECT * FROM {relation} WHERE id=?', (entity_id,)).fetchone()
+    # A canonical task may still have multiple historical customer aliases in
+    # the compatibility view.  Snapshots must use the same deterministic
+    # customer projection as Today, otherwise edit/undo can silently attach
+    # the operation to a different alias of the same task.
+    order_clause = ' ORDER BY customer_id ASC, id ASC' if postgres_mode() and table_name == 'reminders' else ''
+    row = conn.execute(f'SELECT * FROM {relation} WHERE id=?{order_clause}', (entity_id,)).fetchone()
     return dict(row) if row else None
 
 
@@ -1661,7 +1666,8 @@ def _reminder_with_customer(conn, reminder_id, *, include_done=False):
                       t.due_date AS remind_date
                  FROM trosa.customer_tasks t
                  JOIN trosa.customer_records c ON c.id=t.customer_id
-                WHERE t.id=? ''' + status_clause,
+                WHERE t.id=? ''' + status_clause + '''
+                ORDER BY t.customer_id ASC, t.id ASC''',
             (reminder_id,),
         ).fetchone()
         return dict(row) if row else None

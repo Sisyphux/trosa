@@ -1269,6 +1269,15 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             self.assertEqual(len(rows), 1, rows)
             self.assertEqual(rows[0]['id'], task_id)
             self.assertEqual(rows[0]['customer_id'], customer_id)
+            module = self._app_module()
+            self.assertEqual(
+                module._reminder_with_customer(self.connection, task_id)['customer_id'],
+                customer_id,
+            )
+            self.assertEqual(
+                module._snapshot_entity(self.connection, 'reminders', task_id)['customer_id'],
+                customer_id,
+            )
             projected = [
                 row for row in trosa_domain.today_tasks(
                     self.connection, due_on_or_before='2031-12-31'
