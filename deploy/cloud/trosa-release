@@ -131,7 +131,7 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
         fail "本地仓库找不到 commit $COMMIT"
       fi
       if [[ -z "$RELEASE_ID" ]]; then
-        RELEASE_ID="rel-$(date -u +%Y%m%d%H%M%S)-${COMMIT:0:7}"
+        RELEASE_ID="rel-$(date -u +%Y%m%d%H%M%S)-${COMMIT:0:12}"
       fi
     else
       # rollback 结果写入独立目录，不与任何代码 release 混淆。
@@ -154,7 +154,8 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
 
     # 轮询：只读 cat 结果文件，单次调用都是短命令，可安全重试。
     # 任何一次轮询失败都只意味着"本次没问到"，不代表发布失败。
-    deadline=$((SECONDS + 600))
+    # 轮询窗口要覆盖服务端等待发布锁的时间（默认 900s）。
+    deadline=$((SECONDS + ${TRADE_OS_RELEASE_POLL_TIMEOUT:-1200}))
     last_status=""
     while [[ $SECONDS -lt $deadline ]]; do
       sleep 5
@@ -182,11 +183,13 @@ print(json.dumps(best) if best else '')" 2>/dev/null || true)"
             printf 'TROSA_RELEASE_REFUSED release=%s（production 未变更，见 next_action）\n' "$RELEASE_ID" >&2; exit 3 ;;
           rolled_back)
             printf 'TROSA_RELEASE_ROLLED_BACK release=%s（已自动恢复上一健康版本，见 next_action）\n' "$RELEASE_ID" >&2; exit 4 ;;
+          busy)
+            printf 'TROSA_RELEASE_BUSY release=%s（另一个发布仍占用 ECS 锁，本次未改动 production；稍后重跑同一 publish 即可）\n' "$RELEASE_ID" >&2; exit 6 ;;
           *) printf 'TROSA_RELEASE_FAILED release=%s status=%s（见 error/next_action）\n' "$RELEASE_ID" "$last_status" >&2; exit 1 ;;
         esac
       fi
     done
-    printf '轮询超时（10 分钟）。release %s 仍在服务端执行或结果不可读。\n' "$RELEASE_ID" >&2
+    printf '轮询超时。release %s 仍在服务端执行或结果不可读。\n' "$RELEASE_ID" >&2
     printf 'production 状态未知但服务端任务不受本机影响：重跑 status 查看，或重跑同一 publish（幂等）。\n' >&2
     exit 5
     ;;

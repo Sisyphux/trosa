@@ -1,3 +1,18 @@
+## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
+
+- 根因（并发覆盖）：旧的 `release-commit.sh` 只在本地取发布锁，而锁是可被崩溃进程永久留下的 `$TMPDIR` 目录；两个入口若拿到不同 `TMPDIR` 或旧锁残留，就不互斥。更关键的是，锁只保证“不并行”，不保证“后发布者包含先发布者”：两个任务从同一 production 版本开发时，A 先上线后，B 若已通过本地门禁，仍可能把基于旧基线的候选推到 ECS，ECS 只按 `current` 符号链接切换，不校验候选是否包含当前 production，于是 A 的功能被静默覆盖。
+- 根因（迁移编号）：`next_migration_number` 是“读最大编号 → 写任务清单”的非原子读改写，两个并发 `create`/`adopt` 能拿到同一个号，只在 `preflight`/门禁阶段才发现。
+- 根因（状态写入）：`.deploy-state.json`、`DEPLOY_RESULT.json`、`.last-deploy-result.json`、`release.json`、`.health.json`、`.migration.json`、`.backup.json` 都是直接覆盖写，发布中断可能留下半写 JSON，polling 客户端与 `status` 可能读到错乱状态；release id 复用不同 commit 会覆盖另一发布的历史、备份与结果。
+- 修复（production 基线门，服务端权威）：`release-remote.sh` 在任何 backup / migrate / 切换流量之前，先用 `tools/release_baseline.py` 证明候选 commit 仍包含当前 production commit（GitHub compare，`ahead`/`identical` 才允许）。等待锁期间、门禁期间 production 前进、候选基于旧 `origin/main`、compare 不可用、production commit 未知——全部 fail closed，写 `refused`，production 不变。跨任务：A 先上线后 B 的旧候选被拒绝；B 在最新 main 上重建后方可上线，最终 production 同时包含 A 与 B。
+- 修复（发布串行化）：ECS 侧 `flock -w` 有界等待替代 `flock -n`，锁被占用超过等待窗口时写出明确的 `busy` 终端结果（只写本 release 的结果文件，不覆盖正在运行 release 的 polling 结果），不再静默退出 75 让客户端空等；rollback 与 deploy 共用同一把锁。
+- 修复（release 身份与账本）：release id 与 commit 一一绑定，复用 id 指向不同 commit 会 `refused`；新增 append-only `.release-ledger.jsonl` 记录每个终端结果的 release/commit/mode/status/phase/production，作为可审计的 release ledger。
+- 修复（原子状态）：新增 `atomic_write`（同目录临时文件 + rename），所有 release/state/result/manifest/health/migration/backup 写入原子化，读取方永不看到半写文件。
+- 修复（本地锁与迁移预留）：新增 `deploy/cloud/lib-release-lock.sh` 可移植锁（`mkdir` + `owner` PID/时间戳，死进程或超时可回收），`release-commit.sh` 改用共享 git 目录中的锁并在 dry-run 时不取锁；`agent-worktree.sh` 的迁移编号预留改为在锁内完成“扫描 + 写清单”，并发任务不再抢号。
+- 修复（客户端）：`trosa-release` 识别 `busy` 并给出明确退出码，轮询窗口覆盖服务端等待锁的时间。
+- 影响范围：仅 `deploy/cloud/*` 发布链路、新增 `tools/release_baseline.py`、`tests/test_release_concurrency.py` 与文档；不改 `app.py`、业务表、迁移和运行契约。ECS 发布 runner 仍需 `flock`；基线门需要 ECS 能访问 `api.github.com`（公开仓库 compare，可用 `TRADE_OS_GITHUB_TOKEN` 提高限额）。
+- 是否需要迁移：否。新增文件随下一次发布进入候选；由于 ECS 的 runner 是从被发布 commit 自身下载的，包含本次修复的第一个 release 即由新 runner 自校验，之后所有候选都继承该门。
+- 当前状态：新增并发回归（基线决策、两任务竞态模型、锁互斥/超时回收、并发迁移预留、release id/ledger/原子写入契约）通过；完整发布门禁见下。
+
 ## 2026-09-17 — 修复“AI 帮我整理”再次无反应：DeepSeek V4 思考模式吞掉输出
 
 - 根因：共享 AI 接入的 DeepSeek V4 系列默认开启思考（`thinking`），推理过程与最终答案共用 `max_tokens` 预算。`_call_deepseek` 固定 3072 且未关闭思考时，整理/摘要这类较长输入会把预算耗在 `reasoning_content` 上，返回空 `content`；`/api/inbox/analyze-reply` 于是静默回退成“原文截断 + 未知”，界面看起来像 AI 没反应。

@@ -54,10 +54,31 @@ TARGET_BRANCH="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
 # 发布配置解析与发布角色边界（TRADE_OS_AGENT_ROLE）由这一份共享实现提供。
 # shellcheck source=release-env.sh
 source "$SCRIPT_DIR/release-env.sh"
+# 可移植锁与原子迁移编号预留。
+# shellcheck source=lib-release-lock.sh
+source "$SCRIPT_DIR/lib-release-lock.sh"
 
 fail() {
   printf '任务隔离未完成：%s\n' "$*" >&2
   exit 1
+}
+
+# 迁移编号预留锁：确保“读最大编号 → 写任务清单”是原子的，两个并发 create/adopt
+# 不会拿到同一个号。锁在脚本退出时兜底释放，避免异常路径长期占用。
+MIGRATION_LOCK_DIR=""
+release_migration_lock() {
+  if [[ -n "$MIGRATION_LOCK_DIR" ]]; then
+    trosa_lock_release "$MIGRATION_LOCK_DIR"
+    MIGRATION_LOCK_DIR=""
+  fi
+}
+trap release_migration_lock EXIT
+
+begin_migration_lock() {
+  MIGRATION_LOCK_DIR="$TASK_META_DIR/.reserve.lock"
+  mkdir -p -- "$TASK_META_DIR"
+  trosa_lock_acquire "$MIGRATION_LOCK_DIR" 30 120 \
+    || fail "无法获取迁移编号预留锁 $MIGRATION_LOCK_DIR（另一个任务正在预留，请稍后重试）"
 }
 
 usage() {
@@ -215,18 +236,9 @@ PY
 }
 
 # 跨主工作区、所有隔离区以及已预留的任务清单取下一个未占用的迁移编号，
-# 避免两个并行任务抢同一个号。
+# 避免两个并行任务抢同一个号。调用方必须持有迁移预留锁（begin_migration_lock）。
 next_migration_number() {
-  local name number max=0
-  while IFS= read -r number; do
-    [[ "$number" =~ ^[0-9]+$ ]] || continue
-    number=$((10#$number))
-    (( number > max )) && max=$number
-  done < <(
-    while IFS= read -r name; do printf '%s\n' "${name%%_*}"; done < <(all_migration_basenames)
-    reserved_migration_numbers
-  )
-  printf '%04d' $((max + 1))
+  trosa_next_migration_number "$MAIN_ROOT" "$TASK_META_DIR"
 }
 
 write_task_meta() {
@@ -393,9 +405,13 @@ cmd_create() {
     || fail "隔离区前端自检失败"
   local reserved=""
   if [[ "$reserve" == 1 ]]; then
+    begin_migration_lock
     reserved="$(next_migration_number)"
+    write_task_meta "$task" "$(branch_of "$task")" "$wt" "$base" "$owner" "$goal" "$scope" "$reserved"
+    release_migration_lock
+  else
+    write_task_meta "$task" "$(branch_of "$task")" "$wt" "$base" "$owner" "$goal" "$scope" "$reserved"
   fi
-  write_task_meta "$task" "$(branch_of "$task")" "$wt" "$base" "$owner" "$goal" "$scope" "$reserved"
   printf '\n任务隔离区已就绪：\n  目录：%s\n  分支：%s（基线 %s）\n' "$wt" "$(branch_of "$task")" "$base"
   print_task_meta "$task"
   if [[ -n "$reserved" ]]; then
@@ -776,8 +792,10 @@ cmd_adopt() {
 
   # 采纳后重新预留正确编号（采纳的迁移可能已占用下一个号）。
   local reserved
+  begin_migration_lock
   reserved="$(next_migration_number)"
   write_task_meta "$task" "$(branch_of "$task")" "$wt" "$TARGET_BRANCH" "$owner" "$goal" "$scope" "$reserved"
+  release_migration_lock
 
   printf '\n主工作区已恢复干净。原始改动作为备份 stash 保留：\n'
   printf '  查看：git -C %s stash list\n' "$MAIN_ROOT"

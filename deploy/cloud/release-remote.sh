@@ -52,16 +52,17 @@ fi
 LOCK_PATH="$REMOTE_ROOT/.trosa-publish.lock"
 STATE_FILE="$REMOTE_ROOT/.deploy-state.json"
 LAST_RESULT="$REMOTE_ROOT/.last-deploy-result.json"
+LEDGER_FILE="$REMOTE_ROOT/.release-ledger.jsonl"
 RELEASE_DIR="$REMOTE_ROOT/releases/$RELEASE_ID"
 RESULT_FILE="$RELEASE_DIR/DEPLOY_RESULT.json"
 LOG_FILE="$RELEASE_DIR/deploy.log"
 GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
-
-exec 9>"$LOCK_PATH"
-if ! flock -n 9; then
-  printf 'Another ECS release is already running.\n' >&2
-  exit 75
-fi
+# How long a release waits behind another release before reporting `busy`.
+LOCK_WAIT=${TRADE_OS_RELEASE_LOCK_WAIT:-900}
+# 1 = mirror every result to the polling endpoint; 0 = write only this
+# release's own result (used for wait/busy states that must not clobber the
+# result of the release actually running).
+MIRROR_LAST_RESULT=1
 
 NOW() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
@@ -113,18 +114,89 @@ load_production_env() {
   fi
 }
 
+# Atomic file replace: readers (status, polling clients) never observe a
+# half-written release/state/result file, even if the runner is killed mid-write.
+atomic_write() {
+  local target=$1 tmp
+  tmp=$(mktemp "$(dirname "$target")/.$(basename "$target").XXXXXX" 2>/dev/null) || return 1
+  if ! cat >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  mv -f -- "$tmp" "$target"
+}
+
+# Append one terminal record to the release ledger. The ledger is the audit
+# trail that ties a release id to exactly one commit and records the outcome;
+# it is written while the ECS release lock is held, so records are serialized.
+append_ledger() {
+  local status=$1 phase=$2 prod_id prod_commit
+  prod_id=$(read_current_release)
+  prod_commit=$(release_commit "$REMOTE_ROOT/releases/$prod_id")
+  python3 - "$LEDGER_FILE" "$RELEASE_ID" "$COMMIT_SHA" "$MODE" "$status" "$phase" \
+    "$prod_id" "$prod_commit" "$(NOW)" <<'PY'
+import json
+import os
+import sys
+
+path, rid, commit, mode, status, phase, prod_id, prod_commit, at = sys.argv[1:10]
+row = {
+    "release": rid,
+    "commit": commit,
+    "mode": mode,
+    "status": status,
+    "phase": phase,
+    "production": {"id": prod_id, "commit": prod_commit},
+    "at": at,
+}
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+try:
+    os.write(fd, (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
+finally:
+    os.close(fd)
+PY
+}
+
+# Print the commit already recorded for this release id when it differs from
+# the requested one (exit 0); exit 1 when the id is free/compatible.
+ledger_release_conflict() {
+  [ -f "$LEDGER_FILE" ] || return 1
+  python3 - "$LEDGER_FILE" "$RELEASE_ID" "$COMMIT_SHA" <<'PY'
+import json
+import sys
+
+path, rid, commit = sys.argv[1:4]
+try:
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                doc = json.loads(line)
+            except ValueError:
+                continue
+            if doc.get("release") == rid and doc.get("commit") and doc["commit"] != commit:
+                print(doc["commit"])
+                raise SystemExit(0)
+except OSError:
+    pass
+raise SystemExit(1)
+PY
+}
+
 write_result() {
   # write_result STATUS PHASE ERROR_JSON_EXTRA(not used) — builds DEPLOY_RESULT.json
   # from globals set by each phase. Kept in one function so every terminal
-  # state lands in the same machine-readable shape.
+  # state lands in the same machine-readable shape. All writes are atomic.
   local status=$1 phase=$2 error=${3:-} next=${4:-}
   local prod_id prod_commit prev_id prev_commit
   prod_id=$(read_current_release)
   prod_commit=$(release_commit "$REMOTE_ROOT/releases/$prod_id")
   prev_id=$(python3 -c "import json;print(json.load(open('$STATE_FILE')).get('previous',{}).get('id','none'))" 2>/dev/null || printf 'unknown')
   prev_commit=$(release_commit "$REMOTE_ROOT/releases/$prev_id")
-  python3 - "$RESULT_FILE" <<EOF
-import json, sys
+  python3 - <<EOF | atomic_write "$RESULT_FILE"
+import json
 doc = {
   "release": "$RELEASE_ID",
   "commit": "$COMMIT_SHA",
@@ -140,29 +212,92 @@ doc = {
   "next_action": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$next"),
   "updated_at": "$(NOW)",
 }
-open(sys.argv[1], "w").write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+print(json.dumps(doc, indent=2, sort_keys=True))
 EOF
-  cp -f "$RESULT_FILE" "$LAST_RESULT"
-  # LAST_RESULT is the polling endpoint: keep it single-line so clients can
-  # stream-parse it without reassembling pretty-printed JSON.
-  python3 -c "import json;open('$LAST_RESULT','w').write(json.dumps(json.load(open('$RESULT_FILE')),sort_keys=True,separators=(',',':'))+'\n')"
+  if [ "$MIRROR_LAST_RESULT" = "1" ]; then
+    # LAST_RESULT is the polling endpoint: keep it single-line so clients can
+    # stream-parse it without reassembling pretty-printed JSON.
+    python3 -c "import json;print(json.dumps(json.load(open('$RESULT_FILE')),sort_keys=True,separators=(',',':')))" \
+      | atomic_write "$LAST_RESULT"
+  fi
+  if [ "$status" != "in_progress" ]; then
+    append_ledger "$status" "$phase"
+  fi
   printf 'result status=%s phase=%s\n' "$status" "$phase"
 }
 
 update_state_on_success() {
   local new_id=$1 new_commit=$2 old_id=$3 old_commit=$4
-  python3 - "$STATE_FILE" <<EOF
+  python3 - <<EOF | atomic_write "$STATE_FILE"
 import json, os
 state = {"production": {}, "previous": {}, "previous_healthy": {}, "updated_at": ""}
-if os.path.exists("$STATE_FILE"):
-    try: state.update(json.load(open("$STATE_FILE")))
-    except Exception: pass
+try:
+    with open("$STATE_FILE", encoding="utf-8") as handle:
+        state.update(json.load(handle))
+except Exception:
+    pass
 state["previous"] = {"id": "$old_id", "commit": "$old_commit"}
 state["previous_healthy"] = {"id": "$old_id", "commit": "$old_commit"}
 state["production"] = {"id": "$new_id", "commit": "$new_commit"}
 state["updated_at"] = "$(NOW)"
-open("$STATE_FILE", "w").write(json.dumps(state, indent=2, sort_keys=True) + "\n")
+print(json.dumps(state, indent=2, sort_keys=True))
 EOF
+}
+
+# The commit currently serving production. The `current` symlink is the actual
+# running artifact, so prefer its manifest; fall back to the deploy state file.
+production_commit_for_guard() {
+  local id commit
+  id=$(read_current_release)
+  if [ "$id" = "none" ]; then
+    printf 'none'
+    return 0
+  fi
+  commit=$(release_commit "$REMOTE_ROOT/releases/$id")
+  if [ "$commit" = "unknown" ] && [ -f "$STATE_FILE" ]; then
+    commit=$(python3 -c "import json;print(json.load(open('$STATE_FILE')).get('production',{}).get('commit','unknown'))" 2>/dev/null || printf 'unknown')
+  fi
+  printf '%s' "$commit"
+}
+
+# Production baseline gate (run under the lock, before any mutation). A release
+# may only replace production when the candidate still contains the commit
+# production currently runs. Anything that cannot be proven refuses.
+baseline_guard() {
+  local prod_commit helper out allow reason
+  prod_commit=$(production_commit_for_guard)
+  if [ "$prod_commit" = "none" ]; then
+    printf 'baseline: no current production; first release allowed\n'
+    return 0
+  fi
+  helper="$RELEASE_DIR/tools/release_baseline.py"
+  if [ ! -f "$helper" ]; then
+    write_result "refused" "baseline" \
+      "baseline guard unavailable: tools/release_baseline.py missing from the candidate" \
+      "publish a candidate built from current main; production unchanged"
+    return 1
+  fi
+  out=$(python3 "$helper" --repository "$GITHUB_REPOSITORY" \
+    --production "$prod_commit" --candidate "$COMMIT_SHA" 2>/dev/null || true)
+  allow=$(printf '%s' "$out" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("allow"))
+except Exception:
+    print("invalid")' 2>/dev/null || printf 'invalid')
+  reason=$(printf '%s' "$out" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("reason", ""))
+except Exception:
+    print("")' 2>/dev/null || true)
+  if [ "$allow" != "True" ]; then
+    write_result "refused" "baseline" \
+      "candidate $COMMIT_SHA does not contain current production $prod_commit (${reason:-unproven})" \
+      "sync the task to the latest main, resolve conflicts and publish again; production unchanged"
+    return 1
+  fi
+  printf 'baseline ok: production %s is contained by candidate %s (%s)\n' \
+    "$prod_commit" "$COMMIT_SHA" "$reason"
+  return 0
 }
 
 # ---------------------------------------------------------------- health helpers
@@ -214,15 +349,15 @@ PYEOF
     release_ok=1
   fi
   if [ "$ping_ok" = 1 ] && [ "$app_ok" = 1 ] && [ "$svc_ok" = 1 ] && [ "$ledger_ok" = 1 ] && [ "$release_ok" = 1 ]; then ok=1; fi
-  python3 - <<EOF
+  python3 - <<EOF | atomic_write "$RELEASE_DIR/.health.json"
 import json
-open("$RELEASE_DIR/.health.json", "w").write(json.dumps({
+print(json.dumps({
   "ok": bool($ok),
   "checks": {"ping_contract": bool($ping_ok), "app_html": bool($app_ok),
              "systemd_active": bool($svc_ok), "migration_ledger": bool($ledger_ok),
              "release_pointer": bool($release_ok)},
   "checked_at": "$(NOW)",
-}, indent=2, sort_keys=True) + "\n")
+}, indent=2, sort_keys=True))
 EOF
   printf '%s' "$ok"
 }
@@ -257,6 +392,23 @@ prune_releases() {
       done
 }
 
+# ---------------------------------------------------------------- lock
+# Serialize every state-changing release on ECS. Wait up to LOCK_WAIT for a
+# running release; if it is still running, record an explicit `busy` terminal
+# result for this release instead of silently exiting. A busy release changes
+# nothing in production.
+mkdir -p "$REMOTE_ROOT/releases" 2>/dev/null || true
+mkdir -p "$RELEASE_DIR" 2>/dev/null || true
+exec 9>"$LOCK_PATH"
+if ! flock -w "$LOCK_WAIT" 9; then
+  MIRROR_LAST_RESULT=0
+  write_result "busy" "lock" \
+    "another ECS release is still running after waiting ${LOCK_WAIT}s" \
+    "re-run the same publish once the running release finishes; production unchanged"
+  printf 'Another ECS release holds the lock; reported busy for %s.\n' "$RELEASE_ID" >&2
+  exit 75
+fi
+
 # ---------------------------------------------------------------- deploy
 do_deploy() {
   load_production_env
@@ -264,9 +416,31 @@ do_deploy() {
   exec >>"$LOG_FILE" 2>&1
   printf '=== trosa release deploy %s commit %s at %s ===\n' "$RELEASE_ID" "$COMMIT_SHA" "$(NOW)"
 
-  local prod_before prod_commit_before
+  local prod_before prod_commit_before conflict_commit
   prod_before=$(read_current_release)
   prod_commit_before=$(release_commit "$REMOTE_ROOT/releases/$prod_before")
+
+  # Release identity is immutable: one release id maps to exactly one commit.
+  # Reusing an id for a different commit would silently overwrite another
+  # release's manifest, backup record and result history.
+  if [ -f "$RELEASE_DIR/release.json" ]; then
+    local existing_commit
+    existing_commit=$(release_commit "$RELEASE_DIR")
+    if [ -n "$existing_commit" ] && [ "$existing_commit" != "unknown" ] \
+       && [ "$existing_commit" != "$COMMIT_SHA" ]; then
+      write_result "refused" "identity" \
+        "release id $RELEASE_ID already belongs to commit $existing_commit" \
+        "publish with a fresh release id; production unchanged"
+      return 0
+    fi
+  fi
+  if conflict_commit=$(ledger_release_conflict); then
+    write_result "refused" "identity" \
+      "release id $RELEASE_ID is already recorded for commit $conflict_commit" \
+      "publish with a fresh release id; production unchanged"
+    return 0
+  fi
+
   write_result "in_progress" "started" "" "runner started on ECS; safe to disconnect and re-poll"
 
   # Fast idempotent path: already running this exact commit and healthy.
@@ -288,15 +462,26 @@ do_deploy() {
     rm -f "$archive"
     "$REMOTE_ROOT/venv/bin/python" -m py_compile \
       "$RELEASE_DIR/app.py" "$RELEASE_DIR/db.py" "$RELEASE_DIR/scheduler.py" "$RELEASE_DIR/serve.py"
-    python3 - <<EOF
+    python3 - <<EOF | atomic_write "$RELEASE_DIR/release.json"
 import json
-open("$RELEASE_DIR/release.json", "w").write(json.dumps({
+print(json.dumps({
   "id": "$RELEASE_ID", "commit": "$COMMIT_SHA",
-  "repository": "$GITHUB_REMOTE", "staged_at": "$(NOW)",
-}, indent=2, sort_keys=True) + "\n")
+  "repository": "$GITHUB_REMOTE",
+  "production_at_staging": "$prod_commit_before",
+  "staged_at": "$(NOW)",
+}, indent=2, sort_keys=True))
 EOF
   fi
   "$REMOTE_ROOT/venv/bin/pip" install --disable-pip-version-check -q -r "$RELEASE_DIR/requirements.txt"
+
+  # ---- production baseline gate (before backup/migrate/switch) ----
+  # A release may only replace production when its candidate still contains the
+  # commit production runs. If production moved while this candidate waited
+  # (for a lock, a gate, or a test), this refuses and production is untouched.
+  if ! baseline_guard; then
+    printf 'baseline refused for %s\n' "$RELEASE_ID"
+    return 0
+  fi
 
   # ---- db plan (explicit phase; production untouched) ----
   # The formal venv carries psycopg.  Do not use the system Python here: a
@@ -407,7 +592,7 @@ EOF
 )
   fi
   plan_category=$(printf '%s' "$plan_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('category','compatible'))" 2>/dev/null || printf 'compatible')
-  printf '%s' "$plan_json" | python3 -c "import json,sys;open('$RELEASE_DIR/.migration.json','w').write(json.dumps({'plan':json.load(sys.stdin),'applied_before':'$applied_ledger'[:4000]},indent=2,sort_keys=True))"
+  printf '%s' "$plan_json" | python3 -c "import json,sys;print(json.dumps({'plan':json.load(sys.stdin),'applied_before':'$applied_ledger'[:4000]},indent=2,sort_keys=True))" | atomic_write "$RELEASE_DIR/.migration.json"
   printf 'db plan: %s\n' "$plan_category"
 
   if [ "$plan_category" = "destructive" ] && [ "$ALLOW_DESTRUCTIVE" != "1" ]; then
@@ -443,13 +628,13 @@ EOF
           "re-run the same release; production and database unchanged"
         return 1
       }
-      python3 - <<EOF
+      python3 - <<EOF | atomic_write "$RELEASE_DIR/.backup.json"
 import json
-open("$RELEASE_DIR/.backup.json", "w").write(json.dumps({
+print(json.dumps({
   "path": "$snap_dir/database.dump", "sha256": "$database_sha",
   "verified": True, "scope": "pre-migration server-local",
   "created_at": "$(NOW)",
-}, indent=2, sort_keys=True) + "\n")
+}, indent=2, sort_keys=True))
 EOF
       printf 'backup ok: %s\n' "$snap_dir/database.dump"
     else

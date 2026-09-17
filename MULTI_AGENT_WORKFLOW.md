@@ -100,13 +100,22 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
   `sync` + 解决冲突后再发布。冲突发生在发布候选里，不会污染任何人的工作区。
 - 本地 `main` 是否移动不影响发布（发布基线始终是 `origin/main`）。发布后按需
   `git fetch origin && git merge --ff-only origin/main`。
+- **并发发布是安全的**：本地用共享 git 目录中的可移植锁（崩溃后可回收）把发布候选
+  串行化，推送 `origin/main` 仍用 `--force-with-lease` 固定基线，基线上移时后到者
+  被拒绝。ECS 侧发布 runner 也串行执行（有界等待，超时写明确 `busy` 结果）。
+- **production 基线门（关键）**：ECS 在切换流量前会证明候选 commit 仍包含当前
+  production commit。若候选基于旧 production（例如你在等待期间另一个任务已上线），
+  发布会被明确 `refused`，production 不变；你必须 `sync` 到最新 `main`、解决冲突后
+  重新 `publish`。这个规则保证后上线者包含先前所有已上线改动，任何一方都不会被静默
+  覆盖；无法证明安全的比较一律 fail closed。
 
 ## 6. 迁移（数据库结构）并行规则
 
 - **唯一事实源是 `migrations/` 目录**：运行时（`db.py`）与演练工具
   （`tools/unified_postgres_migration.py`）都按文件名排序自动发现，没有第二份清单。
 - 新迁移编号在 `create` / `adopt` 时统一预留（跨主工作区与所有隔离区取下一个空号），
-  写入任务清单的 `reserved_migration`。
+  写入任务清单的 `reserved_migration`。预留是原子操作：`agent-worktree.sh` 在共享
+  锁内完成“扫描最大编号 + 写任务清单”，因此两个并发任务不会拿到同一个号。
 - 每棵树、每次发布前由 `tools/check_migrations.py`（已接入 `release-test.sh` 快速门禁）
   校验：文件名合法、编号唯一。编号空档只作为警告（并行任务可能先发布较大编号，
   空档不会让运行时漏掉任何迁移）。

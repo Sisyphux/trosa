@@ -29,8 +29,11 @@ SOURCE_DIR="$(git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null || true
 TARGET_BRANCH="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
 BASE_REF="refs/remotes/origin/$TARGET_BRANCH"
 WORK_TMPDIR="${TMPDIR:-/tmp}"
-# 与 auto-publish.sh 共用同一个锁：两个入口不得同时向 ECS 发 release。
-LOCK_DIR="$WORK_TMPDIR/trosa-auto-publish.lock"
+# 本地发布串行化锁。放在共享 git 目录，使主工作区与所有隔离区的发布互斥；
+# 可移植实现会自动回收崩溃进程留下的锁。dry-run 不改 production，不取锁。
+# shellcheck source=lib-release-lock.sh
+source "$SCRIPT_DIR/lib-release-lock.sh"
+LOCK_DIR=""
 DRY_RUN=0
 ALLOW_DESTRUCTIVE="${TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB:-0}"
 COMMIT_SPECS=()
@@ -129,9 +132,8 @@ cleanup() {
   if [[ -n "$REL_DIR" ]]; then
     git -C "$SOURCE_DIR" worktree prune >/dev/null 2>&1 || true
   fi
-  if [[ -d "$LOCK_DIR" ]]; then
-    # macOS /usr/bin/rmdir does not accept GNU's `--` sentinel.
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+  if [[ -n "$LOCK_DIR" ]]; then
+    trosa_lock_release "$LOCK_DIR"
   fi
   exit "$status"
 }
@@ -188,8 +190,11 @@ if [[ ! -r "$ENV_FILE" ]]; then
 fi
 trosa_warn_legacy_workbench_env "$ENV_FILE"
 
-mkdir -- "$LOCK_DIR" 2>/dev/null \
-  || fail "已有另一个发布正在运行（锁：$LOCK_DIR）；确认无进程后再删除该目录"
+if [[ "$DRY_RUN" != 1 ]]; then
+  LOCK_DIR="$GIT_COMMON_DIR/trosa-release.lock"
+  trosa_lock_acquire "$LOCK_DIR" "${TRADE_OS_RELEASE_LOCK_WAIT:-1800}" 7200 \
+    || fail "已有另一个本地发布正在运行（锁：$LOCK_DIR，等待 ${TRADE_OS_RELEASE_LOCK_WAIT:-1800}s 超时）；确认无进程后重试，或删除该目录"
+fi
 
 cd "$SOURCE_DIR"
 origin_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -396,7 +401,7 @@ remote_after="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk 'NR == 1 
 [[ "$remote_after" == "$RELEASE_SHA" ]] \
   || fail "GitHub $TARGET_BRANCH 未确认到本次 release commit：期望 $RELEASE_SHA，实际 ${remote_after:-（空）}"
 
-RELEASE_ID="${RELEASE_ID_SPEC:-${TRADE_OS_RELEASE_ID:-rel-$(date -u +%Y%m%d%H%M%S)-${RELEASE_SHA:0:7}}}"
+RELEASE_ID="${RELEASE_ID_SPEC:-${TRADE_OS_RELEASE_ID:-rel-$(date -u +%Y%m%d%H%M%S)-${RELEASE_SHA:0:12}}}"
 [[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]] \
   || fail "非法 release id：$RELEASE_ID"
 publish_args=(publish --commit "$RELEASE_SHA" --release-id "$RELEASE_ID")

@@ -153,8 +153,23 @@ release commit，最后调用 `trosa-release publish`。底层发布器让 ECS �
 服务端本地快照）→ migrate（切换流量之前）→ activate（原子切换 `current`
 符号链接并重启）→ health（契约 + 页面 + systemd + 迁移账本 +
 release 指针五项深度检查）；失败时按阶段自动回滚代码并写入机器可读结果。
+
+并发发布安全由两层保证：
+
+- **本地**：`release-commit.sh` 用共享 git 目录中的可移植锁（死进程/超时可回收）串行化
+  发布候选；推送 `origin/main` 使用 `--force-with-lease`，基线上移时后到者被拒绝，绝不
+  覆盖另一个发布的提交。
+- **ECS**：`flock` 有界等待串行化所有 release（deploy 与 rollback 共用）；超过等待窗口
+  写入明确的 `busy` 终端结果并退出，不静默挂起。切换流量前，`tools/release_baseline.py`
+  会证明候选 commit 仍包含当前 production commit（GitHub compare，`ahead`/`identical`
+  才允许）；基于旧 production、production commit 未知或 compare 不可用都会 fail closed，
+  返回 `refused` 且 production 不变。这样两个从同一旧版本开发的并行任务不会互相覆盖：
+  先发布者上线，后发布者必须 `sync` 到最新 `main` 重建，最终 production 同时包含两者。
+
 ECS 发布锁保证同一时间只有一个 release 在执行；同一 release 重复执行是
-幂等的（已是生产版本且健康时直接返回 success）。
+幂等的（已是生产版本且健康时直接返回 success）。release id 与 commit 一一绑定，
+append-only `.release-ledger.jsonl` 记录每个终端结果；state / result / manifest /
+health / migration / backup 全部原子写入，发布中断不会留下半写状态。
 
 `backup-workbench.sh` 会调用 ECS PostgreSQL 生产目录的 verified logical dump，核对 dump
 的 SHA-256 和 `pg_restore --list`，再把数据库 dump、客户附件和 manifest 打包下载到 Mac 的
