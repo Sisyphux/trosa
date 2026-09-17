@@ -142,7 +142,8 @@ def audit(connection, sqlite_dir: Path, *, apply: bool, journal_path: Path,
             WHERE trosa.compat_legacy_bigint(e.payload->>'related_task_id') IS NOT NULL'''
     ).fetchall()
     event_rows = [
-        {**row, 'payload': row['payload']} for row in event_rows
+        {**row, 'row_id': str(row['row_id']), 'account_id': str(row['account_id']),
+         'payload': row['payload']} for row in event_rows
         if row['owner'] in {key[0] for key in fixed_tasks}
     ]
     followups = plan_event_followups(
@@ -169,7 +170,7 @@ def audit(connection, sqlite_dir: Path, *, apply: bool, journal_path: Path,
         'untouched_manual_review_count': report['manual_review_count'],
     }
     if json_output:
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
     else:
         print(f"确定修复: {len(fixes)} 条；连带事件: {len(followups)} 条"
               + (f"；已应用: {applied} 条，日志 {journal_path}" if apply else "（计划模式，未修改）"))
