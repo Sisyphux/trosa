@@ -92,7 +92,8 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 - 新迁移编号在 `create` / `adopt` 时统一预留（跨主工作区与所有隔离区取下一个空号），
   写入任务清单的 `reserved_migration`。
 - 每棵树、每次发布前由 `tools/check_migrations.py`（已接入 `release-test.sh` 快速门禁）
-  校验：文件名合法、编号唯一、编号连续、运行时可见。
+  校验：文件名合法、编号唯一。编号空档只作为警告（并行任务可能先发布较大编号，
+  空档不会让运行时漏掉任何迁移）。
 - 两个任务抢到同一编号时：保留先发布者的编号，后发布者在合并前 `git mv` 到下一个空号，
   不要复制对方的 DDL。跨任务冲突用 `preflight` 可直接看出。
 - 迁移 **forward-only**：已应用的迁移文件不可再改内容（运行时会因 SHA-256 变化拒绝启动），

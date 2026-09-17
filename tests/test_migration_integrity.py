@@ -63,12 +63,19 @@ class MigrationCheckerRejectionTest(unittest.TestCase):
             problems = check_migrations.check_directory(tmp)
             self.assertTrue(any("duplicate migration number 0002" in p for p in problems), problems)
 
-    def test_gap_is_rejected(self):
+    def test_gap_is_reported_but_not_fatal(self):
+        # Parallel tasks reserve numbers from a shared pool and may merge out
+        # of order; a gap is expected and must not block a tree.
         with tempfile.TemporaryDirectory() as tmp:
             self._write(tmp, "0001_a.sql")
             self._write(tmp, "0003_c.sql")
-            problems = check_migrations.check_directory(tmp)
-            self.assertTrue(any("missing migration number(s): 0002" in p for p in problems), problems)
+            self.assertEqual(check_migrations.check_directory(tmp), [])
+            self.assertEqual(check_migrations.missing_numbers(tmp), ["0002"])
+
+    def test_real_repository_has_no_gaps(self):
+        self.assertEqual(
+            check_migrations.missing_numbers(str(ROOT / "migrations")), []
+        )
 
     def test_invalid_name_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

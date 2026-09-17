@@ -130,15 +130,39 @@ all_migration_basenames() {
   done < <(git -C "$MAIN_ROOT" worktree list --porcelain)
 }
 
-# 跨主工作区与所有隔离区取下一个未占用的迁移编号，避免两个并行任务抢同一个号。
+# 已有任务清单里预留的迁移编号；用于让新任务避开同机其它任务。
+reserved_migration_numbers() {
+  [[ -d "$TASK_META_DIR" ]] || return 0
+  python3 - "$TASK_META_DIR" <<'PY'
+import glob
+import json
+import os
+import sys
+
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.json"))):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except (OSError, ValueError):
+        continue
+    value = str(doc.get("reserved_migration") or "")
+    if value.isdigit():
+        print(value)
+PY
+}
+
+# 跨主工作区、所有隔离区以及已预留的任务清单取下一个未占用的迁移编号，
+# 避免两个并行任务抢同一个号。
 next_migration_number() {
   local name number max=0
-  while IFS= read -r name; do
-    number="${name%%_*}"
+  while IFS= read -r number; do
     [[ "$number" =~ ^[0-9]+$ ]] || continue
     number=$((10#$number))
     (( number > max )) && max=$number
-  done < <(all_migration_basenames)
+  done < <(
+    while IFS= read -r name; do printf '%s\n' "${name%%_*}"; done < <(all_migration_basenames)
+    reserved_migration_numbers
+  )
   printf '%04d' $((max + 1))
 }
 
@@ -498,6 +522,14 @@ for number in sorted(by_number):
     problems=$((problems + 1))
   else
     printf '  未发现跨任务编号冲突（每棵树内仍需通过 check_migrations.py）。\n'
+  fi
+
+  local dup_reserved
+  dup_reserved="$(reserved_migration_numbers | sort | uniq -d)"
+  if [[ -n "$dup_reserved" ]]; then
+    printf '  多个活跃任务预留了同一编号（合并前必须错开）：\n'
+    printf '%s\n' "$dup_reserved" | sed 's/^/    /'
+    problems=$((problems + 1))
   fi
 
   printf '\n'

@@ -89,7 +89,7 @@ printf '\n==> Python 语法检查\n'
 "$PYTHON_BIN" -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py
 printf '完成：Python 语法检查\n'
 
-printf '\n==> 迁移目录完整性（编号唯一/连续、可被运行时应用）\n'
+printf '\n==> 迁移目录完整性（编号唯一、可被运行时应用）\n'
 "$PYTHON_BIN" "$TREE/tools/check_migrations.py" --dir "$TREE"
 printf '完成：迁移目录完整性\n'
 

@@ -1,6 +1,7 @@
 # migrations/ 目录约定
 
-- 文件名：`NNNN_lower_snake_case.sql`，4 位序号从 `0001` 开始，唯一且连续。
+- 文件名：`NNNN_lower_snake_case.sql`，4 位序号从 `0001` 开始，**唯一**。并行任务可能
+  先发布较大编号，因此编号出现空档只作为警告，不是错误；空档不会让运行时漏掉任何迁移。
 - **目录是唯一事实源**：`db.py` 与 `tools/unified_postgres_migration.py` 都按文件名排序
   自动发现迁移，不存在需要同步维护的第二份清单。新增迁移只需放入文件。
 - 新迁移编号必须先预留：`deploy/cloud/agent-worktree.sh create/adopt` 会把下一个空号写入
@@ -12,7 +13,7 @@
   python3 tools/check_migrations.py --dir .
   ```
 
-  它检查文件名合法、编号唯一、编号连续；已接入 `deploy/cloud/release-test.sh` 的快速门禁
+  它检查文件名合法、编号唯一（空档仅警告）；已接入 `deploy/cloud/release-test.sh` 的快速门禁
   和 `tests/test_migration_integrity.py`。
 - 迁移是 **forward-only**：已应用的迁移文件禁止再改内容（运行时按 `audit.schema_migrations`
   里的 SHA-256 校验并拒绝重放/篡改），任何修正都必须新增前向迁移。

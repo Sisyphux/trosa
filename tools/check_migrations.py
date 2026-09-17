@@ -4,14 +4,20 @@
 The runtime applies every ``migrations/NNNN_*.sql`` in filename order and
 records its SHA-256 in ``audit.schema_migrations``.  Two agents working in
 parallel can otherwise claim the same next number (git sees different file
-names and merges them silently), or leave a gap that hides a migration from
-review.  This gate makes those states impossible to merge unnoticed:
+names and merges them silently).  This gate makes that impossible to merge
+unnoticed:
 
 * every file must match ``NNNN_lower_snake_case.sql``;
-* numbers must be unique (no two tasks claiming the same slot);
-* numbers must be contiguous from 0001 with no gaps;
-* the runtime registry must equal the directory contents (checked by
-  ``tests/test_migration_integrity.py``).
+* numbers must be unique (no two tasks claiming the same slot).
+
+Gaps in the sequence are only a warning.  Parallel tasks reserve numbers from a
+shared pool and may legitimately publish out of order, so a branch (and even
+``main``) can briefly skip a number that another task reserved but has not
+merged yet.  A gap never hides a migration: the runtime still applies every
+file that exists, and the ledger records names, not positions.
+
+The runtime registry is enforced to equal the directory contents by
+``tests/test_migration_integrity.py``.
 
 Usage:
     python3 tools/check_migrations.py [--dir <repo-root>]
@@ -41,8 +47,21 @@ def migration_files(directory: str) -> list[str]:
     )
 
 
+def _valid_numbers(directory: str) -> dict[int, str]:
+    numbers: dict[int, str] = {}
+    for name in migration_files(directory):
+        match = MIGRATION_NAME.match(name)
+        if match:
+            numbers[int(match.group(1))] = name
+    return numbers
+
+
 def check_directory(directory: str) -> list[str]:
-    """Return human-readable problems; an empty list means the directory is clean."""
+    """Return fatal problems; an empty list means the directory is safe.
+
+    Fatal: unreadable/empty directory, invalid filename, duplicate number.
+    Non-fatal gaps are reported separately by ``missing_numbers``.
+    """
     directory = os.path.abspath(directory)
     if not os.path.isdir(directory):
         return [f"migration directory not found: {directory}"]
@@ -68,13 +87,16 @@ def check_directory(directory: str) -> list[str]:
             )
         else:
             by_number[number] = name
-
-    if by_number:
-        highest = max(by_number)
-        missing = [f"{n:04d}" for n in range(1, highest + 1) if n not in by_number]
-        if missing:
-            problems.append("missing migration number(s): " + ", ".join(missing))
     return problems
+
+
+def missing_numbers(directory: str) -> list[str]:
+    """Numbers below the highest present one that no file claims (warning only)."""
+    numbers = sorted(_valid_numbers(directory))
+    if not numbers:
+        return []
+    present = set(numbers)
+    return [f"{n:04d}" for n in range(1, max(numbers) + 1) if n not in present]
 
 
 def main(argv: list[str]) -> int:
@@ -97,6 +119,12 @@ def main(argv: list[str]) -> int:
         return 1
     names = migration_files(directory)
     print(f"MIGRATION_CHECK_OK count={len(names)} latest={names[-1]}")
+    gaps = missing_numbers(directory)
+    if gaps:
+        print(
+            "MIGRATION_CHECK_WARNING missing=" + ",".join(gaps)
+            + " (reserved by an unmerged task; gap is not fatal)"
+        )
     return 0
 
 
