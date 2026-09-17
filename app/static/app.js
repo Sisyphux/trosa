@@ -1169,7 +1169,27 @@ function waitForApiRetry(delay) {
   return new Promise(function(resolve) { setTimeout(resolve, delay); });
 }
 
-async function api(url, options) {
+// ---- 写入单飞（transport-level dedupe）----
+// 所有写请求都经过 api()，这里是防重复提交的统一咽喉：同 method+URL+body 的
+// 非 GET 请求在第一个还在途中时，后续调用共享同一个 Promise，不再发出第二个
+// 网络请求。这样“双击 / 回车+点击 / 无按钮路径重复触发”在任何现有与未来新增
+// 的写入口上都只会产生一次写入；handler 层的 beginWrite/setActionFeedback 仍
+// 负责按钮态与提示，不再单独承担正确性。
+var _pendingMutations = {};
+function api(url, options) {
+  options = options || {};
+  var method = String(options.method || 'GET').toUpperCase();
+  if (method === 'GET') return apiOnce(url, options);
+  var mutationKey = method + ' ' + url + ' ' + (typeof options.body === 'string' ? options.body : '');
+  if (_pendingMutations[mutationKey]) return _pendingMutations[mutationKey];
+  var promise = apiOnce(url, options);
+  _pendingMutations[mutationKey] = promise;
+  var cleanup = function() { if (_pendingMutations[mutationKey] === promise) delete _pendingMutations[mutationKey]; };
+  promise.then(cleanup, cleanup);
+  return promise;
+}
+
+async function apiOnce(url, options) {
   options = options || {};
   var method = String(options.method || 'GET').toUpperCase();
   var attempts = method === 'GET' ? 3 : 1;
@@ -1321,6 +1341,7 @@ document.addEventListener('visibilitychange', function() {
 
 // ========== INBOX ==========
 var _inboxLoadToken = 0;
+var _dashboardLoadToken = 0;
 var _listPendingTimers = {};
 
 function setListPending(element, pending) {
@@ -2258,6 +2279,10 @@ async function analyzeCommunication(context) {
   if (button) { button.disabled = true; button.textContent = 'AI 正在整理…'; button.setAttribute('aria-busy', 'true'); }
   panel.hidden = false;
   panel.innerHTML = '<div class="quick-analysis-loading">AI 正在后台整理沟通内容，你可以继续填写其他内容…</div>';
+  // 整理结果写到共享槽位并渲染进当前表单，必须在响应回来时确认还是同一个
+  // 上下文：客户工作区用 scope 校验，记录跟进弹窗用 fillToken 校验。
+  var workspaceScope = context === 'history' ? beginCustomerScope() : null;
+  var completeFillToken = _completeModalFillToken;
   try {
     var customerContext = communicationContextData(context);
     var result = await api('/api/inbox/analyze-reply', { method: 'POST', body: JSON.stringify({
@@ -2266,6 +2291,8 @@ async function analyzeCommunication(context) {
       customer_id: customerContext.customer_id,
       customer_name: customerContext.customer_name
     }) });
+    var contextChanged = workspaceScope ? !liveCustomerCache(workspaceScope) : completeFillToken !== _completeModalFillToken;
+    if (contextChanged) return;
     var analysis = result.analysis || {};
     _communicationAnalyses[context] = analysis;
     var resolvedDirection = analysis.direction || resolvedCommunicationDirection(context);
@@ -2362,7 +2389,7 @@ async function saveInboxReply() {
         })
       });
     }
-    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+    if (liveCustomerCache(beginCustomerScope(customerId))) {
       var activity = saved && saved.activity ? Object.assign({ type: 'follow' }, saved.activity) : Object.assign({
         type: 'follow', id: saved && (saved.activity_id || (!context.agentProposalId && saved.id)),
         follow_date: followDate, content: content,
@@ -2558,6 +2585,7 @@ function arrangeOverdueReminders(button) {
 }
 
 async function loadDashboard() {
+  var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
     if (!errorEl) return;
@@ -2575,6 +2603,9 @@ async function loadDashboard() {
     api('/api/logs?limit=8'),
     api('/api/my-weekly-logs')
   ]);
+  // A slower earlier read must not repaint today's stats/reminders over a newer
+  // one (e.g. completing a task then returning to Today).
+  if (loadToken !== _dashboardLoadToken) return;
   var statsResult = requests[0];
   if (statsResult.status === 'fulfilled') {
     var stats = statsResult.value || {};
@@ -3376,37 +3407,42 @@ function openTodayQuickEdit() {
 }
 
 async function submitTodayQuickEdit() {
-  var ids = Array.from(selectedTodayCustomers);
-  if (ids.length === 0) { closeModal('todayQuickEditModal'); return; }
-  var level = document.getElementById('todayQuickEditLevel').value;
-  var businessStage = document.getElementById('todayQuickEditBusinessStage').value;
-  var nextFollowUp = document.getElementById('todayQuickEditNextFollowUp').value;
-  var content = document.getElementById('todayQuickEditContent').value.trim();
-  var result = document.getElementById('todayQuickEditResult').value.trim();
-  var activityType = document.getElementById('todayQuickEditActivityType').value;
-  var direction = document.getElementById('todayQuickEditDirection').value;
-  if (!level && !businessStage && !nextFollowUp && !content) { showToast('请至少选择一项要修改的字段，或填写跟进内容', 'warning'); return; }
+  if (!beginWrite('todayQuickEdit')) return;
   try {
-    if (level) {
-      await api('/api/customers/batch/level', { method: 'POST', body: JSON.stringify({ ids: ids, value: level }) });
-    }
-    if (businessStage) {
-      await api('/api/customers/batch/business-stage', { method: 'POST', body: JSON.stringify({ ids: ids, value: businessStage }) });
-    }
-    if (nextFollowUp) {
-      await api('/api/customers/batch/next_follow_up', { method: 'POST', body: JSON.stringify({ ids: ids, value: nextFollowUp }) });
-    }
-    if (content) {
-      await api('/api/customers/batch/follow_history', {
-        method: 'POST',
-        body: JSON.stringify({ ids: ids, content: content, result: result, activity_type: activityType, direction: direction })
-      });
-    }
-    showToast('已更新 ' + ids.length + ' 个客户', 'success');
-    closeModal('todayQuickEditModal', true);
-    clearTodaySelection();
-    loadDashboard();
-  } catch(e) {}
+    var ids = Array.from(selectedTodayCustomers);
+    if (ids.length === 0) { closeModal('todayQuickEditModal'); return; }
+    var level = document.getElementById('todayQuickEditLevel').value;
+    var businessStage = document.getElementById('todayQuickEditBusinessStage').value;
+    var nextFollowUp = document.getElementById('todayQuickEditNextFollowUp').value;
+    var content = document.getElementById('todayQuickEditContent').value.trim();
+    var result = document.getElementById('todayQuickEditResult').value.trim();
+    var activityType = document.getElementById('todayQuickEditActivityType').value;
+    var direction = document.getElementById('todayQuickEditDirection').value;
+    if (!level && !businessStage && !nextFollowUp && !content) { showToast('请至少选择一项要修改的字段，或填写跟进内容', 'warning'); return; }
+    try {
+      if (level) {
+        await api('/api/customers/batch/level', { method: 'POST', body: JSON.stringify({ ids: ids, value: level }) });
+      }
+      if (businessStage) {
+        await api('/api/customers/batch/business-stage', { method: 'POST', body: JSON.stringify({ ids: ids, value: businessStage }) });
+      }
+      if (nextFollowUp) {
+        await api('/api/customers/batch/next_follow_up', { method: 'POST', body: JSON.stringify({ ids: ids, value: nextFollowUp }) });
+      }
+      if (content) {
+        await api('/api/customers/batch/follow_history', {
+          method: 'POST',
+          body: JSON.stringify({ ids: ids, content: content, result: result, activity_type: activityType, direction: direction })
+        });
+      }
+      showToast('已更新 ' + ids.length + ' 个客户', 'success');
+      closeModal('todayQuickEditModal', true);
+      clearTodaySelection();
+      loadDashboard();
+    } catch(e) {}
+  } finally {
+    endWrite('todayQuickEdit');
+  }
 }
 
 // ========== PERSONAL PREFERENCES ==========
@@ -4786,37 +4822,42 @@ async function batchCompleteGroup(groupKey) {
 }
 
 async function submitBatchComplete() {
-  var result = document.getElementById('batchCompleteResult').value.trim() || '继续跟进';
-  var nextDate = document.getElementById('batchCompleteNext').value.trim();
-  var targets = _batchCompleteTargets || [];
-  if (targets.length === 0) { closeModal('batchCompleteModal'); return; }
+  if (!beginWrite('batchComplete')) return;
+  try {
+    var result = document.getElementById('batchCompleteResult').value.trim() || '继续跟进';
+    var nextDate = document.getElementById('batchCompleteNext').value.trim();
+    var targets = _batchCompleteTargets || [];
+    if (targets.length === 0) { closeModal('batchCompleteModal'); return; }
 
-  var today = new Date().toISOString().split('T')[0];
-  var completed = 0;
+    var today = new Date().toISOString().split('T')[0];
+    var completed = 0;
 
-  for (var i = 0; i < targets.length; i++) {
-    try {
-      var item = targets[i];
-      if (_batchCompleteMode === 'newpool') {
-        var cid = item.id;
-        await api('/api/customers/' + cid + '/follow_history', {
-          method: 'POST',
-          body: JSON.stringify({ content: result, follow_date: today, result: result, next_plan: nextDate, is_reported: false })
-        });
-        if (nextDate) {
-          await api('/api/customers/' + cid, { method: 'PUT', body: JSON.stringify({ next_follow_up: nextDate }) });
+    for (var i = 0; i < targets.length; i++) {
+      try {
+        var item = targets[i];
+        if (_batchCompleteMode === 'newpool') {
+          var cid = item.id;
+          await api('/api/customers/' + cid + '/follow_history', {
+            method: 'POST',
+            body: JSON.stringify({ content: result, follow_date: today, result: result, next_plan: nextDate, is_reported: false })
+          });
+          if (nextDate) {
+            await api('/api/customers/' + cid, { method: 'PUT', body: JSON.stringify({ next_follow_up: nextDate }) });
+          }
+        } else if (_batchCompleteMode === 'today') {
+          await api('/api/reminders/' + item.id, { method: 'PUT', body: JSON.stringify({ result: result, next_follow_up: nextDate }) });
         }
-      } else if (_batchCompleteMode === 'today') {
-        await api('/api/reminders/' + item.id, { method: 'PUT', body: JSON.stringify({ result: result, next_follow_up: nextDate }) });
-      }
-      completed++;
-    } catch(e) {}
+        completed++;
+      } catch(e) {}
+    }
+    closeModal('batchCompleteModal', true);
+    showToast('已完成 ' + completed + ' 条跟进', 'success');
+    if (_batchCompleteMode === 'newpool') loadNewPool();
+    else loadDashboard();
+    _batchCompleteTargets = [];
+  } finally {
+    endWrite('batchComplete');
   }
-  closeModal('batchCompleteModal', true);
-  showToast('已完成 ' + completed + ' 条跟进', 'success');
-  if (_batchCompleteMode === 'newpool') loadNewPool();
-  else loadDashboard();
-  _batchCompleteTargets = [];
 }
 
 // ========== CUSTOMER EDIT MODAL ==========
@@ -4832,6 +4873,32 @@ var _customerTimelineLoading = false;
 var _customerSectionLoads = {};
 var _customerWorkspaceCache = {};
 var _customerWorkspaceCacheTtl = 15000;
+
+// ---- 客户工作区 scope ----
+// “哪个客户的工作区正开着”用 generation 表达：openEditModal 每次装载（新开或
+// 重开同一客户）以及关闭工作区都会递增。异步操作在第一个 await 之前用
+// beginCustomerScope() 捕获 scope，await 之后只允许通过 liveCustomerCache(scope)
+// 触碰共享的工作区状态；期间切换、重开或关闭客户都会让 scope 失效，旧响应自然
+// 被丢弃。逐点位的 id 比较（旧方案）有一个盲区：同一客户关闭后立刻重开时 id
+// 相同，旧加载的响应仍会覆盖新一次加载的数据 —— generation 不受此影响。
+var _customerScopeGeneration = 0;
+function beginCustomerScope(customerId) {
+  return {
+    generation: _customerScopeGeneration,
+    customerId: Number(customerId || (_customerDetailCache && _customerDetailCache.id) || 0)
+  };
+}
+function customerScopeIsActive(scope) {
+  return !!scope && !!_customerDetailCache &&
+    scope.generation === _customerScopeGeneration &&
+    Number(_customerDetailCache.id) === scope.customerId;
+}
+
+// await 之后触碰共享工作区状态的唯一合法入口：scope 已失效时返回 null，
+// 调用方拿到 null 就直接丢弃这次响应。
+function liveCustomerCache(scope) {
+  return customerScopeIsActive(scope) ? _customerDetailCache : null;
+}
 
 function normalizeCustomerTimelineItems(items) {
   return (items || []).map(function(item) {
@@ -4922,6 +4989,9 @@ async function openEditModal(id) {
 
   var requestToken = ++_customerDetailLoadToken;
   _customerDetailLoadingId = id;
+  // A new workspace load supersedes every in-flight echo of the previous one —
+  // including a reload of the same customer, whose id would be identical.
+  _customerScopeGeneration++;
   if (_customerDetailController) _customerDetailController.abort();
   _customerDetailController = typeof AbortController === 'function' ? new AbortController() : null;
   _customerDetailCache = null;
@@ -5015,6 +5085,7 @@ async function openEditModal(id) {
     renderCustomerNextTask(c.reminders || []);
     _customerDetailCache = c;
     _customerTimelinePage = 1;
+    _customerTimelineLoading = false;
     _customerSectionLoads = {};
     renderCustomerTimelineMore(c.timeline_pagination);
     document.querySelectorAll('#customerEditModal .tab-btn').forEach(function(t, i) { t.classList.toggle('active', i === 0); });
@@ -5080,7 +5151,14 @@ function openCustomerTaskModal(mode) {
   document.getElementById('customerTaskModalTitle').textContent = isEditing ? '调整下一步' : '安排下一步';
   document.getElementById('customerTaskTitle').value = isEditing ? (currentTask.title || currentTask.content || '') : '';
   document.getElementById('customerTaskDate').value = isEditing ? (currentTask.remind_date || '').substring(0, 10) : '';
-  if (modal) modal.dataset.editTaskId = isEditing ? String(currentTask.id) : '';
+  // Bind this dialog to the customer it was opened for. The submit handler must
+  // write to this captured id, never re-read editCustomerId at submit time —
+  // otherwise a workspace switch while the dialog is open writes the next step
+  // to whichever customer is on screen.
+  if (modal) {
+    modal.dataset.customerId = String((_customerDetailCache && _customerDetailCache.id) || document.getElementById('editCustomerId').value || '');
+    modal.dataset.editTaskId = isEditing ? String(currentTask.id) : '';
+  }
   var submit = document.getElementById('customerTaskSubmit');
   if (submit) {
     submit.textContent = isEditing ? '保存下一步' : '创建下一步';
@@ -5329,13 +5407,16 @@ async function resolveCustomerSelaExclusionReview(decision) {
 async function refreshCustomerWorkspace() {
   var customerId = document.getElementById('editCustomerId').value;
   if (!customerId) return;
+  var scope = beginCustomerScope(customerId);
   var parts = await Promise.all([
     api('/api/customers/' + customerId + '/summary'),
     api('/api/customers/' + customerId + '/tasks')
   ]);
+  var cache = liveCustomerCache(scope);
+  if (!cache) return;
   var summary = parts[0] || {};
   var tasks = parts[1] || {};
-  var customer = _customerDetailCache || {};
+  var customer = cache;
   Object.keys(summary).forEach(function(key) { customer[key] = summary[key]; });
   customer.reminders = tasks.tasks || summary.reminders || [];
   customer.tasks = customer.reminders;
@@ -5365,14 +5446,16 @@ async function copyCustomerContext(mode) {
 
 async function editCustomerWaiting() {
   var customerId = document.getElementById('editCustomerId').value;
+  var scope = beginCustomerScope(customerId);
   var current = (_customerDetailCache && _customerDetailCache.customer_judgment) || '';
   var waiting = await showAppPrompt({ title: '更新当前等待', message: '写下正在等待的回复、文件或确认；留空即可清除。', label: '当前等待', value: current, submitLabel: '保存' });
   if (waiting === null) return;
   try {
     var updated = await api('/api/customers/' + customerId + '/waiting', { method: 'PUT', body: JSON.stringify({ waiting: waiting.trim() }) });
-    if (_customerDetailCache) {
-      _customerDetailCache.customer_judgment = updated.waiting || '';
-      renderCustomerFactsBrief(_customerDetailCache);
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      cache.customer_judgment = updated.waiting || '';
+      renderCustomerFactsBrief(cache);
     }
     showToast(waiting.trim() ? '当前等待已更新' : '当前等待已清除', 'success');
   } catch (e) {}
@@ -5428,16 +5511,18 @@ async function quickUpdateCustomerLevel(select) {
   select.disabled = true;
   select.setAttribute('aria-busy', 'true');
   select.classList.add('is-saving');
+  var scope = beginCustomerScope(id);
   try {
     await api('/api/customers/' + id, {
       method: 'PUT',
       body: JSON.stringify({ level: next })
     });
-    if (_customerDetailCache && Number(_customerDetailCache.id) === id) {
-      _customerDetailCache.level = next;
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      cache.level = next;
       var editLevel = document.getElementById('editLevel');
       if (editLevel) editLevel.value = next;
-      renderCustomerFactsBrief(_customerDetailCache);
+      renderCustomerFactsBrief(cache);
     }
     markModalClean('customerEditModal');
     setCustomerLevelQuickFeedback(document.querySelector('.customer-level-quick'), '已保存', 'success');
@@ -5453,6 +5538,18 @@ async function quickUpdateCustomerLevel(select) {
     if (quickLabel) quickLabel.classList.remove('is-saving');
   }
 }
+
+// One user intent is one write. These handlers can be reached from a button, a
+// form submit and the unsaved-changes 保存并退出 at the same time, and some are
+// invoked without a button element, so a synchronous keyed guard is what keeps
+// a double-click or Enter+click from creating duplicate records.
+var _inflightWrites = {};
+function beginWrite(key) {
+  if (_inflightWrites[key]) return false;
+  _inflightWrites[key] = true;
+  return true;
+}
+function endWrite(key) { delete _inflightWrites[key]; }
 
 function setActionFeedback(button, state, label) {
   if (!button) return function() {};
@@ -5474,6 +5571,12 @@ function setActionFeedback(button, state, label) {
 function applyCustomerTaskSnapshot(tasks, changedKey) {
   var cache = _customerDetailCache;
   if (!cache) return;
+  // Completing/postponing a task updates 下次跟进 programmatically. That is a
+  // saved server change, not a user edit, so it must not raise the
+  // unsaved-changes prompt on the next close when the form was otherwise clean.
+  var workspaceModal = document.getElementById('customerEditModal');
+  var workspaceOpen = !!(workspaceModal && workspaceModal.classList.contains('show'));
+  var workspaceWasDirty = workspaceOpen && customerModalIsDirty('customerEditModal');
   var openTasks = (tasks || []).slice().sort(function(a, b) {
     return String(a.remind_date || '').localeCompare(String(b.remind_date || '')) || Number(a.id || 0) - Number(b.id || 0);
   });
@@ -5491,6 +5594,7 @@ function applyCustomerTaskSnapshot(tasks, changedKey) {
   if (Array.isArray(cache.tasks)) renderCustomerTasks(cache.tasks, changedKey ? [changedKey] : []);
   renderCustomerFactsBrief(cache);
   markElementConfirmed(document.getElementById('customerNextTask'));
+  if (workspaceOpen && !workspaceWasDirty) markModalClean('customerEditModal');
   var cachedWorkspace = _customerWorkspaceCache[cache.id];
   if (cachedWorkspace) {
     cachedWorkspace.summary = Object.assign({}, cachedWorkspace.summary || {}, {
@@ -5505,12 +5609,13 @@ function applyCustomerTaskSnapshot(tasks, changedKey) {
 async function completeCustomerNextTask(button) {
   var next = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
   if (!next) return;
+  var scope = beginCustomerScope();
   var reset = setActionFeedback(button, 'pending', '处理中…');
   try {
     var saved = await api('/api/reminders/' + next.id, { method: 'PUT', body: JSON.stringify({ result: '已完成', activity_type: 'task_completed' }) });
-    var customerId = _customerDetailCache && _customerDetailCache.id;
-    if (_customerDetailCache && customerId) {
-      var remaining = (_customerDetailCache.reminders || []).filter(function(task) {
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      var remaining = (cache.reminders || []).filter(function(task) {
         return Number(task.id) !== Number(next.id);
       });
       applyCustomerTaskSnapshot(remaining);
@@ -5521,7 +5626,7 @@ async function completeCustomerNextTask(button) {
           direction: 'unknown', is_reported: false, source: 'manual'
         };
         var changedKey = upsertCustomerTimelineEntry(activity);
-        syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey);
+        syncCustomerWorkspaceAfterCommunication(scope.customerId, activity, changedKey);
       }
     }
     // The confirmed local echo is already painted. These reads repair any
@@ -5543,16 +5648,18 @@ async function completeCustomerNextTask(button) {
 async function postponeCustomerNextTask(days, button) {
   var next = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
   if (!next) return;
+  var scope = beginCustomerScope();
   var due = new Date();
   due.setDate(due.getDate() + days);
   var reset = setActionFeedback(button, 'pending', '正在调整…');
   try {
     var saved = await api('/api/reminders/' + next.id + '/reschedule', { method: 'POST', body: JSON.stringify({ remind_date: localDateString(due) }) });
-    if (_customerDetailCache) {
+    var cache = liveCustomerCache(scope);
+    if (cache) {
       var updatedTask = saved && saved.reminder ? saved.reminder : Object.assign({}, next, {
         remind_date: (saved && saved.remind_date) || localDateString(due)
       });
-      var remaining = (_customerDetailCache.reminders || []).filter(function(task) {
+      var remaining = (cache.reminders || []).filter(function(task) {
         return Number(task.id) !== Number(next.id) &&
           Number(task.id) !== Number(saved && saved.merged_into || 0);
       });
@@ -5574,12 +5681,20 @@ async function postponeCustomerNextTask(days, button) {
 }
 
 async function createCustomerTask(button) {
-  var customerId = document.getElementById('editCustomerId').value;
+  // The customer this dialog was opened for is bound at open time
+  // (openCustomerTaskModal stamps dataset.customerId). Never re-read the
+  // workspace DOM here: a workspace switch while the dialog is open must not
+  // redirect the write.
+  var modal = document.getElementById('customerTaskModal');
+  var customerId = (modal && modal.dataset.customerId) || document.getElementById('editCustomerId').value;
   var title = document.getElementById('customerTaskTitle').value.trim();
   var dueDate = document.getElementById('customerTaskDate').value;
   if (!title || !dueDate) { showToast('请填写具体动作和日期', 'warning'); return; }
+  // The unsaved-changes 保存并退出 path calls this without a button, so the
+  // visual disable alone cannot stop a second write.
+  if (!beginWrite('customerTask')) return;
   var proposalId = _agentTaskProposalId;
-  var modal = document.getElementById('customerTaskModal');
+  var scope = beginCustomerScope(customerId);
   var editTaskId = proposalId ? 0 : Number((button && button.dataset.editTaskId) || (modal && modal.dataset.editTaskId) || 0);
   var reset = setActionFeedback(button, 'pending', editTaskId ? '正在保存…' : '正在创建…');
   try {
@@ -5603,12 +5718,13 @@ async function createCustomerTask(button) {
     // This task covers the Inbox signal that opened the scheduling flow. Refresh
     // immediately so the handled customer leaves the current list.
     if (currentPage === 'inbox') await loadInbox();
-    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+    var cache = liveCustomerCache(scope);
+    if (cache) {
       var task = created && (created.task || created.next_task || created.reminder);
       var mergedInto = Number(created && created.merged_into || 0);
-      var visibleTasks = Array.isArray(_customerDetailCache.tasks)
-        ? _customerDetailCache.tasks.slice()
-        : (_customerDetailCache.reminders || []).slice();
+      var visibleTasks = Array.isArray(cache.tasks)
+        ? cache.tasks.slice()
+        : (cache.reminders || []).slice();
       if (task) {
         visibleTasks = visibleTasks.filter(function(item) {
           return Number(item.id) !== editTaskId && Number(item.id) !== mergedInto && Number(item.id) !== Number(task.id);
@@ -5617,21 +5733,21 @@ async function createCustomerTask(button) {
         visibleTasks.sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
       }
       applyCustomerTaskSnapshot(visibleTasks, task ? customerTaskMotionKey(task) : '');
-      document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up || '';
-      renderCustomerNextTask(_customerDetailCache.reminders || []);
+      document.getElementById('editNextFollowUp').value = cache.next_follow_up || '';
+      renderCustomerNextTask(cache.reminders || []);
       markElementConfirmed(document.getElementById('customerNextTask'));
-      renderCustomerFactsBrief(_customerDetailCache);
+      renderCustomerFactsBrief(cache);
       // The customer workspace may be reopened from its short-lived summary
       // cache. Keep that cache aligned with the durable write as well, or the
       // newly created task disappears again when the detail modal is opened.
       var cachedWorkspace = _customerWorkspaceCache[customerId];
       if (cachedWorkspace) {
         cachedWorkspace.summary = Object.assign({}, cachedWorkspace.summary || {}, {
-          next_follow_up: _customerDetailCache.next_follow_up || '',
-          next_task: _customerDetailCache.next_task || null,
-          current_next_step: _customerDetailCache.current_next_step || (_customerDetailCache.next_task ? {
-            label: _customerDetailCache.next_task.title || _customerDetailCache.next_task.content || '没有明确下一步',
-            date: _customerDetailCache.next_task.remind_date || '', source: '待办记录'
+          next_follow_up: cache.next_follow_up || '',
+          next_task: cache.next_task || null,
+          current_next_step: cache.current_next_step || (cache.next_task ? {
+            label: cache.next_task.title || cache.next_task.content || '没有明确下一步',
+            date: cache.next_task.remind_date || '', source: '待办记录'
           } : { label: '没有明确下一步', date: '', source: '系统事实' })
         });
         cachedWorkspace.savedAt = Date.now();
@@ -5644,6 +5760,8 @@ async function createCustomerTask(button) {
     setActionFeedback(button, 'error', '创建失败');
     showToast('下一步没有创建，请重试', 'error');
     reset(1800);
+  } finally {
+    endWrite('customerTask');
   }
 }
 
@@ -5669,13 +5787,15 @@ async function saveCustomer() {
     profile: document.getElementById('editProfile').value.trim(),
     notes: document.getElementById('editNotes').value.trim()
   };
+  var scope = beginCustomerScope(id);
   try {
     var previousNextFollowUp = _customerDetailCache && _customerDetailCache.next_follow_up;
     await api('/api/customers/' + id, { method: 'PUT', body: JSON.stringify(data) });
-    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(id)) {
-      Object.keys(data).forEach(function(key) { _customerDetailCache[key] = data[key]; });
-      updateCustomerWorkspaceIdentity(_customerDetailCache);
-      renderCustomerFactsBrief(_customerDetailCache);
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      Object.keys(data).forEach(function(key) { cache[key] = data[key]; });
+      updateCustomerWorkspaceIdentity(cache);
+      renderCustomerFactsBrief(cache);
       if (previousNextFollowUp !== data.next_follow_up) await refreshCustomerWorkspace();
     }
     var msg = '客户更新成功';
@@ -5832,6 +5952,8 @@ async function saveContact(event, contactId) {
     if (nameInput) nameInput.focus();
     return false;
   }
+  var customerId = document.getElementById('editCustomerId').value;
+  var scope = beginCustomerScope(customerId);
   var saveButton = card.querySelector('button[type="submit"]');
   card.classList.add('is-saving');
   if (saveButton) { saveButton.disabled = true; saveButton.textContent = '保存中…'; }
@@ -5840,12 +5962,14 @@ async function saveContact(event, contactId) {
   try {
     var saved = await api('/api/contacts/' + id, { method: 'PUT', body: JSON.stringify(data) });
     if (!saved) throw new Error('联系人资料未保存，请重新登录');
-    var current = _customerDetailCache && Array.isArray(_customerDetailCache.contacts)
-      ? _customerDetailCache.contacts.find(function(item) { return Number(item.id) === id; }) : null;
-    var updated = Object.assign({}, current || {}, data, { id: id });
-    if (saved && saved.contact) updated = saved.contact;
     _editingContactId = null;
     _editingContactOriginal = null;
+    var cache = liveCustomerCache(scope);
+    if (!cache) { showToast('联系人资料已保存', 'success'); return false; }
+    var current = Array.isArray(cache.contacts)
+      ? cache.contacts.find(function(item) { return Number(item.id) === id; }) : null;
+    var updated = Object.assign({}, current || {}, data, { id: id });
+    if (saved && saved.contact) updated = saved.contact;
     patchCustomerWorkspaceContact(updated);
     showToast('联系人资料已保存', 'success');
   } catch (e) {
@@ -5887,12 +6011,15 @@ async function addContact() {
   var email = document.getElementById('contactEmail').value.trim();
   if (!name && !email) { showToast('姓名和邮箱至少填一项', 'warning'); return false; }
   var data = { name: name, title: document.getElementById('contactTitle').value.trim(), email: email, phone: document.getElementById('contactPhone').value.trim(), whatsapp: document.getElementById('contactWhatsapp').value.trim(), linkedin: document.getElementById('contactLinkedin').value.trim() };
+  var scope = beginCustomerScope(id);
   try {
     var saved = await api('/api/customers/' + id + '/contacts', { method: 'POST', body: JSON.stringify(data) });
     showToast('联系人已添加', 'success');
-    document.getElementById('contactName').value = ''; document.getElementById('contactTitle').value = '';
-    document.getElementById('contactEmail').value = ''; document.getElementById('contactPhone').value = ''; document.getElementById('contactWhatsapp').value = ''; document.getElementById('contactLinkedin').value = '';
-    patchCustomerWorkspaceContact(saved && saved.contact, { merged: !!(saved && saved.merged) });
+    if (liveCustomerCache(scope)) {
+      document.getElementById('contactName').value = ''; document.getElementById('contactTitle').value = '';
+      document.getElementById('contactEmail').value = ''; document.getElementById('contactPhone').value = ''; document.getElementById('contactWhatsapp').value = ''; document.getElementById('contactLinkedin').value = '';
+      patchCustomerWorkspaceContact(saved && saved.contact, { merged: !!(saved && saved.merged) });
+    }
     return true;
   } catch(e) { return false; }
 }
@@ -5906,6 +6033,7 @@ async function addBulkContacts() {
   var validationPanel = document.getElementById('bulkContactEmailValidation');
   validationPanel.hidden = false;
   validationPanel.innerHTML = '<strong>正在检查邮箱可发送性…</strong><span>检查格式、邮件路由、一次性邮箱、免费邮箱和部门邮箱</span>';
+  var scope = beginCustomerScope(id);
   try {
     var validation = await api('/api/emails/validate', { method: 'POST', body: JSON.stringify({ emails: emails }) });
     var accepted = (validation.results || []).filter(function(item) { return item.status === 'valid' || item.status === 'suspicious'; });
@@ -5914,12 +6042,16 @@ async function addBulkContacts() {
       var email = accepted[i].normalized || accepted[i].email;
       var response = await api('/api/customers/' + id + '/contacts', { method: 'POST', body: JSON.stringify({ name: email.split('@')[0], email: email }) });
       if (!response.duplicate) added++;
-      patchCustomerWorkspaceContact(response && response.contact, { merged: !!(response && response.merged), deferRender: true });
+      if (liveCustomerCache(scope)) {
+        patchCustomerWorkspaceContact(response && response.contact, { merged: !!(response && response.merged), deferRender: true });
+      }
     }
-    document.getElementById('bulkContactEmails').value = '';
-    renderEmailValidation('bulkContactEmailValidation', validation);
-    if (_customerDetailCache && Array.isArray(_customerDetailCache.contacts)) renderContacts(_customerDetailCache.contacts);
-    if (_customerDetailCache) renderCustomerFactsBrief(_customerDetailCache);
+    if (liveCustomerCache(scope)) {
+      renderEmailValidation('bulkContactEmailValidation', validation);
+      document.getElementById('bulkContactEmails').value = '';
+      if (Array.isArray(_customerDetailCache.contacts)) renderContacts(_customerDetailCache.contacts);
+      renderCustomerFactsBrief(_customerDetailCache);
+    }
     showToast('已验证并导入 ' + added + ' 个联系人', 'success');
     return true;
   } catch(e) {
@@ -5930,10 +6062,12 @@ async function addBulkContacts() {
 
 async function deleteContact(contactId) {
   if (!await showAppConfirm({ title: '删除联系人', message: '确认删除该联系人？', submitLabel: '删除' })) return;
+  var customerId = document.getElementById('editCustomerId').value;
+  var scope = beginCustomerScope(customerId);
   try {
     await api('/api/contacts/' + contactId, { method: 'DELETE' });
     showToast('联系人已删除', 'success');
-    patchCustomerWorkspaceContact({ id: contactId }, { remove: true });
+    if (liveCustomerCache(scope)) patchCustomerWorkspaceContact({ id: contactId }, { remove: true });
   } catch(e) {}
 }
 
@@ -6085,6 +6219,7 @@ async function uploadCustomerFiles() {
   if (category) form.append('category', category);
   var btn = document.getElementById('customerFileUploadBtn');
   if (btn) { btn.disabled = true; btn.textContent = '正在上传…'; }
+  var scope = beginCustomerScope(id);
   try {
     var resp = await fetch('/api/customers/' + id + '/files', { method: 'POST', credentials: 'include', body: form });
     var data = await resp.json().catch(function() { return {}; });
@@ -6097,9 +6232,10 @@ async function uploadCustomerFiles() {
     var categoryInput = document.getElementById('customerFileCategory');
     if (categoryInput) categoryInput.value = '';
     var createdFiles = (data && data.created) || [];
-    if (_customerDetailCache && Array.isArray(_customerDetailCache.files)) {
-      var currentFiles = createdFiles.concat(_customerDetailCache.files);
-      _customerDetailCache.files = currentFiles;
+    var cache = liveCustomerCache(scope);
+    if (cache && Array.isArray(cache.files)) {
+      var currentFiles = createdFiles.concat(cache.files);
+      cache.files = currentFiles;
       renderCustomerFiles(currentFiles);
     }
     return true;
@@ -6126,21 +6262,27 @@ async function deleteCustomerFile(fileId) {
   if (!await showAppConfirm({ title: '删除文件', message: '确认删除这个客户文件？文件会移入可恢复区，可立即撤销。', submitLabel: '删除' })) return;
   var id = document.getElementById('editCustomerId').value;
   if (!id) return;
+  var scope = beginCustomerScope(id);
   try {
     var deleted = await api('/api/customers/' + id + '/files/' + fileId, { method: 'DELETE' });
     showToastAction('文件已移入可恢复区。', 'success', '撤销', async function() {
+      // 撤销是稍后发生的独立动作：按文件归属客户重新捕获 scope，只有当工作区
+      // 仍显示该客户时才做本地回显。
+      var restoreScope = beginCustomerScope(id);
       try {
         var restored = await api('/api/customers/' + id + '/files/' + fileId + '/restore', { method: 'POST' });
-        if (_customerDetailCache && Array.isArray(_customerDetailCache.files) && restored && restored.file) {
-          _customerDetailCache.files = [restored.file].concat(_customerDetailCache.files.filter(function(file) { return Number(file.id) !== Number(fileId); }));
-          renderCustomerFiles(_customerDetailCache.files);
+        var restoreCache = liveCustomerCache(restoreScope);
+        if (restoreCache && Array.isArray(restoreCache.files) && restored && restored.file) {
+          restoreCache.files = [restored.file].concat(restoreCache.files.filter(function(file) { return Number(file.id) !== Number(fileId); }));
+          renderCustomerFiles(restoreCache.files);
         }
         showToast('文件已恢复', 'success');
       } catch (e) { showToast(e.message || '恢复失败', 'error'); }
     });
-    if (_customerDetailCache && Array.isArray(_customerDetailCache.files)) {
-      _customerDetailCache.files = _customerDetailCache.files.filter(function(file) { return Number(file.id) !== Number(fileId); });
-      renderCustomerFiles(_customerDetailCache.files);
+    var cache = liveCustomerCache(scope);
+    if (cache && Array.isArray(cache.files)) {
+      cache.files = cache.files.filter(function(file) { return Number(file.id) !== Number(fileId); });
+      renderCustomerFiles(cache.files);
     }
   } catch (e) {}
 }
@@ -6184,22 +6326,25 @@ function renderCustomerTimelineMore(pagination) {
 async function loadMoreCustomerTimeline() {
   var customerId = _customerDetailCache && _customerDetailCache.id;
   if (!customerId || _customerTimelineLoading) return;
+  var scope = beginCustomerScope(customerId);
   var more = document.getElementById('customerTimelineMore');
   _customerTimelineLoading = true;
   if (more) { more.className = 'customer-timeline-more is-loading'; more.innerHTML = ''; more.hidden = false; }
   try {
     var nextPage = _customerTimelinePage + 1;
     var data = await api('/api/customers/' + customerId + '/timeline?page=' + nextPage + '&per_page=' + _customerTimelinePerPage);
+    var cache = liveCustomerCache(scope);
+    if (!cache) return;
     var nextItems = normalizeCustomerTimelineItems((data && data.items) || []);
-    _customerDetailCache.timeline_items = (_customerDetailCache.timeline_items || []).concat(nextItems);
-    _customerDetailCache.timeline_pagination = (data && data.pagination) || {};
-    _customerDetailCache.follow_history = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'follow'; });
-    _customerDetailCache.outreach_emails = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'outreach'; });
+    cache.timeline_items = (cache.timeline_items || []).concat(nextItems);
+    cache.timeline_pagination = (data && data.pagination) || {};
+    cache.follow_history = cache.timeline_items.filter(function(item) { return item.type === 'follow'; });
+    cache.outreach_emails = cache.timeline_items.filter(function(item) { return item.type === 'outreach'; });
     _customerTimelinePage = nextPage;
-    renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails);
-    renderCustomerTimelineMore(_customerDetailCache.timeline_pagination);
+    renderFollowTimeline(cache.follow_history, cache.outreach_emails);
+    renderCustomerTimelineMore(cache.timeline_pagination);
   } catch (e) {
-    renderCustomerTimelineMore(_customerDetailCache.timeline_pagination);
+    if (liveCustomerCache(scope)) renderCustomerTimelineMore(_customerDetailCache.timeline_pagination);
     showToast('更早的沟通记录暂时无法加载', 'error');
   } finally {
     _customerTimelineLoading = false;
@@ -6210,20 +6355,23 @@ async function refreshCustomerTimeline(options) {
   options = options || {};
   var customerId = _customerDetailCache && _customerDetailCache.id;
   if (!customerId) return;
+  var scope = beginCustomerScope(customerId);
   var data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + _customerTimelinePerPage,
     { silentError: !!options.silentError });
+  var cache = liveCustomerCache(scope);
+  if (!cache) return;
   if (_customerWorkspaceCache[customerId]) {
     _customerWorkspaceCache[customerId].timeline = data;
     _customerWorkspaceCache[customerId].savedAt = Date.now();
   }
   var items = normalizeCustomerTimelineItems((data && data.items) || []);
-  _customerDetailCache.timeline_items = items;
-  _customerDetailCache.timeline_pagination = (data && data.pagination) || {};
-  _customerDetailCache.follow_history = items.filter(function(item) { return item.type === 'follow'; });
-  _customerDetailCache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
+  cache.timeline_items = items;
+  cache.timeline_pagination = (data && data.pagination) || {};
+  cache.follow_history = items.filter(function(item) { return item.type === 'follow'; });
+  cache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
   _customerTimelinePage = 1;
-  renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails);
-  renderCustomerTimelineMore(_customerDetailCache.timeline_pagination);
+  renderFollowTimeline(cache.follow_history, cache.outreach_emails);
+  renderCustomerTimelineMore(cache.timeline_pagination);
 }
 
 // ---------- 写后即时回显（local echo） ----------
@@ -6567,6 +6715,8 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
 }
 
 async function toggleReport(type, id) {
+  var customerId = _customerDetailCache && _customerDetailCache.id;
+  var scope = beginCustomerScope(customerId);
   try {
     var url = type === 'follow'
       ? '/api/follow-history/' + id + '/report'
@@ -6576,16 +6726,16 @@ async function toggleReport(type, id) {
     // The write has succeeded, so reflect its durable state before the
     // follow-up read finishes. This keeps the marker responsive even when a
     // tunnel or slow connection delays the timeline refresh.
-    var customerId = _customerDetailCache && _customerDetailCache.id;
     var recordType = type === 'follow' ? 'follow' : 'outreach';
     var isReported = !!res.is_reported;
-    ((_customerDetailCache && _customerDetailCache.timeline_items) || []).forEach(function(item) {
-      if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
-    });
-    if (_customerDetailCache) {
-      _customerDetailCache.follow_history = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
-      _customerDetailCache.outreach_emails = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
-      renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails,
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      (cache.timeline_items || []).forEach(function(item) {
+        if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
+      });
+      cache.follow_history = (cache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
+      cache.outreach_emails = (cache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
+      renderFollowTimeline(cache.follow_history, cache.outreach_emails,
         [customerTimelineKey({ type: recordType, id: id })]);
     }
     var workspace = customerId && _customerWorkspaceCache[customerId];
@@ -6628,6 +6778,10 @@ async function addFollowHistory() {
     next_follow_up: nextTask ? nextDate : '',
     is_reported: document.getElementById('followHistoryReport').checked
   };
+  var workspaceModal = document.getElementById('customerEditModal');
+  var workspaceOpen = !!(workspaceModal && workspaceModal.classList.contains('show'));
+  var workspaceWasDirty = workspaceOpen && customerModalIsDirty('customerEditModal');
+  var scope = beginCustomerScope(id);
   button.dataset.submitting = 'true';
   button.disabled = true;
   var originalLabel = button.textContent;
@@ -6635,44 +6789,50 @@ async function addFollowHistory() {
   try {
     var saved = await api('/api/customers/' + id + '/follow_history', { method: 'POST', body: JSON.stringify(data) });
     showToast(nextTask ? '记录已保存，下一步已安排' : (attentionStateMessage(saved.attention) || '记录已保存'), 'success');
-    document.getElementById('followHistoryContent').innerHTML = '';
-    document.getElementById('followHistoryResult').innerHTML = '';
-    document.getElementById('followHistoryNextTask').value = '';
-    document.getElementById('followHistoryNext').value = '';
-    document.getElementById('followHistoryReport').checked = false;
-    document.getElementById('followHistoryDirectionOverride').value = 'auto';
-    _communicationAnalyses.history = null;
-    updateAutoDirectionPreview('history');
-    var composer = document.getElementById('followCompose');
-    if (composer) composer.open = false;
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      document.getElementById('followHistoryContent').innerHTML = '';
+      document.getElementById('followHistoryResult').innerHTML = '';
+      document.getElementById('followHistoryNextTask').value = '';
+      document.getElementById('followHistoryNext').value = '';
+      document.getElementById('followHistoryReport').checked = false;
+      document.getElementById('followHistoryDirectionOverride').value = 'auto';
+      _communicationAnalyses.history = null;
+      updateAutoDirectionPreview('history');
+      var composer = document.getElementById('followCompose');
+      if (composer) composer.open = false;
+    }
     var activity = Object.assign({ type: 'follow' }, saved.activity || {
       id: saved.id, follow_date: saved.recent_contact_date || localDateString(),
       content: data.activity_content, result: data.activity_result, next_plan: data.next_task,
       activity_type: data.activity_type, direction: direction, is_reported: data.is_reported
     });
-    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(id)) {
+    if (cache) {
       var changedKey = upsertCustomerTimelineEntry(activity);
-      _customerDetailCache.follow_history = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'follow'; });
-      _customerDetailCache.outreach_emails = _customerDetailCache.timeline_items.filter(function(item) { return item.type === 'outreach'; });
+      cache.follow_history = cache.timeline_items.filter(function(item) { return item.type === 'follow'; });
+      cache.outreach_emails = cache.timeline_items.filter(function(item) { return item.type === 'outreach'; });
       if (saved.completed_task) {
-        _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.completed_task.id); });
+        cache.reminders = (cache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.completed_task.id); });
       }
       if (saved.next_step) {
-        _customerDetailCache.reminders = (_customerDetailCache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]).sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
+        cache.reminders = (cache.reminders || []).filter(function(task) { return Number(task.id) !== Number(saved.next_step.id); }).concat([saved.next_step]).sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
       }
       // `current_next_step` drives the summary label, while `next_task` is its
       // fallback. Keep both views together so a completed task cannot leave its
       // old date visible beside “没有明确下一步”.
-      _customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null;
-      _customerDetailCache.last_contact = saved.recent_contact_date || _customerDetailCache.last_contact;
-      _customerDetailCache.next_follow_up = saved.next_follow_up || '';
-      _customerDetailCache.current_next_step = saved.next_step ? {
+      cache.next_task = (cache.reminders || [])[0] || null;
+      cache.last_contact = saved.recent_contact_date || cache.last_contact;
+      cache.next_follow_up = saved.next_follow_up || '';
+      cache.current_next_step = saved.next_step ? {
         label: saved.next_step.title || saved.next_step.content || '没有明确下一步',
         date: saved.next_step.remind_date || '', source: '待办记录'
       } : { label: '没有明确下一步', date: '', source: '系统事实' };
-      document.getElementById('editNextFollowUp').value = _customerDetailCache.next_follow_up;
-      renderCustomerNextTask(_customerDetailCache.reminders || []);
+      document.getElementById('editNextFollowUp').value = cache.next_follow_up;
+      renderCustomerNextTask(cache.reminders || []);
       syncCustomerWorkspaceAfterCommunication(id, activity, changedKey);
+      // The composer reset and the programmatic 下次跟进 write above are saved
+      // server facts, so they must not raise the unsaved-changes prompt.
+      if (workspaceOpen && !workspaceWasDirty) markModalClean('customerEditModal');
     }
     // 客户详情可能是从 Today 打开的。后端已经完成了到期待办，
     // 这里刷新底层工作台，让关闭详情后不会留下旧的今日事项。
@@ -6702,7 +6862,11 @@ async function saveCustomerWorkspaceAndExit() {
   if (hasContactDraft && !(await addContact())) return false;
   var followContent = document.getElementById('followHistoryContent');
   if (followContent && richTextPlain(followContent) && !(await addFollowHistory())) return false;
-  return saveCustomer();
+  var saved = await saveCustomer();
+  // The button that reaches this handler is labelled 保存并退出, so a successful
+  // save must actually leave the workspace instead of only clearing dirty state.
+  if (saved) closeModal('customerEditModal', true);
+  return saved;
 }
 
 async function addOutreach() {
@@ -6711,15 +6875,19 @@ async function addOutreach() {
   var subject = document.getElementById('outreachSubject').value.trim();
   if (!subject) { showToast('请粘贴邮件或填写主题', 'warning'); return; }
   var data = { subject: subject, content: document.getElementById('outreachContent').value.trim(), sent_date: document.getElementById('outreachDate').value, reply_status: document.getElementById('outreachReply').value };
+  var scope = beginCustomerScope(id);
   try {
     var saved = await api('/api/customers/' + id + '/outreach', { method: 'POST', body: JSON.stringify(data) });
-    if (_customerDetailCache && Number(_customerDetailCache.id) === Number(id) && saved && saved.outreach) {
+    var cache = liveCustomerCache(scope);
+    if (cache && saved && saved.outreach) {
       var changedKey = upsertCustomerTimelineEntry(Object.assign({ type: 'outreach' }, saved.outreach));
       syncCustomerWorkspaceAfterOutreach(id, saved.outreach, changedKey);
     }
     showToast('记录已添加', 'success');
-    document.getElementById('outreachPaste').value = ''; document.getElementById('outreachSubject').value = ''; document.getElementById('outreachContent').value = '';
-    document.getElementById('outreachDate').value = ''; document.getElementById('outreachReply').value = 'pending';
+    if (cache) {
+      document.getElementById('outreachPaste').value = ''; document.getElementById('outreachSubject').value = ''; document.getElementById('outreachContent').value = '';
+      document.getElementById('outreachDate').value = ''; document.getElementById('outreachReply').value = 'pending';
+    }
     var composer = document.getElementById('followCompose');
     if (composer) composer.open = false;
     reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
@@ -6728,11 +6896,12 @@ async function addOutreach() {
 
 async function deleteOutreach(outreachId) {
   if (!await showAppConfirm({ title: '删除记录', message: '确认删除这条记录？', submitLabel: '删除' })) return;
+  var customerModal = document.getElementById('customerEditModal').classList.contains('show');
+  var scope = beginCustomerScope();
   try {
-    var customerModal = document.getElementById('customerEditModal').classList.contains('show');
     await api('/api/outreach/' + outreachId, { method: 'DELETE' });
     showToast('记录已删除', 'success');
-    if (customerModal) {
+    if (customerModal && liveCustomerCache(scope)) {
       removeCustomerTimelineEntry('outreach', outreachId);
       reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     } else loadHistory();
@@ -6741,19 +6910,24 @@ async function deleteOutreach(outreachId) {
 
 
 // ========== COMPLETE REMINDER ==========
+// 连续打开两次“记录跟进”时（比如快速点两条今日待办），先打开的那次读取返回
+// 较慢会重新 fillCompleteModal，把用户已经在第二次弹窗里输入的内容整个清掉。
+// fillToken 保证只有最后一次 openCompleteModal 的响应才能填充表单。
+var _completeModalFillToken = 0;
 function openCompleteModal(reminderId) {
+  var fillToken = ++_completeModalFillToken;
   api('/api/reminders/today').then(function(reminders) {
-    var r = reminders.find(function(r) { return r.id === reminderId; });
-    if (!r) {
-      // also try upcoming
-      api('/api/reminders/upcoming').then(function(upcoming) {
-        r = upcoming.find(function(r) { return r.id === reminderId; });
-        if (!r) return;
-        fillCompleteModal(r);
-      });
+    var r = (reminders || []).find(function(r) { return r.id === reminderId; });
+    if (r) {
+      if (fillToken === _completeModalFillToken) fillCompleteModal(r);
       return;
     }
-    fillCompleteModal(r);
+    // also try upcoming
+    api('/api/reminders/upcoming').then(function(upcoming) {
+      r = (upcoming || []).find(function(r) { return r.id === reminderId; });
+      if (!r || fillToken !== _completeModalFillToken) return;
+      fillCompleteModal(r);
+    });
   });
 }
 
@@ -6890,6 +7064,15 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 async function submitComplete() {
+  if (!beginWrite('complete')) return;
+  try {
+    await runSubmitComplete();
+  } finally {
+    endWrite('complete');
+  }
+}
+
+async function runSubmitComplete() {
   var id = document.getElementById('completeReminderId').value;
   var content = document.getElementById('completeResult').value.trim();
   var direction = resolvedCommunicationDirection('complete');
@@ -7164,6 +7347,9 @@ function openAddCustomerModal() {
   var recognitionSummary = document.getElementById('existRecognitionSummary');
   if (recognitionSummary) { recognitionSummary.hidden = true; recognitionSummary.innerHTML = ''; }
   _pendingSmartFill = null;
+  // Invalidate any in-flight 自动识别 so its preview cannot pop up later over an
+  // unrelated page (or a reopened modal for another customer).
+  _smartFillRequestToken++;
   openModal('addCustomerModal');
   markModalClean('addCustomerModal');
 }
@@ -7238,6 +7424,8 @@ async function smartFillCustomer(type) {
       method: 'POST', body: JSON.stringify({ company: company, website: website, use_ai: false })
     });
     if (requestToken !== _smartFillRequestToken) return;
+    var hostModal = document.getElementById(isNew ? 'addNewCustomerModal' : 'addCustomerModal');
+    if (!hostModal || !hostModal.classList.contains('show')) return;
     _pendingSmartFill = { type: type, result: result, originalCompany: company, originalWebsite: website };
     review.className = 'smart-fill-review ' + (result.website_status === 'error' ? 'has-error' : 'is-ready');
     review.innerHTML = result.website_status === 'error'
@@ -7287,35 +7475,40 @@ function confirmSmartFillResult() {
 }
 
 async function submitExistCustomer(copyEmails) {
-  var name = document.getElementById('addExistName').value.trim();
-  if (!name) { showToast('请填写公司名称', 'warning'); return; }
-  
-  var country = document.getElementById('addExistCountry').value.trim();
-  
-  var contacts = collectDraftContacts('exist');
-  if (!validateDraftContacts(contacts)) return;
-  var data = {
-    name: name, company: name,
-    country: country,
-    level: document.getElementById('addExistLevel').value,
-    business_role: document.getElementById('addExistType').value,
-    field: document.getElementById('addExistField').value.trim(),
-    business_stage: document.getElementById('addExistBusinessStage').value,
-    next_follow_up: document.getElementById('addExistNextFollow').value,
-    website: document.getElementById('addExistWebsite').value.trim(),
-    tags: document.getElementById('addExistTags').value.trim(),
-    profile: document.getElementById('addExistProfile').value.trim(),
-    notes: document.getElementById('addExistNotes').value.trim(),
-    contacts: contacts
-  };
+  if (!beginWrite('existCustomer')) return;
   try {
-    var saved = await api('/api/customers', { method: 'POST', body: JSON.stringify(data) });
-    showToast(copyEmails ? '客户已保存' : '客户添加成功', 'success');
-    markModalClean('addCustomerModal');
-    closeModal('addCustomerModal', true);
-    if (copyEmails) await copyEmailsToClipboard(contacts.map(function(contact) { return contact.email; }));
-    if (currentPage === 'customers') loadCustomers(); else loadDashboard();
-  } catch(e) {}
+    var name = document.getElementById('addExistName').value.trim();
+    if (!name) { showToast('请填写公司名称', 'warning'); return; }
+
+    var country = document.getElementById('addExistCountry').value.trim();
+
+    var contacts = collectDraftContacts('exist');
+    if (!validateDraftContacts(contacts)) return;
+    var data = {
+      name: name, company: name,
+      country: country,
+      level: document.getElementById('addExistLevel').value,
+      business_role: document.getElementById('addExistType').value,
+      field: document.getElementById('addExistField').value.trim(),
+      business_stage: document.getElementById('addExistBusinessStage').value,
+      next_follow_up: document.getElementById('addExistNextFollow').value,
+      website: document.getElementById('addExistWebsite').value.trim(),
+      tags: document.getElementById('addExistTags').value.trim(),
+      profile: document.getElementById('addExistProfile').value.trim(),
+      notes: document.getElementById('addExistNotes').value.trim(),
+      contacts: contacts
+    };
+    try {
+      var saved = await api('/api/customers', { method: 'POST', body: JSON.stringify(data) });
+      showToast(copyEmails ? '客户已保存' : '客户添加成功', 'success');
+      markModalClean('addCustomerModal');
+      closeModal('addCustomerModal', true);
+      if (copyEmails) await copyEmailsToClipboard(contacts.map(function(contact) { return contact.email; }));
+      if (currentPage === 'customers') loadCustomers(); else loadDashboard();
+    } catch(e) {}
+  } finally {
+    endWrite('existCustomer');
+  }
 }
 
 function openAddNewCustomerModal() {
@@ -7333,32 +7526,40 @@ function openAddNewCustomerModal() {
   document.getElementById('newSmartFillReview').hidden = true;
   document.getElementById('newSmartFillReview').className = 'smart-fill-review';
   _pendingSmartFill = null;
+  // See openAddCustomerModal: retire any in-flight recognition for a modal that
+  // is no longer (or no longer the same) open.
+  _smartFillRequestToken++;
   openModal('addNewCustomerModal');
   markModalClean('addNewCustomerModal');
 }
 
 async function submitNewCustomer() {
-  var name = document.getElementById('newCustomerName').value.trim();
-  if (!name) { showToast('请填写公司名称', 'warning'); return; }
-  var contacts = collectDraftContacts('new');
-  if (!validateDraftContacts(contacts)) return;
-  var data = {
-    name: name, company: name,
-    country: document.getElementById('newCustomerCountry').value.trim(),
-    type: document.getElementById('newCustomerType').value,
-    field: document.getElementById('newCustomerField').value.trim(),
-    website: document.getElementById('newCustomerWebsite').value.trim(),
-    profile: document.getElementById('newCustomerProfile').value.trim(),
-    notes: document.getElementById('newCustomerNotes').value.trim(),
-    contacts: contacts
-  };
+  if (!beginWrite('newCustomer')) return;
   try {
-    await api('/api/customers', { method: 'POST', body: JSON.stringify(data) });
-    showToast('新客户已添加', 'success');
-    markModalClean('addNewCustomerModal');
-    closeModal('addNewCustomerModal', true);
-    loadDashboard();
-  } catch(e) {}
+    var name = document.getElementById('newCustomerName').value.trim();
+    if (!name) { showToast('请填写公司名称', 'warning'); return; }
+    var contacts = collectDraftContacts('new');
+    if (!validateDraftContacts(contacts)) return;
+    var data = {
+      name: name, company: name,
+      country: document.getElementById('newCustomerCountry').value.trim(),
+      type: document.getElementById('newCustomerType').value,
+      field: document.getElementById('newCustomerField').value.trim(),
+      website: document.getElementById('newCustomerWebsite').value.trim(),
+      profile: document.getElementById('newCustomerProfile').value.trim(),
+      notes: document.getElementById('newCustomerNotes').value.trim(),
+      contacts: contacts
+    };
+    try {
+      await api('/api/customers', { method: 'POST', body: JSON.stringify(data) });
+      showToast('新客户已添加', 'success');
+      markModalClean('addNewCustomerModal');
+      closeModal('addNewCustomerModal', true);
+      loadDashboard();
+    } catch(e) {}
+  } finally {
+    endWrite('newCustomer');
+  }
 }
 
 function openBatchAddModal() {
@@ -7367,22 +7568,27 @@ function openBatchAddModal() {
 }
 
 async function submitBatchAdd() {
-  var text = document.getElementById('batchAddText').value.trim();
-  if (!text) { showToast('请输入客户数据', 'warning'); return; }
-  var lines = text.split('\n').filter(function(l) { return l.trim(); });
-  var count = 0;
-  for (var i = 0; i < lines.length; i++) {
-    var parts = lines[i].split(',').map(function(s) { return s.trim(); });
-    if (parts[0]) {
-      try {
-        await api('/api/customers', { method: 'POST', body: JSON.stringify({ name: parts[0], company: parts[1] || '', country: parts[2] || '', field: parts[3] || '', notes: parts[4] || '' }) });
-        count++;
-      } catch(e) {}
+  if (!beginWrite('batchAdd')) return;
+  try {
+    var text = document.getElementById('batchAddText').value.trim();
+    if (!text) { showToast('请输入客户数据', 'warning'); return; }
+    var lines = text.split('\n').filter(function(l) { return l.trim(); });
+    var count = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var parts = lines[i].split(',').map(function(s) { return s.trim(); });
+      if (parts[0]) {
+        try {
+          await api('/api/customers', { method: 'POST', body: JSON.stringify({ name: parts[0], company: parts[1] || '', country: parts[2] || '', field: parts[3] || '', notes: parts[4] || '' }) });
+          count++;
+        } catch(e) {}
+      }
     }
+    showToast('Added ' + count + ' new clients', 'success');
+    closeModal('batchAddModal', true);
+    loadDashboard();
+  } finally {
+    endWrite('batchAdd');
   }
-  showToast('Added ' + count + ' new clients', 'success');
-  closeModal('batchAddModal', true);
-  loadDashboard();
 }
 
 // ========== CALENDAR ==========
@@ -7679,25 +7885,27 @@ function _hl_apply(color) {
 async function saveTimelineHighlight(target) {
   var log = _followTimelineCache[target.logId];
   if (!log || !target.field || !target.element) return;
+  var scope = beginCustomerScope();
   log[target.field] = richTextHtml(target.element);
   try {
     await api('/api/follow-history/' + target.logId, { method: 'PUT', body: JSON.stringify({
       follow_date: log.follow_date || '', activity_type: log.activity_type || 'follow_up',
       direction: log.direction || 'unknown', content: log.content || '', result: log.result || '', next_plan: log.next_plan || ''
     }) });
-    if (_customerDetailCache) {
-      (_customerDetailCache.timeline_items || []).forEach(function(item) {
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      (cache.timeline_items || []).forEach(function(item) {
         if (item.type === 'follow' && Number(item.id) === Number(target.logId)) item[target.field] = log[target.field];
       });
-      _customerDetailCache.follow_history = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
-      _customerDetailCache.outreach_emails = (_customerDetailCache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
-      renderFollowTimeline(_customerDetailCache.follow_history, _customerDetailCache.outreach_emails,
+      cache.follow_history = (cache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
+      cache.outreach_emails = (cache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
+      renderFollowTimeline(cache.follow_history, cache.outreach_emails,
         [customerTimelineKey({ type: 'follow', id: target.logId })]);
-      if (_customerWorkspaceCache[_customerDetailCache.id]) {
-        _customerWorkspaceCache[_customerDetailCache.id].timeline = Object.assign({}, _customerWorkspaceCache[_customerDetailCache.id].timeline || {}, {
-          items: _customerDetailCache.timeline_items
+      if (_customerWorkspaceCache[cache.id]) {
+        _customerWorkspaceCache[cache.id].timeline = Object.assign({}, _customerWorkspaceCache[cache.id].timeline || {}, {
+          items: cache.timeline_items
         });
-        _customerWorkspaceCache[_customerDetailCache.id].savedAt = Date.now();
+        _customerWorkspaceCache[cache.id].savedAt = Date.now();
       }
     }
     showToast('高亮已保存', 'success');
@@ -7790,11 +7998,14 @@ async function saveFollowEdit() {
   try {
     var saved = await api('/api/follow-history/' + id, { method: 'PUT', body: JSON.stringify(data) });
     var customerModal = document.getElementById('customerEditModal').classList.contains('show');
-    var customerId = (_customerDetailCache && _customerDetailCache.id) || (_followCache && _followCache.customer_id);
+    // Ownership comes from the edited record itself. Reading the *currently*
+    // open customer here made the guard compare B to B and let A's edit land
+    // in B's timeline when the workspace was switched mid-request.
+    var ownerId = (_followCache && _followCache.customer_id) || (_customerDetailCache && _customerDetailCache.id);
     var updated = Object.assign({ type: 'follow' }, _followCache || {}, data, saved || {}, { id: Number(id) });
-    if (customerModal && _customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+    if (customerModal && liveCustomerCache(beginCustomerScope(ownerId))) {
       var changedKey = upsertCustomerTimelineEntry(updated);
-      syncCustomerWorkspaceAfterCommunication(customerId, updated, changedKey);
+      syncCustomerWorkspaceAfterCommunication(ownerId, updated, changedKey);
     } else {
       _followTimelineCache[id] = updated;
     }
@@ -7807,12 +8018,13 @@ async function saveFollowEdit() {
 
 async function deleteFollowLog(logId) {
   if (!await showAppConfirm({ title: '移除跟进记录', message: '确认移除这条跟进记录？移除后仍可撤销。', submitLabel: '移除' })) return;
+  var customerModal = document.getElementById('customerEditModal').classList.contains('show');
+  var scope = beginCustomerScope();
   try {
-    var customerModal = document.getElementById('customerEditModal').classList.contains('show');
     var removed = customerModal ? findCustomerTimelineEntry('follow', logId) : null;
     await api('/api/follow-history/' + logId, { method: 'DELETE' });
     if (customerModal) {
-      removeCustomerTimelineEntry('follow', logId);
+      if (liveCustomerCache(scope)) removeCustomerTimelineEntry('follow', logId);
       showFollowUndoToast(logId, removed);
       reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     } else {
@@ -7828,13 +8040,16 @@ function showFollowUndoToast(logId, removed) {
   toast.className = 'toast success toast-with-action';
   toast.innerHTML = uiIcon('check') + '<span>记录已移除</span><button type="button">撤销</button>';
   toast.querySelector('button').onclick = async function() {
+    var restoreScope = beginCustomerScope(removed && removed.customer_id);
     try {
       await api('/api/follow-history/' + logId + '/restore', { method: 'POST' });
       var customerModal = document.getElementById('customerEditModal').classList.contains('show');
-      var customerId = (_customerDetailCache && _customerDetailCache.id) || (removed && removed.customer_id);
-      if (customerModal && removed && _customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
+      // Ownership comes from the removed record itself; comparing against the
+      // *currently* open customer made the guard self-satisfying and restored
+      // A's record into B's timeline.
+      if (customerModal && removed && liveCustomerCache(restoreScope)) {
         var changedKey = upsertCustomerTimelineEntry(Object.assign({ type: 'follow' }, removed));
-        syncCustomerWorkspaceAfterCommunication(customerId, removed, changedKey);
+        syncCustomerWorkspaceAfterCommunication(removed.customer_id, removed, changedKey);
       }
       toast.remove();
       showToast('记录已恢复', 'success');
@@ -8161,12 +8376,19 @@ var _modalSaveHandlers = {
 function customerModalState(id) {
   var modal = document.getElementById(id);
   if (!modal) return '';
-  var fields = Array.from(modal.querySelectorAll('input, select, textarea')).filter(function(field) {
+  var fields = Array.from(modal.querySelectorAll('input, select, textarea, [contenteditable="true"]')).filter(function(field) {
     return field.type !== 'hidden' && field.type !== 'button' && field.type !== 'submit' && !field.disabled &&
       !(field.closest && field.closest('.contact-edit-form'));
   });
   return JSON.stringify(fields.map(function(field) {
-    return [field.id || field.name || field.className, field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value, field.files && field.files[0] ? field.files[0].name : ''];
+    // Rich-text composers are contenteditable, not form controls. Without this
+    // branch a draft typed only into 沟通内容 / 结果 was invisible to the
+    // unsaved-changes guard and was discarded silently on close.
+    var editable = field.isContentEditable || field.getAttribute('contenteditable') === 'true' || field.getAttribute('contenteditable') === '';
+    var value = editable
+      ? String(field.innerHTML || '')
+      : (field.type === 'checkbox' || field.type === 'radio' ? field.checked : field.value);
+    return [field.id || field.name || field.className, value, field.files && field.files[0] ? field.files[0].name : ''];
   }));
 }
 
@@ -8193,6 +8415,9 @@ function showAppPrompt(options) {
     var modal = document.getElementById('appDialogModal');
     var input = document.getElementById('appDialogInput');
     if (!modal || !input) { resolve(null); return; }
+    // 对话框只有一个 resolver 槽位。新的对话框必须先用“取消”结算掉上一次
+    // 请求，否则前一个 Promise 永远 pending，调用它的流程就此挂死。
+    if (_appDialogResolver) finishAppDialog(_appDialogMode === 'confirm' ? false : null);
     _appDialogResolver = resolve;
     _appDialogMode = 'prompt';
     document.getElementById('appDialogTitle').textContent = options.title || '输入信息';
@@ -8223,6 +8448,8 @@ function showAppConfirm(options) {
   return new Promise(function(resolve) {
     var modal = document.getElementById('appDialogModal');
     if (!modal) { resolve(false); return; }
+    // 同 showAppPrompt：先用取消结算掉被覆盖的上一个对话框请求。
+    if (_appDialogResolver) finishAppDialog(_appDialogMode === 'confirm' ? false : null);
     _appDialogResolver = resolve;
     _appDialogMode = 'confirm';
     document.getElementById('appDialogTitle').textContent = options.title || '确认操作';
@@ -8321,6 +8548,8 @@ function closeModal(id, force) {
   if (id === 'customerEditModal') {
     _customerDetailLoadToken++;
     _customerDetailLoadingId = null;
+    // Closing the workspace ends every in-flight echo that captured its scope.
+    _customerScopeGeneration++;
     if (_customerDetailController) { _customerDetailController.abort(); _customerDetailController = null; }
     var customerLoadingModal = document.getElementById('customerEditModal');
     if (customerLoadingModal) {
@@ -8405,6 +8634,7 @@ document.addEventListener('keydown', function(e) {
   var top = openModals[openModals.length - 1];
   if (top) {
     if (top.id === 'unsavedChangesModal') continueEditingCustomerForm();
+    else if (top.classList.contains('ephemeral-modal')) closeEphemeralModal(top);
     else closeModal(top.id);
     return;
   }
@@ -8485,35 +8715,40 @@ async function loadCustomerSection(tabId) {
   if (tabId === 'editTabFiles' && Array.isArray(customer.files)) return;
   if (tabId === 'editTabTasks' && Array.isArray(customer.tasks)) return;
 
+  var scope = beginCustomerScope(customerId);
   _customerSectionLoads[tabId] = true;
   setCustomerSectionLoading(tabId, tabId === 'editTabContacts' ? '正在读取联系人…' : tabId === 'editTabFiles' ? '正在读取文件清单…' : '正在读取待办…');
   try {
     if (tabId === 'editTabContacts') {
       var contacts = await api('/api/customers/' + customerId + '/contacts');
-      if (_customerDetailCache && _customerDetailCache.id === customerId) {
-        _customerDetailCache.contacts = (contacts && (contacts.contacts || contacts)) || [];
-        _customerDetailCache.contact_count = _customerDetailCache.contacts.length;
-        _customerDetailCache.primary_contact = _customerDetailCache.contacts[0] || null;
-        renderContacts(_customerDetailCache.contacts);
-        renderCustomerFactsBrief(_customerDetailCache);
+      var contactsCache = liveCustomerCache(scope);
+      if (contactsCache) {
+        contactsCache.contacts = (contacts && (contacts.contacts || contacts)) || [];
+        contactsCache.contact_count = contactsCache.contacts.length;
+        contactsCache.primary_contact = contactsCache.contacts[0] || null;
+        renderContacts(contactsCache.contacts);
+        renderCustomerFactsBrief(contactsCache);
       }
     } else if (tabId === 'editTabFiles') {
       var files = await api('/api/customers/' + customerId + '/files');
-      if (_customerDetailCache && _customerDetailCache.id === customerId) {
-        _customerDetailCache.files = (files && (files.files || files)) || [];
-        renderCustomerFiles(_customerDetailCache.files);
+      var filesCache = liveCustomerCache(scope);
+      if (filesCache) {
+        filesCache.files = (files && (files.files || files)) || [];
+        renderCustomerFiles(filesCache.files);
       }
     } else if (tabId === 'editTabTasks') {
       var tasks = await api('/api/customers/' + customerId + '/tasks');
-      if (_customerDetailCache && _customerDetailCache.id === customerId) {
-        _customerDetailCache.tasks = (tasks && tasks.tasks) || [];
-        _customerDetailCache.reminders = _customerDetailCache.tasks;
-        renderCustomerTasks(_customerDetailCache.tasks);
-        renderCustomerNextTask(_customerDetailCache.tasks);
-        renderCustomerFactsBrief(_customerDetailCache);
+      var tasksCache = liveCustomerCache(scope);
+      if (tasksCache) {
+        tasksCache.tasks = (tasks && tasks.tasks) || [];
+        tasksCache.reminders = tasksCache.tasks;
+        renderCustomerTasks(tasksCache.tasks);
+        renderCustomerNextTask(tasksCache.tasks);
+        renderCustomerFactsBrief(tasksCache);
       }
     }
   } catch (e) {
+    if (!liveCustomerCache(scope)) return;
     var targets = { editTabContacts: 'contactsList', editTabFiles: 'customerFilesList', editTabTasks: 'customerTasksList' };
     var target = document.getElementById(targets[tabId]);
     if (target) target.innerHTML = '<div class="workspace-loading"><p>这部分内容暂时无法加载。</p><button class="btn btn-sm" type="button" onclick="loadCustomerSection(\'' + tabId + '\')">重新加载</button></div>';

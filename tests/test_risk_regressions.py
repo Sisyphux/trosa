@@ -2294,8 +2294,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('reconcileCustomerTimeline({ includeSummary: true })', handler)
         self.assertIn('recentFactFromCommunication(activity)', javascript)
         self.assertIn('recent_facts: _customerDetailCache.recent_facts', javascript)
-        self.assertIn("_customerDetailCache.current_next_step = saved.next_step", handler)
-        self.assertIn("_customerDetailCache.next_task = (_customerDetailCache.reminders || [])[0] || null", handler)
+        # The post-await writes go through the scope gate: `cache` is the
+        # customer cache returned by liveCustomerCache(scope).
+        self.assertIn('var cache = liveCustomerCache(scope);', handler)
+        self.assertIn("cache.current_next_step = saved.next_step ? {", handler)
+        self.assertIn('cache.next_task = (cache.reminders || [])[0] || null', handler)
 
     def test_importer_covers_every_legacy_user_table(self):
         importer = (ROOT / 'tools' / 'unified_postgres_import.py').read_text(encoding='utf-8')
@@ -3269,6 +3272,60 @@ class TimelineLocalEchoRegressionTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('timeline local echo regression: OK', result.stdout)
+
+
+class CustomerContextRaceRegressionTest(unittest.TestCase):
+    """A late response for customer A must never paint or mutate customer B."""
+
+    def test_contenteditable_fields_participate_in_the_unsaved_guard(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        state_fn = javascript[javascript.index('function customerModalState(id) {'):]
+        state_fn = state_fn[:state_fn.index('function markModalClean(id)')]
+        self.assertIn('[contenteditable="true"]', state_fn)
+
+    def test_customer_context_race_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'customer_context_race_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('customer context race regression: OK', result.stdout)
+
+
+class FrontendArchitectureInvariantTest(unittest.TestCase):
+    """机制级不变量：异步写入必须绑定实体身份，防重复提交必须有传输层兜底。
+
+    检查在真实求值后的代码上进行（jsdom 加载 app.js 后对顶层函数做
+    toString() 内省，见 tests/support/frontend_architecture_check.cjs），
+    因此未来任何人新增“await 之后直接写共享客户工作区状态”的函数而不捕获
+    scope，这个测试都会失败并指出函数名。
+    """
+
+    def test_frontend_architecture_invariants_on_evaluated_code(self):
+        harness = ROOT / 'tests' / 'support' / 'frontend_architecture_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('frontend architecture invariants: OK', result.stdout)
 
 
 if __name__ == '__main__':
