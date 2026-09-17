@@ -118,6 +118,8 @@ REQUIRED_INDEXES = (
      ("organization_id", "legacy_user_id", "legacy_key")),
     ("trosa.communication_source_items", "trosa_communication_items_org_user_fp_idx",
      ("organization_id", "legacy_user_id", "source_fingerprint")),
+    ("trosa.timeline_events", "trosa_timeline_natural_identity_idx",
+     ("account_id", "source_module", "source_reference")),
     ("audit.agent_actions", "audit_agent_actions_org_user_action_idx",
      ("organization_id", "legacy_user_id", "action_id")),
     ("audit.undo_snapshots", "audit_undo_snapshots_org_user_token_idx",

@@ -12247,11 +12247,15 @@ def extension_save_communications():
             for item, fingerprint in new_pairs:
                 item_time = item.get('time') or ''
                 item_id = cursor.execute(
-                    'SELECT id FROM trosa.communication_source_items WHERE source_fingerprint=?',
+                    '''SELECT id FROM trosa.communication_source_items
+                        WHERE organization_id=trosa.compat_org_id()
+                          AND legacy_user_id=trosa.compat_current_user()
+                          AND source_fingerprint=?''',
                     (fingerprint,),
                 ).fetchone()
                 item_id = item_id['id'] if item_id else cursor.execute(
-                    'SELECT trosa.compat_uuid(?)', (f'communication-item:{fingerprint}',),
+                    'SELECT trosa.compat_uuid(?)',
+                    (f'communication-item:{g.current_user}:{fingerprint}',),
                 ).fetchone()[0]
                 cursor.execute('''INSERT INTO trosa.communication_source_items
                                   (id, organization_id, legacy_user_id, communication_source_id,

@@ -1951,6 +1951,9 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         binding = (ROOT / 'migrations' / '0034_customer_history_binding.sql').read_text(encoding='utf-8')
         self.assertIn('compat_customer_binding', binding)
         self.assertIn('trosa_account_legacy_refs_account_scoped_idx', binding)
+        identity = (ROOT / 'migrations' / '0035_timeline_natural_identity.sql').read_text(encoding='utf-8')
+        self.assertIn('trosa_timeline_natural_identity_idx', identity)
+        self.assertIn('account_id, source_module, source_reference', identity)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')

@@ -599,6 +599,118 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             self.connection.execute('DELETE FROM core.companies WHERE id=?', (company_id,))
             self.connection.commit()
 
+    def test_timeline_identity_does_not_collide_across_customers_or_users(self):
+        """A shared source reference or per-user legacy id must not share one UUID."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        first_customer = ids['customer_id']
+        second_customer = trosa_domain.create_customer(self.connection, values={
+            'name': 'Second Identity Customer',
+            'company': 'Second Identity Co',
+            'website': 'https://second-identity.example',
+        })
+        self.connection.commit()
+
+        first = trosa_domain.record_external_interaction(
+            self.connection, customer_id=first_customer, content='FIRST SAME REF',
+            occurred_on='2026-08-10', direction='inbound', source='gmail',
+            source_reference='shared-message-id',
+        )
+        second = trosa_domain.record_external_interaction(
+            self.connection, customer_id=second_customer, content='SECOND SAME REF',
+            occurred_on='2026-08-10', direction='inbound', source='gmail',
+            source_reference='shared-message-id',
+        )
+        # Replaying the same natural fact stays idempotent for its own customer.
+        self.assertEqual(first, trosa_domain.record_external_interaction(
+            self.connection, customer_id=first_customer, content='FIRST SAME REF',
+            occurred_on='2026-08-10', direction='inbound', source='gmail',
+            source_reference='shared-message-id',
+        ))
+        self.assertNotEqual(first, second)
+        self.connection.commit()
+
+        ref_rows = {
+            row['legacy_customer_id']: row['account_id']
+            for row in self.connection.execute(
+                '''SELECT legacy_customer_id, account_id FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                      AND legacy_customer_id IN (?, ?)''', (first_customer, second_customer),
+            ).fetchall()
+        }
+        first_account = ref_rows[first_customer]
+        second_account = ref_rows[second_customer]
+
+        def target_for(legacy_id):
+            return self.connection.execute(
+                '''SELECT target_id FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                      AND table_name='follow_up_logs' AND legacy_id=?''', (legacy_id,),
+            ).fetchone()['target_id']
+
+        first_target, second_target = target_for(first), target_for(second)
+        self.assertNotEqual(first_target, second_target)
+        # The canonical identity is derived from organization, user, account,
+        # source and reference -- not source reference alone.
+        expected_first = self.connection.execute(
+            '''SELECT trosa.compat_uuid('interaction:' || trosa.compat_org_id()::text || ':hamid:'
+                   || ?::text || ':gmail:shared-message-id')''', (str(first_account),),
+        ).fetchone()[0]
+        self.assertEqual(first_target, expected_first)
+
+        first_items = {item['content'] for item in trosa_domain.customer_interactions(self.connection, first_customer)}
+        self.assertIn('FIRST SAME REF', first_items)
+        self.assertNotIn('SECOND SAME REF', first_items)
+        second_items = {item['content'] for item in trosa_domain.customer_interactions(self.connection, second_customer)}
+        self.assertIn('SECOND SAME REF', second_items)
+        self.assertNotIn('FIRST SAME REF', second_items)
+
+        # Two users whose per-user legacy id sequence both produce the same
+        # integer must still get distinct canonical events.
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_customer = trosa_domain.create_customer(amy_connection, values={
+                'name': 'Amy Identity Customer',
+                'company': 'Amy Identity Co',
+                'website': 'https://amy-identity.example',
+            })
+            amy_legacy = trosa_domain.record_external_interaction(
+                amy_connection, customer_id=amy_customer, content='AMY MANUAL',
+                occurred_on='2026-08-10', direction='outbound', source='manual',
+            )
+            amy_connection.commit()
+            amy_target = amy_connection.execute(
+                '''SELECT target_id FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='amy'
+                      AND table_name='follow_up_logs' AND legacy_id=?''', (amy_legacy,),
+            ).fetchone()['target_id']
+            amy_items = {item['content'] for item in trosa_domain.customer_interactions(amy_connection, amy_customer)}
+            self.assertIn('AMY MANUAL', amy_items)
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+        self.assertNotIn(amy_target, {first_target, second_target})
+
+        # Direct database guard: a second event for the same natural identity
+        # must be rejected instead of silently dropped.
+        duplicate_id = self.connection.execute(
+            "SELECT trosa.compat_uuid(?)", ('r2-duplicate',)
+        ).fetchone()[0]
+        with self.assertRaises(Exception):
+            self.connection.execute(
+                '''INSERT INTO trosa.timeline_events
+                       (id, account_id, event_type, direction, content, source_module,
+                        source_reference, occurred_at, payload)
+                   VALUES (?, ?, 'email', 'inbound', 'DUPLICATE', 'gmail',
+                           'shared-message-id', trosa.compat_time('2026-08-11'), '{}'::jsonb)''',
+                (duplicate_id, first_account),
+            )
+        self.connection.rollback()
+
     def test_flask_acceptance_routes_use_canonical_postgres(self):
         """Exercise the normal HTTP workflow against real PostgreSQL."""
         module = self._app_module()

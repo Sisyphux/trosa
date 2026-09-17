@@ -292,8 +292,15 @@ def record_external_interaction(
         legacy_id = conn.execute(
             "SELECT trosa.compat_next_id('follow_up_logs', trosa.compat_current_user())",
         ).fetchone()[0]
+        # Identity includes organization, user and owning account so two
+        # customers can share a source reference (or two users can share a
+        # per-user legacy id) without addressing the same UUID.
         target_id = conn.execute(
-            "SELECT trosa.compat_uuid(?)", (f'interaction:{source}:{source_reference or legacy_id}',),
+            '''SELECT trosa.compat_uuid(
+                   'interaction:' || trosa.compat_org_id()::text || ':'
+                   || trosa.compat_current_user() || ':' || ?::text || ':'
+                   || ? || ':' || ?::text)''',
+            (str(account['account_id']), source, str(source_reference or legacy_id)),
         ).fetchone()[0]
         contact_method_id = None
         if contact_id:
@@ -314,7 +321,12 @@ def record_external_interaction(
                (id, account_id, contact_method_id, event_type, direction, content, result, next_plan,
                 source_module, source_reference, occurred_at, payload)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, trosa.compat_time(?), ?::jsonb)
-               ON CONFLICT (id) DO NOTHING''',
+               ON CONFLICT (id) DO UPDATE SET
+                   contact_method_id=excluded.contact_method_id,
+                   event_type=excluded.event_type, direction=excluded.direction,
+                   content=excluded.content, result=excluded.result,
+                   next_plan=excluded.next_plan, source_reference=excluded.source_reference,
+                   occurred_at=excluded.occurred_at, payload=excluded.payload''',
             (target_id, account['account_id'], contact_method_id, activity_type, direction, content, result,
              next_plan, source, source_reference, occurred_on, json.dumps(payload)),
         )
