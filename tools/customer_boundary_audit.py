@@ -114,12 +114,14 @@ def _collect_rows(connection) -> list[dict]:
             f"coalesce(c.{payload_column}->>'is_deleted', '0') in ('1', 'true')"
             if table == 'timeline_events' else 'false'
         )
+        task_type_expr = "coalesce(c.task_type, '')" if table == 'tasks' else "''"
         rows = connection.execute(
             f'''SELECT r.legacy_user_id AS owner, r.legacy_id AS legacy_id,
                        c.id AS row_id, c.account_id AS account_id,
                        {payload_expr} AS bound,
                        {related_expr} AS related_task_id,
                        {deleted_expr} AS deleted,
+                       {task_type_expr} AS task_type,
                        c.{payload_column} AS payload
                   FROM trosa.legacy_row_refs r
                   JOIN trosa.{table} c ON c.id=r.target_id
@@ -240,6 +242,10 @@ def verify_views(connection, users: list[str]) -> list[dict]:
     binding: dict[str, dict[str, dict[int, int]]] = {}
     for row in buckets['ok']:
         if row.get('deleted'):
+            continue
+        if row['kind'] == 'task' and (row.get('task_type') or '').startswith('outreach_'):
+            # Retired outreach scheduler rows are delivery history, never a
+            # customer task; the business views exclude them by design.
             continue
         per_user = binding.setdefault(row['owner'], {'communication': {}, 'email': {}, 'task': {}})
         per_user[row['kind']][int(row['legacy_id'])] = int(row['target'])
