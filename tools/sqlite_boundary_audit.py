@@ -201,7 +201,8 @@ def _pg_state(connection, users: list[str]) -> dict:
     return state
 
 
-def audit(connection, sqlite_dir: Path, *, json_output: bool) -> int:
+def collect_report(connection, sqlite_dir: Path) -> dict:
+    """Run the full SQLite-vs-PostgreSQL comparison and return the report."""
     users = [
         row['legacy_user_id'] for row in connection.execute(
             '''SELECT DISTINCT legacy_user_id FROM trosa.account_legacy_refs
@@ -356,6 +357,11 @@ def audit(connection, sqlite_dir: Path, *, json_output: bool) -> int:
 
     report['deterministic_fix_count'] = len(report['deterministic_fixes'])
     report['manual_review_count'] = len(report['manual_review'])
+    return report
+
+
+def audit(connection, sqlite_dir: Path, *, json_output: bool) -> int:
+    report = collect_report(connection, sqlite_dir)
     if json_output:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
