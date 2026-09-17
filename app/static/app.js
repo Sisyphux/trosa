@@ -1385,6 +1385,32 @@ function truncateCaptureSummary(text, limit) {
   return value.substring(0, limit) + '…';
 }
 
+// 无用信号（如自动通知邮件）直接删除：不写任何客户记录，从 Inbox 移除。
+async function deleteInboxCapture(itemId) {
+  var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
+  if (!isInboxCommunicationCapture(item)) { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); loadInbox(); return; }
+  var sender = item.capture_identity || item.capture_sender || item.customer_company || item.title || '这条沟通';
+  var confirmed = await showAppConfirm({
+    title: '删除待归属沟通',
+    message: '来自 ' + sender + ' 的内容不会写入任何客户记录，直接从 Inbox 移除。',
+    submitLabel: '删除'
+  });
+  if (!confirmed) return;
+  try {
+    await api('/api/inbox/archive', {
+      method: 'POST',
+      body: JSON.stringify({ dedupe_key: item.dedupe_key, customer_id: item.customer_id || null, item_type: item.item_type })
+    });
+    _captureMatches = {};
+    inboxItems = inboxItems.filter(function(entry) { return Number(entry.id) !== Number(itemId); });
+    renderInbox();
+    loadInbox();
+    showToast('已删除，不会写入任何记录', 'success');
+  } catch (e) {
+    loadInbox();
+  }
+}
+
 async function quickConfirmCapture(itemId) {
   var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
   if (!isInboxCommunicationCapture(item)) { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); loadInbox(); return; }
@@ -1578,6 +1604,7 @@ function renderInboxItemHtml(item) {
 
   var mainAction = '';
   var captureMatch = null;
+  var deleteAction = '';
   if (item.item_type === 'sela_follow_up' && /^sela_proposal:\d+$/.test(item.dedupe_key || '')) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="openSelaFollowUpReview(' + Number(item.dedupe_key.split(':')[1]) + ')">核对跟进建议</button>';
   } else if (item.item_type === 'sela_agent_request') {
@@ -1591,6 +1618,7 @@ function renderInboxItemHtml(item) {
     } else {
       mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
     }
+    deleteAction = '<button class="text-action" onclick="deleteInboxCapture(' + itemId + ')">删除</button>';
   } else if (selaReview) {
     mainAction = customerId
       ? '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户资料</button>'
@@ -1640,12 +1668,12 @@ function renderInboxItemHtml(item) {
         '<button class="btn btn-sm btn-primary" type="button" onclick="createInboxTaskFromPanel(this,' + customerId + ')">安排</button>' +
       '</div>';
     }
-    detail = '<div class="inbox-item-detail">' + body + inlineDecision + '<div class="inbox-actions">' + mainAction + extraActions + archive + '</div></div>';
+    detail = '<div class="inbox-item-detail">' + body + inlineDecision + '<div class="inbox-actions">' + mainAction + extraActions + archive + deleteAction + '</div></div>';
   }
 
   var toggleIcon = expanded ? '▾' : '▸';
   var toggleBtn = '<button class="inbox-toggle" onclick="toggleInboxItem(\'' + escapeHtml(key) + '\')" aria-label="' + (expanded ? '收起' : '展开') + '">' + toggleIcon + '</button>';
-  var quickAction = expanded ? '' : '<span class="inbox-item-quick-action">' + mainAction + '</span>';
+  var quickAction = expanded ? '' : '<span class="inbox-item-quick-action">' + mainAction + deleteAction + '</span>';
 
   return '<article class="inbox-item inbox-' + escapeHtml(item.item_type) + (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
     '<div class="inbox-item-row">' +
