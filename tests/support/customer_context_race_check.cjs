@@ -405,6 +405,47 @@ async function run() {
     restoreRealApi();
   });
 
+  await check('a slower earlier Today read cannot restore a removed reminder', async () => {
+    const task = {
+      id: 7, customer_id: 42, customer_company: '客户X', task_title: '联系客户',
+      title: '联系客户', content: '联系客户', remind_date: '2026-09-17', why_today: '', last_activity: '',
+    };
+    win.dashboardReminders = [task];
+    win.renderTodayTasks(win.dashboardReminders);
+    assert.equal(doc.querySelectorAll('#todayReminders .today-task-row').length, 1, 'seed row must render');
+
+    installDeferredApi();
+    // A read that started before the user acted, plus the fresh read the write
+    // handler triggers. Each loadDashboard issues stats + today + upcoming +
+    // logs + weekly.
+    const stale = win.loadDashboard();
+    const staleEntries = win.__pendingApi.slice();
+    assert.equal(staleEntries.length, 5, 'one Today read issues five requests');
+    const fresh = win.loadDashboard();
+    const freshEntries = win.__pendingApi.slice(5);
+    assert.equal(freshEntries.length, 5, 'the second Today read issues its own five requests');
+
+    const resolveSet = (entries, todayValue) => {
+      entries.forEach((entry) => {
+        entry.done = true;
+        if (entry.url.indexOf('/api/stats') === 0) entry.resolve({ pending: 0, total: 0 });
+        else if (entry.url.indexOf('/api/reminders/today') === 0) entry.resolve(todayValue);
+        else entry.resolve([]);
+      });
+    };
+    // The newer read already sees the reminder gone.
+    resolveSet(freshEntries, []);
+    await wait(5);
+    // The older read resolves LAST and still contains the reminder.
+    resolveSet(staleEntries, [task]);
+    await Promise.all([stale, fresh]);
+    await wait(10);
+
+    assert.equal(doc.querySelectorAll('#todayReminders .today-task-row').length, 0, 'stale read must not repaint the removed row');
+    assert.ok(doc.querySelector('#todayReminders .today-clear'), 'the list must stay in the cleared state');
+    restoreRealApi();
+  });
+
   await check('an AI analysis for customer A cannot land in customer B workspace', async () => {
     seedCustomer(1, [follow(11, 'A', 1)]);
     doc.getElementById('editName').value = '客户A';

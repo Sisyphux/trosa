@@ -50,7 +50,8 @@
 - 机制：`api()` 对并发同 method+URL+body 的非 GET 请求做传输层单飞 —— 双击、回车+点击或无按钮路径重复触发的写入，在任何现有与未来新增的写入口都只会产生一次网络写入（handler 层守卫继续负责按钮态）。
 - 修复（同类漏网路径）：切换客户期间的“加入/移出本周工作”不再写错客户；删除跟进/开发信后的本地移除与撤销恢复按记录归属客户校准；“记录跟进”弹窗连续打开时，慢响应不再用上一个任务的表单覆盖当前输入；客户工作区的 AI 整理结果不再落到另一个客户的表单；打开弹窗时的确认框被新请求覆盖时先以“取消”结算，不再永久挂起。
 - 机制：任务弹窗（安排下一步）在打开时绑定目标客户并写入 dataset，提交时不再读取当前 DOM，避免弹窗开着时工作区切换导致写错客户。
-- 验证：新增 `tests/support/frontend_architecture_check.cjs`（对真实求值后的函数做内省的机制不变量 lint）与 `FrontendArchitectureInvariantTest`；扩展 `customer_context_race_check.cjs` 复现同客户重开串台、传输层单飞、撤销归属、弹窗填充竞态与 AI 整理串台；真实 Chromium 验证无守卫按钮双击只产生一次联系人写入；`tools/browser_acceptance.sh`、`test_risk_regressions` 全量通过。
+- 修复（Today 今日跟进）：`loadDashboard()` 加读取代次守卫 —— 在客户详情里完成/延后/调整下一步后，写入前发出的较慢 Today 读取即使更晚返回，也不能再把它旧的任务列表盖回新列表；这正是“点完 3 天后，今日跟进里那条要整页刷新才消掉”的根因（旧读取后到，用过期数据重绘）。
+- 验证：新增 `tests/support/frontend_architecture_check.cjs`（对真实求值后的函数做内省的机制不变量 lint）与 `FrontendArchitectureInvariantTest`；扩展 `customer_context_race_check.cjs` 复现同客户重开串台、传输层单飞、撤销归属、弹窗填充竞态、AI 整理串台，以及“较慢的旧 Today 读取不能恢复已移除的待办行”（去掉守卫即失败）；真实 Chromium 验证无守卫按钮双击只产生一次联系人写入；`tools/browser_acceptance.sh`、`test_risk_regressions` 全量通过。
 
 ## 2026-09-17 — 客户工作区跨客户串台与重复写入修复
 
