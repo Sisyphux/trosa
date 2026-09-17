@@ -1,0 +1,1 @@
+accept-race A marker — concurrency acceptance candidate A (same base P0).
