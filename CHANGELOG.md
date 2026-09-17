@@ -7,6 +7,7 @@
 - 修复（发布串行化）：ECS 侧 `flock -w` 有界等待替代 `flock -n`，锁被占用超过等待窗口时写出明确的 `busy` 终端结果（只写本 release 的结果文件，不覆盖正在运行 release 的 polling 结果），不再静默退出 75 让客户端空等；rollback 与 deploy 共用同一把锁。
 - 修复（release 身份与账本）：release id 与 commit 一一绑定，复用 id 指向不同 commit 会 `refused`；新增 append-only `.release-ledger.jsonl` 记录每个终端结果的 release/commit/mode/status/phase/production，作为可审计的 release ledger。
 - 修复（原子状态）：新增 `atomic_write`（同目录临时文件 + rename），所有 release/state/result/manifest/health/migration/backup 写入原子化，读取方永不看到半写文件。
+- 修复（状态可读性，首次发布线上发现）：`mktemp` 默认 0600 且 rename 保留权限，导致 `.deploy-state.json`、`DEPLOY_RESULT.json`、`release.json` 等变成 root-only，非 root 的 `status`/轮询读不到 production 状态。`atomic_write` 在 rename 前显式 `chmod 0644`，ledger 写入后同样校正权限，runner 在取锁后修复历史遗留的 0600 状态文件。
 - 修复（本地锁与迁移预留）：新增 `deploy/cloud/lib-release-lock.sh` 可移植锁（`mkdir` + `owner` PID/时间戳，死进程或超时可回收），`release-commit.sh` 改用共享 git 目录中的锁并在 dry-run 时不取锁；`agent-worktree.sh` 的迁移编号预留改为在锁内完成“扫描 + 写清单”，并发任务不再抢号。
 - 修复（客户端）：`trosa-release` 识别 `busy` 并给出明确退出码，轮询窗口覆盖服务端等待锁的时间。
 - 影响范围：仅 `deploy/cloud/*` 发布链路、新增 `tools/release_baseline.py`、`tests/test_release_concurrency.py` 与文档；不改 `app.py`、业务表、迁移和运行契约。ECS 发布 runner 仍需 `flock`；基线门需要 ECS 能访问 `api.github.com`（公开仓库 compare，可用 `TRADE_OS_GITHUB_TOKEN` 提高限额）。

@@ -52,6 +52,13 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def extract_shell_function(text: str, name: str) -> str:
+    """Return the ``name() { ... }`` definition verbatim from a shell script."""
+    start = text.index(f"{name}() {{")
+    end = text.index("\n}\n", start) + len("\n}\n")
+    return text[start:end]
+
+
 def sha(char: str) -> str:
     return char * 40
 
@@ -345,6 +352,42 @@ class PortableLockTests(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # Structural guarantees of the shell entrypoints.
 # --------------------------------------------------------------------------- #
+
+
+class AtomicWriteModeTests(unittest.TestCase):
+    """State must be atomically *and* readably written.
+
+    A real incident: ``mktemp`` creates 0600 files, so using it for atomic
+    replace made `.deploy-state.json` / results / manifests root-only. The
+    non-root status and polling paths then could not read production state.
+    """
+
+    def setUp(self) -> None:
+        self.script = read(RELEASE_REMOTE)
+
+    def test_atomic_write_forces_world_readable_mode(self):
+        body = extract_shell_function(self.script, "atomic_write")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "state.json")
+            Path(target).write_text("old", encoding="utf-8")
+            os.chmod(target, 0o600)
+            program = body + f'\nprintf \'{{"a":1}}\' | atomic_write "{target}"\n'
+            proc = subprocess.run(["bash", "-c", program], capture_output=True,
+                                  text=True, timeout=30)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            mode = os.stat(target).st_mode & 0o777
+            self.assertEqual(oct(mode), oct(0o644), oct(mode))
+            self.assertEqual(Path(target).read_text(encoding="utf-8"), '{"a":1}')
+
+    def test_ledger_is_made_readable(self):
+        self.assertIn("os.chmod(path, 0o644)", self.script)
+
+    def test_existing_unreadable_state_is_repaired_under_lock(self):
+        lock = self.script.index('flock -w "$LOCK_WAIT" 9')
+        repair = self.script.index('chmod 0644 "$_state_path"')
+        dispatch = self.script.index("do_deploy() {")
+        self.assertLess(lock, repair)
+        self.assertLess(repair, dispatch)
 
 
 class ReleaseRemoteContractTests(unittest.TestCase):

@@ -116,6 +116,9 @@ load_production_env() {
 
 # Atomic file replace: readers (status, polling clients) never observe a
 # half-written release/state/result file, even if the runner is killed mid-write.
+# The result files are read by the non-root status/poll path, so the temp file
+# must be made world-readable before the rename: mktemp defaults to 0600 and
+# rename preserves that, which would make production state unreadable.
 atomic_write() {
   local target=$1 tmp
   tmp=$(mktemp "$(dirname "$target")/.$(basename "$target").XXXXXX" 2>/dev/null) || return 1
@@ -123,6 +126,7 @@ atomic_write() {
     rm -f -- "$tmp"
     return 1
   fi
+  chmod 0644 "$tmp" 2>/dev/null || true
   mv -f -- "$tmp" "$target"
 }
 
@@ -154,6 +158,10 @@ try:
     os.write(fd, (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
 finally:
     os.close(fd)
+try:
+    os.chmod(path, 0o644)
+except OSError:
+    pass
 PY
 }
 
@@ -408,6 +416,16 @@ if ! flock -w "$LOCK_WAIT" 9; then
   printf 'Another ECS release holds the lock; reported busy for %s.\n' "$RELEASE_ID" >&2
   exit 75
 fi
+
+# Repair state-file modes left by an earlier runner that used mktemp's 0600
+# default: the operator status/poll path runs as a non-root account and must be
+# able to read production state. The next atomic write will keep them 0644.
+for _state_path in "$STATE_FILE" "$LAST_RESULT" "$LEDGER_FILE"; do
+  if [ -e "$_state_path" ]; then
+    chmod 0644 "$_state_path" 2>/dev/null || true
+  fi
+done
+unset _state_path
 
 # ---------------------------------------------------------------- deploy
 do_deploy() {
