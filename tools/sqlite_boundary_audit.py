@@ -322,8 +322,10 @@ def audit(connection, sqlite_dir: Path, *, json_output: bool) -> int:
                         'sqlite_customer_name': names.get(expected_customer, ''),
                     })
 
-        # Inbox: runtime reassignments are legitimate, so any difference goes
-        # to human review, never to an automatic fix.
+        # Inbox: runtime reassignments are legitimate, and a shared account
+        # may hold several aliases, so every difference goes to human review.
+        # Distinguish a benign same-account alias ambiguity from a real
+        # cross-company mismatch.
         for row in _sqlite_rows(str(db_path), 'inbox_items'):
             item_id = int(row['id'])
             expected_customer = row.get('customer_id')
@@ -338,9 +340,15 @@ def audit(connection, sqlite_dir: Path, *, json_output: bool) -> int:
                     'sqlite_customer_name': names.get(int(expected_customer), ''),
                 })
             elif pg_inbox['customer'] is None or pg_inbox['customer'] != int(expected_customer):
+                expected_account = state['accounts'].get((user, int(expected_customer)))
+                same_account = (
+                    expected_account is not None
+                    and pg_inbox['account_id'] == expected_account
+                )
                 report['manual_review'].append({
                     'user': user, 'table': 'inbox_items', 'legacy_id': item_id,
-                    'reason': 'inbox_customer_differs_from_sqlite',
+                    'reason': ('inbox_on_shared_account_alias' if same_account
+                               else 'inbox_customer_differs_from_sqlite'),
                     'sqlite_customer_id': int(expected_customer),
                     'sqlite_customer_name': names.get(int(expected_customer), ''),
                     'current_pg_customer_id': pg_inbox['customer'],
