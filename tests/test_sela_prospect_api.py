@@ -106,6 +106,25 @@ class SelaProspectApiTest(unittest.TestCase):
         db.set_db_user('hamid')
         return db.get_db()
 
+    def add_customer(self, name, **fields):
+        conn = self.hamid_db()
+        try:
+            columns = {'name': name, 'company': name, **fields}
+            conn.execute(
+                'INSERT INTO customers (' + ', '.join(columns) + ') VALUES (' + ', '.join('?' for _ in columns) + ')',
+                tuple(columns.values()),
+            )
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+            return customer_id
+        finally:
+            conn.close()
+
+    def exclusion_records(self):
+        response = self.client.get('/api/integrations/sela/exclusions', headers=self.headers())
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return response.get_json()['records']
+
     def test_sela_upsert_conflict_target_matches_sqlite_and_postgres_shapes(self):
         self.assertEqual(
             self.module._sela_conflict_target('legacy_user_id', 'source', 'source_id'),
@@ -493,6 +512,117 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_customer_without_real_contact_is_not_a_hard_exclusion(self):
+        customer_id = self.add_customer('Uncontacted Prospect Co', website='https://uncontacted.example/')
+        records = self.exclusion_records()
+        self.assertFalse(any(row.get('record_id') == f'trosa-customer:{customer_id}' for row in records))
+
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction, activity_type, created_at)
+                   VALUES (?, '客户回复了报价', '2026-09-10', 'inbound', 'customer_reply', '2026-09-10 10:00:00')""",
+                (customer_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        record = next(row for row in self.exclusion_records() if row.get('record_id') == f'trosa-customer:{customer_id}')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertTrue(record['contacted'])
+        self.assertEqual(record['contact_evidence'], 'recorded_communication')
+
+    def test_imported_outreach_date_alone_does_not_establish_contact(self):
+        customer_id = self.add_customer('Legacy Import Co', website='https://legacy-import.example/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO outreach_emails (customer_id, subject, content, sent_date, reply_status, created_at)
+                   VALUES (?, '历史 sela 外联', '历史 sela 外联', '2026-08-20', 'pending', '2026-09-09 11:00:00')""",
+                (customer_id,),
+            )
+            conn.commit()
+            outreach_id = conn.execute('SELECT id FROM outreach_emails WHERE customer_id=?', (customer_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertFalse(any(row.get('record_id') == f'trosa-customer:{customer_id}' for row in self.exclusion_records()))
+
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO email_delivery_events (email, outreach_email_id, event_type, message_id, source, occurred_at)
+                   VALUES ('sales@legacy-import.example', ?, 'sent', 'message-1', 'sela', '2026-09-09 12:00:00')""",
+                (outreach_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        record = next(row for row in self.exclusion_records() if row.get('record_id') == f'trosa-customer:{customer_id}')
+        self.assertEqual(record['contact_evidence'], 'delivery_event')
+
+    def test_open_inbound_capture_matched_to_contact_is_contact_evidence(self):
+        customer_id = self.add_customer('Capture Evidence Co', website='https://capture-evidence.example/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                "INSERT INTO contacts (customer_id, name, email, is_primary) "
+                "VALUES (?, 'Sales', 'sales@capture-evidence.example', 1)",
+                (customer_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        message = {
+            'id': 'gmail-reply-capture-1', 'thread_id': 'thread-1',
+            'from': 'Sales <sales@capture-evidence.example>',
+            'subject': 'Re: Acrylic sheet', 'received_at': '2026-09-14T10:00:00+08:00',
+            'body': 'Please send more information.',
+        }
+        key = 'sela:gmail-capture:gmail-reply-capture-1'
+        posted = self.client.post(
+            '/api/integrations/sela/inbox-captures',
+            json={'message': message, 'idempotency_key': key}, headers=self.headers(key),
+        )
+        self.assertEqual(posted.status_code, 200, posted.get_data(as_text=True))
+        record = next(row for row in self.exclusion_records() if row.get('record_id') == f'trosa-customer:{customer_id}')
+        self.assertTrue(record['contacted'])
+        self.assertEqual(record['contact_evidence'], 'inbound_capture')
+
+    def test_prospect_reuses_existing_customer_by_domain_instead_of_duplicating(self):
+        customer_id = self.add_customer('Acrilicos S.A.', website='https://acrilicos.example/')
+        body = prospect('domain-reuse-prospect')
+        body['contact'] = {'name': 'Nuevo Contacto', 'email': 'nuevo@acrilicos.example', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:domain-reuse:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()
+        self.assertEqual(result['status'], 'SYNCED', result)
+        self.assertFalse(result['created'])
+        self.assertEqual(result['trosa_id'], customer_id)
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_prospect_profiles').fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_same_name_with_conflicting_domain_requires_review(self):
+        customer_id = self.add_customer('Conflict Plastics', website='https://conflict-plastics.example/')
+        body = prospect('conflict-prospect')
+        body['company'] = 'Conflict Plastics'
+        body['website'] = 'https://conflict-plastics-other.example/'
+        body['contact'] = {'name': 'X', 'email': 'x@conflict-plastics-other.example', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:conflict:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'REVIEW')
+        self.assertEqual(response.get_json()['reason'], 'COMPANY_DOMAIN_CONFLICT')
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0], 1)
+        finally:
+            conn.close()
 
 
 if __name__ == '__main__':

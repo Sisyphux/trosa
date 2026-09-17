@@ -3080,12 +3080,49 @@ def _modern_outreach_rows(conn, *, customer_id=None, source_id=None):
     return [dict(row) for row in rows]
 
 
-def _sela_match_customers(conn, payload):
-    """Resolve one sela candidate using only exact, auditable identity keys.
+def _sela_company_identity_matches(rows, payload):
+    """Reuse an existing Customer by company identity when contacts are absent.
 
-    Company names and domains are useful review evidence, but they are not
-    sufficient to assign a customer automatically.  The only non-external
-    identities accepted here are a unique normalized email or phone.
+    A canonical website domain is a strong identity key: one company, one
+    domain.  A unique normalized company name corroborates it.  Ambiguous or
+    conflicting identity is returned for a Trosa review instead of silently
+    creating a second Customer for a company already owned by the CRM.
+    """
+    wanted_name = _sync_name_key(payload.get('company') or payload.get('name'))
+    wanted_domain = _canonical_website_domain(payload.get('website') or payload.get('domain'))
+    if not wanted_name and not wanted_domain:
+        return [], ''
+    domain_hits, name_hits = [], []
+    for row in rows:
+        row_domain = _canonical_website_domain(row.get('website'))
+        row_name = _sync_name_key(row.get('company') or row.get('name'))
+        matched = []
+        if wanted_domain and row_domain and row_domain == wanted_domain:
+            matched.append('domain')
+        if wanted_name and row_name and row_name == wanted_name:
+            matched.append('company')
+        if not matched:
+            continue
+        item = dict(row)
+        item['matched_by'] = matched
+        (domain_hits if 'domain' in matched else name_hits).append(item)
+    if domain_hits:
+        return domain_hits, ''
+    if wanted_domain and any(_canonical_website_domain(row.get('website')) for row in name_hits):
+        # Same name, a different recorded domain: a real identity conflict must
+        # not overwrite the existing Customer.
+        return name_hits, 'COMPANY_DOMAIN_CONFLICT'
+    return name_hits, ''
+
+
+def _sela_match_customers(conn, payload):
+    """Resolve one sela candidate using auditable identity keys.
+
+    A unique normalized email or phone is the primary identity.  The external
+    integration id is accepted only when it already owns the record.  When no
+    contact identity exists, an unambiguous company domain or normalized name
+    reuses the existing Customer so sela never creates a duplicate for a
+    company the CRM already has.
     """
     candidate_id = str(payload.get('candidate_id') or '').strip()
     contact = payload.get('contact') if isinstance(payload.get('contact'), dict) else {}
@@ -3155,7 +3192,9 @@ def _sela_match_customers(conn, payload):
         item = dict(row)
         item['matched_by'] = methods
         matches.append(item)
-    return matches, ''
+    if matches:
+        return matches, ''
+    return _sela_company_identity_matches(rows, payload)
 
 
 def _sela_upsert_contact(conn, customer_id, raw_contact, now):
@@ -3516,37 +3555,170 @@ def _sela_upsert_business_exclusion(conn, value, now):
     return _sela_business_exclusion_view(row)
 
 
+def _sela_open_inbound_capture_senders(conn):
+    """Return sender emails from open inbound Gmail captures.
+
+    An unresolved capture is still a durable inbound-mail fact, but it only
+    proves contact with a Customer when its sender matches a known Contact, so
+    callers join it through the Contact email index instead of trusting the
+    capture's own identity text.
+    """
+    if postgres_mode():
+        rows = _modern_inbox_rows(conn, status='open', item_type=('gmail_capture',))
+    else:
+        rows = conn.execute(
+            "SELECT content FROM inbox_items WHERE status='open' AND item_type='gmail_capture'"
+        ).fetchall()
+    senders = set()
+    for row in rows:
+        capture = _inbox_capture_context(dict(row).get('content'))
+        if str(capture.get('direction') or '').lower() not in ('', 'inbound', 'two_way'):
+            continue
+        email = _canonical_email(capture.get('sender_email'))
+        if email:
+            senders.add(email)
+    return senders
+
+
+def _sela_contact_email_index(conn):
+    """Return {normalized contact email: {customer_id}} for active Customers."""
+    if postgres_mode():
+        rows = conn.execute(
+            '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
+                 FROM trosa.customer_contacts contact
+                 JOIN trosa.customer_records record ON record.id=contact.customer_id
+                WHERE record.deleted_at IS NULL AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
+                 FROM contacts contact JOIN customers customer ON customer.id=contact.customer_id
+                WHERE (customer.is_deleted=0 OR customer.is_deleted IS NULL)
+                  AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+        ).fetchall()
+    index: dict[str, set[int]] = {}
+    for row in rows:
+        email = _canonical_email(row['email'])
+        if email:
+            index.setdefault(email, set()).add(int(row['customer_id']))
+    return index
+
+
+def _sela_customer_contact_evidence(conn):
+    """Map Customer id -> the durable fact that proves real external contact.
+
+    Contact is decided only by real communication evidence: a recorded
+    communication, an inbound reply or bounce, a real delivery event, or an
+    open inbound capture matched to a known Contact email.  A Customer row,
+    its contacts, research, tasks, follow-up suggestions or imported date
+    fields never establish contact on their own.
+    """
+    evidence: dict[int, str] = {}
+
+    def mark(customer_id, reason):
+        try:
+            customer_id = int(customer_id)
+        except (TypeError, ValueError):
+            return
+        if customer_id and customer_id not in evidence:
+            evidence[customer_id] = reason
+
+    if postgres_mode():
+        for row in conn.execute(
+            "SELECT DISTINCT customer_id FROM trosa.customer_interactions WHERE kind='communication'",
+        ).fetchall():
+            mark(row['customer_id'], 'recorded_communication')
+        for row in conn.execute(
+            """SELECT DISTINCT customer_id FROM trosa.customer_interactions
+                WHERE kind='email' AND lower(COALESCE(delivery_status,'')) IN ('replied','bounced')""",
+        ).fetchall():
+            mark(row['customer_id'], 'customer_reply')
+        for row in conn.execute(
+            """SELECT DISTINCT account_ref.legacy_customer_id AS customer_id
+                 FROM trosa.email_delivery_events event
+                 JOIN trosa.outreach_messages message ON message.id=event.outreach_message_id
+                 JOIN trosa.account_legacy_refs account_ref
+                   ON account_ref.account_id=message.account_id
+                  AND account_ref.organization_id=trosa.compat_org_id()
+                  AND account_ref.legacy_user_id=trosa.compat_current_user()""",
+        ).fetchall():
+            mark(row['customer_id'], 'delivery_event')
+        for row in _modern_inbox_rows(conn, status='open', item_type=('customer_reply',)):
+            mark(row.get('customer_id'), 'customer_reply')
+    else:
+        for row in conn.execute(
+            "SELECT DISTINCT customer_id FROM follow_up_logs WHERE is_deleted=0 OR is_deleted IS NULL",
+        ).fetchall():
+            mark(row['customer_id'], 'recorded_communication')
+        for row in conn.execute(
+            "SELECT DISTINCT customer_id FROM outreach_emails WHERE lower(COALESCE(reply_status,'')) IN ('replied','bounced')",
+        ).fetchall():
+            mark(row['customer_id'], 'customer_reply')
+        for row in conn.execute(
+            """SELECT DISTINCT outreach.customer_id FROM email_delivery_events event
+                 JOIN outreach_emails outreach ON outreach.id=event.outreach_email_id
+                WHERE outreach.customer_id IS NOT NULL""",
+        ).fetchall():
+            mark(row['customer_id'], 'delivery_event')
+        for row in conn.execute(
+            "SELECT DISTINCT customer_id FROM inbox_items WHERE status='open' AND item_type='customer_reply' AND customer_id IS NOT NULL",
+        ).fetchall():
+            mark(row['customer_id'], 'customer_reply')
+
+    senders = _sela_open_inbound_capture_senders(conn)
+    if senders:
+        for email, customer_ids in _sela_contact_email_index(conn).items():
+            if email in senders:
+                for customer_id in customer_ids:
+                    mark(customer_id, 'inbound_capture')
+    return evidence
+
+
 def _sela_exclusion_snapshot_records(conn):
-    """Return the one authoritative exclusion projection owned by Trosa."""
+    """Return the one authoritative exclusion projection owned by Trosa.
+
+    A Customer record only blocks new outreach when a durable external-contact
+    fact exists.  Mere existence in the CRM — profile, contacts, research,
+    tasks, follow-up suggestions or imported date fields — must not turn a
+    prospect into a hard exclusion.  Uncontacted Customers are omitted so sela
+    can develop them while still reusing the existing record.
+    """
+    contact_evidence = _sela_customer_contact_evidence(conn)
+
+    def customer_record(item, customer_id, latest_outreach_date):
+        canonical_name = str(item.get('company') or item.get('name') or '')
+        if not canonical_name:
+            return None
+        aliases = [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else []
+        return {
+            'record_id': f'trosa-customer:{customer_id}',
+            'canonical_name': canonical_name,
+            'normalized_name': _sync_name_key(canonical_name),
+            'aliases': aliases,
+            'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
+            'country': str(item.get('country') or ''),
+            'status': 'trosa_customer', 'match_policy': 'hard',
+            'source': 'trosa_customer', 'source_id': str(customer_id),
+            'updated_at': str(item.get('updated_at') or ''),
+            'id': customer_id, 'name': str(item.get('name') or ''),
+            'company': canonical_name, 'website': str(item.get('website') or ''),
+            'business_stage': str(item.get('business_stage') or ''),
+            'latest_outreach_date': latest_outreach_date,
+            'contacted': True,
+            'contact_evidence': contact_evidence.get(customer_id, ''),
+        }
+
     if postgres_mode():
         records = []
-        customers = _active_customers(conn)
-        for item in customers:
+        for item in _active_customers(conn):
             customer_id = int(item['id'])
+            if not contact_evidence.get(customer_id):
+                continue
             latest_outreach = _modern_outreach_rows(conn, customer_id=customer_id)
             latest_outreach_date = str((latest_outreach[0] if latest_outreach else {}).get('sent_date') or '')
-            if (str(item.get('external_source') or '').strip() == _SELA_PROSPECT_SOURCE
-                    and not latest_outreach_date.strip()):
-                continue
-            canonical_name = str(item.get('company') or item.get('name') or '')
-            if not canonical_name:
-                continue
-            aliases = [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else []
-            records.append({
-                'record_id': f'trosa-customer:{customer_id}',
-                'canonical_name': canonical_name,
-                'normalized_name': _sync_name_key(canonical_name),
-                'aliases': aliases,
-                'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
-                'country': str(item.get('country') or ''),
-                'status': 'trosa_customer', 'match_policy': 'hard',
-                'source': 'trosa_customer', 'source_id': str(customer_id),
-                'updated_at': str(item.get('updated_at') or ''),
-                'id': customer_id, 'name': str(item.get('name') or ''),
-                'company': canonical_name, 'website': str(item.get('website') or ''),
-                'business_stage': str(item.get('business_stage') or ''),
-                'latest_outreach_date': latest_outreach_date,
-            })
+            record = customer_record(item, customer_id, latest_outreach_date)
+            if record:
+                records.append(record)
         suppressed = conn.execute(
             '''SELECT p.*, c.name, c.company, c.country, c.website,
                       c.updated_at AS customer_updated_at
@@ -3597,30 +3769,12 @@ def _sela_exclusion_snapshot_records(conn):
     ).fetchall()
     for row in rows:
         item = dict(row)
-        if (str(item.get('external_source') or '').strip() == _SELA_PROSPECT_SOURCE
-                and not str(item.get('latest_outreach_date') or '').strip()):
+        customer_id = int(item['id'])
+        if not contact_evidence.get(customer_id):
             continue
-        canonical_name = str(item.get('company') or item.get('name') or '')
-        if not canonical_name:
-            continue
-        aliases = [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else []
-        records.append({
-            'record_id': f'trosa-customer:{int(item["id"])}',
-            'canonical_name': canonical_name,
-            'normalized_name': _sync_name_key(canonical_name),
-            'aliases': aliases,
-            'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
-            'country': str(item.get('country') or ''),
-            'status': 'trosa_customer',
-            'match_policy': 'hard',
-            'source': 'trosa_customer',
-            'source_id': str(item['id']),
-            'updated_at': str(item.get('updated_at') or ''),
-            'id': int(item['id']), 'name': str(item.get('name') or ''),
-            'company': canonical_name, 'website': str(item.get('website') or ''),
-            'business_stage': str(item.get('business_stage') or ''),
-            'latest_outreach_date': str(item.get('latest_outreach_date') or ''),
-        })
+        record = customer_record(item, customer_id, str(item.get('latest_outreach_date') or ''))
+        if record:
+            records.append(record)
     suppressed = conn.execute(
         '''SELECT p.*, c.name, c.company, c.country, c.website, c.updated_at AS customer_updated_at
            FROM agent_prospect_profiles p
@@ -4371,6 +4525,7 @@ def _sela_upsert_prospect(conn, prospect):
     else:
         matches, match_error = _sela_match_customers(conn, {
             'candidate_id': source_id,
+            'company': company,
             'website': prospect.get('website') or prospect.get('domain'),
             'contact': prospect.get('contact') if isinstance(prospect.get('contact'), dict) else {
                 'email': prospect.get('email'),
