@@ -72,7 +72,7 @@ class CommitReleaseEntrypointTests(unittest.TestCase):
             self.assertIn(token, script)
         program = read("tools/browser_acceptance.js")
         for token in ("#loginOverlay", "#inboxReplyContent",
-                      "#inboxReplyNextDate", "page-dashboard",
+                      "#customerTaskDate", "page-dashboard",
                       "page-inbox", "globalPageSearch", "Customer",
                       "Today", "Inbox", "Search"):
             self.assertIn(token, program)

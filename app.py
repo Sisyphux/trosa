@@ -6110,6 +6110,34 @@ def _customer_attention_label(state):
 
 _CAPTURE_INBOX_TYPES = frozenset(('browser_capture', 'gmail_capture'))
 
+_CAPTURE_DATE_PATTERN = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def _capture_calendar_date(raw_value):
+    """Normalize a captured message time to YYYY-MM-DD without truncating RFC 2822 dates."""
+    value = str(raw_value or '').strip()
+    if not value:
+        return ''
+    match = _CAPTURE_DATE_PATTERN.search(value)
+    if match:
+        return match.group(0)
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError, IndexError):
+        parsed = None
+    if parsed is not None:
+        try:
+            return parsed.astimezone().date().isoformat()
+        except (ValueError, OverflowError):
+            return parsed.date().isoformat()
+    match = re.search(r'(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})', value)
+    if match:
+        try:
+            return parsedate_to_datetime(f"{match.group(1)} {match.group(2)} {match.group(3)}").date().isoformat()
+        except (TypeError, ValueError, OverflowError, IndexError):
+            return ''
+    return ''
+
 
 def _inbox_capture_context(raw_content, created_at=''):
     """Extract explicit captured-message context without guessing customer identity."""
@@ -6144,8 +6172,16 @@ def _inbox_capture_context(raw_content, created_at=''):
         direction = 'two_way' if len(directions) > 1 or 'two_way' in directions else next(iter(directions))
     channel = str(payload.get('channel') or '').strip()
     activity_type = 'email' if channel in ('netease', 'gmail') else ('whatsapp' if channel == 'whatsapp' else 'follow_up')
-    event_date = str(payload.get('end_time') or payload.get('start_time') or (message_dates[-1] if message_dates else '') or created_at or '')[:10]
+    event_date = ''
+    for candidate in (payload.get('end_time'), payload.get('start_time'),
+                      message_dates[-1] if message_dates else '', created_at):
+        event_date = _capture_calendar_date(candidate)
+        if event_date:
+            break
     content = '\n\n'.join(parts).strip() or str(payload.get('content') or '').strip()
+    first_message = messages[0] if messages and isinstance(messages[0], dict) else {}
+    sender = str(first_message.get('sender') or '').strip()
+    sender_email_match = re.search(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+', sender + ' ' + str(payload.get('conversation_identity') or ''))
     return {
         'content': content[:12000],
         'direction': direction,
@@ -6155,6 +6191,8 @@ def _inbox_capture_context(raw_content, created_at=''):
         'source_url': str(payload.get('source_url') or '').strip(),
         'identity': str(payload.get('conversation_identity') or payload.get('email') or payload.get('phone') or '').strip(),
         'date': event_date,
+        'sender': sender,
+        'sender_email': sender_email_match.group(0).casefold() if sender_email_match else '',
     }
 
 
@@ -9313,6 +9351,7 @@ def get_inbox():
                         'capture_activity_type': capture.get('activity_type', 'follow_up'), 'capture_date': capture.get('date', ''),
                         'capture_channel': capture.get('channel', ''), 'capture_platform': capture.get('platform', ''),
                         'capture_source_url': capture.get('source_url', ''), 'capture_identity': capture.get('identity', ''),
+                        'capture_sender': capture.get('sender', ''), 'capture_sender_email': capture.get('sender_email', ''),
                         'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
                     })
                 items.append(item)
@@ -9346,6 +9385,7 @@ def get_inbox():
                         'capture_activity_type': capture.get('activity_type', 'follow_up'), 'capture_date': capture.get('date', ''),
                         'capture_channel': capture.get('channel', ''), 'capture_platform': capture.get('platform', ''),
                         'capture_source_url': capture.get('source_url', ''), 'capture_identity': capture.get('identity', ''),
+                        'capture_sender': capture.get('sender', ''), 'capture_sender_email': capture.get('sender_email', ''),
                         'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
                     })
                 items.append(item)
@@ -9626,6 +9666,113 @@ def extract_inbox_image():
     if not text or text.startswith('[ERROR_VISION]'):
         return jsonify({'error': (text or '图片识别失败').replace('[ERROR_VISION]', '').strip()}), 503
     return jsonify({'text': text})
+
+
+def _website_domain(value):
+    """Reduce a customer website to its registrable-looking host."""
+    host = str(value or '').strip().casefold()
+    host = re.sub(r'^https?://', '', host).split('/', 1)[0].split('@')[-1]
+    if host.startswith('www.'):
+        host = host[4:]
+    if len(host) >= 4 and '.' in host:
+        return host
+    return ''
+
+
+def _capture_customer_matches(captures, customer_rows):
+    """Rank one deterministic sender→customer suggestion per open capture.
+
+    Rule based on explicit evidence only (sender email, website domain,
+    company name appearing in the captured text). No model, no guessing.
+    """
+    customer_domains = {}
+    for customer in customer_rows:
+        domain = _website_domain(customer.get('website'))
+        if domain:
+            customer_domains[int(customer['id'])] = domain
+    matches = []
+    for item in captures:
+        capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
+        sender_email = (capture.get('sender_email') or '').casefold()
+        sender_name = (capture.get('sender') or '').split('@')[0].strip().casefold()
+        haystack = (capture.get('content') or '').casefold()
+        best = None
+        for customer in customer_rows:
+            score = 0
+            reasons = []
+            if sender_email:
+                for contact in customer.get('contacts', []):
+                    if (contact.get('email') or '').strip().casefold() == sender_email:
+                        score += 90
+                        reasons.append('发件邮箱')
+                        break
+            if sender_email and customer_domains.get(int(customer['id'])) and \
+                    sender_email.endswith('@' + customer_domains[int(customer['id'])]):
+                score += 70
+                reasons.append('官网域名')
+            for field, weight, label in (('company', 55, '公司'), ('name', 40, '客户名称'),
+                                         ('website', 45, '网站')):
+                value = (customer.get(field) or '').strip()
+                if len(value) >= 3 and value.casefold() in haystack:
+                    score += weight
+                    reasons.append(label)
+            if not score:
+                continue
+            candidate = {
+                'item_id': int(item['id']),
+                'customer_id': int(customer['id']),
+                'company': customer.get('company') or customer.get('name') or '',
+                'country': customer.get('country') or '',
+                'score': min(score, 100),
+                'reason': '、'.join(dict.fromkeys(reasons)),
+                'sender_email': capture.get('sender_email', ''),
+                'sender': capture.get('sender', ''),
+            }
+            if not best or candidate['score'] > best['score']:
+                best = candidate
+        if best and best['score'] >= 60:
+            matches.append(best)
+    return matches
+
+
+@app.route('/api/inbox/capture-matches', methods=['GET'])
+@login_required
+def inbox_capture_matches():
+    """Sender-based customer suggestions for open 待归属沟通 items."""
+    conn = get_db()
+    try:
+        if postgres_mode():
+            raw_rows = _modern_inbox_rows(conn, status='open', item_type=tuple(sorted(_CAPTURE_INBOX_TYPES)))
+            customers = []
+            for customer in _active_customers(conn):
+                customers.append({
+                    'id': int(customer['id']), 'name': customer.get('name', ''),
+                    'company': customer.get('company', ''), 'country': customer.get('country', ''),
+                    'website': customer.get('website', ''),
+                    'contacts': [{'email': contact.get('email', ''), 'name': contact.get('name', '')}
+                                 for contact in _customer_contacts(conn, int(customer['id']))],
+                })
+        else:
+            raw_rows = conn.execute(
+                """SELECT * FROM inbox_items WHERE status='open' AND item_type IN ('browser_capture','gmail_capture')
+                    ORDER BY created_at DESC""").fetchall()
+            grouped = {}
+            for row in conn.execute(
+                    """SELECT c.id, c.name, c.company, c.country, c.website, ct.email, ct.name AS contact_name
+                       FROM customers c LEFT JOIN contacts ct ON ct.customer_id=c.id
+                       WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)""").fetchall():
+                entry = grouped.setdefault(int(row['id']), {
+                    'id': int(row['id']), 'name': row['name'], 'company': row['company'],
+                    'country': row['country'] or '', 'website': row['website'] or '', 'contacts': [],
+                })
+                if row['email'] or row['contact_name']:
+                    entry['contacts'].append({'email': row['email'] or '', 'name': row['contact_name'] or ''})
+            customers = list(grouped.values())
+    finally:
+        conn.close()
+    matches = _capture_customer_matches(raw_rows, customers)
+    matches.sort(key=lambda entry: (-entry['score'], entry['item_id']))
+    return jsonify({'matches': matches})
 
 
 @app.route('/api/inbox/archive', methods=['POST'])

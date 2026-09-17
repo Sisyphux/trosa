@@ -20,6 +20,16 @@ function localDate() {
   return String(now.getFullYear()) + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
 }
 
+const origin = new URL(baseUrl).origin;
+const hostname = new URL(baseUrl).hostname;
+await context.clearCookies({domain: hostname}).catch(() => {});
+// Keep the desktop layout stable regardless of the Tabbit window size:
+// below 768px the sidebar collapses behind a toggle and nav clicks fail.
+await page.setViewportSize({width: 1440, height: 900});
+// A reused Tabbit task can still sit on a dead rehearsal port from an earlier
+// run. Detach from it before touching origin-scoped storage.
+await page.goto('about:blank', {waitUntil: 'domcontentloaded'}).catch(() => {});
+await page.goto(origin + '/?browser_acceptance=1', {waitUntil: 'domcontentloaded'});
 // Remove an unrelated app's service worker if this origin was used by another
 // local tool before the acceptance run. A service worker can otherwise serve
 // stale HTML while the real Trosa server is healthy on the same loopback port.
@@ -34,16 +44,19 @@ await page.evaluate(async () => {
   }
   try { localStorage.clear(); sessionStorage.clear(); } catch (_) {}
 });
+await page.reload({waitUntil: 'domcontentloaded'});
 
-const origin = new URL(baseUrl).origin;
-const hostname = new URL(baseUrl).hostname;
-await context.clearCookies({domain: hostname}).catch(() => {});
-await page.goto(origin + '/?browser_acceptance=1', {waitUntil: 'domcontentloaded'});
-await page.locator('#loginUsers [data-user-id="hamid"]').waitFor({state: 'visible', timeout: 15000});
-
-await page.locator('#loginUsers [data-user-id="hamid"]').click();
-await page.locator('#loginOverlay').waitFor({state: 'hidden', timeout: 15000});
-await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
+// A reused Tabbit task may already carry a session; only log in when asked.
+const loginButton = page.locator('#loginUsers [data-user-id="hamid"]');
+const dashboard = page.locator('#page-dashboard.active');
+if (await dashboard.isVisible()) {
+  // keep the session
+} else {
+  await loginButton.waitFor({state: 'visible', timeout: 15000});
+  await loginButton.click();
+  await page.locator('#loginOverlay').waitFor({state: 'hidden', timeout: 15000});
+}
+await dashboard.waitFor({state: 'visible', timeout: 15000});
 
 // Customer → real customer workspace.
 await page.locator('[data-page="customers"]').first().click();
@@ -59,11 +72,7 @@ await communicationModal.locator('#inboxReplyContent').fill(
   'Browser acceptance customer reply — confirm acrylic sheet sample quotation.'
 );
 const today = localDate();
-const nextToggle = communicationModal.locator('#inboxReplyHasNext');
-if (!(await nextToggle.isChecked())) await nextToggle.check();
-await communicationModal.locator('#inboxReplyNextTask').fill('Browser acceptance: send sample quotation');
 await communicationModal.locator('#inboxReplyDate').fill(today);
-await communicationModal.locator('#inboxReplyNextDate').fill(today);
 await communicationModal.locator('#saveInboxReplyButton').click();
 await page.locator('#inboxReplyModal.show:visible').waitFor({state: 'hidden', timeout: 30000});
 
@@ -88,7 +97,23 @@ await customerModal.getByText('Browser acceptance customer reply', {exact: false
 const customerText = await customerModal.innerText();
 check(customerText.includes('Browser acceptance customer reply'),
   'saved communication is not visible in the Customer timeline');
-check(customerText.includes('Browser acceptance: send sample quotation'),
+
+// Next step is now scheduled from the customer workspace, not from the
+// communication dialog. Create a dated task so Today coverage stays real.
+// The action button may read 安排下一步 (no open task) or 调整下一步 (existing
+// task from an earlier run); both open the same task modal.
+const taskButton = customerModal.locator('#customerTaskActionButton');
+await taskButton.waitFor({state: 'visible', timeout: 15000});
+await taskButton.click();
+const taskModal = page.locator('#customerTaskModal.show:visible');
+await taskModal.waitFor({state: 'visible', timeout: 15000});
+await taskModal.locator('#customerTaskTitle').fill('Browser acceptance: send sample quotation');
+await taskModal.locator('#customerTaskDate').fill(today);
+await taskModal.locator('#customerTaskSubmit').click();
+await taskModal.waitFor({state: 'hidden', timeout: 15000});
+
+const customerTaskText = await customerModal.innerText();
+check(customerTaskText.includes('Browser acceptance: send sample quotation'),
   'saved next step is not visible in the Customer workspace');
 
 await customerModal.getByRole('button', {name: '关闭'}).first().click();
@@ -130,7 +155,7 @@ return {
   activePage: await page.locator('.page-section.active').getAttribute('id'),
   customer: 'Rehearsal Acrylic Co',
   communicationVisible: customerText.includes('Browser acceptance customer reply'),
-  nextStepVisibleInCustomer: customerText.includes('Browser acceptance: send sample quotation'),
+  nextStepVisibleInCustomer: customerTaskText.includes('Browser acceptance: send sample quotation'),
   nextStepVisibleInToday: todayText.includes('Browser acceptance: send sample quotation'),
   inboxItems: await page.locator('#inboxList > *').count(),
   searchMatched: searchResultText.includes('Browser acceptance customer reply'),

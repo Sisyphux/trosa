@@ -6,6 +6,16 @@
 - 数据边界：只改 `app/engine.py` 的请求参数与结果解析，不动接口、数据表、迁移和写入逻辑。
 - 验证：新增 `DeepSeekThinkingModeTest`，覆盖关闭思考、空结果显式报错、连接测试预算；AI 相关回归通过。
 
+## 2026-09-17 — Inbox 待归属沟通重构：行内一键归属 + 沟通确认卡
+
+- 修复：待归属沟通里的 RFC 2822 邮件时间（如 `Mon, 14 Sep 2026 23:05:04 +0300`）不再被截断成无效日期，日期按规则解析为 `YYYY-MM-DD`，Inbox 与沟通确认不再显示 `NaN月NaN日`；解析不出时不显示假日期。
+- 列表快速处理：待归属沟通按发件邮箱、官网域名、客户名与原文匹配给出建议客户（纯规则、无模型），行内直接显示“归属 某客户”按钮，一键确认归属并写入客户时间线，不再每条都要打开弹窗搜索客户；无法匹配的仍走“确认归属并记录”。
+- 沟通确认弹窗改为确认卡：Inbox 来源打开时 AI 自动整理摘要填入记录框（可直接编辑），原始沟通折叠在“原始记录”里只读展示；打开后自动识别候选客户（规则建议优先），去掉“同时安排下一步”，日期自动带入，需要时可点“AI 重新整理”。
+- 待归属沟通流水线：弹窗里确认一条后自动载入下一条待归属沟通，不回列表，并提示剩余条数。
+- 原始记录边界：Gmail capture 的原始邮件本来就随归属写入 `communication_source_items`，已解决（resolved）的 Inbox 条目也保留原文；记录内容放 AI 摘要不丢原始证据。
+- 数据边界：`app.py` 新增只读的 `GET /api/inbox/capture-matches`（规则匹配建议）并补全 capture 发件人信息；`app/static/app.js`、`index.html`、`style.css` 更新界面与流程，不动数据表、迁移和写入逻辑；沟通记录与待办的写入仍走原 `follow_history` / tasks 接口并保留撤销与审计。
+- 验收同步：`tools/browser_acceptance.js` 的“下一步”改走客户工作区“安排下一步”（弹窗内不再有下一步字段），`tests/test_release_commit_entrypoint.py` 相应令牌更新；完整 Python 回归 263 项通过，真实 Chromium 验收（含沟通记录、待办、Today、Inbox、Search）通过；另用真实浏览器验证了行内一键归属与确认卡全流程（两条 capture 全部正确归属、无 NaN、无下一步字段、原文折叠可展开）。
+
 ## 2026-09-17 — 修复沟通记录串客户：历史记录按原始客户绑定，禁止共享主档别名扇出
 
 - 根因：`trosa.customer_interactions` / `trosa.customer_tasks` 视图只按 account 关联 `account_legacy_refs`；同一用户名下两个客户（如 Kaze 与 Action Plus Exhibitions and Interiors）指向同一 canonical 公司账号后，每条沟通记录会扇出到每个别名客户，客户详情“现在 / 最近一次重要沟通”、时间线、下一步因此显示另一客户的记录。Today 在 0033 只做了去重而非正确归属。
@@ -2279,4 +2289,3 @@
 
 - 发布候选现在必须真实重建隔离 PostgreSQL、应用全部迁移并通过 PostgreSQL 集成演练；不再把缺少 DSN、数据库工具或服务不可用静默记为 SKIP。
 - 新增 Tabbit Chromium 页面验收：真实登录后完成 Customer → 沟通与明确日期待办 → Today → Inbox → Search，并核对页面可见结果；同源残留 service worker 会在验收开始时清理，避免把其他本地应用误当成 Trosa。
-- 发布候选继续在独立 release worktree 中运行这些门禁，主工作区的未提交修改、暂存区和未跟踪文件不参与发布。

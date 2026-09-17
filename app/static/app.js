@@ -168,6 +168,7 @@ let customerFilters = {};
 var _inboxReplyAnalysis = null;
 var _inboxReplyAnalysisTimer = null;
 var _inboxReplyAnalysisToken = 0;
+var _inboxReplyRawContent = '';
 
 // ========== User Colors ==========
 const USER_COLORS = { 'hamid': '#4A90D9', 'amy': '#E8726A', 'kelley': '#5BB881' };
@@ -900,7 +901,7 @@ function openSearchMatchContext(customer) {
       source: context.source || 'search', inboxItemId: context.id, customerId: customerId,
       customerName: customer.company || customer.name || '当前客户',
       contactId: context.contact_id || '', contactName: context.contact_name || '',
-      content: context.content || context.title || '', followDate: context.date || '',
+      content: context.content || context.title || '', rawContent: context.content || '', followDate: context.date || '',
       direction: context.direction || 'unknown', activityType: context.activity_type || 'follow_up',
       sourceLabel: context.source_label || 'Search 命中', sourceDetail: context.source_url || '',
       subtitle: 'Search 已带入匹配的 Inbox 原文。核对后保存，必要时再安排下一步。'
@@ -1343,7 +1344,9 @@ async function loadInbox() {
     var data = await api('/api/inbox');
     if (token !== _inboxLoadToken) return;
     inboxItems = data.items || [];
+    _captureMatches = {};
     renderInbox(data.counts || {});
+    refreshCaptureMatches();
   } catch (e) {
     if (token === _inboxLoadToken && list) {
       list.innerHTML = '<div class="empty-state list-error-state"><p>Inbox 暂时无法加载</p><button class="btn btn-sm" type="button" onclick="loadInbox()">重新加载</button></div>';
@@ -1353,6 +1356,61 @@ async function loadInbox() {
       setListPending(list, false);
       setTimeout(function() { updateFilterIndicator(document.getElementById('inboxFilters')); }, 60);
     }
+  }
+}
+
+// 待归属沟通的行内快速处理：按发件邮箱/域名/公司名规则匹配建议客户，不依赖模型。
+var _captureMatches = {};
+var _captureMatchesToken = 0;
+
+async function refreshCaptureMatches() {
+  var token = ++_captureMatchesToken;
+  try {
+    var data = await api('/api/inbox/capture-matches');
+    if (token !== _captureMatchesToken) return;
+    _captureMatches = {};
+    (data.matches || []).forEach(function(match) {
+      if (match && match.item_id) _captureMatches[Number(match.item_id)] = match;
+    });
+    renderInbox();
+  } catch (e) {
+    if (token !== _captureMatchesToken) return;
+    renderInbox();
+  }
+}
+
+function truncateCaptureSummary(text, limit) {
+  var value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (value.length <= limit) return value;
+  return value.substring(0, limit) + '…';
+}
+
+async function quickConfirmCapture(itemId) {
+  var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
+  if (!isInboxCommunicationCapture(item)) { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); loadInbox(); return; }
+  var match = _captureMatches[Number(itemId)];
+  if (!match || !match.customer_id) return;
+  var customerId = match.customer_id;
+  var followDate = item.capture_date || localDateString();
+  var remaining = inboxItems.filter(function(entry) { return isInboxCommunicationCapture(entry); }).length - 1;
+  try {
+    await api('/api/customers/' + customerId + '/follow_history', {
+      method: 'POST',
+      body: JSON.stringify({
+        activity_content: item.capture_content || '', activity_result: '',
+        activity_type: item.capture_activity_type || 'follow_up',
+        direction: item.capture_direction || 'unknown',
+        follow_date: followDate, source: item.item_type === 'gmail_capture' ? 'gmail' : 'browser_extension',
+        inbox_item_id: item.id, contact_id: null
+      })
+    });
+    _captureMatches = {};
+    inboxItems = inboxItems.filter(function(entry) { return Number(entry.id) !== Number(itemId); });
+    renderInbox();
+    loadInbox();
+    showToast(remaining > 0 ? '已归属 ' + (match.company || '客户') + '，待归属沟通还剩 ' + remaining + ' 条' : '已归属 ' + (match.company || '客户'), 'success');
+  } catch (e) {
+    loadInbox();
   }
 }
 
@@ -1519,6 +1577,7 @@ function renderInboxItemHtml(item) {
     : escapeHtml(name);
 
   var mainAction = '';
+  var captureMatch = null;
   if (item.item_type === 'sela_follow_up' && /^sela_proposal:\d+$/.test(item.dedupe_key || '')) {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="openSelaFollowUpReview(' + Number(item.dedupe_key.split(':')[1]) + ')">核对跟进建议</button>';
   } else if (item.item_type === 'sela_agent_request') {
@@ -1526,7 +1585,12 @@ function renderInboxItemHtml(item) {
   } else if (item.item_type === 'customer_reply') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
   } else if (isInboxCommunicationCapture(item)) {
-    mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
+    captureMatch = _captureMatches[Number(itemId)] || null;
+    if (!customerId && captureMatch && captureMatch.customer_id) {
+      mainAction = '<button class="btn btn-sm btn-primary" onclick="quickConfirmCapture(' + itemId + ')">归属 ' + escapeHtml(captureMatch.company || '客户') + '</button>';
+    } else {
+      mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
+    }
   } else if (selaReview) {
     mainAction = customerId
       ? '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户资料</button>'
@@ -1540,7 +1604,7 @@ function renderInboxItemHtml(item) {
 
   var summaryText = '';
   if (isInboxCommunicationCapture(item)) {
-    summaryText = item.capture_content || item.title || '待确认的客户沟通';
+    summaryText = truncateCaptureSummary(item.capture_content || item.title || '待确认的客户沟通', 110);
   } else if (selaReview) {
     summaryText = selaIdentityReasonLabel(selaReview.reason) + ' · ' + selaIdentityQualificationLabel(selaReview.research && selaReview.research.qualification_status);
   } else {
@@ -1552,8 +1616,14 @@ function renderInboxItemHtml(item) {
     var body = '';
     if (isInboxCommunicationCapture(item)) {
       var captureSource = [item.capture_platform || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'), item.capture_channel].filter(Boolean).join(' · ');
+      var captureMatch = _captureMatches[Number(itemId)] || null;
       body = '<div class="inbox-why">来源：' + escapeHtml(captureSource) + '</div>' +
         '<div class="inbox-evidence">原始对象：' + escapeHtml(item.capture_identity || '未识别') + '</div>' +
+        (captureMatch && captureMatch.customer_id && !customerId
+          ? '<div class="inbox-capture-suggestion">建议归属：' + escapeHtml(captureMatch.company || '客户') +
+            (captureMatch.reason ? '（' + escapeHtml(captureMatch.reason) + '）' : '') +
+            '<button type="button" class="btn btn-sm btn-primary" onclick="quickConfirmCapture(' + itemId + ')">一键归属</button></div>'
+          : '') +
         '<p>' + escapeHtml(item.capture_content || item.content || '没有可显示的原文') + '</p>';
     } else if (selaReview) {
       body = renderSelaIdentityReview(selaReview, item);
@@ -1735,27 +1805,30 @@ async function recordInboxReply(itemId) {
     source: 'inbox', inboxItemId: item.id, customerId: item.customer_id,
     customerName: item.customer_company || item.customer_name || '当前客户',
     contactId: item.contact_id || '', contactName: item.contact_name || '',
-    content: item.content || '', followDate: item.follow_date || '',
+    content: item.content || '', rawContent: item.content || '', followDate: item.follow_date || '',
     direction: item.direction || 'inbound', activityType: item.activity_type || 'customer_reply',
     sourceLabel: item.source_label || 'Inbox 客户回复',
-    subtitle: '原始回复已带入。核对后保存为客户事实，必要时再安排下一步。'
+    autoAnalyze: true,
+    subtitle: 'AI 已整理摘要，请核对后保存为客户事实；原始回复会一并保留。'
   });
 }
 
 function recordInboxCapture(itemId) {
   var item = inboxItems.find(function(candidate) { return Number(candidate.id) === Number(itemId); });
   if (!isInboxCommunicationCapture(item)) { showToast('这条待归属沟通已不存在，请刷新 Inbox', 'warning'); return; }
+  var remaining = inboxItems.filter(function(entry) { return isInboxCommunicationCapture(entry); }).length;
   openCommunicationConfirm({
     source: item.item_type === 'gmail_capture' ? 'gmail' : 'browser_extension', inboxItemId: item.id,
     // A capture can remain open after its identity was reliably resolved.
     // Keep that confirmed context; only genuinely unassigned captures need the picker.
     customerId: item.customer_id || '', customerName: item.customer_company || item.customer_name || '',
     contactId: item.contact_id || '', contactName: item.contact_name || '',
-    content: item.capture_content || '', followDate: item.capture_date || '',
+    content: item.capture_content || '', rawContent: item.capture_content || '', followDate: item.capture_date || '',
     direction: item.capture_direction || 'unknown', activityType: item.capture_activity_type || 'follow_up',
     sourceLabel: item.capture_platform || item.capture_channel || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'),
     sourceDetail: item.capture_source_url || item.capture_identity || '',
-    subtitle: '原始沟通已带入。请选择客户并核对内容后保存；未确认前不会改变 Inbox。'
+    autoAnalyze: true, autoPipeline: true, queueSize: remaining,
+    subtitle: 'AI 已整理摘要，请核对归属与内容；原始记录会一并保留。'
   });
 }
 
@@ -1888,6 +1961,8 @@ async function openCommunicationConfirm(options) {
   var contextContact = document.getElementById('communicationConfirmContextContact');
   var contextSource = document.getElementById('communicationConfirmContextSource');
   var contextDate = document.getElementById('communicationConfirmContextDate');
+  var rawDetails = document.getElementById('inboxReplyRawSource');
+  var rawText = document.getElementById('inboxReplyRawSourceText');
   var title = document.getElementById('communicationConfirmTitle');
   var kicker = document.getElementById('communicationConfirmKicker');
   var subtitle = document.getElementById('communicationConfirmSubtitle');
@@ -1897,13 +1972,15 @@ async function openCommunicationConfirm(options) {
   if (subtitle) subtitle.textContent = context.subtitle || '确认实际发生的事实；需要时再安排明确的下一步。';
   if (contentLabel) contentLabel.innerHTML = '这次发生了什么 <span class="required">*</span>';
   document.getElementById('inboxReplyContent').value = context.content || '';
+  _inboxReplyRawContent = context.content || '';
   _inboxReplyAnalysis = null;
   document.getElementById('inboxReplyAnalysis').hidden = true;
   document.getElementById('inboxReplyDate').value = context.followDate || localDateString();
-  document.getElementById('inboxReplyHasNext').checked = false;
-  document.getElementById('inboxReplyNextTask').value = '';
-  document.getElementById('inboxReplyNextDate').value = '';
-  toggleInboxReplyNext();
+  if (rawDetails && rawText) {
+    var hasRaw = !!(context.rawContent && context.rawContent !== context.content);
+    rawDetails.hidden = !hasRaw;
+    rawText.textContent = context.rawContent || '';
+  }
   var hasContext = context.source !== 'manual' || context.inboxItemId || context.contactId || context.sourceLabel || context.followDate;
   if (contextPanel) contextPanel.hidden = !hasContext;
   if (hasContext) {
@@ -1921,13 +1998,30 @@ async function openCommunicationConfirm(options) {
     if (knownCustomer) knownCustomer.hidden = true;
     if (pickerWrap) pickerWrap.hidden = false;
     document.getElementById('inboxReplyCustomer').value = '';
+    // 已有规则匹配建议时先用它，避免每次都重新拉全部客户。
+    var match = context.inboxItemId ? _captureMatches[Number(context.inboxItemId)] : null;
+    if (match && match.customer_id) {
+      try {
+        var state = _customerPickerRegistry.inboxReplyCustomerPicker;
+        if (state && state.customers) {
+          var suggested = state.customers.find(function(entry) { return Number(entry.id) === Number(match.customer_id); });
+          if (suggested) chooseInboxReplyCandidate(suggested.id);
+        }
+      } catch (e) {}
+    }
     try {
       var data = await api('/api/customers?view=all&sort=updated_at&order=desc');
       initializeCustomerPicker('inboxReplyCustomerPicker', data.customers || []);
+      if (match && match.customer_id && !document.getElementById('inboxReplyCustomer').value) {
+        var customers2 = (_customerPickerRegistry.inboxReplyCustomerPicker || {}).customers || [];
+        var suggested2 = customers2.find(function(entry) { return Number(entry.id) === Number(match.customer_id); });
+        if (suggested2) chooseInboxReplyCandidate(suggested2.id);
+      }
     } catch (e) { return; }
   }
   openModal('inboxReplyModal');
   setTimeout(function() { document.getElementById('inboxReplyContent').focus(); }, 0);
+  if (context.autoAnalyze && context.content) analyzeInboxReply(true, { autoFillSummary: true });
 }
 
 function openInboxReplyModal() {
@@ -1965,14 +2059,16 @@ function extractInboxReplyImage(input) {
   reader.readAsDataURL(file);
 }
 
-async function analyzeInboxReply(force) {
+async function analyzeInboxReply(force, options) {
+  var autoOptions = options || {};
   clearTimeout(_inboxReplyAnalysisTimer);
   var content = document.getElementById('inboxReplyContent').value.trim();
   if (!content) { if (force) showToast('请先粘贴客户回复', 'warning'); return; }
   var panel = document.getElementById('inboxReplyAnalysis');
   var token = ++_inboxReplyAnalysisToken;
   panel.hidden = false;
-  panel.innerHTML = '<div class="quick-analysis-loading">AI 正在识别客户和关键信息…</div>';
+  if (!autoOptions.autoFillSummary) panel.innerHTML = '<div class="quick-analysis-loading">AI 正在识别客户和关键信息…</div>';
+  else panel.innerHTML = '<div class="quick-analysis-loading">AI 正在整理这次沟通的摘要…</div>';
   try {
     var context = _communicationConfirmContext || {};
     var requestedDirection = ['auto', 'outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0
@@ -1988,8 +2084,16 @@ async function analyzeInboxReply(force) {
       chooseInboxReplyCandidate(candidates[0].id);
     }
     var analysis = result.analysis || {};
-    if (analysis.message_date && /^\d{4}-\d{2}-\d{2}$/.test(analysis.message_date)) document.getElementById('inboxReplyDate').value = analysis.message_date;
-    if (analysis.suggested_next_action && !document.getElementById('inboxReplyNextTask').value) document.getElementById('inboxReplyNextTask').value = analysis.suggested_next_action;
+    if (analysis.message_date && /^\d{4}-\d{2}-\d{2}$/.test(analysis.message_date) && !document.getElementById('inboxReplyDate').value) {
+      document.getElementById('inboxReplyDate').value = analysis.message_date;
+    }
+    // 摘要直接进记录框（可编辑），原始文本保留在下方“原始记录”里。
+    var summary = String(analysis.summary || '').trim();
+    var textarea = document.getElementById('inboxReplyContent');
+    if (autoOptions.autoFillSummary && summary && textarea.value.trim() === _inboxReplyRawContent.trim()) {
+      textarea.value = summary;
+      _inboxReplyRawContent = context.rawContent || _inboxReplyRawContent;
+    }
   } catch(e) {
     panel.innerHTML = '<div class="quick-analysis-error">暂时无法使用 AI 分析，仍可手动选择客户并保存原文。</div>';
   }
@@ -2190,27 +2294,13 @@ function chooseInboxReplyCandidate(customerId) {
   picker.querySelector('.customer-picker-results').classList.remove('show');
 }
 
-function toggleInboxReplyNext() {
-  var enabled = document.getElementById('inboxReplyHasNext').checked;
-  document.getElementById('inboxReplyNext').hidden = !enabled;
-  if (enabled && !document.getElementById('inboxReplyNextDate').value) {
-    var date = new Date();
-    date.setDate(date.getDate() + 7);
-    document.getElementById('inboxReplyNextDate').value = localDateString(date);
-  }
-}
-
 async function saveInboxReply() {
   var context = _communicationConfirmContext || {};
   var customerId = context.customerId || document.getElementById('inboxReplyCustomer').value;
   var content = document.getElementById('inboxReplyContent').value.trim();
   var followDate = document.getElementById('inboxReplyDate').value || localDateString();
-  var hasNext = document.getElementById('inboxReplyHasNext').checked;
-  var nextTask = hasNext ? document.getElementById('inboxReplyNextTask').value.trim() : '';
-  var nextDate = hasNext ? document.getElementById('inboxReplyNextDate').value : '';
   if (!content) { showToast('请先记录沟通内容', 'warning'); document.getElementById('inboxReplyContent').focus(); return; }
   if (!customerId) { showToast('请搜索并选择客户', 'warning'); document.getElementById('inboxReplyCustomerSearch').focus(); return; }
-  if (hasNext && (!nextTask || !nextDate)) { showToast('请填写下一步动作和日期', 'warning'); return; }
   var button = document.getElementById('saveInboxReplyButton');
   button.disabled = true;
   button.textContent = '正在记录…';
@@ -2221,7 +2311,7 @@ async function saveInboxReply() {
         content: content, activity_content: content, follow_date: followDate,
         activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
         activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
-        next_task: nextTask, next_follow_up: nextDate,
+        next_task: '', next_follow_up: '',
         inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
       });
       await api('/api/agent/proposals/' + context.agentProposalId, { method: 'PUT', body: JSON.stringify(proposalPayload) });
@@ -2231,7 +2321,7 @@ async function saveInboxReply() {
         method: 'PUT', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
-          next_task: nextTask, next_follow_up: nextDate, is_reported: 0
+          next_task: '', next_follow_up: '', is_reported: 0
         })
       });
     } else {
@@ -2239,18 +2329,17 @@ async function saveInboxReply() {
         method: 'POST', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
-          follow_date: followDate, next_task: nextTask, next_follow_up: nextDate,
+          follow_date: followDate, next_task: '', next_follow_up: '',
           source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
         })
       });
     }
-    closeModal('inboxReplyModal', true);
     if (_customerDetailCache && Number(_customerDetailCache.id) === Number(customerId)) {
       var activity = saved && saved.activity ? Object.assign({ type: 'follow' }, saved.activity) : Object.assign({
         type: 'follow', id: saved && (saved.activity_id || (!context.agentProposalId && saved.id)),
         follow_date: followDate, content: content,
         result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
-        next_plan: nextTask, activity_type: context.activityType || 'customer_reply',
+        next_plan: '', activity_type: context.activityType || 'customer_reply',
         direction: context.direction || 'unknown', is_reported: false
       }, saved && saved.activity ? saved.activity : {});
       if (activity.id) {
@@ -2263,13 +2352,36 @@ async function saveInboxReply() {
       }
       reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     }
-    showToast(hasNext ? '沟通已记录，下一步已安排' : '沟通已保存到时间线', 'success');
+    // 待归属沟通流水线：确认一条后直接载入下一条，不回列表。
+    if (context.autoPipeline) {
+      loadInbox();
+      if (currentPage === 'dashboard') loadDashboard();
+      var nextItem = inboxItems.find(function(entry) {
+        return isInboxCommunicationCapture(entry) && Number(entry.id) !== Number(context.inboxItemId);
+      });
+      var total = context.queueSize || 1;
+      showToast('已记录，待归属沟通还剩 ' + (nextItem ? Math.max(total - 1, 1) : 0) + ' 条', 'success');
+      if (nextItem) {
+        button.disabled = false;
+        button.textContent = '确认并记录';
+        recordInboxCapture(nextItem.id);
+      } else {
+        closeModal('inboxReplyModal', true);
+        button.disabled = false;
+        button.textContent = '确认并记录';
+      }
+      return;
+    }
+    closeModal('inboxReplyModal', true);
+    showToast('沟通已保存到时间线', 'success');
     loadInbox();
     if (currentPage === 'dashboard') loadDashboard();
   } catch (e) {
   } finally {
-    button.disabled = false;
-    button.textContent = '确认并记录';
+    if (!context.autoPipeline) {
+      button.disabled = false;
+      button.textContent = '确认并记录';
+    }
   }
 }
 
@@ -2347,8 +2459,14 @@ function selectCustomerPicker(pickerId, index) {
 
 function formatChineseDate(dateStr) {
   if (!dateStr) return '';
-  var parts = dateStr.substring(0, 10).split('-');
-  return Number(parts[1]) + '月' + Number(parts[2]) + '日';
+  var value = String(dateStr).trim();
+  var match = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (match) return Number(match[2]) + '月' + Number(match[3]) + '日';
+  var parsed = new Date(value);
+  if (!isNaN(parsed.getTime()) && !/^\d{4}$/.test(value)) {
+    return (parsed.getMonth() + 1) + '月' + parsed.getDate() + '日';
+  }
+  return value;
 }
 
 function formatChineseToday(date) {
