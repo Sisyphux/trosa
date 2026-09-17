@@ -23,8 +23,9 @@ class CompareTest(unittest.TestCase):
 
     def test_wrong_binding_is_a_deterministic_fix(self):
         buckets = compare(
-            [{'id': 1, 'customer_id': 10}],
-            {1: {'bound': 20, 'row_id': 'a'}},
+            [{'id': 1, 'customer_id': 10, 'title': 'legacy'}],
+            {1: {'bound': 20, 'row_id': 'a',
+                 'payload': {'id': 1, 'customer_id': 20, 'title': 'legacy'}}},
         )
         self.assertEqual(len(buckets['fix']), 1)
         self.assertEqual(buckets['fix'][0]['id'], 1)
@@ -53,6 +54,26 @@ class CompareTest(unittest.TestCase):
         buckets = compare([], {5: {'bound': 10, 'row_id': 'a'}})
         self.assertEqual(len(buckets['pg_only']), 1)
         self.assertEqual(buckets['fix'], [])
+
+    def test_id_reused_by_runtime_row_is_manual_never_a_fix(self):
+        # A runtime row holds the legacy id, but its payload does not carry
+        # the legacy row verbatim: rewriting it would misattribute the
+        # runtime record, so this goes to human review.
+        sqlite_row = {'id': 1, 'customer_id': 10, 'title': 'legacy title'}
+        pg_rows = {1: {'bound': 20, 'row_id': 'a', 'payload': {'customer_id': 20}}}
+        buckets = compare([sqlite_row], pg_rows)
+        self.assertEqual(len(buckets['manual_id_collision']), 1)
+        self.assertEqual(buckets['fix'], [])
+
+    def test_payload_carrying_legacy_row_verbatim_is_a_deterministic_fix(self):
+        sqlite_row = {'id': 1, 'customer_id': 10, 'title': 'legacy title'}
+        pg_rows = {1: {'bound': 20, 'row_id': 'a', 'payload': {
+            'id': 1, 'customer_id': 20, 'title': 'legacy title',
+            'is_reported': 1,
+        }}}
+        buckets = compare([sqlite_row], pg_rows)
+        self.assertEqual(len(buckets['fix']), 1)
+        self.assertEqual(buckets['manual_id_collision'], [])
 
 
 if __name__ == '__main__':
