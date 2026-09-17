@@ -136,12 +136,15 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 }
 
-# 运行一次命令，把完整输出写入任务证据文件，并在开头附上可核验的元数据。
+# 快速门禁（--quick）只做语法检查，写入独立的 quick 日志，绝不覆盖完整证据、
+# 也不更新完成判定；否则一次语法检查会让任务看起来“已通过门禁”。
+task_quick_log_path() { printf '%s/%s.quick.log' "$TASK_META_DIR" "$1"; }
+
+# 运行一次命令，把完整输出写入指定证据文件，并在开头附上可核验的元数据。
 # 返回被运行命令的退出码，调用方据此判定完成与否。
 run_with_evidence() {
-  local task=$1 kind=$2 head=$3 log; shift 3
+  local log=$1 task=$2 kind=$3 head=$4; shift 4
   local tmp status
-  log="$(task_evidence_path "$task")"
   mkdir -p -- "$TASK_META_DIR"
   tmp="$(mktemp "${TMPDIR:-/tmp}/trosa-evidence.XXXXXX")"
   set +e
@@ -470,17 +473,29 @@ cmd_test() {
   [[ -r "$gate" ]] || fail "找不到发布门禁 $MAIN_ROOT/deploy/cloud/release-test.sh"
   args=(--dir "$wt")
   if [[ "$quick" == 1 ]]; then args+=(--quick); fi
-  local head iso log
+  local head iso log kind
   head="$(git -C "$wt" rev-parse HEAD)"
-  log="$(task_evidence_path "$task")"
+  if [[ "$quick" == 1 ]]; then
+    log="$(task_quick_log_path "$task")"; kind="test-quick"
+  else
+    log="$(task_evidence_path "$task")"; kind="test"
+  fi
   iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  if run_with_evidence "$task" test "$head" bash "$gate" ${args[@]+"${args[@]}"}; then
-    merge_task_meta "$task" \
-      "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
-    printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
-    printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
+  if run_with_evidence "$log" "$task" "$kind" "$head" bash "$gate" ${args[@]+"${args[@]}"}; then
+    if [[ "$quick" == 1 ]]; then
+      printf '任务 %s 快速门禁通过（仅语法检查，不作为完成证据）。\n' "$task"
+      printf '完整门禁：test --task %s（不带 --quick）。快速日志：%s\n' "$task" "$log"
+    else
+      merge_task_meta "$task" \
+        "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+      printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+      printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
+    fi
   else
     local status=$?
+    if [[ "$quick" == 1 ]]; then
+      fail "任务 $task 快速门禁失败（仅语法，未改动完成判定）：$log"
+    fi
     merge_task_meta "$task" \
       "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
     fail "任务 $task 门禁未通过，不可发布（证据：$log，退出码 $status）"
@@ -565,7 +580,7 @@ cmd_publish() {
   local log iso release landed
   log="$(task_evidence_path "$task")"
   iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  if run_with_evidence "$task" publish "$head" \
+  if run_with_evidence "$log" "$task" publish "$head" \
       bash "$MAIN_ROOT/deploy/cloud/auto-publish.sh" --branch "$branch"; then
     release="$(grep -o 'release=[^ ]*' "$log" | tail -n 1 | cut -d= -f2 || true)"
     landed="$(grep -o 'RELEASE_COMMIT_SUCCESS commit=[0-9a-f]*' "$log" | tail -n 1 | sed 's/.*commit=//' || true)"

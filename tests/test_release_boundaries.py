@@ -155,6 +155,18 @@ class TaskEvidenceContractTests(unittest.TestCase):
         self.assertIn("完成判定：已发布", self.script)
         self.assertIn("完成判定：开发完成并通过门禁，尚未发布", self.script)
 
+    def test_quick_gate_cannot_mark_task_verified(self):
+        # 快速门禁只做语法检查：必须写独立 quick 日志，且不得写 verify_result。
+        self.assertIn("task_quick_log_path", self.script)
+        self.assertIn(
+            'log="$(task_quick_log_path "$task")"; kind="test-quick"', self.script
+        )
+        # verify_result=ok 只应出现在完整门禁与发布路径（各一处）。
+        self.assertEqual(self.script.count('"verify_result=ok"'), 2)
+        quick = self.script.index('task_quick_log_path "$task"')
+        first_full = self.script.index('"verify_result=ok"')
+        self.assertLess(quick, first_full)
+
     def test_release_entrypoints_enforce_role(self):
         for name in ("trosa-release", "release-commit.sh"):
             text = (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8")
