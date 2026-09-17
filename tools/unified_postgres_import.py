@@ -838,15 +838,15 @@ class Importer:
                     business_type=row.get("type"),
                     source_identity=f"trosa:{user}:customer:{legacy_customer_id}",
                 )
-                account_id = compat_uuid(f"account:{company_id}")
+                account_id = compat_uuid(f"account:{company_id}:{user}")
                 owner_user_id = self.identity_user_id(user)
                 self.execute("""insert into trosa.accounts(id,organization_id,company_id,owner_user_id,display_name,account_status,customer_type,channel_type,priority_level,profile,field,industry,company_size,annual_revenue,tags,attention_state,attention_reason,last_contact_at,next_follow_up_at,is_pinned,pinned_order,deleted_at,legacy_payload)
                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                  on conflict (organization_id,company_id) do nothing""",
+                  on conflict (organization_id,company_id,owner_user_id) do nothing""",
                   (account_id, ORG_ID, company_id, owner_user_id, clean(row.get("name")), clean(row.get("status")), clean(row.get("customer_type")), clean(row.get("type")), clean(row.get("level")), clean(row.get("profile")), clean(row.get("field")), clean(row.get("industry")), clean(row.get("company_size")), clean(row.get("annual_revenue")), clean(row.get("tags")), clean(row.get("attention_state")), clean(row.get("attention_reason")), parse_time(row.get("last_contact")), parse_time(row.get("next_follow_up")), legacy_bool(row.get("is_pinned")), legacy_int(row.get("pinned_order"), 0), parse_time(row.get("deleted_at")) if legacy_bool(row.get("is_deleted")) else None, Jsonb(row)))
                 actual_account = self.cur.execute(
-                    "select id from trosa.accounts where organization_id=%s and company_id=%s",
-                    (ORG_ID, company_id),
+                    "select id from trosa.accounts where organization_id=%s and company_id=%s and owner_user_id=%s",
+                    (ORG_ID, company_id, owner_user_id),
                 ).fetchone()
                 if not actual_account:
                     self.issue(source_name + "/customers", str(legacy_customer_id), "ACCOUNT_NOT_CREATED", "Customer account projection could not be resolved", row)

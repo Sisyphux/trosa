@@ -120,6 +120,8 @@ REQUIRED_INDEXES = (
      ("organization_id", "legacy_user_id", "source_fingerprint")),
     ("trosa.timeline_events", "trosa_timeline_natural_identity_idx",
      ("account_id", "source_module", "source_reference")),
+    ("trosa.accounts", "accounts_org_company_owner_key",
+     ("organization_id", "company_id", "owner_user_id")),
     ("audit.agent_actions", "audit_agent_actions_org_user_action_idx",
      ("organization_id", "legacy_user_id", "action_id")),
     ("audit.undo_snapshots", "audit_undo_snapshots_org_user_token_idx",
@@ -130,6 +132,7 @@ REQUIRED_INDEXES = (
 
 REQUIRED_COLUMNS += (
     ("audit.operation_log_events", "target_reference"),
+    ("trosa.accounts", "owner_user_id"),
 )
 
 REQUIRED_FUNCTIONS = (
@@ -144,6 +147,9 @@ REQUIRED_FUNCTIONS = (
     "trosa.compat_set_lastrowid(bigint)",
     "trosa.compat_time(text)",
     "trosa.compat_legacy_bigint(text)",
+    "trosa.compat_account_owner_guard()",
+    "trosa.enforce_single_account_owner()",
+    "trosa.transfer_customer_account(bigint,text)",
     "trosa.compat_customers_write()",
     "trosa.compat_contacts_write()",
     "trosa.compat_reminders_write()",
@@ -179,6 +185,7 @@ REQUIRED_TRIGGERS = (
     "trosa.reminders.compat_reminders_write",
     "trosa.follow_up_logs.compat_follow_up_write",
     "trosa.outreach_emails.compat_outreach_write",
+    "trosa.account_legacy_refs.trosa_account_legacy_refs_owner_guard",
     "trade_os_compat.customers.compat_customers_bridge",
     "trade_os_compat.contacts.compat_contacts_bridge",
     "trade_os_compat.reminders.compat_reminders_bridge",

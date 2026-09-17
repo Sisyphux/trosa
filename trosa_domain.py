@@ -17,6 +17,7 @@ business implementations.
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Iterable
 
 from db import postgres_mode
@@ -1149,13 +1150,15 @@ def create_customer(conn: Any, *, values: dict[str, Any]) -> int:
     customer_id = conn.execute(
         "SELECT trosa.compat_next_id('customers', trosa.compat_current_user())",
     ).fetchone()[0]
-    company_id = conn.execute(
-        "SELECT trosa.compat_uuid('modern-company:' || trosa.compat_current_user() || ':' || ?::text)",
-        (customer_id,),
-    ).fetchone()[0]
-    account_id = conn.execute(
-        "SELECT trosa.compat_uuid('modern-account:' || trosa.compat_current_user() || ':' || ?::text)",
-        (customer_id,),
+    # Fresh canonical identity per created customer.  A per-user customer id
+    # can be reused after an explicit transfer, so the identity must not depend
+    # on it.
+    company_id = str(uuid.uuid4())
+    account_id = str(uuid.uuid4())
+    owner_user_id = conn.execute(
+        '''SELECT id FROM identity.users
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()''',
     ).fetchone()[0]
     conn.execute(
         '''INSERT INTO core.companies
@@ -1165,11 +1168,11 @@ def create_customer(conn: Any, *, values: dict[str, Any]) -> int:
     )
     conn.execute(
         '''INSERT INTO trosa.accounts
-           (id, organization_id, company_id, display_name, priority_level, profile, field, industry,
+           (id, organization_id, company_id, owner_user_id, display_name, priority_level, profile, field, industry,
             company_size, annual_revenue, tags, last_contact_at, next_follow_up_at, legacy_payload)
-           VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, trosa.compat_time(?),
+           VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, trosa.compat_time(?),
                    trosa.compat_time(?), '{}'::jsonb)''',
-        (account_id, company_id, values.get('name', ''), values.get('level', ''), values.get('profile', ''),
+        (account_id, company_id, owner_user_id, values.get('name', ''), values.get('level', ''), values.get('profile', ''),
          values.get('field', ''), values.get('industry', ''), values.get('company_size', ''),
          values.get('annual_revenue', ''), values.get('tags', ''), values.get('last_contact', ''), values.get('next_follow_up', '')),
     )
@@ -1196,6 +1199,22 @@ def create_customer(conn: Any, *, values: dict[str, Any]) -> int:
          values.get('customer_judgment', '')),
     )
     return int(customer_id)
+
+
+def transfer_customer(conn: Any, *, customer_id: int, to_user: str) -> int:
+    """Move an active Customer (account and history) to another owner.
+
+    The database enforces a single active owner per account, so transfer is an
+    explicit operation rather than a second shared owner.  A target that already
+    owns a customer for the same shared company is reported instead of merged.
+    """
+    if not postgres_mode():
+        raise ValueError('customer transfer is only available in PostgreSQL mode')
+    row = conn.execute(
+        'SELECT trosa.transfer_customer_account(?, ?) AS customer_id',
+        (int(customer_id), str(to_user)),
+    ).fetchone()
+    return int(row['customer_id'])
 
 
 def update_task(

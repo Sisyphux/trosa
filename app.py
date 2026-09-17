@@ -98,6 +98,7 @@ from trosa_domain import (
     set_customer_stage as _set_customer_stage,
     update_customer_priority as _update_customer_priority,
     update_customer as _update_customer_record,
+    transfer_customer as _transfer_customer,
     update_contact as _update_contact,
     update_outreach_message as _update_outreach_message,
     merge_open_task as _merge_open_task,
@@ -8901,6 +8902,44 @@ def restore_customer(customer_id):
     return jsonify({'message': f'已恢复 {customer_name}'})
 
 
+@app.route('/api/customers/<int:customer_id>/transfer', methods=['POST'])
+@login_required
+def transfer_customer_owner(customer_id):
+    """Explicitly move one Customer and its history to another owner."""
+    if not postgres_mode():
+        return jsonify({'error': '客户转移仅在正式 PostgreSQL 模式可用'}), 400
+    payload = request.get_json(silent=True) or {}
+    to_user = str(payload.get('to_user') or '').strip()
+    if not to_user:
+        return jsonify({'error': '缺少目标负责人'}), 400
+    if to_user == g.current_user:
+        return jsonify({'error': '目标负责人不能是当前负责人'}), 400
+    conn = get_db()
+    try:
+        row = _customer_record(conn, customer_id)
+        if not row:
+            conn.close()
+            return jsonify({'error': '客户不存在'}), 404
+        new_customer_id = _transfer_customer(conn, customer_id=customer_id, to_user=to_user)
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        conn.close()
+        return jsonify({'error': error.message}), error.status
+    except ValueError as error:
+        conn.rollback()
+        conn.close()
+        return jsonify({'error': str(error)}), 409
+    except Exception as exc:
+        conn.rollback()
+        conn.close()
+        logger.error('transfer_customer error: %s', exc, exc_info=True)
+        return jsonify({'error': '客户转移失败'}), 500
+    conn.close()
+    log_operation('TRANSFER', 'customer', customer_id, f'客户转移给 {to_user}')
+    return jsonify({'message': f'客户已转移给 {to_user}', 'customer_id': new_customer_id})
+
+
 @app.route('/api/customers/<int:customer_id>/permanent', methods=['DELETE'])
 @login_required
 def permanent_delete_customer(customer_id):
@@ -9136,7 +9175,10 @@ def _permanent_delete_customer_pg(conn, customer_id):
         )
     # trosa.customer_details cascades from the account delete below.
     conn.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
-    if company_id:
+    if company_id and not conn.execute(
+        'SELECT 1 FROM trosa.accounts WHERE company_id=?', (company_id,)
+    ).fetchone():
+        # Only the last account for a company owns its shared identity rows.
         conn.execute('DELETE FROM core.company_domains WHERE company_id=?', (company_id,))
         conn.execute('DELETE FROM core.company_aliases WHERE company_id=?', (company_id,))
         conn.execute('DELETE FROM core.company_people WHERE company_id=?', (company_id,))

@@ -362,241 +362,195 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             False,
         )
 
-    def test_shared_account_customer_facts_do_not_cross_users(self):
-        """A shared imported account must retain separate Customer records."""
+    def test_same_company_is_shared_but_ownership_stays_single(self):
+        """Two users may share a canonical company; each account has one owner."""
         import db
         import trosa_domain
         from tools.postgres_rehearsal import load_fixture
 
         ids = load_fixture()
         hamid_customer_id = ids['customer_id']
-        hamid_contact_id = ids['contact_id']
-        account = self.connection.execute(
+        hamid_account = self.connection.execute(
             '''SELECT account_id FROM trosa.account_legacy_refs
                 WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
                   AND legacy_customer_id=?''', (hamid_customer_id,),
         ).fetchone()['account_id']
-        contact = self.connection.execute(
-            '''SELECT * FROM trosa.contact_legacy_refs
-                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
-                  AND legacy_contact_id=?''', (hamid_contact_id,),
-        ).fetchone()
-        amy_customer_id, amy_contact_id = 900001, 900001
-        self.connection.execute(
-            '''INSERT INTO trosa.account_legacy_refs
-               (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
-               VALUES (trosa.compat_org_id(), 'amy', ?, ?, 'shared-fixture-amy', ?::jsonb)
-               ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id) DO UPDATE
-               SET account_id=excluded.account_id, legacy_payload=excluded.legacy_payload''',
-            (amy_customer_id, account, '''{"name":"Amy original","company":"Amy Co","country":"CA","level":"C","website":"https://amy.example","profile":"amy","field":"amy field","industry":"amy industry","company_size":"1-10","annual_revenue":"10","tags":"amy","status":"Amy status","notes":"Amy note","system_notes":"Amy system","import_source":"amy","last_contact":"2026-01-01","next_follow_up":"2026-01-02","manual_next_follow":true,"is_pinned":"0","pinned_order":"0","pinned_at":"","is_deleted":"0","deleted_at":""}'''),
-        )
-        self.connection.execute(
-            '''INSERT INTO trosa.contact_legacy_refs
-               (organization_id, legacy_user_id, legacy_contact_id, legacy_customer_id, account_id,
-                person_id, contact_method_id, name, title, phone, whatsapp, linkedin, preferred_channel,
-                contact_type, is_primary, notes)
-               VALUES (trosa.compat_org_id(), 'amy', ?, ?, ?, ?, ?, 'Amy buyer', 'Buyer', '', '', '',
-                       'email', 'person', true, 'Amy contact note')
-               ON CONFLICT (organization_id, legacy_user_id, legacy_contact_id) DO UPDATE
-               SET legacy_customer_id=excluded.legacy_customer_id, account_id=excluded.account_id,
-                   person_id=excluded.person_id, contact_method_id=excluded.contact_method_id,
-                   name=excluded.name, title=excluded.title, notes=excluded.notes''',
-            (amy_contact_id, amy_customer_id, account, contact['person_id'], contact['contact_method_id']),
-        )
-        self.connection.commit()
-
-        trosa_domain.update_customer(self.connection, customer_id=hamid_customer_id, values={
-            'name': 'Hamid changed', 'company': 'Hamid Co', 'country': 'US', 'level': 'A',
-            'website': 'https://hamid.example', 'profile': 'hamid', 'field': 'hamid field',
-            'industry': 'hamid industry', 'company_size': '51-200', 'annual_revenue': '20',
-            'tags': 'hamid', 'status': 'Hamid status', 'notes': 'Hamid note',
-            'system_notes': 'Hamid system', 'import_source': 'hamid', 'last_contact': '2026-02-01',
-            'next_follow_up': '2026-02-02', 'manual_next_follow': True,
-            'business_stage': '成交', 'business_role': '终端', 'customer_judgment': 'hamid judgment',
-        })
-        trosa_domain.update_customer_priority(self.connection, customer_id=hamid_customer_id,
-                                              action='pin', changed_at='2026-02-03')
-        trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id,
-                                          deleted=True, changed_at='2026-02-04')
-        trosa_domain.update_contact(self.connection, contact_id=hamid_contact_id, values={
-            'name': 'Hamid buyer', 'title': 'Director', 'email': 'hamid-buyer@example.test',
-            'phone': '+1 555 0101', 'whatsapp': '', 'linkedin': '', 'preferred_channel': 'email',
-            'contact_type': 'person', 'is_primary': True, 'notes': 'Hamid contact note',
-        })
-        self.connection.commit()
-
-        db.set_db_user('amy')
-        amy_connection = db.get_db()
-        try:
-            amy_record = trosa_domain.customer_record(amy_connection, amy_customer_id)
-            self.assertIsNotNone(amy_record)
-            self.assertEqual(amy_record['name'], 'Amy original')
-            self.assertEqual(amy_record['company'], 'Amy Co')
-            self.assertFalse(amy_record['is_pinned'])
-            self.assertEqual(amy_record['last_interaction_on'], '2026-01-01')
-            amy_contacts = trosa_domain.customer_contacts(amy_connection, amy_customer_id)
-            self.assertEqual(amy_contacts[0]['name'], 'Amy buyer')
-            self.assertEqual(amy_contacts[0]['email'], 'buyer@rehearsal.example')
-        finally:
-            amy_connection.close()
-            db.set_db_user('hamid')
-
-        self.assertIsNone(trosa_domain.customer_record(self.connection, hamid_customer_id))
-        trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id, deleted=False)
-        self.assertEqual(trosa_domain.customer_record(self.connection, hamid_customer_id)['name'], 'Hamid changed')
-        self.connection.commit()
-
-    def test_customer_history_binding_keeps_shared_account_siblings_apart(self):
-        """A shared canonical account must not attribute one sibling's history to another."""
-        import db
-        import trosa_domain
-        from tools.postgres_rehearsal import load_fixture
-
-        load_fixture()
-
-        def ident(seed):
-            return self.connection.execute(
-                "SELECT trosa.compat_uuid(?)", (seed,)
-            ).fetchone()[0]
-
-        company_id = ident('binding-test:company')
-        account_id = ident('binding-test:account')
-        hamid_customer_id, amy_customer_id = 910001, 910002
-        events = {
-            'hamid': (ident('binding-test:event:hamid'), 'HAMID-ONLY', hamid_customer_id),
-            'amy': (ident('binding-test:event:amy'), 'AMY-ONLY', amy_customer_id),
-            'unbound': (ident('binding-test:event:unbound'), 'UNBOUND', None),
-        }
-        tasks = {
-            'hamid': (ident('binding-test:task:hamid'), 'HAMID TASK', hamid_customer_id),
-            'amy': (ident('binding-test:task:amy'), 'AMY TASK', amy_customer_id),
-            'unbound': (ident('binding-test:task:unbound'), 'UNBOUND TASK', None),
-        }
-        messages = {
-            'hamid': (ident('binding-test:message:hamid'), 'HAMID MAIL', hamid_customer_id),
-            'amy': (ident('binding-test:message:amy'), 'AMY MAIL', amy_customer_id),
-            'unbound': (ident('binding-test:message:unbound'), 'UNBOUND MAIL', None),
-        }
+        company_id = self.connection.execute(
+            'SELECT company_id FROM trosa.accounts WHERE id=?', (hamid_account,)).fetchone()[0]
+        amy_customer_id = 900001
+        amy_account = self.connection.execute(
+            "SELECT trosa.compat_uuid(?)", ('owner-test:amy-account',)).fetchone()[0]
+        amy_uid = self.connection.execute(
+            "SELECT id FROM identity.users WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='amy'",
+        ).fetchone()[0]
         try:
             self.connection.execute(
-                '''INSERT INTO core.companies (id, organization_id, canonical_name, normalized_name)
-                   VALUES (?, trosa.compat_org_id(), 'Binding Test Co', 'binding test co')''',
-                (company_id,),
+                '''INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id, display_name)
+                   VALUES (?, trosa.compat_org_id(), ?, ?, 'Amy original')''',
+                (amy_account, company_id, amy_uid),
             )
             self.connection.execute(
-                '''INSERT INTO trosa.accounts (id, organization_id, company_id, display_name)
-                   VALUES (?, trosa.compat_org_id(), ?, 'Binding Test')''',
-                (account_id, company_id),
+                '''INSERT INTO trosa.account_legacy_refs
+                       (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+                   VALUES (trosa.compat_org_id(), 'amy', ?, ?, 'owner-test-amy',
+                           '{"name":"Amy original","company":"Amy Co","country":"CA","last_contact":"2026-01-01"}'::jsonb)''',
+                (amy_customer_id, amy_account),
             )
-            for user, legacy_id in (('hamid', hamid_customer_id), ('amy', amy_customer_id)):
-                self.connection.execute(
-                    '''INSERT INTO trosa.account_legacy_refs
-                           (organization_id, legacy_user_id, legacy_customer_id, account_id,
-                            source_db, legacy_payload)
-                       VALUES (trosa.compat_org_id(), ?, ?, ?, 'binding-test', '{}'::jsonb)''',
-                    (user, legacy_id, account_id),
-                )
-
-            def bind(customer_id):
-                payload = {'is_reported': True}
-                if customer_id is not None:
-                    payload['customer_id'] = customer_id
-                return json.dumps(payload)
-
-            for kind, items in (
-                ('follow_up_logs', events),
-                ('reminders', tasks),
-                ('outreach_emails', messages),
-            ):
-                for idx, (item_key, (target_id, content, customer_id)) in enumerate(items.items()):
-                    payload = bind(customer_id)
-                    if kind == 'follow_up_logs':
-                        self.connection.execute(
-                            '''INSERT INTO trosa.timeline_events
-                                   (id, account_id, event_type, direction, content, source_module,
-                                    source_reference, occurred_at, payload)
-                               VALUES (?, ?, 'email', 'inbound', ?, 'binding-test', ?, trosa.compat_time('2026-08-01'), ?::jsonb)''',
-                            (target_id, account_id, content, item_key, payload),
-                        )
-                    elif kind == 'reminders':
-                        # One open follow-up per account per day is a database
-                        # invariant, so give each test task its own day.
-                        self.connection.execute(
-                            '''INSERT INTO trosa.tasks
-                                   (id, account_id, title, content, reason, due_at, status,
-                                    task_type, legacy_payload)
-                               VALUES (?, ?, ?, ?, 'binding test', trosa.compat_time(?), 'open',
-                                       'follow_up', ?::jsonb)''',
-                            (target_id, account_id, content, content,
-                             '2026-08-%02d' % (2 + idx), payload),
-                        )
-                    else:
-                        self.connection.execute(
-                            '''INSERT INTO trosa.outreach_messages
-                                   (id, account_id, subject, body, sent_at, legacy_payload)
-                               VALUES (?, ?, ?, ?, trosa.compat_time('2026-08-03'), ?::jsonb)''',
-                            (target_id, account_id, content, content, payload),
-                        )
-            for user in ('hamid', 'amy'):
-                for kind, items in (
-                    ('follow_up_logs', events),
-                    ('reminders', tasks),
-                    ('outreach_emails', messages),
-                ):
-                    for idx, (item_key, (target_id, content, customer_id)) in enumerate(items.items()):
-                        self.connection.execute(
-                            '''INSERT INTO trosa.legacy_row_refs
-                                   (organization_id, legacy_user_id, table_name, legacy_id, target_id)
-                               VALUES (trosa.compat_org_id(), ?, ?, ?, ?)''',
-                            (user, kind, {'hamid': 910, 'amy': 920}[user] + idx * 10 + 1, target_id),
-                        )
             self.connection.commit()
 
-            hamid_interactions = trosa_domain.customer_interactions(self.connection, hamid_customer_id)
-            self.assertIn('HAMID-ONLY', {item['content'] for item in hamid_interactions})
-            self.assertNotIn('AMY-ONLY', {item['content'] for item in hamid_interactions})
-            self.assertNotIn('UNBOUND', {item['content'] for item in hamid_interactions})
-            hamid_tasks = trosa_domain.customer_tasks(self.connection, hamid_customer_id)
-            self.assertIn('HAMID TASK', {item['title'] for item in hamid_tasks})
-            self.assertNotIn('AMY TASK', {item['title'] for item in hamid_tasks})
-            self.assertNotIn('UNBOUND TASK', {item['title'] for item in hamid_tasks})
+            # One shared company, two accounts, one owner each.
+            owner_rows = self.connection.execute(
+                '''SELECT usr.legacy_user_id FROM trosa.accounts a
+                    JOIN identity.users usr ON usr.id=a.owner_user_id
+                   WHERE a.organization_id=trosa.compat_org_id() AND a.company_id=?''',
+                (company_id,),
+            ).fetchall()
+            self.assertEqual({row['legacy_user_id'] for row in owner_rows}, {'hamid', 'amy'})
+
+            trosa_domain.update_customer(self.connection, customer_id=hamid_customer_id, values={
+                'name': 'Hamid changed', 'company': 'Hamid Co', 'country': 'US', 'level': 'A',
+                'website': 'https://hamid.example', 'profile': 'hamid', 'field': 'hamid field',
+                'industry': 'hamid industry', 'company_size': '51-200', 'annual_revenue': '20',
+                'tags': 'hamid', 'status': 'Hamid status', 'notes': 'Hamid note',
+                'system_notes': 'Hamid system', 'import_source': 'hamid', 'last_contact': '2026-02-01',
+                'next_follow_up': '2026-02-02', 'manual_next_follow': True,
+                'business_stage': '成交', 'business_role': '终端', 'customer_judgment': 'hamid judgment',
+            })
+            trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id,
+                                              deleted=True, changed_at='2026-02-04')
+            self.connection.commit()
 
             db.set_db_user('amy')
             amy_connection = db.get_db()
             try:
-                amy_interactions = trosa_domain.customer_interactions(amy_connection, amy_customer_id)
-                self.assertIn('AMY-ONLY', {item['content'] for item in amy_interactions})
-                self.assertNotIn('HAMID-ONLY', {item['content'] for item in amy_interactions})
-                self.assertNotIn('UNBOUND', {item['content'] for item in amy_interactions})
-                amy_tasks = trosa_domain.customer_tasks(amy_connection, amy_customer_id)
-                self.assertIn('AMY TASK', {item['title'] for item in amy_tasks})
-                self.assertNotIn('HAMID TASK', {item['title'] for item in amy_tasks})
-                # The legacy-shaped projections must apply the same binding.
-                amy_mail = amy_connection.execute(
-                    '''SELECT subject FROM trosa.outreach_emails WHERE customer_id=?''',
-                    (amy_customer_id,),
-                ).fetchall()
-                self.assertIn('AMY MAIL', {row['subject'] for row in amy_mail})
-                self.assertNotIn('HAMID MAIL', {row['subject'] for row in amy_mail})
+                amy_record = trosa_domain.customer_record(amy_connection, amy_customer_id)
+                self.assertIsNotNone(amy_record)
+                self.assertEqual(amy_record['name'], 'Amy original')
+                self.assertEqual(amy_record['company'], 'Amy Co')
+                self.assertIsNotNone(trosa_domain.customer_record(amy_connection, amy_customer_id))
             finally:
                 amy_connection.close()
                 db.set_db_user('hamid')
+
+            self.assertIsNone(trosa_domain.customer_record(self.connection, hamid_customer_id))
+            trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id, deleted=False)
+            self.assertEqual(trosa_domain.customer_record(self.connection, hamid_customer_id)['name'], 'Hamid changed')
+            self.connection.commit()
         finally:
-            target_ids = [item[0] for item in
-                          list(events.values()) + list(tasks.values()) + list(messages.values())]
+            self.connection.execute('DELETE FROM trosa.customer_details WHERE account_id=?', (amy_account,))
+            self.connection.execute('DELETE FROM trosa.account_legacy_refs WHERE account_id=?', (amy_account,))
+            self.connection.execute('DELETE FROM trosa.accounts WHERE id=?', (amy_account,))
+            self.connection.commit()
+
+    def test_customer_history_binding_keeps_account_aliases_apart(self):
+        """A bound fact must not fan out to a sibling alias of the same account."""
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        base_customer_id = ids['customer_id']
+        account_id = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (base_customer_id,),
+        ).fetchone()['account_id']
+        alias_customer_id = 910001
+        self.connection.execute(
+            '''INSERT INTO trosa.account_legacy_refs
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id,
+                    source_db, legacy_payload)
+               VALUES (trosa.compat_org_id(), 'hamid', ?, ?, 'binding-test',
+                       '{"name":"Historical alias","company":"Binding Alias Co"}'::jsonb)''',
+            (alias_customer_id, account_id),
+        )
+
+        def ident(seed):
+            return self.connection.execute("SELECT trosa.compat_uuid(?)", (seed,)).fetchone()[0]
+
+        def bind(customer_id):
+            payload = {'is_reported': True}
+            if customer_id is not None:
+                payload['customer_id'] = customer_id
+            return json.dumps(payload)
+
+        base_event = ident('binding-test:event:base')
+        alias_event = ident('binding-test:event:alias')
+        unbound_event = ident('binding-test:event:unbound')
+        base_task = ident('binding-test:task:base')
+        alias_task = ident('binding-test:task:alias')
+        unbound_task = ident('binding-test:task:unbound')
+        target_ids = [base_event, alias_event, unbound_event, base_task, alias_task, unbound_task]
+        try:
+            for target, content, customer_id in (
+                (base_event, 'BASE BOUND', base_customer_id),
+                (alias_event, 'ALIAS BOUND', alias_customer_id),
+                (unbound_event, 'ALIAS UNBOUND', None),
+            ):
+                self.connection.execute(
+                    '''INSERT INTO trosa.timeline_events
+                           (id, account_id, event_type, direction, content, source_module,
+                            source_reference, occurred_at, payload)
+                       VALUES (?, ?, 'email', 'inbound', ?, 'binding-test', ?, trosa.compat_time('2026-08-01'), ?::jsonb)''',
+                    (target, account_id, content, target, bind(customer_id)),
+                )
+            for idx, (target, content, customer_id) in enumerate((
+                (base_task, 'BASE TASK', base_customer_id),
+                (alias_task, 'ALIAS TASK', alias_customer_id),
+                (unbound_task, 'UNBOUND TASK', None),
+            )):
+                self.connection.execute(
+                    '''INSERT INTO trosa.tasks
+                           (id, account_id, title, content, reason, due_at, status, task_type, legacy_payload)
+                       VALUES (?, ?, ?, ?, 'binding test', trosa.compat_time(?), 'open',
+                               'follow_up', ?::jsonb)''',
+                    (target, account_id, content, content, '2026-09-%02d' % (2 + idx), bind(customer_id)),
+                )
+            for idx, target in enumerate((base_event, alias_event, unbound_event)):
+                self.connection.execute(
+                    '''INSERT INTO trosa.legacy_row_refs
+                           (organization_id, legacy_user_id, table_name, legacy_id, target_id)
+                       VALUES (trosa.compat_org_id(), 'hamid', 'follow_up_logs', ?, ?)''',
+                    (950000 + idx, target),
+                )
+            for idx, target in enumerate((base_task, alias_task, unbound_task)):
+                self.connection.execute(
+                    '''INSERT INTO trosa.legacy_row_refs
+                           (organization_id, legacy_user_id, table_name, legacy_id, target_id)
+                       VALUES (trosa.compat_org_id(), 'hamid', 'reminders', ?, ?)''',
+                    (960000 + idx, target),
+                )
+            self.connection.commit()
+
+            base_interactions = {item['content'] for item in
+                                 trosa_domain.customer_interactions(self.connection, base_customer_id)}
+            self.assertIn('BASE BOUND', base_interactions)
+            self.assertNotIn('ALIAS BOUND', base_interactions)
+            self.assertNotIn('ALIAS UNBOUND', base_interactions)
+            alias_interactions = {item['content'] for item in
+                                  trosa_domain.customer_interactions(self.connection, alias_customer_id)}
+            self.assertIn('ALIAS BOUND', alias_interactions)
+            self.assertNotIn('BASE BOUND', alias_interactions)
+            self.assertNotIn('ALIAS UNBOUND', alias_interactions)
+
+            base_tasks = {item['title'] for item in
+                          trosa_domain.customer_tasks(self.connection, base_customer_id)}
+            self.assertIn('BASE TASK', base_tasks)
+            self.assertNotIn('ALIAS TASK', base_tasks)
+            self.assertNotIn('UNBOUND TASK', base_tasks)
+            alias_tasks = {item['title'] for item in
+                           trosa_domain.customer_tasks(self.connection, alias_customer_id)}
+            self.assertIn('ALIAS TASK', alias_tasks)
+            self.assertNotIn('BASE TASK', alias_tasks)
+            self.assertNotIn('UNBOUND TASK', alias_tasks)
+        finally:
             marks = ','.join('?' for _ in target_ids)
+            self.connection.execute(f'DELETE FROM trosa.legacy_row_refs WHERE target_id IN ({marks})', target_ids)
+            self.connection.execute(f'DELETE FROM trosa.timeline_events WHERE id IN ({marks})', target_ids)
+            self.connection.execute(f'DELETE FROM trosa.tasks WHERE id IN ({marks})', target_ids)
             self.connection.execute(
-                f'DELETE FROM trosa.legacy_row_refs WHERE target_id IN ({marks})', target_ids)
-            self.connection.execute(
-                f'DELETE FROM trosa.timeline_events WHERE id IN ({marks})', target_ids)
-            self.connection.execute(
-                f'DELETE FROM trosa.tasks WHERE id IN ({marks})', target_ids)
-            self.connection.execute(
-                f'DELETE FROM trosa.outreach_messages WHERE id IN ({marks})', target_ids)
-            self.connection.execute(
-                'DELETE FROM trosa.account_legacy_refs WHERE account_id=?', (account_id,))
-            self.connection.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
-            self.connection.execute('DELETE FROM core.companies WHERE id=?', (company_id,))
+                '''DELETE FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                      AND legacy_customer_id=?''', (alias_customer_id,))
             self.connection.commit()
 
     def test_timeline_identity_does_not_collide_across_customers_or_users(self):
@@ -710,6 +664,153 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                 (duplicate_id, first_account),
             )
         self.connection.rollback()
+
+    def test_single_active_owner_and_explicit_transfer(self):
+        """A Customer has one owner; transfer moves it explicitly."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        customer_id = trosa_domain.create_customer(self.connection, values={
+            'name': 'Single Owner Customer',
+            'company': 'Single Owner Co',
+            'website': 'https://single-owner.example',
+        })
+        self.connection.commit()
+        owner = self.connection.execute(
+            '''SELECT usr.legacy_user_id FROM trosa.account_legacy_refs ar
+                JOIN trosa.accounts a ON a.id=ar.account_id
+                JOIN identity.users usr ON usr.id=a.owner_user_id
+               WHERE ar.organization_id=trosa.compat_org_id() AND ar.legacy_user_id='hamid'
+                 AND ar.legacy_customer_id=?''', (customer_id,),
+        ).fetchone()['legacy_user_id']
+        self.assertEqual(owner, 'hamid')
+
+        # A reference for a different user is rejected by the database.
+        with self.assertRaises(Exception):
+            self.connection.execute(
+                '''INSERT INTO trosa.account_legacy_refs
+                       (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db)
+                   SELECT organization_id, 'amy', 931001, account_id, 'guard-probe'
+                     FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                      AND legacy_customer_id=?''', (customer_id,),
+            )
+        self.connection.rollback()
+
+        moved = trosa_domain.transfer_customer(self.connection, customer_id=customer_id, to_user='amy')
+        self.connection.commit()
+        self.assertEqual(
+            self.connection.execute(
+                '''SELECT usr.legacy_user_id FROM trosa.account_legacy_refs ar
+                    JOIN trosa.accounts a ON a.id=ar.account_id
+                    JOIN identity.users usr ON usr.id=a.owner_user_id
+                   WHERE ar.organization_id=trosa.compat_org_id() AND ar.legacy_user_id='amy'
+                     AND ar.legacy_customer_id=?''', (moved,),
+            ).fetchone()['legacy_user_id'],
+            'amy',
+        )
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            self.assertIsNotNone(trosa_domain.customer_record(amy_connection, moved))
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+        self.assertIsNone(trosa_domain.customer_record(self.connection, customer_id))
+
+    def test_owner_heal_splits_multi_user_accounts(self):
+        """The drift heal gives each user their own account for a shared company."""
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        hamid_account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (customer_id,),
+        ).fetchone()['account_id']
+        company_id = self.connection.execute(
+            'SELECT company_id FROM trosa.accounts WHERE id=?', (hamid_account,)).fetchone()[0]
+        # Seed the pre-invariant drift, then let the heal split it.
+        self.connection.execute(
+            'ALTER TABLE trosa.account_legacy_refs DISABLE TRIGGER trosa_account_legacy_refs_owner_guard')
+        self.connection.execute(
+            '''INSERT INTO trosa.account_legacy_refs
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+               VALUES (trosa.compat_org_id(), 'amy', 932001, ?, 'drift-probe', '{}'::jsonb)''',
+            (hamid_account,),
+        )
+        self.connection.execute(
+            'ALTER TABLE trosa.account_legacy_refs ENABLE TRIGGER trosa_account_legacy_refs_owner_guard')
+        split_count = self.connection.execute(
+            'SELECT trosa.enforce_single_account_owner()').fetchone()[0]
+        self.assertGreaterEqual(split_count, 1)
+        amy_account = self.connection.execute(
+            '''SELECT a.id, a.owner_user_id FROM trosa.account_legacy_refs ar
+                JOIN trosa.accounts a ON a.id=ar.account_id
+               WHERE ar.organization_id=trosa.compat_org_id() AND ar.legacy_user_id='amy'
+                 AND ar.legacy_customer_id=932001''',
+        ).fetchone()
+        self.assertIsNotNone(amy_account)
+        self.assertNotEqual(amy_account['id'], hamid_account)
+        owner_legacy = self.connection.execute(
+            'SELECT legacy_user_id FROM identity.users WHERE id=?', (amy_account['owner_user_id'],),
+        ).fetchone()[0]
+        self.assertEqual(owner_legacy, 'amy')
+        self.assertEqual(
+            self.connection.execute(
+                'SELECT company_id FROM trosa.accounts WHERE id=?', (amy_account['id'],),
+            ).fetchone()[0],
+            company_id,
+        )
+        self.connection.rollback()
+
+    def test_compat_writer_creates_owner_scoped_accounts_for_shared_company(self):
+        """The compatibility writer never merges two owners' accounts."""
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        self.connection.execute(
+            '''INSERT INTO trade_os_compat.customers (name, company, country, website, level)
+               VALUES ('Compat Owner A', 'Compat Owner Co', 'US', 'https://compat-owner.example', 'A')''')
+        first = int(self.connection.execute(
+            "SELECT current_setting('trade_os.lastrowid', true)").fetchone()[0])
+        first_account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (first,),
+        ).fetchone()['account_id']
+        self.connection.commit()
+
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_connection.execute(
+                '''INSERT INTO trade_os_compat.customers (name, company, country, website, level)
+                   VALUES ('Compat Owner B', 'Compat Owner Co', 'US', 'https://compat-owner.example', 'B')''')
+            second = int(amy_connection.execute(
+                "SELECT current_setting('trade_os.lastrowid', true)").fetchone()[0])
+            second_account = amy_connection.execute(
+                '''SELECT account_id FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='amy'
+                      AND legacy_customer_id=?''', (second,),
+            ).fetchone()['account_id']
+            amy_connection.commit()
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+        self.assertNotEqual(first_account, second_account)
+        rows = self.connection.execute(
+            '''SELECT a.company_id, usr.legacy_user_id FROM trosa.accounts a
+                JOIN identity.users usr ON usr.id=a.owner_user_id
+               WHERE a.id IN (?, ?)''', (first_account, second_account),
+        ).fetchall()
+        self.assertEqual(len({row['company_id'] for row in rows}), 1)
+        self.assertEqual({row['legacy_user_id'] for row in rows}, {'hamid', 'amy'})
 
     def test_contact_delete_and_undo_restore_on_postgres(self):
         """Undo of a deleted contact must re-insert through the compat view."""
@@ -1811,41 +1912,62 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         inbox_id = client.post('/api/inbox/reply', json={
             'customer_id': customer_id, 'content': 'Cascade inbox reply.',
         }).get_json()['id']
-        account = self.connection.execute(
+        hamid_account = self.connection.execute(
             '''SELECT account_id FROM trosa.account_legacy_refs
                 WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
                   AND legacy_customer_id=?''', (customer_id,),
         ).fetchone()['account_id']
+        company_id = self.connection.execute(
+            'SELECT company_id FROM trosa.accounts WHERE id=?', (hamid_account,)).fetchone()[0]
 
-        # Amy shares the same canonical account with her own projection.
+        # Amy owns a separate account for the same shared company.
+        amy_customer_id = 920001
+        amy_account = self.connection.execute(
+            "SELECT trosa.compat_uuid(?)", ('delete-cascade:amy-account',)).fetchone()[0]
+        amy_uid = self.connection.execute(
+            "SELECT id FROM identity.users WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='amy'",
+        ).fetchone()[0]
+        self.connection.execute(
+            '''INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id, display_name)
+               VALUES (?, trosa.compat_org_id(), ?, ?, 'Amy same-company customer')''',
+            (amy_account, company_id, amy_uid),
+        )
         self.connection.execute(
             '''INSERT INTO trosa.account_legacy_refs
-               (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
-               VALUES (trosa.compat_org_id(), 'amy', 920001, ?, 'shared-delete-probe', '{}'::jsonb)
-               ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id)
-               DO UPDATE SET account_id=excluded.account_id''',
-            (account,),
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+               VALUES (trosa.compat_org_id(), 'amy', ?, ?, 'delete-cascade', '{}'::jsonb)''',
+            (amy_customer_id, amy_account),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.customer_details (account_id, notes) VALUES (?, 'Amy detail')''',
+            (amy_account,),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.tasks (id, account_id, title, due_at, status, task_type)
+               VALUES (trosa.compat_uuid('delete-cascade:amy-task'), ?, 'Amy task',
+                       trosa.compat_time('2026-10-02'), 'open', 'follow_up')''',
+            (amy_account,),
         )
         self.connection.commit()
 
         deleted = client.delete(f'/api/customers/{customer_id}/permanent')
         self.assertEqual(deleted.status_code, 200, deleted.get_json())
         self.assertEqual(client.get(f'/api/customers/{customer_id}').status_code, 404)
-        # Hamid's projection is gone but Amy's shared view is intact.
+        # Hamid's account is gone; Amy's same-company account and task survive.
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.accounts WHERE id=?', (hamid_account,)).fetchone()[0], 0)
         db.set_db_user('amy')
         amy_connection = db.get_db()
         try:
-            amy_record = trosa_domain.customer_record(amy_connection, 920001)
-            self.assertIsNotNone(amy_record)
-            self.assertEqual(
-                amy_connection.execute(
-                    'SELECT count(*) FROM trosa.tasks WHERE account_id=?', (account,),
-                ).fetchone()[0],
-                1,
-            )
+            self.assertIsNotNone(trosa_domain.customer_record(amy_connection, amy_customer_id))
+            self.assertEqual(amy_connection.execute(
+                'SELECT count(*) FROM trosa.tasks WHERE account_id=?', (amy_account,)).fetchone()[0], 1)
         finally:
             amy_connection.close()
             db.set_db_user('hamid')
+        # The shared company and its identity rows survive Hamid's delete.
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM core.companies WHERE id=?', (company_id,)).fetchone()[0], 1)
         orphans = self.connection.execute(
             '''SELECT count(*) FROM trosa.account_legacy_refs ref
                  LEFT JOIN trosa.accounts account ON account.id=ref.account_id
@@ -1853,15 +1975,15 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(orphans, 0)
 
-        # Amy's own permanent delete is now exclusive and removes everything.
+        # Amy's own permanent delete is exclusive and removes her rows.
         amy_client = module.app.test_client()
         self.assertEqual(amy_client.post('/api/auth/login', json={'user': 'amy'}).status_code, 200)
         self.assertEqual(
-            amy_client.delete('/api/customers/920001/permanent').status_code, 200,
+            amy_client.delete(f'/api/customers/{amy_customer_id}/permanent').status_code, 200,
         )
         self.assertEqual(
             self.connection.execute(
-                'SELECT count(*) FROM trosa.accounts WHERE id=?', (account,),
+                'SELECT count(*) FROM trosa.accounts WHERE id=?', (amy_account,),
             ).fetchone()[0],
             0,
         )
@@ -1870,7 +1992,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                     + (SELECT count(*) FROM trosa.timeline_events WHERE account_id=?)
                     + (SELECT count(*) FROM trosa.outreach_messages WHERE account_id=?)
                     + (SELECT count(*) FROM trosa.inbox_items WHERE account_id=?)''',
-            (account, account, account, account),
+            (amy_account, amy_account, amy_account, amy_account),
         ).fetchone()[0]
         self.assertEqual(remaining, 0)
         orphans = self.connection.execute(

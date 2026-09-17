@@ -1954,6 +1954,10 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         identity = (ROOT / 'migrations' / '0035_timeline_natural_identity.sql').read_text(encoding='utf-8')
         self.assertIn('trosa_timeline_natural_identity_idx', identity)
         self.assertIn('account_id, source_module, source_reference', identity)
+        owner = (ROOT / 'migrations' / '0036_single_active_customer_owner.sql').read_text(encoding='utf-8')
+        self.assertIn('accounts_org_company_owner_key', owner)
+        self.assertIn('trosa_account_legacy_refs_owner_guard', owner)
+        self.assertIn('transfer_customer_account', owner)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')
