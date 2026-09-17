@@ -1,3 +1,11 @@
+## 2026-09-17 — 修复沟通记录串客户：历史记录按原始客户绑定，禁止共享主档别名扇出
+
+- 根因：`trosa.customer_interactions` / `trosa.customer_tasks` 视图只按 account 关联 `account_legacy_refs`；同一用户名下两个客户（如 Kaze 与 Action Plus Exhibitions and Interiors）指向同一 canonical 公司账号后，每条沟通记录会扇出到每个别名客户，客户详情“现在 / 最近一次重要沟通”、时间线、下一步因此显示另一客户的记录。Today 在 0033 只做了去重而非正确归属。
+- 机制（迁移 0034）：每个事件/待办/开发信按其自身 payload 里保存的原始 `customer_id` 绑定客户（导入器本就原样保存了旧表行，运行时写入边界 `record_external_interaction` / `merge_open_task` / `create_outreach_message` 现在显式写入该绑定）；缺绑定的旧行只有在“该用户对该账号只有一个别名”时才可见，绝不扇出。legacy 形状视图（`trosa.reminders` / `trosa.follow_up_logs` / `trosa.outreach_emails`）同步换用同一绑定，写触发器不受影响。
+- 数据核验：新增 `tools/customer_boundary_audit.py` —— 全库只读审计（绑定缺失/歧义/不匹配分类、修复前错误暴露统计、三个业务视图与规范绑定的逐行一致性校验），`--repair` 只应用确定性修复（单别名补绑定、经 related_task 链恢复）并输出 before/after 变更日志。
+- 数据修复：Kaze/Action Plus 共享账号下的 9 条沟通记录已按原始客户还原归属；4 条无法可靠判断归属的记录保持隐藏并明确列出，不做猜测性归属。
+- 回归：新增演练测试 `test_customer_history_stays_bound_to_its_own_customer_on_merged_account` 与 `test_customer_boundary_audit_reports_clean_history`；客户列表、详情、现在、时间线、最近沟通、下一步、Today、周报全部经由同一绑定视图读取。
+
 ## 2026-09-16 — 保存后即时回显客户工作区与 Today 变化
 
 - 优化：记录沟通、开发信、编辑/删除/撤销跟进记录，以及 Today 与客户详情中的完成/延后/安排下一步，在服务端写入成功后先更新当前视图，不再需要刷新整页才能看到变化；后台读取只负责校准，读取失败也不会撤销已经确认的本地回显。

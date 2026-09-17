@@ -1704,6 +1704,193 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             )
             self.connection.commit()
 
+    def test_customer_history_stays_bound_to_its_own_customer_on_merged_account(self):
+        """A merged account must never leak history between Customer aliases.
+
+        The Kaze regression: two legacy customers of the same user share one
+        canonical account, and the customer history views used to fan every
+        event out to both aliases.  Each interaction, outreach, and task must
+        be attributed to the customer recorded in its own payload binding.
+        """
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        alias_customer_id = 990002
+        account = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()['account_id']
+        try:
+            self.connection.execute(
+                '''INSERT INTO trosa.account_legacy_refs
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id,
+                    source_db, legacy_payload)
+                   VALUES (trosa.compat_org_id(), 'hamid', ?, ?,
+                           'customer-binding-probe', '{"name":"Merged sibling"}')
+                   ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id)
+                   DO NOTHING''',
+                (alias_customer_id, account),
+            )
+            self.connection.commit()
+
+            alias_interaction_id = trosa_domain.record_external_interaction(
+                self.connection,
+                customer_id=alias_customer_id,
+                content='Alias customer own follow-up',
+                occurred_on='2026-09-15',
+                direction='outbound',
+                source='customer-binding-probe',
+                source_reference='customer-binding-probe:interaction',
+                activity_type='follow_up',
+            )
+            alias_task_id = trosa_domain.merge_open_task(
+                self.connection, customer_id=alias_customer_id,
+                title='Alias customer next step', content='', reason='binding probe',
+                due_on='2026-10-01', now='2026-09-15 09:00:00',
+            )
+            alias_outreach_id = trosa_domain.create_outreach_message(
+                self.connection, customer_id=alias_customer_id,
+                subject='Alias quote', content='Alias body',
+                sent_on='2026-09-14', reply_status='pending',
+                created_at='2026-09-15 09:00:00',
+            )
+            self.connection.commit()
+
+            # New runtime writes carry the explicit customer binding.
+            event_row = self.connection.execute(
+                '''SELECT payload->>'customer_id' AS bound
+                     FROM trosa.timeline_events event
+                     JOIN trosa.legacy_row_refs r ON r.target_id=event.id
+                      AND r.table_name='follow_up_logs'
+                    WHERE r.legacy_user_id='hamid' AND r.legacy_id=?''',
+                (alias_interaction_id,),
+            ).fetchone()
+            self.assertEqual(event_row['bound'], str(alias_customer_id))
+            task_row = self.connection.execute(
+                '''SELECT legacy_payload->>'customer_id' AS bound
+                     FROM trosa.tasks task
+                     JOIN trosa.legacy_row_refs r ON r.target_id=task.id
+                      AND r.table_name='reminders'
+                    WHERE r.legacy_user_id='hamid' AND r.legacy_id=?''',
+                (alias_task_id,),
+            ).fetchone()
+            self.assertEqual(task_row['bound'], str(alias_customer_id))
+
+            # Customer history contains no fan-out: each row lands under
+            # exactly one customer, and never under the sibling alias.
+            rows = self.connection.execute(
+                '''SELECT id, customer_id FROM trosa.customer_interactions
+                    WHERE id=?''', (alias_interaction_id,),
+            ).fetchall()
+            self.assertEqual(len(rows), 1, rows)
+            self.assertEqual(rows[0]['customer_id'], alias_customer_id)
+            outreach_rows = self.connection.execute(
+                '''SELECT customer_id FROM trosa.customer_interactions
+                    WHERE kind='email' AND id=?''', (alias_outreach_id,),
+            ).fetchall()
+            self.assertEqual([row['customer_id'] for row in outreach_rows],
+                             [alias_customer_id])
+
+            task_rows = self.connection.execute(
+                '''SELECT customer_id FROM trosa.customer_tasks WHERE id=?''',
+                (alias_task_id,),
+            ).fetchall()
+            self.assertEqual([row['customer_id'] for row in task_rows], [alias_customer_id])
+
+            today_rows = self.connection.execute(
+                '''SELECT customer_id FROM trosa.today_tasks WHERE id=?''',
+                (alias_task_id,),
+            ).fetchall()
+            self.assertEqual([row['customer_id'] for row in today_rows], [alias_customer_id])
+
+            # The sibling customer sees none of the alias customer's history.
+            self.assertEqual(
+                self.connection.execute(
+                    '''SELECT count(*) FROM trosa.customer_interactions
+                        WHERE customer_id=? AND id=?''',
+                    (customer_id, alias_interaction_id),
+                ).fetchone()[0], 0,
+            )
+            self.assertEqual(
+                self.connection.execute(
+                    '''SELECT count(*) FROM trosa.customer_tasks
+                        WHERE customer_id=? AND id=?''',
+                    (customer_id, alias_task_id),
+                ).fetchone()[0], 0,
+            )
+            facts = trosa_domain.customer_facts(
+                self.connection, [customer_id, alias_customer_id],
+            )
+            self.assertNotEqual(
+                facts[customer_id]['next_task_title'], 'Alias customer next step',
+            )
+            self.assertEqual(
+                facts[alias_customer_id]['next_task_title'], 'Alias customer next step',
+            )
+        finally:
+            self.connection.execute(
+                '''DELETE FROM trosa.timeline_events event
+                     USING trosa.legacy_row_refs r
+                    WHERE event.id=r.target_id AND r.table_name='follow_up_logs'
+                      AND r.legacy_user_id='hamid' AND r.legacy_id=?''',
+                (alias_interaction_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.tasks task
+                     USING trosa.legacy_row_refs r
+                    WHERE task.id=r.target_id AND r.table_name='reminders'
+                      AND r.legacy_user_id='hamid' AND r.legacy_id=?''',
+                (alias_task_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.outreach_messages message
+                     USING trosa.legacy_row_refs r
+                    WHERE message.id=r.target_id AND r.table_name='outreach_emails'
+                      AND r.legacy_user_id='hamid' AND r.legacy_id=?''',
+                (alias_outreach_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid'
+                      AND table_name='follow_up_logs' AND legacy_id=?''',
+                (alias_interaction_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid'
+                      AND table_name='reminders' AND legacy_id=?''',
+                (alias_task_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.legacy_row_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid'
+                      AND table_name='outreach_emails' AND legacy_id=?''',
+                (alias_outreach_id,),
+            )
+            self.connection.execute(
+                '''DELETE FROM trosa.account_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+                (alias_customer_id,),
+            )
+            self.connection.commit()
+
+    def test_customer_boundary_audit_reports_clean_history(self):
+        """The full-boundary audit must report zero view or binding issues."""
+        from tools import customer_boundary_audit
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        issues = customer_boundary_audit.verify_views(self.connection, ['hamid', 'amy'])
+        self.assertEqual(issues, [], issues)
+
     def test_compat_view_same_day_insert_merges_into_one_row(self):
         """Direct compat-view writes obey the same one-task invariant."""
         from tools.postgres_rehearsal import load_fixture
