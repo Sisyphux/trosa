@@ -154,19 +154,29 @@ class PlanReleaseDbTests(unittest.TestCase):
         migration_dir = ROOT / "migrations"
         # Use the actual files rather than synthesizing names: this confirms
         # a historic destructive migration is excluded before classification.
-        applied = {
+        # Expected pending migrations are derived from the directory so adding
+        # a parallel task's forward migration does not break this release test.
+        local = sorted(
             path.name for path in migration_dir.glob("*.sql")
-            if path.name[:4].isdigit() and int(path.name[:4]) <= 30
-        }
+            if path.name[:4].isdigit()
+        )
+        applied = {name for name in local if int(name[:4]) <= 30}
+        expected_pending = [name for name in local if int(name[:4]) > 30]
         self.assertEqual(len(applied), 30)
         result = plan.plan_release_db(str(migration_dir), applied, [])
-        self.assertEqual(result["pending_migrations"], [
-            "0031_customer_pin_payload_backfill.sql",
-            "0032_one_follow_up_per_customer_day.sql",
-            "0033_today_task_alias_fanout.sql",
-        ])
-        self.assertEqual(result["category"], "compatible")
-        self.assertEqual(result["destructive_files"], [])
+        self.assertEqual(result["pending_migrations"], expected_pending)
+        expected_destructive = [
+            name for name in expected_pending
+            if plan.is_destructive_sql(
+                (migration_dir / name).read_text(encoding="utf-8")
+            )
+        ]
+        if expected_destructive:
+            self.assertEqual(result["category"], "destructive")
+            self.assertEqual(result["destructive_files"], expected_destructive)
+        else:
+            self.assertEqual(result["category"], "compatible")
+            self.assertEqual(result["destructive_files"], [])
         self.assertNotIn("0009_postgres_final_integrity_boundaries.sql", result["pending_migrations"])
 
     def test_cli_emits_machine_readable_json(self):
@@ -258,7 +268,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def test_shell_syntax_valid(self):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",
-                     "auto-publish.sh", "run-workbench-command.sh",
+                     "auto-publish.sh", "release-commit.sh", "release-test.sh",
+                     "agent-worktree.sh", "run-workbench-command.sh",
                      "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")
@@ -358,6 +369,31 @@ class ResultContractTests(unittest.TestCase):
             if candidate.get("release") == "rel-x":
                 best = candidate
         self.assertEqual(best["status"], "rolled_back")
+
+
+class AgentWorktreeContractTests(unittest.TestCase):
+    """The task-isolation entrypoint must keep its boundary commands wired.
+
+    A parallel-agent workflow only works if every session can (a) discover
+    where it is, (b) move unattributed in-flight changes out of the main
+    workspace, and (c) see migration-number conflicts.  These are cheap
+    contract checks, not a full end-to-end run.
+    """
+
+    def test_help_lists_boundary_commands(self):
+        proc = run(["bash", "deploy/cloud/agent-worktree.sh", "--help"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for command in ("status", "preflight", "create", "adopt", "sync", "publish", "remove"):
+            self.assertIn(command, proc.stdout)
+
+    def test_status_reports_current_environment(self):
+        proc = run(["bash", "deploy/cloud/agent-worktree.sh", "status"])
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("环境：", proc.stdout)
+
+    def test_unknown_command_fails(self):
+        proc = run(["bash", "deploy/cloud/agent-worktree.sh", "definitely-not-a-command"])
+        self.assertNotEqual(proc.returncode, 0)
 
 
 if __name__ == "__main__":

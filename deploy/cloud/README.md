@@ -176,18 +176,25 @@ done
 ## 多 Agent 任务隔离
 
 每个 Agent 都在一个独立 worktree 和任务分支中工作（`agent/<id>`，目录默认在
-仓库同级的 `trosa-worktrees/`，`workbench.env` 从不复制进隔离区）。任务完成时
-先提交一个逻辑完整的 commit；发布系统不理解文件 hunk，也不读取其他 worktree：
+仓库同级的 `trosa-worktrees/`，`workbench.env` 从不复制进隔离区）。主工作区只做
+集成、验收和发布，不直接写业务代码；完整规则见根目录
+[`MULTI_AGENT_WORKFLOW.md`](../../MULTI_AGENT_WORKFLOW.md)。
 
 ```bash
-deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区，复用主仓 .venv/node_modules
-deploy/cloud/agent-worktree.sh test --task <id>     # 隔离数据目录跑完整回归（含扩展测试）
-deploy/cloud/agent-worktree.sh sync --task <id>     # 变基到最新 main
-deploy/cloud/agent-worktree.sh publish --task <id>  # 发布任务分支的已提交成果
-deploy/cloud/agent-worktree.sh remove --task <id>   # 回收（默认保留分支）
+deploy/cloud/agent-worktree.sh status                 # 判断当前环境 / 任务归属
+deploy/cloud/agent-worktree.sh preflight              # 体检：主区脏文件、迁移编号冲突
+deploy/cloud/agent-worktree.sh create --task <id> \
+  --owner <name> --goal "..." --scope "..."           # 建隔离区，预留下一个迁移编号
+deploy/cloud/agent-worktree.sh adopt --task <id>      # 把主区在途改动整体搬进隔离区
+deploy/cloud/agent-worktree.sh test --task <id>       # 隔离数据目录跑完整回归（含扩展测试）
+deploy/cloud/agent-worktree.sh sync --task <id>       # 变基到最新 main
+deploy/cloud/agent-worktree.sh publish --task <id>    # 发布任务分支的已提交成果
+deploy/cloud/agent-worktree.sh remove --task <id>     # 回收（默认保留分支）
 ```
 
-发布要求任务 worktree 完全干净（包含没有未跟踪文件）；随后在基于
-`origin/main` 的临时 release worktree 中 cherry-pick 任务 commit，跑同一份
-`release-test.sh`，冲突则停止且不修改调用者工作区。主 worktree 可以继续有其他
-Agent 的在途改动。完整说明见 `agent-worktree.sh --help` 与脚本头注释。
+任务清单（负责人 / 目标 / 修改范围 / 预留迁移编号）存放在共享 git 目录
+`trosa-tasks/<id>.json`，不进入版本库。发布要求任务 worktree 完全干净
+（包含没有未跟踪文件）；随后在基于 `origin/main` 的临时 release worktree 中
+cherry-pick 任务 commit，跑同一份 `release-test.sh`，冲突则停止且不修改调用者
+工作区。主 worktree 可以继续有其他 Agent 的在途改动。完整说明见
+`agent-worktree.sh --help` 与脚本头注释。

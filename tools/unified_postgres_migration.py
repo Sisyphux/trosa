@@ -42,40 +42,15 @@ from postgres_schema_contract import (
 )
 
 
-SCHEMA_PATHS = (
-    ROOT / "migrations" / "0001_unified_trade_os.sql",
-    ROOT / "migrations" / "0002_postgres_runtime.sql",
-    ROOT / "migrations" / "0003_postgres_app_compat.sql",
-    ROOT / "migrations" / "0004_postgres_runtime_surfaces.sql",
-    ROOT / "migrations" / "0005_postgres_runtime_write_fixes.sql",
-    ROOT / "migrations" / "0006_postgres_runtime_surface_writes.sql",
-    ROOT / "migrations" / "0007_postgres_runtime_hardening.sql",
-    ROOT / "migrations" / "0008_postgres_runtime_integrity_hardening.sql",
-    ROOT / "migrations" / "0009_postgres_final_integrity_boundaries.sql",
-    ROOT / "migrations" / "0010_postgres_user_scoped_external_ids.sql",
-    ROOT / "migrations" / "0011_postgres_compat_identity_guards.sql",
-    ROOT / "migrations" / "0012_postgres_legacy_email_ids.sql",
-    ROOT / "migrations" / "0013_postgres_company_match_boundaries.sql",
-    ROOT / "migrations" / "0014_postgres_customer_priority_recovery.sql",
-    ROOT / "migrations" / "0015_postgres_legacy_date_projections.sql",
-    ROOT / "migrations" / "0016_postgres_user_scoped_customer_payloads.sql",
-    ROOT / "migrations" / "0017_trosa_agent_prospect_profiles.sql",
-    ROOT / "migrations" / "0018_trosa_business_exclusions.sql",
-    ROOT / "migrations" / "0019_retire_frozen_compat_surfaces.sql",
-    ROOT / "migrations" / "0020_customer_state_facts.sql",
-    ROOT / "migrations" / "0021_formal_business_read_models.sql",
-    ROOT / "migrations" / "0022_modern_trosa_core.sql",
-    ROOT / "migrations" / "0023_customer_details_compat_boundary.sql",
-    ROOT / "migrations" / "0024_customer_record_task_projection.sql",
-    ROOT / "migrations" / "0025_customer_record_dates.sql",
-    ROOT / "migrations" / "0026_compat_customer_state_boundary.sql",
-    ROOT / "migrations" / "0027_modern_customer_files_and_priority.sql",
-    ROOT / "migrations" / "0028_canonical_operation_audit.sql",
-    ROOT / "migrations" / "0029_compat_operation_audit_bridge.sql",
-    ROOT / "migrations" / "0030_customer_records_user_scoped_projection.sql",
-    ROOT / "migrations" / "0031_customer_pin_payload_backfill.sql",
-    ROOT / "migrations" / "0032_one_follow_up_per_customer_day.sql",
-    ROOT / "migrations" / "0033_today_task_alias_fanout.sql",
+# The migrations directory is the single source of truth shared by the runtime
+# (``db.py``) and this rehearsal/apply tool.  Adding a ``NNNN_*.sql`` file is
+# the only step needed; ``tools/check_migrations.py`` guards numbering.
+MIGRATIONS_DIR = ROOT / "migrations"
+SCHEMA_PATHS = tuple(
+    sorted(
+        path for path in MIGRATIONS_DIR.glob("*.sql")
+        if path.name[:4].isdigit() and path.name[4:5] == "_"
+    )
 )
 TARGET_SCHEMAS = REQUIRED_SCHEMAS
 TARGET_TABLES = REQUIRED_TABLES

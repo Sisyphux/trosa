@@ -6,6 +6,14 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 
 当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后默认使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>` 构建干净候选并发布 ECS，发布不读取主工作区的 dirty 改动。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
 
+## 多 Agent 并行开发（强制）
+
+- 主工作区只做集成、验收和发布，禁止直接写业务代码或堆积来源不明的未提交改动。每个任务在独立 worktree + `agent/<id>` 分支中完成，完整流程见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md)。
+- 会话开始先运行 `deploy/cloud/agent-worktree.sh status` 判断当前环境，再运行 `preflight` 看主工作区与迁移编号冲突。新任务用 `create --task <id> --owner ... --goal ... --scope ...`。
+- 发现主工作区有无法归属的在途改动时，用 `adopt --task <id>` 搬进隔离区，不要直接 commit、覆盖或删除；adopt 会保留 stash 备份。
+- 每个 commit 以 `[<id>]` 开头且只承载一个任务的改动；发布用 `agent-worktree.sh publish --task <id>`（底层是 commit 驱动入口），只接受 commit / branch。
+- `migrations/` 目录是数据库迁移的唯一事实源：新增迁移先在 create/adopt 预留编号，并通过 `tools/check_migrations.py`；详见 [`migrations/README.md`](migrations/README.md)。
+
 ## 运行与数据边界
 
 - **ECS 是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于 ECS 本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。

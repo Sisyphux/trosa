@@ -30,6 +30,16 @@ from tools.unified_postgres_import import (
 )
 
 
+def _registered_migration_names():
+    """Migration names the rehearsal/apply tool will execute.
+
+    Derived from ``migrations/`` so a parallel task only adds a file; there is
+    no hardcoded registry to update in both places.
+    """
+    from tools import unified_postgres_migration
+    return {Path(path).name for path in unified_postgres_migration.SCHEMA_PATHS}
+
+
 class IsolatedDatabaseTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -1932,26 +1942,35 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("e.payload->>'contact_id'", migration)
         self.assertIn("e.payload->>'related_task_id'", migration)
         self.assertIn("o.legacy_payload->>'contact_id'", migration)
-        self.assertEqual(Path(db._postgres_migration_paths()[-1]).name, '0033_today_task_alias_fanout.sql')
-        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
-        self.assertIn('0007_postgres_runtime_hardening.sql', tool_source)
-        self.assertIn('0015_postgres_legacy_date_projections.sql', tool_source)
-        self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', tool_source)
-        self.assertIn('0017_trosa_agent_prospect_profiles.sql', tool_source)
-        self.assertIn('0018_trosa_business_exclusions.sql', tool_source)
-        self.assertIn('0019_retire_frozen_compat_surfaces.sql', tool_source)
-        self.assertIn('0020_customer_state_facts.sql', tool_source)
-        self.assertIn('0021_formal_business_read_models.sql', tool_source)
-        self.assertIn('0022_modern_trosa_core.sql', tool_source)
-        self.assertIn('0023_customer_details_compat_boundary.sql', tool_source)
-        self.assertIn('0024_customer_record_task_projection.sql', tool_source)
-        self.assertIn('0025_customer_record_dates.sql', tool_source)
-        self.assertIn('0026_compat_customer_state_boundary.sql', tool_source)
-        self.assertIn('0027_modern_customer_files_and_priority.sql', tool_source)
-        self.assertIn('0028_canonical_operation_audit.sql', tool_source)
-        self.assertIn('0029_compat_operation_audit_bridge.sql', tool_source)
-        self.assertIn('0030_customer_records_user_scoped_projection.sql', tool_source)
-        self.assertIn('0031_customer_pin_payload_backfill.sql', tool_source)
+        # The registry must track the directory exactly, so a new forward
+        # migration is applied without editing any hardcoded list.
+        self.assertEqual(
+            [Path(path).name for path in db._postgres_migration_paths()],
+            sorted(path.name for path in (ROOT / 'migrations').glob('[0-9][0-9][0-9][0-9]_*.sql')),
+        )
+        from tools import unified_postgres_migration
+        registered = {Path(path).name for path in unified_postgres_migration.SCHEMA_PATHS}
+        for name in (
+            '0007_postgres_runtime_hardening.sql',
+            '0015_postgres_legacy_date_projections.sql',
+            '0016_postgres_user_scoped_customer_payloads.sql',
+            '0017_trosa_agent_prospect_profiles.sql',
+            '0018_trosa_business_exclusions.sql',
+            '0019_retire_frozen_compat_surfaces.sql',
+            '0020_customer_state_facts.sql',
+            '0021_formal_business_read_models.sql',
+            '0022_modern_trosa_core.sql',
+            '0023_customer_details_compat_boundary.sql',
+            '0024_customer_record_task_projection.sql',
+            '0025_customer_record_dates.sql',
+            '0026_compat_customer_state_boundary.sql',
+            '0027_modern_customer_files_and_priority.sql',
+            '0028_canonical_operation_audit.sql',
+            '0029_compat_operation_audit_bridge.sql',
+            '0030_customer_records_user_scoped_projection.sql',
+            '0031_customer_pin_payload_backfill.sql',
+        ):
+            self.assertIn(name, registered)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')
@@ -2041,8 +2060,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn('company_id=CASE WHEN coalesce(core.contact_methods.person_id,excluded.person_id)', migration)
         self.assertIn('username text NOT NULL DEFAULT', migration)
         self.assertIn('web_fetched_at text NOT NULL DEFAULT', migration)
-        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
-        self.assertIn('0008_postgres_runtime_integrity_hardening.sql', tool_source)
+        from tools import unified_postgres_migration
+        self.assertIn(
+            '0008_postgres_runtime_integrity_hardening.sql',
+            {Path(path).name for path in unified_postgres_migration.SCHEMA_PATHS},
+        )
 
     def test_production_applied_postgres_migrations_keep_immutable_hashes(self):
         # These are the hashes recorded by the read-only ECS audit. Any future
@@ -2094,8 +2116,11 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             'Conflicting integration_sync_receipts rows',
         ):
             self.assertIn(marker, migration)
-        tool_source = (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8')
-        self.assertIn('0009_postgres_final_integrity_boundaries.sql', tool_source)
+        from tools import unified_postgres_migration
+        self.assertIn(
+            '0009_postgres_final_integrity_boundaries.sql',
+            {Path(path).name for path in unified_postgres_migration.SCHEMA_PATHS},
+        )
 
     def test_postgres_external_provider_keys_are_user_scoped(self):
         migration = (ROOT / 'migrations' / '0010_postgres_user_scoped_external_ids.sql').read_text(encoding='utf-8')
@@ -2241,7 +2266,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             self.assertIn(marker, migration)
         self.assertNotIn('normalized_name=v_normalized_name', migration)
         self.assertNotIn('ORDER BY d.is_primary DESC, d.created_at ASC', migration)
-        self.assertIn('0013_postgres_company_match_boundaries.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
+        self.assertIn('0013_postgres_company_match_boundaries.sql', _registered_migration_names())
 
     def test_postgres_customer_fields_are_user_scoped_after_a_shared_merge(self):
         migration = (ROOT / 'migrations' / '0016_postgres_user_scoped_customer_payloads.sql').read_text(encoding='utf-8')
@@ -2251,7 +2276,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             'zz_customers_ref_payload_write', 'audit.legacy_records',
         ):
             self.assertIn(marker, migration)
-        self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', (ROOT / 'tools' / 'unified_postgres_migration.py').read_text(encoding='utf-8'))
+        self.assertIn('0016_postgres_user_scoped_customer_payloads.sql', _registered_migration_names())
 
     def test_postgres_customer_priority_is_imported_and_recovered(self):
         migration = (ROOT / 'migrations' / '0014_postgres_customer_priority_recovery.sql').read_text(encoding='utf-8')

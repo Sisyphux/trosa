@@ -106,42 +106,28 @@ def _postgres_user_id(user):
 
 
 def _postgres_migration_paths():
+    """Every forward migration in filename order.
+
+    The ``migrations/`` directory is the single source of truth.  Dropping a
+    ``NNNN_*.sql`` file there is enough to have the runtime apply it; there is
+    no second registry to keep in sync, so two parallel tasks can never
+    disagree about which files exist.  ``tools/check_migrations.py`` (run from
+    ``release-test.sh``) rejects duplicate or non-contiguous numbering before
+    a change can be released.
+    """
     root = os.path.dirname(os.path.abspath(__file__))
-    return (
-        os.path.join(root, 'migrations', '0001_unified_trade_os.sql'),
-        os.path.join(root, 'migrations', '0002_postgres_runtime.sql'),
-        os.path.join(root, 'migrations', '0003_postgres_app_compat.sql'),
-        os.path.join(root, 'migrations', '0004_postgres_runtime_surfaces.sql'),
-        os.path.join(root, 'migrations', '0005_postgres_runtime_write_fixes.sql'),
-        os.path.join(root, 'migrations', '0006_postgres_runtime_surface_writes.sql'),
-        os.path.join(root, 'migrations', '0007_postgres_runtime_hardening.sql'),
-        os.path.join(root, 'migrations', '0008_postgres_runtime_integrity_hardening.sql'),
-        os.path.join(root, 'migrations', '0009_postgres_final_integrity_boundaries.sql'),
-        os.path.join(root, 'migrations', '0010_postgres_user_scoped_external_ids.sql'),
-        os.path.join(root, 'migrations', '0011_postgres_compat_identity_guards.sql'),
-        os.path.join(root, 'migrations', '0012_postgres_legacy_email_ids.sql'),
-        os.path.join(root, 'migrations', '0013_postgres_company_match_boundaries.sql'),
-        os.path.join(root, 'migrations', '0014_postgres_customer_priority_recovery.sql'),
-        os.path.join(root, 'migrations', '0015_postgres_legacy_date_projections.sql'),
-        os.path.join(root, 'migrations', '0016_postgres_user_scoped_customer_payloads.sql'),
-        os.path.join(root, 'migrations', '0017_trosa_agent_prospect_profiles.sql'),
-        os.path.join(root, 'migrations', '0018_trosa_business_exclusions.sql'),
-        os.path.join(root, 'migrations', '0019_retire_frozen_compat_surfaces.sql'),
-        os.path.join(root, 'migrations', '0020_customer_state_facts.sql'),
-        os.path.join(root, 'migrations', '0021_formal_business_read_models.sql'),
-        os.path.join(root, 'migrations', '0022_modern_trosa_core.sql'),
-        os.path.join(root, 'migrations', '0023_customer_details_compat_boundary.sql'),
-        os.path.join(root, 'migrations', '0024_customer_record_task_projection.sql'),
-        os.path.join(root, 'migrations', '0025_customer_record_dates.sql'),
-        os.path.join(root, 'migrations', '0026_compat_customer_state_boundary.sql'),
-        os.path.join(root, 'migrations', '0027_modern_customer_files_and_priority.sql'),
-        os.path.join(root, 'migrations', '0028_canonical_operation_audit.sql'),
-        os.path.join(root, 'migrations', '0029_compat_operation_audit_bridge.sql'),
-        os.path.join(root, 'migrations', '0030_customer_records_user_scoped_projection.sql'),
-        os.path.join(root, 'migrations', '0031_customer_pin_payload_backfill.sql'),
-        os.path.join(root, 'migrations', '0032_one_follow_up_per_customer_day.sql'),
-        os.path.join(root, 'migrations', '0033_today_task_alias_fanout.sql'),
+    directory = os.path.join(root, 'migrations')
+    if not os.path.isdir(directory):
+        return ()
+    names = sorted(
+        name for name in os.listdir(directory)
+        if len(name) > 5
+        and name.endswith('.sql')
+        and name[:4].isdigit()
+        and name[4] == '_'
+        and os.path.isfile(os.path.join(directory, name))
     )
+    return tuple(os.path.join(directory, name) for name in names)
 
 
 _POSTGRES_SCHEMA_SENTINELS = REQUIRED_TABLES + REQUIRED_VIEWS
