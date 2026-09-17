@@ -72,6 +72,24 @@ MIGRATION_SUFFIX = ".sql"
 RELEASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
+def is_db_sensitive_path(path: str) -> bool:
+    """Whether a changed path can alter database behavior.
+
+    ``migrations/`` only counts for ``.sql`` files: documentation such as
+    ``migrations/README.md`` can describe destructive keywords without ever
+    running at migration time, and must not force a backup or trip the
+    destructive heuristic.
+    """
+    for prefix in DB_SENSITIVE_PATH_PREFIXES:
+        if prefix == "migrations/":
+            if path.startswith(prefix) and path.endswith(MIGRATION_SUFFIX):
+                return True
+            continue
+        if path == prefix.rstrip("/") or path.startswith(prefix):
+            return True
+    return False
+
+
 def is_valid_release_id(release_id: str) -> bool:
     """Release ids must be safe to use as a directory name and symlink target."""
     return bool(RELEASE_ID_PATTERN.match(release_id or ""))
@@ -205,14 +223,7 @@ def plan_release_db(
         if is_destructive_sql(contents):
             destructive_files.append(name)
 
-    sensitive_paths = [
-        path for path in changed
-        if path == ".env.example" and False  # placeholder guard, never matches
-        or any(
-            path == prefix.rstrip("/") or path.startswith(prefix)
-            for prefix in DB_SENSITIVE_PATH_PREFIXES
-        )
-    ]
+    sensitive_paths = [path for path in changed if is_db_sensitive_path(path)]
 
     if destructive_files:
         category = "destructive"

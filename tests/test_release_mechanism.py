@@ -88,6 +88,31 @@ class DestructiveSqlTests(unittest.TestCase):
         self.assertTrue(plan.is_destructive_sql(text))
 
 
+class DatabaseSensitivePathTests(unittest.TestCase):
+    """Migrations documentation must not look like executable DB change.
+
+    ``migrations/README.md`` describes DROP/DELETE keywords for readers; it
+    never runs at migration time, so it must not force a backup or trip the
+    destructive heuristic that publishes rely on.
+    """
+
+    def test_migrations_markdown_is_not_sensitive(self):
+        self.assertFalse(plan.is_db_sensitive_path("migrations/README.md"))
+        self.assertTrue(plan.is_db_sensitive_path("migrations/0034_customer_history_binding.sql"))
+
+    def test_runtime_and_production_paths_are_sensitive(self):
+        self.assertTrue(plan.is_db_sensitive_path("db.py"))
+        self.assertTrue(plan.is_db_sensitive_path("tools/unified_postgres_migration.py"))
+        self.assertTrue(plan.is_db_sensitive_path("deploy/postgres-production/backup.sh"))
+        self.assertFalse(plan.is_db_sensitive_path("docs/README.md"))
+        self.assertFalse(plan.is_db_sensitive_path("app/static/app.js"))
+
+    def test_release_commit_heuristic_only_reads_executable_files(self):
+        text = (ROOT / "deploy" / "cloud" / "release-commit.sh").read_text(encoding="utf-8")
+        self.assertIn("DB_DIFF_FILES", text)
+        self.assertIn("migrations/*.sql) DB_SQL_FILES", text)
+
+
 class PlanReleaseDbTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -139,6 +164,12 @@ class PlanReleaseDbTests(unittest.TestCase):
         self._write("0001_a.sql")
         result = plan.plan_release_db(self.mdir, {"0001_a.sql"}, ["app/static/app.js"])
         self.assertEqual(result["category"], "none")
+
+    def test_migrations_markdown_change_is_not_sensitive(self):
+        self._write("0001_a.sql")
+        result = plan.plan_release_db(self.mdir, {"0001_a.sql"}, ["migrations/README.md"])
+        self.assertEqual(result["category"], "none")
+        self.assertEqual(result["sensitive_paths"], [])
 
     def test_unreadable_ledger_is_rejected(self):
         self._write("0001_a.sql")

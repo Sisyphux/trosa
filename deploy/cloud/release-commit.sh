@@ -291,7 +291,7 @@ DB_FILES=()
 while IFS= read -r path; do
   [[ -n "$path" ]] || continue
   case "$path" in
-    migrations/*|db.py|postgres_compat.py|postgres_schema_contract.py|tools/unified_postgres_migration.py|tools/unified_postgres_import.py|deploy/postgres-production/*)
+    migrations/*.sql|db.py|postgres_compat.py|postgres_schema_contract.py|tools/unified_postgres_migration.py|tools/unified_postgres_import.py|deploy/postgres-production/*)
       DB_SENSITIVE=1
       DB_FILES+=("$path")
       ;;
@@ -305,9 +305,13 @@ if [[ "$DB_SENSITIVE" == 1 ]]; then
   done <<< "$(printf '%s\n' ${DB_FILES[@]+"${DB_FILES[@]}"})"
   DESTRUCTIVE_HIT=""
   DB_SQL_FILES=()
+  # 破坏性启发式只判可执行迁移/运行时文件。migrations/README.md 这类文档会
+  # 描述 DROP/DELETE 关键字，但不在迁移时执行，不能因此阻塞发布。
+  DB_DIFF_FILES=()
   while IFS= read -r path; do
     case "$path" in
-      migrations/*.sql) DB_SQL_FILES+=("$path") ;;
+      migrations/*.sql) DB_SQL_FILES+=("$path"); DB_DIFF_FILES+=("$path") ;;
+      *.py) DB_DIFF_FILES+=("$path") ;;
     esac
   done <<< "$CHANGED_FILES"
   if [[ ${#DB_SQL_FILES[@]} -gt 0 ]]; then
@@ -317,10 +321,10 @@ if [[ "$DB_SENSITIVE" == 1 ]]; then
       DESTRUCTIVE_HIT=""
     fi
   fi
-  if [[ -z "$DESTRUCTIVE_HIT" ]]; then
+  if [[ -z "$DESTRUCTIVE_HIT" && ${#DB_DIFF_FILES[@]} -gt 0 ]]; then
     # 与 auto-publish.sh 一致的回退启发式，覆盖无新迁移但改了运行时迁移代码的情况。
     DESTRUCTIVE_GREP='^\+[^+].*(DROP[[:space:]]+(TABLE|TABLES|COLUMN|SCHEMA|DATABASE)|TRUNCATE[[:space:]]+(TABLE|TABLES)|DELETE[[:space:]]+FROM|ALTER[[:space:]]+TABLE.*DROP[[:space:]]+COLUMN)'
-    DB_DIFF="$(git diff "$BASE_SHA" "$RELEASE_SHA" -- ${DB_FILES[@]+"${DB_FILES[@]}"})"
+    DB_DIFF="$(git diff "$BASE_SHA" "$RELEASE_SHA" -- "${DB_DIFF_FILES[@]}")"
     if printf '%s\n' "$DB_DIFF" | grep -Eiq "$DESTRUCTIVE_GREP"; then
       DESTRUCTIVE_HIT="(grep fallback on changed runtime files)"
     fi
