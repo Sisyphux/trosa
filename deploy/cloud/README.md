@@ -36,10 +36,19 @@ Trade OS 使用一台持久磁盘 ECS、一个 Waitress 进程、一个 PostgreS
 首次配置：
 
 ```bash
-cp deploy/cloud/workbench.env.example deploy/cloud/workbench.env
+mkdir -p ~/.config/trosa
+cp deploy/cloud/workbench.env.example ~/.config/trosa/workbench.env
+chmod 600 ~/.config/trosa/workbench.env
 # 编辑实例 ID 等路由信息，不要写入任何密钥
 deploy/cloud/bootstrap-workbench.sh
 ```
+
+发布配置放在仓库外（`~/.config/trosa/workbench.env`，或由 `TRADE_OS_WORKBENCH_ENV`
+指向），这样任务 worktree、release 归档和误提交都不会携带发布开关。仓库内旧位置
+`deploy/cloud/workbench.env` 仍可读取，但会提示迁移；所有脚本通过
+`deploy/cloud/release-env.sh` 统一解析，不再各自硬编码路径。发布（`publish` /
+`rollback`）还要求 `TRADE_OS_AGENT_ROLE=release`：开发/审查 Agent 会话应设置
+`TRADE_OS_AGENT_ROLE=dev` 或 `review`，它们在 `publish` 时会被明确拒绝。
 
 Cloud Assistant 使用 Workbench 的本机受保护 AK profile（`~/.workbench/config.json`，
 权限 0600）签名 API；`workbench.env` 永远只放实例路由信息。首次切换可运行

@@ -51,6 +51,9 @@ MAIN_ROOT="$(cd "$GIT_COMMON_DIR/.." 2>/dev/null && pwd)"
 [[ "$MAIN_ROOT" == /* ]] || { printf '任务隔离未完成：无法解析主仓库根目录\n' >&2; exit 1; }
 WORKTREE_ROOT="${TRADE_OS_WORKTREE_ROOT:-$(dirname "$MAIN_ROOT")/trosa-worktrees}"
 TARGET_BRANCH="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
+# 发布配置解析与发布角色边界（TRADE_OS_AGENT_ROLE）由这一份共享实现提供。
+# shellcheck source=release-env.sh
+source "$SCRIPT_DIR/release-env.sh"
 
 fail() {
   printf '任务隔离未完成：%s\n' "$*" >&2
@@ -69,6 +72,7 @@ Usage:
                           [--owner <name>] [--goal <text>] [--scope <text>]
   agent-worktree.sh list
   agent-worktree.sh test --task <id> [--quick]
+  agent-worktree.sh evidence --task <id>
   agent-worktree.sh sync --task <id> [--fetch-base]
   agent-worktree.sh publish --task <id> [--message "仅记录用的说明"]
   agent-worktree.sh remove --task <id> [--force] [--delete-branch]
@@ -103,6 +107,62 @@ path_of() { printf '%s/%s' "$WORKTREE_ROOT" "$1"; }
 # require_clean 失败，也不会泄露到发布产物。
 TASK_META_DIR="$GIT_COMMON_DIR/trosa-tasks"
 task_meta_path() { printf '%s/%s.json' "$TASK_META_DIR" "$1"; }
+
+# 完成证据：每次 test/publish 都把这棵树的 commit 与门禁结果落盘到共享目录。
+# 它不在工作树内，不参与 commit，也不会让 require_clean 失败；人和其它 Agent
+# 都可以据此判断“任务是否真的完成”，而不是听信一句自述。
+task_evidence_path() { printf '%s/%s.verify.log' "$TASK_META_DIR" "$1"; }
+
+# 合并任务清单字段（key=value），保留未列出的既有字段。
+merge_task_meta() {
+  local task=$1; shift
+  local meta
+  meta="$(task_meta_path "$task")"
+  [[ -r "$meta" ]] || return 0
+  python3 - "$meta" "$@" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    doc = json.load(handle)
+for pair in sys.argv[2:]:
+    key, _, value = pair.partition("=")
+    if key:
+        doc[key] = value
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(doc, handle, ensure_ascii=False, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+}
+
+# 运行一次命令，把完整输出写入任务证据文件，并在开头附上可核验的元数据。
+# 返回被运行命令的退出码，调用方据此判定完成与否。
+run_with_evidence() {
+  local task=$1 kind=$2 head=$3 log; shift 3
+  local tmp status
+  log="$(task_evidence_path "$task")"
+  mkdir -p -- "$TASK_META_DIR"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/trosa-evidence.XXXXXX")"
+  set +e
+  "$@" >"$tmp" 2>&1
+  status=$?
+  set -e
+  cat "$tmp"
+  {
+    printf '# trosa task evidence\n'
+    printf '# task: %s\n' "$task"
+    printf '# branch: %s\n' "$(branch_of "$task")"
+    printf '# commit: %s\n' "$head"
+    printf '# kind: %s\n' "$kind"
+    if [[ "$status" == 0 ]]; then printf '# result: ok\n'; else printf '# result: failed\n'; fi
+    printf '# at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '# command: %s\n' "$*"
+    cat "$tmp"
+  } >"$log"
+  rm -f -- "$tmp"
+  return "$status"
+}
 
 # 当前分支对应的任务 id；不是任务分支则输出空。
 task_of_branch() {
@@ -174,9 +234,18 @@ write_task_meta() {
     "$owner" "$goal" "$scope" "$reserved" <<'PY'
 import datetime
 import json
+import os
 import sys
 
 (path, task, branch, wt, base, owner, goal, scope, reserved) = sys.argv[1:10]
+# adopt 会复用已有任务清单：保留已经积累的完成状态与证据，不要重置成未验证。
+preserved = {}
+if os.path.exists(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            preserved = json.load(handle)
+    except (OSError, ValueError):
+        preserved = {}
 doc = {
     "task": task,
     "branch": branch,
@@ -186,10 +255,16 @@ doc = {
     "goal": goal,
     "scope": scope,
     "reserved_migration": reserved,
+    "status": preserved.get("status") or "active",
+    "evidence": os.path.join(os.path.dirname(path), f"{task}.verify.log"),
     "created_at": datetime.datetime.now(
         datetime.timezone.utc
     ).astimezone().isoformat(timespec="seconds"),
 }
+for key in ("landed_commit", "landed_release", "landed_at",
+            "verify_result", "verified_commit", "verified_at"):
+    if preserved.get(key):
+        doc[key] = preserved[key]
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(doc, handle, ensure_ascii=False, indent=2, sort_keys=True)
     handle.write("\n")
@@ -216,10 +291,27 @@ for key, label in (
     ("reserved_migration", "预留迁移编号"),
     ("base", "基线"),
     ("created_at", "创建时间"),
+    ("verified_commit", "验证 commit"),
+    ("verify_result", "最近门禁"),
+    ("landed_commit", "落地 commit"),
+    ("landed_release", "发布 release"),
+    ("evidence", "证据文件"),
 ):
     value = doc.get(key)
     if value:
         print(f"  {label}：{value}")
+
+status = doc.get("status") or "active"
+if status == "landed":
+    print(f"  完成判定：已发布（release={doc.get('landed_release') or '未知'}）")
+elif status == "abandoned":
+    print("  完成判定：已废弃")
+elif doc.get("verify_result") == "ok":
+    print("  完成判定：开发完成并通过门禁，尚未发布")
+elif doc.get("verify_result") == "failed":
+    print("  完成判定：最近一次门禁未通过，不可发布")
+else:
+    print("  完成判定：进行中（尚无验证证据）")
 PY
 }
 
@@ -378,8 +470,42 @@ cmd_test() {
   [[ -r "$gate" ]] || fail "找不到发布门禁 $MAIN_ROOT/deploy/cloud/release-test.sh"
   args=(--dir "$wt")
   if [[ "$quick" == 1 ]]; then args+=(--quick); fi
-  bash "$gate" ${args[@]+"${args[@]}"}
-  printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+  local head iso log
+  head="$(git -C "$wt" rev-parse HEAD)"
+  log="$(task_evidence_path "$task")"
+  iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if run_with_evidence "$task" test "$head" bash "$gate" ${args[@]+"${args[@]}"}; then
+    merge_task_meta "$task" \
+      "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+    printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+    printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
+  else
+    local status=$?
+    merge_task_meta "$task" \
+      "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+    fail "任务 $task 门禁未通过，不可发布（证据：$log，退出码 $status）"
+  fi
+}
+
+cmd_evidence() {
+  local task=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
+      *) fail "evidence 未知参数：$1" ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'evidence 需要 --task <id>'
+  validate_task_id "$task"
+  print_task_meta "$task"
+  local log
+  log="$(task_evidence_path "$task")"
+  if [[ -r "$log" ]]; then
+    printf '\n最近一次完成证据（%s）：\n' "$log"
+    cat "$log"
+  else
+    printf '\n尚无完成证据：先运行 test --task %s。\n' "$task"
+  fi
 }
 
 cmd_sync() {
@@ -420,6 +546,8 @@ cmd_publish() {
   done
   [[ -n "$task" ]] || fail 'publish 需要 --task <id>'
   validate_task_id "$task"
+  # 发布角色边界：dev/review 角色可以开发与验证，但不能改动 production。
+  trosa_require_release_role || fail '当前角色没有发布权限（publish 只属于 release 角色）'
   local wt branch head
   wt="$(find_task_path "$task")"
   branch="$(branch_of "$task")"
@@ -434,8 +562,33 @@ cmd_publish() {
   # from the shared object database, builds a clean release worktree, and only
   # pushes the resulting release candidate to main.
   printf '\n发布任务 %s：%s（HEAD %s）→ origin/%s\n' "$task" "$branch" "${head:0:9}" "$TARGET_BRANCH"
-  bash "$MAIN_ROOT/deploy/cloud/auto-publish.sh" --branch "$branch"
-  printf '\n任务 %s 已发布。\n' "$task"
+  local log iso release landed
+  log="$(task_evidence_path "$task")"
+  iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if run_with_evidence "$task" publish "$head" \
+      bash "$MAIN_ROOT/deploy/cloud/auto-publish.sh" --branch "$branch"; then
+    release="$(grep -o 'release=[^ ]*' "$log" | tail -n 1 | cut -d= -f2 || true)"
+    landed="$(grep -o 'RELEASE_COMMIT_SUCCESS commit=[0-9a-f]*' "$log" | tail -n 1 | sed 's/.*commit=//' || true)"
+    merge_task_meta "$task" \
+      "status=landed" \
+      "landed_commit=${landed:-$head}" \
+      "landed_release=${release}" \
+      "landed_at=$iso" \
+      "verify_result=ok" \
+      "verified_commit=$head" \
+      "verified_at=$iso" \
+      "evidence=$log"
+    printf '\n任务 %s 已发布。\n' "$task"
+    printf '完成证据：%s（发布 release=%s）\n' "$log" "${release:-未知}"
+  else
+    merge_task_meta "$task" \
+      "status=active" \
+      "verify_result=failed" \
+      "verified_commit=$head" \
+      "verified_at=$iso" \
+      "evidence=$log"
+    fail "任务 $task 发布未完成（证据：$log）；未标记为完成"
+  fi
 }
 
 cmd_status() {
@@ -444,6 +597,7 @@ cmd_status() {
   [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
   branch="$(git -C "$top" symbolic-ref --short -q HEAD || printf 'detached')"
   task="$(task_of_branch "$branch")"
+  printf '角色：%s（dev/review 不能发布；只有 release 能发布）\n' "$(trosa_agent_role)"
   if [[ "$top" == "$MAIN_ROOT" ]]; then
     printf '环境：主工作区（集成 / 验收 / 发布）\n'
     printf '  路径：%s\n  分支：%s\n' "$top" "$branch"
@@ -656,6 +810,7 @@ case "$command" in
   adopt) cmd_adopt "$@" ;;
   list) cmd_list "$@" ;;
   test) cmd_test "$@" ;;
+  evidence) cmd_evidence "$@" ;;
   sync) cmd_sync "$@" ;;
   publish) cmd_publish "$@" ;;
   remove) cmd_remove "$@" ;;

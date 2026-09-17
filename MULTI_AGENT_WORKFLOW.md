@@ -3,7 +3,9 @@
 > 唯一正式说明。任何 Agent / 开发会话在改动代码前先读这一页。
 > 命令实现：`deploy/cloud/agent-worktree.sh`；发布实现：`deploy/cloud/release-commit.sh`。
 
-## 1. 三个角色，三个边界
+## 1. 目录边界与 Agent 权限
+
+### 目录边界
 
 | 角色 | 目录 | 允许做什么 | 不允许做什么 |
 |---|---|---|---|
@@ -13,6 +15,18 @@
 
 原则：**一个任务 = 一个 worktree = 一个 `agent/<id>` 分支 = 一个逻辑完整的 commit（或一组 commit）**。
 主工作区只承载集成结果，始终保持干净或只有明确归属的发布操作。
+
+### Agent 权限（`TRADE_OS_AGENT_ROLE`）
+
+| 角色 | 允许 | 不允许 |
+|---|---|---|
+| 开发 Agent `dev` | create/adopt/test/sync/remove、改本任务代码、commit | publish、读发布配置、改主工作区 |
+| 审查 Agent `review` | `status` / `preflight` / `test`、查看 `evidence` | 改代码、publish |
+| 发布 Agent `release` | 主工作区集成、`publish`、真实验收 | 在主工作区写业务代码 |
+
+- 开发/审查会话开始前设置 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；未设置时默认按 `release` 处理，以保持人工操作不变。
+- 发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 0600），由 `deploy/cloud/release-env.sh` 统一解析；开发 worktree 不携带它，因此没有发布能力。仓库内旧位置仍兼容读取并提示迁移。
+- 角色变量是同机护栏，真正边界是文件权限：发布配置不在仓库里。`publish` 对 dev/review 角色会明确拒绝，而不是静默放行。
 
 ## 2. 开新任务（每个 Agent 会话开始时）
 
@@ -61,6 +75,8 @@ deploy/cloud/agent-worktree.sh sync --task <id>    # 变基到最新 main
 
 - commit message 以 `[<id>]` 开头，来源一眼可辨；一次 commit 只承载一个任务的改动。
 - 测试失败或任务暂停只影响本隔离区，其它任务与主工作区不受影响。
+- **完成证据**：`test` 与 `publish` 会把 tree commit、门禁结果和发布 release 写入共享文件 `trosa-tasks/<id>.verify.log`，并更新任务清单状态；用 `evidence --task <id>` 查看。
+- **完成定义**：`status=landed`（已发布且健康）才算任务完成；绿色门禁只代表“开发完成”，不能用“已修复”描述尚未发布的改动。
 - 回收：`remove --task <id>`（默认保留分支；确认丢弃加 `--force`）。
 
 ## 5. 合并与发布
@@ -103,7 +119,8 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 
 - 每个 release 有唯一 `release-id` 与 commit SHA（`deploy/cloud/trosa-release status --json`）。
 - release commit 内含 `(cherry picked from commit <原始 sha>)`。
-- 任务清单记录 owner / goal / scope；commit 以 `[<id>]` 开头。
+- 任务清单记录 owner / goal / scope / status；commit 以 `[<id>]` 开头。
+- 完成证据 `trosa-tasks/<id>.verify.log` 记录被验证的 commit 与结果；`status` 为 `active` / `landed`。
 - 主工作区不干净即流程违规，`preflight` 会报告。
 
 ## 8. 常见问题
@@ -112,4 +129,6 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 - **主工作区又有脏文件？** → `preflight` 列出，`adopt` 搬走。
 - **发布冲突了？** → `release-commit.sh` 会 abort 且不动 `origin/main`；在隔离区 `sync` 后重试。
 - **任务失败 / 暂停** → 离开隔离区即可，其它任务不受影响；恢复时回到原目录继续。
+- **`publish` 报“当前角色没有发布权限”？** → 你的会话是 dev/review 角色；把 commit 和证据交给 release 角色发布，这是设计边界，不是错误。
+- **门禁绿了但没人说已修复？** → 只有 `status=landed` 才算完成；`evidence --task <id>` 可核对 commit 与 release。
 - **旧的任务分支 / 隔离区堆积？** → `list` 查看，确认已发布后用 `remove --task <id> --delete-branch` 回收。

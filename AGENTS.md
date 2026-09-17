@@ -4,7 +4,7 @@
 
 Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上下文 → 执行已确认动作 → 记录实际事实 → 按需确认下一步及日期。沟通记录可以没有下一步；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后默认使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>` 构建干净候选并发布 ECS，发布不读取主工作区的 dirty 改动。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 ECS，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
 
 ## 多 Agent 并行开发（强制）
 
@@ -12,6 +12,8 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 - 会话开始先运行 `deploy/cloud/agent-worktree.sh status` 判断当前环境，再运行 `preflight` 看主工作区与迁移编号冲突。新任务用 `create --task <id> --owner ... --goal ... --scope ...`。
 - 发现主工作区有无法归属的在途改动时，用 `adopt --task <id>` 搬进隔离区，不要直接 commit、覆盖或删除；adopt 会保留 stash 备份。
 - 每个 commit 以 `[<id>]` 开头且只承载一个任务的改动；发布用 `agent-worktree.sh publish --task <id>`（底层是 commit 驱动入口），只接受 commit / branch。
+- **角色边界**：开发/审查 Agent 会话必须 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；只有发布角色（`release`，也是未设置时的默认）能执行 `publish`。发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 600），开发 worktree 不携带它；仓库内旧位置仅兼容读取并提示迁移。
+- **完成定义与证据**：`test --task <id>` 和 `publish --task <id>` 会把 tree commit、门禁结果和发布 release 写入共享证据 `trosa-tasks/<id>.verify.log` 并更新任务清单状态。任务完成 = `status=landed`（已发布且健康），仅有绿色门禁只是“开发完成”，不得声称已修复；用 `agent-worktree.sh evidence --task <id>` 查看。
 - `migrations/` 目录是数据库迁移的唯一事实源：新增迁移先在 create/adopt 预留编号，并通过 `tools/check_migrations.py`；详见 [`migrations/README.md`](migrations/README.md)。
 
 ## 运行与数据边界
@@ -23,6 +25,7 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 - `app.py`、`desktop.py` 和根目录启动器不是正式启动命令：根目录入口只打开已验证的正式工作台；需要 SQLite 旧形状回归时必须显式设置 `CRM_ENV=development TRADE_OS_DEV_SQLITE=1`，PostgreSQL 演练使用 `serve_rehearsal.py` 或 `tools/postgres_rehearsal.py`，并且只允许 loopback 固定演练库。
 - 修改前先查看 `git status --short`。工作区可能有用户未提交的改动，绝不覆盖、回退、删除或格式化无关文件。
 - 自动发布时只传入已完成的 commit 或 branch，不传文件路径；release 候选在独立临时 worktree 中组装，主工作区已有的无关修改必须保留，不能混入发布。
+- 发布配置与角色解析由 `deploy/cloud/release-env.sh` 统一实现；不要在脚本里各自硬编码 `workbench.env` 路径。开发 Agent 没有发布配置即没有发布能力。
 
 ## 核心模块与不可破坏能力
 

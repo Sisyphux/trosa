@@ -12,7 +12,9 @@ region=$2
 remote_command=$3
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
+# shellcheck source=release-env.sh
+source "$SCRIPT_DIR/release-env.sh"
+ENV_FILE="$(trosa_resolve_workbench_env "$SCRIPT_DIR")"
 if [[ -z "${TRADE_OS_SSH_HOST:-}" && -r "$ENV_FILE" ]]; then
   # This optional local setting contains only an SSH host alias, never a
   # password or cloud credential.

@@ -300,7 +300,7 @@ class UnifiedEntrypointTests(unittest.TestCase):
     def test_shell_syntax_valid(self):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",
                      "auto-publish.sh", "release-commit.sh", "release-test.sh",
-                     "agent-worktree.sh", "run-workbench-command.sh",
+                     "release-env.sh", "agent-worktree.sh", "run-workbench-command.sh",
                      "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")

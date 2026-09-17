@@ -20,7 +20,9 @@ set -euo pipefail
 export LC_ALL=C
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
+# shellcheck source=release-env.sh
+source "$SCRIPT_DIR/release-env.sh"
+ENV_FILE="$(trosa_resolve_workbench_env "$SCRIPT_DIR")"
 SOURCE_DIR="${TRADE_OS_SOURCE_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 usage() {
@@ -40,7 +42,8 @@ EOF
 
 fail() { printf 'trosa-release: %s\n' "$*" >&2; exit 1; }
 
-[[ -r "$ENV_FILE" ]] || fail "找不到发布配置 $ENV_FILE；请先复制 workbench.env.example"
+[[ -r "$ENV_FILE" ]] || fail "找不到发布配置 $ENV_FILE；请把 workbench.env.example 复制到 $(trosa_config_home)/workbench.env"
+trosa_warn_legacy_workbench_env "$ENV_FILE"
 # workbench.env 只允许路由元数据；解析仓库根后以其为准。
 PROJECT_ROOT="$SOURCE_DIR"
 source "$ENV_FILE"
@@ -106,6 +109,8 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
     fi
     ;;
   publish|rollback)
+    # 只有 release 角色可以改动 production；dev/review 角色在这里被明确拒绝。
+    trosa_require_release_role || exit 1
     mode=$cmd
     shift
     COMMIT=""

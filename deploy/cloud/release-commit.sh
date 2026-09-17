@@ -160,14 +160,19 @@ esac
 MAIN_ROOT="$(cd "$GIT_COMMON_DIR/.." 2>/dev/null && pwd || true)"
 [[ -n "$MAIN_ROOT" ]] || MAIN_ROOT="$SOURCE_DIR"
 
-if [[ -n "${TRADE_OS_WORKBENCH_ENV:-}" ]]; then
-  ENV_FILE="$TRADE_OS_WORKBENCH_ENV"
-elif [[ -r "$SCRIPT_DIR/workbench.env" ]]; then
-  ENV_FILE="$SCRIPT_DIR/workbench.env"
-else
-  # 任务区与 release worktree 从不复制密钥；只从主仓读取路由文件。
-  ENV_FILE="$MAIN_ROOT/deploy/cloud/workbench.env"
+# shellcheck source=release-env.sh
+source "$SCRIPT_DIR/release-env.sh"
+
+# 发布角色边界：dry-run 只构建候选 + 跑门禁，不改 production，任何角色可用；
+# 真正发布会推送 origin/main 并切换 ECS，必须由 release 角色执行。
+if [[ "$DRY_RUN" != 1 ]]; then
+  trosa_require_release_role || exit 1
 fi
+
+# 正式位置在仓库外（~/.config/trosa/workbench.env）：开发 Agent 的 worktree
+# 不再天然携带发布配置。TRADE_OS_WORKBENCH_ENV 仍可显式覆盖；旧仓库内位置保留
+# 兼容并提示迁移。
+ENV_FILE="$(trosa_resolve_workbench_env "$SCRIPT_DIR" "$MAIN_ROOT")"
 if [[ "$ENV_FILE" != /* ]]; then
   ENV_DIR="$(cd "$(dirname "$ENV_FILE")" 2>/dev/null && pwd || true)"
   [[ -n "$ENV_DIR" ]] || fail "发布配置路径无效：$ENV_FILE"
@@ -178,9 +183,10 @@ if [[ ! -r "$ENV_FILE" ]]; then
     printf '%s\n' "提示：dry-run 未找到发布配置 $ENV_FILE；本次不会访问 ECS。" >&2
     ENV_FILE=""
   else
-    fail "找不到发布配置 $ENV_FILE；请先复制 workbench.env.example，或用 TRADE_OS_WORKBENCH_ENV 指向主仓的 workbench.env"
+    fail "找不到发布配置 $ENV_FILE；请把 workbench.env.example 复制到 $(trosa_config_home)/workbench.env，或用 TRADE_OS_WORKBENCH_ENV 指向它"
   fi
 fi
+trosa_warn_legacy_workbench_env "$ENV_FILE"
 
 mkdir -- "$LOCK_DIR" 2>/dev/null \
   || fail "已有另一个发布正在运行（锁：$LOCK_DIR）；确认无进程后再删除该目录"

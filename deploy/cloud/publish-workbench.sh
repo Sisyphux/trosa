@@ -8,11 +8,15 @@ set -euo pipefail
 printf 'DEPRECATED: publish-workbench.sh 已冻结，请改用 deploy/cloud/trosa-release publish\n' >&2
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${TRADE_OS_WORKBENCH_ENV:-$SCRIPT_DIR/workbench.env}"
+# shellcheck source=release-env.sh
+source "$SCRIPT_DIR/release-env.sh"
+ENV_FILE="$(trosa_resolve_workbench_env "$SCRIPT_DIR")"
 if [[ ! -r "$ENV_FILE" ]]; then
-  printf 'Missing %s. Copy workbench.env.example first.\n' "$ENV_FILE" >&2
+  printf '缺少发布配置 %s。\n把 deploy/cloud/workbench.env.example 复制到 %s/trosa/workbench.env 并填好路由信息。\n' \
+    "$ENV_FILE" "${XDG_CONFIG_HOME:-$HOME/.config}" >&2
   exit 1
 fi
+trosa_warn_legacy_workbench_env "$ENV_FILE"
 source "$ENV_FILE"
 
 : "${TRADE_OS_ECS_REGION:?TRADE_OS_ECS_REGION is required}"
