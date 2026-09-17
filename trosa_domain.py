@@ -721,20 +721,28 @@ def create_inbox_item(
         if not account:
             raise ValueError('customer is not visible to the current user')
         account_id = account['account_id']
-    existing = None
-    if dedupe_key:
-        existing = conn.execute(
+    def _find_existing():
+        """Resolve a dedupe key to its single Inbox fact.
+
+        Callers and legacy rows may hold the functional transport key while
+        canonical storage namespaces it as ``compat:<user>:<raw>``.  Match the
+        payload key, the raw column and the canonical column so both the first
+        lookup and the post-conflict recovery reach the same fact.
+        """
+        return conn.execute(
             '''SELECT ref.legacy_id, item.id FROM trosa.inbox_items item
                  JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
                 WHERE ref.organization_id=trosa.compat_org_id()
                   AND ref.legacy_user_id=trosa.compat_current_user()
                   AND ref.table_name='inbox_items'
                   AND (item.legacy_payload->>'compat_dedupe_key'=?
-                       OR (item.legacy_payload->>'compat_dedupe_key' IS NULL AND item.dedupe_key=?)
-                       OR item.dedupe_key=?)
+                       OR item.dedupe_key=?
+                       OR item.dedupe_key='compat:' || trosa.compat_current_user() || ':' || ?)
                 ORDER BY item.created_at, ref.legacy_id LIMIT 1''',
             (dedupe_key, dedupe_key, dedupe_key),
         ).fetchone()
+
+    existing = _find_existing() if dedupe_key else None
     if existing:
         conn.execute(
             '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
@@ -765,16 +773,7 @@ def create_inbox_item(
     if dedupe_key and not inserted.rowcount:
         # A concurrent writer won the dedupe race: fall back to its row
         # instead of failing the whole business action with a 500.
-        existing = conn.execute(
-            '''SELECT ref.legacy_id, item.id FROM trosa.inbox_items item
-                 JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.table_name='inbox_items'
-                  AND item.dedupe_key='compat:' || trosa.compat_current_user() || ':' || ?
-                ORDER BY item.created_at, ref.legacy_id LIMIT 1''',
-            (dedupe_key,),
-        ).fetchone()
+        existing = _find_existing()
         if existing:
             conn.execute(
                 '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
@@ -784,6 +783,8 @@ def create_inbox_item(
                  resolution_note, existing['id']),
             )
             return int(existing['legacy_id'])
+        # Never fabricate a legacy ref that points at a row we did not insert.
+        raise ValueError('inbox dedupe conflict could not be resolved')
     conn.execute(
         '''INSERT INTO trosa.legacy_row_refs
            (organization_id, legacy_user_id, table_name, legacy_id, target_id)
@@ -1108,30 +1109,42 @@ def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> N
     ).fetchone()
     if not ref:
         raise ValueError('customer is not visible to the current user')
-    conn.execute(
-        '''INSERT INTO trosa.customer_states
-               (organization_id, legacy_user_id, legacy_customer_id, account_id, business_stage, business_role, customer_judgment, updated_at)
-           VALUES (trosa.compat_org_id(), trosa.compat_current_user(), ?, ?, ?, ?, ?, now())
-           ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id) DO UPDATE
-           SET business_stage=excluded.business_stage, business_role=excluded.business_role,
-               customer_judgment=excluded.customer_judgment, updated_at=now()''',
-        (customer_id, ref['account_id'], values.get('business_stage', ''), values.get('business_role', ''),
-         values.get('customer_judgment', '')),
+    if any(key in values for key in ('business_stage', 'business_role', 'customer_judgment')):
+        conn.execute(
+            '''INSERT INTO trosa.customer_states
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id, business_stage, business_role, customer_judgment, updated_at)
+               VALUES (trosa.compat_org_id(), trosa.compat_current_user(), ?, ?, ?, ?, ?, now())
+               ON CONFLICT (organization_id, legacy_user_id, legacy_customer_id) DO UPDATE
+               SET business_stage=excluded.business_stage, business_role=excluded.business_role,
+                   customer_judgment=excluded.customer_judgment, updated_at=now()''',
+            (customer_id, ref['account_id'], values.get('business_stage', ''), values.get('business_role', ''),
+             values.get('customer_judgment', '')),
+        )
+    # Only persist the fields the caller actually supplied.  ``customer_records``
+    # treats a present payload key as authoritative, so defaulting an absent key
+    # to '' silently clears canonical data (external_source/external_id, status,
+    # type, last_interaction_on) on any partial update.
+    payload_fields = (
+        ('name', ('name',)), ('company', ('company',)), ('country', ('country',)),
+        ('level', ('level',)), ('type', ('customer_type', 'type')),
+        ('website', ('website',)), ('profile', ('profile',)), ('field', ('field',)),
+        ('industry', ('industry',)), ('company_size', ('company_size',)),
+        ('annual_revenue', ('annual_revenue',)), ('tags', ('tags',)),
+        ('status', ('status',)), ('notes', ('notes',)), ('system_notes', ('system_notes',)),
+        ('import_source', ('import_source',)), ('external_source', ('external_source',)),
+        ('external_id', ('external_id',)), ('last_contact', ('last_contact',)),
+        ('next_follow_up', ('next_follow_up',)),
     )
-    customer_payload = {
-        'name': values.get('name', ''), 'company': values.get('company', ''),
-        'country': values.get('country', ''), 'level': values.get('level', ''),
-        'type': values.get('customer_type', values.get('type', '')),
-        'website': values.get('website', ''), 'profile': values.get('profile', ''),
-        'field': values.get('field', ''), 'industry': values.get('industry', ''),
-        'company_size': values.get('company_size', ''), 'annual_revenue': values.get('annual_revenue', ''),
-        'tags': values.get('tags', ''), 'status': values.get('status', ''),
-        'notes': values.get('notes', ''), 'system_notes': values.get('system_notes', ''),
-        'import_source': values.get('import_source', ''), 'external_source': values.get('external_source', ''),
-        'external_id': values.get('external_id', ''), 'last_contact': values.get('last_contact', ''),
-        'next_follow_up': values.get('next_follow_up', ''),
-        'manual_next_follow': bool(values.get('manual_next_follow')),
-    }
+    customer_payload: dict[str, Any] = {}
+    for target, sources in payload_fields:
+        for source in sources:
+            if source in values:
+                customer_payload[target] = values.get(source) or ''
+                break
+    if 'manual_next_follow' in values:
+        customer_payload['manual_next_follow'] = bool(values.get('manual_next_follow'))
+    elif 'manual_next_task' in values:
+        customer_payload['manual_next_follow'] = bool(values.get('manual_next_task'))
     conn.execute(
         '''UPDATE trosa.account_legacy_refs
               SET legacy_payload=(coalesce(legacy_payload, '{}'::jsonb)

@@ -1980,12 +1980,13 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_inbox_archive_accepts_visible_dedupe_key(self):
-        """Archiving by the dedupe_key the API exposes must remove the row.
+        """The API-visible dedupe_key is the functional raw key and archives the row.
 
-        The projection returns the canonical ``compat:<user>:<raw>`` key while
-        the compatibility lookup historically only matched the raw transport
-        key.  Posting the visible key therefore missed the existing fact and
-        created a second, already-archived row, leaving the item open in Inbox.
+        Canonical storage namespaces the key as ``compat:<user>:<raw>`` for the
+        unique index.  The API/UI must expose the same raw key the compatibility
+        view exposes; otherwise the visible value cannot be matched on write
+        (archive created a second, already-archived row) and raw-key consumers
+        such as the Sela request parser and the frontend proposal regex break.
         """
         import db
         from tools.postgres_rehearsal import load_fixture
@@ -2016,7 +2017,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             item for item in client.get('/api/inbox').get_json()['items']
             if item['id'] == item_id
         )
-        self.assertNotEqual(visible['dedupe_key'], raw_key)
+        self.assertEqual(visible['dedupe_key'], raw_key)
         archived = client.post('/api/inbox/archive', json={
             'dedupe_key': visible['dedupe_key'],
             'customer_id': visible['customer_id'],
@@ -2249,6 +2250,244 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(orphans, 0)
         module._INBOX_CACHE.clear()
+
+    def test_sela_agent_request_visible_key_recovers_candidate_id(self):
+        """A Sela human request keeps its source id through the PG Inbox projection.
+
+        The canonical storage key is ``compat:<user>:<raw>``; if the API exposed
+        that instead of the functional raw key, the anchored
+        ``sela:agent-request:`` parser returned an empty candidate_id and the
+        frontend review regex never matched.
+        """
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        source_id = 'pg-sela-visible-key-source'
+        created = client.post('/api/integrations/sela/needs', json={'request': {
+            'source_id': source_id,
+            'need': 'Confirm the visible Inbox key contract.',
+            'context': 'The dedupe key must round-trip through the API.',
+        }})
+        self.assertEqual(created.status_code, 200, created.get_json())
+        need_id = created.get_json()['item']['trosa_inbox_id']
+
+        listed = client.get('/api/integrations/sela/needs?status=open')
+        self.assertEqual(listed.status_code, 200, listed.get_json())
+        view = next(item for item in listed.get_json()['needs'] if item['trosa_inbox_id'] == need_id)
+        self.assertEqual(view['candidate_id'], source_id)
+
+        row = next(item for item in client.get('/api/inbox').get_json()['items'] if item['id'] == need_id)
+        self.assertTrue(row['dedupe_key'].startswith(f'sela:agent-request:{source_id}:'), row['dedupe_key'])
+        self.assertFalse(row['dedupe_key'].startswith('compat:'), row['dedupe_key'])
+
+    def test_customer_profile_update_preserves_external_identity_and_last_contact(self):
+        """An ordinary profile save must not blank the Sela link or last contact.
+
+        ``customer_records`` treats a present payload key as authoritative, so a
+        partial update that defaulted ``external_source``/``external_id``/
+        ``last_contact`` to '' silently erased canonical data.
+        """
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        source_id = 'pg-profile-preserve-source'
+        created = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-profile-preserve-1'},
+            json={'prospect': {
+                'source_id': source_id, 'company': 'Profile Preserve Co',
+                'website': 'https://profile-preserve.example', 'country': 'US',
+                'business_type': 'acrylic', 'status': 'qualified',
+                'outreach_status': 'SENT', 'sent_at': '2026-09-20T10:00:00+08:00',
+                'gmail_message_id': 'pg-profile-preserve-outbound-1',
+                'contact': {'email': 'preserve@profile-preserve.example'},
+            }},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = int(created.get_json()['trosa_id'])
+
+        self.connection.execute(
+            """UPDATE trosa.accounts SET last_contact_at=trosa.compat_time('2026-09-16 09:00:00')
+                WHERE id=(SELECT account_id FROM trosa.account_legacy_refs
+                           WHERE organization_id=trosa.compat_org_id()
+                             AND legacy_user_id='hamid' AND legacy_customer_id=?)""",
+            (customer_id,),
+        )
+        self.connection.commit()
+
+        before = self.connection.execute(
+            'SELECT external_source, external_id, last_interaction_on '
+            'FROM trosa.customer_records WHERE id=?', (customer_id,),
+        ).fetchone()
+        self.assertEqual(before['external_source'], 'sela')
+        self.assertEqual(before['external_id'], source_id)
+        self.assertEqual(before['last_interaction_on'], '2026-09-16')
+
+        updated = client.put(f'/api/customers/{customer_id}', json={'notes': 'profile edit probe'})
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+
+        after = self.connection.execute(
+            'SELECT external_source, external_id, last_interaction_on '
+            'FROM trosa.customer_records WHERE id=?', (customer_id,),
+        ).fetchone()
+        self.assertEqual(after['external_source'], 'sela')
+        self.assertEqual(after['external_id'], source_id)
+        self.assertEqual(after['last_interaction_on'], '2026-09-16')
+
+    def test_compat_time_is_business_timezone_independent_of_session(self):
+        """Naive compatibility timestamps mean Trosa business time on every server.
+
+        The production PostgreSQL service runs with a UTC session while the
+        rehearsal inherits Asia/Shanghai; ``compat_local_date`` is hardcoded to
+        Asia/Shanghai.  A session-dependent ``compat_time`` shifted writes by
+        eight hours and rolled the calendar day for late local times.
+        """
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        db.set_db_user('hamid')
+        connection = db.get_db()
+        try:
+            self.assertEqual(connection.execute('SHOW TimeZone').fetchone()[0], 'Asia/Shanghai')
+            connection.raw.execute("SET TIME ZONE 'UTC'")
+            connection.raw.commit()
+            naive_date = connection.execute(
+                "SELECT trosa.compat_local_date(trosa.compat_time('2026-09-17 23:30:00')) AS d"
+            ).fetchone()['d']
+            self.assertEqual(naive_date, '2026-09-17')
+            offset_date = connection.execute(
+                "SELECT trosa.compat_local_date(trosa.compat_time('2026-09-17T23:30:00+03:00')) AS d"
+            ).fetchone()['d']
+            self.assertEqual(offset_date, '2026-09-18')
+        finally:
+            connection.close()
+            db.set_db_user(None)
+
+    def test_outreach_modern_read_matches_compat_view_date_shape(self):
+        """The modern Outreach read must return the same date-shaped value as the view."""
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        source_id = 'pg-outreach-date-shape'
+        created = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-outreach-date-shape-1'},
+            json={'prospect': {
+                'source_id': source_id, 'company': 'Outreach Date Shape Co',
+                'website': 'https://outreach-date-shape.example', 'country': 'US',
+                'business_type': 'acrylic', 'status': 'qualified',
+                'outreach_status': 'SENT', 'sent_at': '2026-09-20T19:30:00+08:00',
+                'gmail_message_id': 'pg-outreach-date-shape-outbound-1',
+                'contact': {'email': 'date-shape@outreach-date-shape.example'},
+            }},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = int(created.get_json()['trosa_id'])
+
+        db.set_db_user('hamid')
+        connection = db.get_db()
+        try:
+            modern = next(row for row in module._modern_outreach_rows(connection, customer_id=customer_id)
+                          if row['external_id'] == source_id or row['message_id'] == source_id)
+            view = connection.execute(
+                'SELECT sent_date FROM outreach_emails WHERE customer_id=? AND subject=?',
+                (customer_id, modern['subject']),
+            ).fetchone()
+        finally:
+            connection.close()
+            db.set_db_user(None)
+        self.assertEqual(modern['sent_date'], '2026-09-20')
+        self.assertEqual(view['sent_date'], '2026-09-20')
+
+    def test_concurrent_team_invitation_accept_has_single_winner(self):
+        """The guarded canonical UPDATE admits exactly one concurrent winner.
+
+        The compatibility view's INSTEAD OF trigger always upserts and
+        PostgreSQL reports the number of matched view rows, so a rowcount gate
+        on the view let two racing accepts both succeed.
+        """
+        import threading
+
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        invitation_id = 'pg-invite-race-1'
+        token_hash = 'pg-invite-race-hash-1'
+        self.connection.execute(
+            """INSERT INTO identity.team_invitations
+                   (id, organization_id, token_hash, created_by, created_at, expires_at,
+                    accepted_at, accepted_user_id, revoked_at)
+               VALUES (?, trosa.compat_org_id(), ?, 'hamid', '2099-01-01T00:00:00+00:00',
+                       '2099-01-02T00:00:00+00:00', '', '', '')
+               ON CONFLICT (id) DO UPDATE SET accepted_at='', accepted_user_id='', revoked_at=''""",
+            (invitation_id, token_hash),
+        )
+        self.connection.commit()
+
+        barrier = threading.Barrier(2)
+        rowcounts, errors = [], []
+
+        def attempt(index):
+            try:
+                connection = db.get_system_db()
+                try:
+                    connection.execute('BEGIN')
+                    row = connection.execute(
+                        """SELECT id FROM trade_os_compat.team_invitations
+                            WHERE token_hash=? AND COALESCE(accepted_at,'')=''
+                              AND COALESCE(revoked_at,'')=''""",
+                        (token_hash,),
+                    ).fetchone()
+                    if row is None:
+                        connection.rollback()
+                        rowcounts.append(0)
+                        return
+                    barrier.wait(timeout=10)
+                    updated = connection.execute(
+                        """UPDATE identity.team_invitations SET accepted_at=?, accepted_user_id=?
+                            WHERE organization_id=trosa.compat_org_id()
+                              AND id=? AND COALESCE(accepted_at,'')=''""",
+                        (f'2099-01-01T00:00:0{index}+00:00', f'user{index}', invitation_id),
+                    )
+                    rowcounts.append(updated.rowcount)
+                    connection.commit()
+                finally:
+                    connection.close()
+            except Exception as exc:  # pragma: no cover - concurrency must hold
+                errors.append(repr(exc))
+
+        threads = [threading.Thread(target=attempt, args=(index,)) for index in (1, 2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(rowcounts), [0, 1])
+        accepted = self.connection.execute(
+            "SELECT count(*) FROM identity.team_invitations WHERE id=? AND COALESCE(accepted_at,'')<>''",
+            (invitation_id,),
+        ).fetchone()[0]
+        self.assertEqual(accepted, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover

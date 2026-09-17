@@ -1,3 +1,16 @@
+## 2026-09-18 — PostgreSQL 兼容收口：时区、可见键、客户资料写空、并发与日期投影
+
+以 Inbox 归档 dedupe_key 为入口的全库 SQLite→PostgreSQL 行为差异专项排查；所有修复均在真实 PostgreSQL rehearsal 中验证。
+
+- 根因（时区）：`trosa.compat_time` 旧定义是 `value::timestamptz`，naive 字符串按**数据库 session 时区**解释。演练机继承 `Asia/Shanghai`，而生产 Docker `postgres:17.11` 未设 `TZ`（UTC）；同一次写入因此相差 8 小时，且 `trosa.compat_local_date` 硬编码 `Asia/Shanghai`，本地时间 ≥16:00 的记录会滚到错误日期。修复（迁移 `0037`）：显式偏移/Z 视为绝对时刻，其余 naive 值一律按 `Asia/Shanghai` 解释；应用连接 `postgres_compat.connect()` 同时把 `TimeZone` 固定为 `Asia/Shanghai`，使 `timestamptz::text` 与旧 SQLite 本地时间形状一致。
+- 根因（可见键）：canonical `inbox_items.dedupe_key` 存储为 `compat:<user>:<raw>`，但 `/api/inbox` 的现代投影把它直接暴露给前端。除已知归档失效外，`_sela_agent_request_source_id` 的锚定正则、前端 `sela_follow_up` 审核按钮正则、Gmail 附件指针解析都把可见键当原始键使用，导致 Sela 人工请求 `candidate_id` 丢失、审核按钮不渲染。修复：投影统一返回兼容视图同款原始功能键（`COALESCE(payload->>'compat_dedupe_key', dedupe_key)`），写入侧继续同时匹配原始/规范两种键。
+- 根因（客户资料写空）：`trosa_domain.update_customer` 无论调用方是否提供，都把所有字段以 `''` 默认写入 `account_legacy_refs.legacy_payload`；而 `trosa.customer_records` 把“payload 存在该键”当权威值。一次普通客户资料保存（含前端只改 `next_follow_up` 的 PUT）就会把 `external_source`/`external_id`（Sela 链接）、`status`、`type`、`last_contact` 清空。修复：`update_customer` 只写入调用方实际提供的键；PUT 仅在显式请求时写 `last_contact`；`customer_states` 同理只在提供时更新。
+- 根因（并发）：`/api/team/invitations/<id>/accept|revoke` 通过 `trade_os_compat.team_invitations` 视图更新并以 `rowcount` 判定成功。PostgreSQL 对 INSTEAD OF 视图统计的是匹配视图行数，触发器始终 upsert，两个并发请求都能拿到 `rowcount=1`，同一邀请可被接受两次。修复：PostgreSQL 分支改为对 `identity.team_invitations` 做条件更新并检查 canonical `rowcount`，失败方在 READ COMMITTED 下重判谓词后得到 0。
+- 根因（日期投影不一致）：`_modern_outreach_rows` 用 `sent_at::text`（session 相关、带时间的完整时间戳），而兼容视图/旧契约用 `trosa.compat_local_date(...)`（`YYYY-MM-DD`）；同一封开发信两条读取路径给出不同值，Sela `sent_at` 形状也被改变。修复：现代读取改用 `compat_local_date`。
+- 根因（dedupe 竞态恢复不对称）：`create_inbox_item` 首次查找已匹配原始/规范键，但并发冲突后的兜底只匹配规范键；找不到时还会写入指向未插入 UUID 的悬空 `legacy_row_refs`。修复：统一查找原始/规范/兼容三种键；冲突无法解析时显式报错，不再伪造引用。
+- 影响范围：`postgres_compat.py`、`trosa_domain.py`、`app.py`、迁移 `0037`、`tests/test_postgres_rehearsal.py`、本变更日志；不改接口形状、表结构与运行契约。
+- 验证：PostgreSQL rehearsal 29 项全部通过（含 5 项新回归：业务时区与 session 无关、Inbox 可见键为原始键且归档单条、Sela 可见键恢复 `candidate_id`、客户资料保存保留 Sela 链接与最近联系、并发邀请单一赢家）；完整 SQLite 回归 305 项通过；迁移完整性门禁通过。
+
 ## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
 
 - 根因（并发覆盖）：旧的 `release-commit.sh` 只在本地取发布锁，而锁是可被崩溃进程永久留下的 `$TMPDIR` 目录；两个入口若拿到不同 `TMPDIR` 或旧锁残留，就不互斥。更关键的是，锁只保证“不并行”，不保证“后发布者包含先发布者”：两个任务从同一 production 版本开发时，A 先上线后，B 若已通过本地门禁，仍可能把基于旧基线的候选推到 ECS，ECS 只按 `current` 符号链接切换，不校验候选是否包含当前 production，于是 A 的功能被静默覆盖。

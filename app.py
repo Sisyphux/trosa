@@ -2583,10 +2583,22 @@ def revoke_team_invitation(invitation_id):
         return denied
     conn = get_system_db()
     try:
-        cursor = conn.execute('''UPDATE team_invitations SET revoked_at=?
-                                 WHERE id=? AND COALESCE(accepted_at, '')=''
-                                   AND COALESCE(revoked_at, '')='' ''',
-                              (datetime.now(timezone.utc).isoformat(), invitation_id))
+        if postgres_mode():
+            # PostgreSQL counts rows matched in an INSTEAD OF view, not the
+            # canonical change the trigger made.  Guard the real table so two
+            # concurrent requests cannot both "succeed": the loser's predicate
+            # is re-checked after the winner commits and matches zero rows.
+            cursor = conn.execute(
+                '''UPDATE identity.team_invitations SET revoked_at=?
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND id=? AND COALESCE(accepted_at, '')=''
+                      AND COALESCE(revoked_at, '')='' ''',
+                (datetime.now(timezone.utc).isoformat(), invitation_id))
+        else:
+            cursor = conn.execute('''UPDATE team_invitations SET revoked_at=?
+                                     WHERE id=? AND COALESCE(accepted_at, '')=''
+                                       AND COALESCE(revoked_at, '')='' ''',
+                                  (datetime.now(timezone.utc).isoformat(), invitation_id))
         conn.commit()
     finally:
         conn.close()
@@ -2634,10 +2646,20 @@ def accept_invitation(token):
             VALUES (?, ?, ?, ?, ?, ?, 'member', ?, ?, 1)''',
                      (username, username, name, name, '#8B7355', generate_password_hash(password),
                       invitation['created_by'], now))
-        updated = conn.execute('''UPDATE team_invitations
-                                  SET accepted_at=?, accepted_user_id=?
-                                  WHERE id=? AND COALESCE(accepted_at, '')='' ''',
-                               (datetime.now(timezone.utc).isoformat(), username, invitation['id']))
+        if postgres_mode():
+            # See revoke_team_invitation: gate on the canonical row so the
+            # command tag reflects the real conditional update, not the count
+            # of view rows the INSTEAD OF trigger fired for.
+            updated = conn.execute(
+                '''UPDATE identity.team_invitations SET accepted_at=?, accepted_user_id=?
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND id=? AND COALESCE(accepted_at, '')='' ''',
+                (datetime.now(timezone.utc).isoformat(), username, invitation['id']))
+        else:
+            updated = conn.execute('''UPDATE team_invitations
+                                      SET accepted_at=?, accepted_user_id=?
+                                      WHERE id=? AND COALESCE(accepted_at, '')='' ''',
+                                   (datetime.now(timezone.utc).isoformat(), username, invitation['id']))
         if not updated.rowcount:
             conn.rollback()
             return jsonify({'error': '邀请链接已被使用'}), 409
@@ -3023,7 +3045,14 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
         params.extend([dedupe_key, dedupe_key])
     rows = conn.execute(
         '''SELECT ref.legacy_id AS id, ar.legacy_customer_id AS customer_id,
-                  item.item_type, item.title, item.content, item.dedupe_key,
+                  item.item_type, item.title, item.content,
+                  -- The API/UI key is the functional transport key.  Canonical
+                  -- storage namespaces it as ``compat:<user>:<raw>`` for the
+                  -- unique index, but every consumer (Inbox archive, Sela
+                  -- request parsing, Gmail attach, frontend regex) treats the
+                  -- visible value as a raw key.  Expose the same raw value the
+                  -- compatibility view exposes so reads and writes agree.
+                  COALESCE(item.legacy_payload->>'compat_dedupe_key', item.dedupe_key) AS dedupe_key,
                   item.status, item.snoozed_until::text AS snoozed_until,
                   item.resolved_at::text AS resolved_at, item.resolution_reason,
                   item.resolution_note, item.created_at::text AS created_at,
@@ -3060,9 +3089,13 @@ def _modern_outreach_rows(conn, *, customer_id=None, source_id=None):
     rows = conn.execute(
         '''SELECT ref.legacy_id AS id, account_ref.legacy_customer_id AS customer_id,
                   message.subject, message.body AS content,
-                  COALESCE(message.sent_at::text, '') AS sent_date,
+                  -- Keep the same date-shaped projection the compatibility
+                  -- view/API contract uses (``compat_local_date``), instead of
+                  -- a session-dependent full timestamp that disagrees with the
+                  -- legacy value and can land on the wrong local day.
+                  COALESCE(trosa.compat_local_date(message.sent_at), '') AS sent_date,
                   message.reply_status, message.reply_content,
-                  COALESCE(message.reply_at::text, '') AS reply_date,
+                  COALESCE(trosa.compat_local_date(message.reply_at), '') AS reply_date,
                   CASE WHEN lower(COALESCE(message.legacy_payload->>'is_reported','0'))
                        IN ('1','true') THEN 1 ELSE 0 END AS is_reported,
                   message.created_at::text AS created_at,
@@ -8759,7 +8792,7 @@ def update_customer(customer_id):
             'field': data.get('field', existing.get('field', '')),
             'notes': data.get('notes', existing.get('notes', '')),
             'system_notes': data.get('system_notes', existing.get('system_notes', '')),
-            'last_contact': last_contact, 'next_follow_up': new_next_follow,
+            'next_follow_up': new_next_follow,
             'manual_next_follow': is_manual_date,
             'industry': data.get('industry', existing.get('industry', '')),
             'company_size': data.get('company_size', existing.get('company_size', '')),
@@ -8767,6 +8800,12 @@ def update_customer(customer_id):
             'tags': data.get('tags', existing.get('tags', '')),
             'import_source': existing.get('import_source', ''),
         }
+        # ``last_interaction_on`` is derived from communications; only an
+        # explicit request may set it.  Writing the (empty) modern column name
+        # under the legacy ``last_contact`` key would otherwise blank it on
+        # every ordinary profile save.
+        if 'last_contact' in data:
+            updated_values['last_contact'] = last_contact
         if postgres_mode():
             _update_customer_record(conn, customer_id=customer_id, values=updated_values)
         else:

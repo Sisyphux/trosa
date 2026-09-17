@@ -27,7 +27,11 @@ _INSERT_OR_IGNORE = re.compile(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", re.IGNORECASE
 _SQLITE_DATETIME = re.compile(r"datetime\s*\(\s*'now'(?:\s*,\s*'localtime')?\s*\)", re.IGNORECASE)
 _SQLITE_DATE = re.compile(r"date\s*\(\s*'now'(?:\s*,\s*'localtime')?\s*\)", re.IGNORECASE)
 _INSERT_TABLE = re.compile(r"^\s*INSERT\s+(?:INTO\s+)?(?:OR\s+\w+\s+)?([\w.]+)", re.IGNORECASE)
-_PSYCOPG_PLACEHOLDER_OR_PERCENT = re.compile(r"%(?![%sbt])", re.IGNORECASE)
+_PARAM_PLACEHOLDER = "\x00trade_os_param\x00"
+# psycopg pyformat placeholders (``%s``/``%b``/``%t``) are already used
+# natively by PostgreSQL-specific statements in the runtime and must be kept.
+# Only a percent that cannot begin a placeholder is a literal to escape.
+_PSYCOPG_LITERAL_PERCENT = re.compile(r"%(?![%sbt])", re.IGNORECASE)
 _COMPAT_VIEW_INSERT = re.compile(
     r"^\s*INSERT\s+INTO\s+(?:trade_os_compat\.)?"
     r"(users|customers|contacts|reminders|follow_up_logs|outreach_emails|inbox_items|"
@@ -96,9 +100,12 @@ def _translate_sql(sql: str) -> str:
     text = _SQLITE_DATETIME.sub("CURRENT_TIMESTAMP", text)
     text = _SQLITE_DATE.sub("CURRENT_DATE", text)
     text = re.sub(r"\bBEGIN\s+IMMEDIATE\b", "BEGIN", text, flags=re.IGNORECASE)
-    # All runtime values are bound parameters in the application.  The
-    # legacy question-mark placeholder therefore has an unambiguous mapping.
-    text = text.replace("?", "%s")
+    # All runtime values are bound parameters in the application.  The legacy
+    # question-mark placeholder therefore has an unambiguous mapping.  Use a
+    # sentinel so a literal ``%`` (including a ``%s``/``%b``/``%t`` inside a
+    # LIKE pattern or any other string) can be escaped for psycopg first
+    # without ever mistaking a real placeholder for a literal.
+    text = text.replace("?", _PARAM_PLACEHOLDER)
     # PostgreSQL checks ON CONFLICT against the target relation before an
     # INSTEAD OF trigger runs.  The legacy API uses conflict clauses on these
     # SQLite-shaped views, while the trigger itself performs the canonical
@@ -107,10 +114,11 @@ def _translate_sql(sql: str) -> str:
     if _COMPAT_VIEW_INSERT.match(text):
         text = re.sub(r"\s+ON\s+CONFLICT\b[\s\S]*?(?=;?\s*$)", "", text, flags=re.IGNORECASE)
     # psycopg treats every percent sign as part of its pyformat parameter
-    # grammar.  The legacy SQL contains SQLite LIKE literals such as
-    # ``NOT LIKE 'outreach_%'``; escape only percent signs that are not a
-    # placeholder or an already escaped ``%%`` sequence.
-    text = _PSYCOPG_PLACEHOLDER_OR_PERCENT.sub("%%", text)
+    # grammar.  Escape only percents that are not one of the native
+    # ``%s``/``%b``/``%t`` placeholders (or an already escaped ``%%``), then
+    # restore the placeholders produced from the legacy ``?``.
+    text = _PSYCOPG_LITERAL_PERCENT.sub("%%", text)
+    text = text.replace(_PARAM_PLACEHOLDER, "%s")
     return text
 
 
@@ -308,6 +316,12 @@ def connect(user: str | None = None) -> CompatConnection:
         raise RuntimeError("TRADE_OS_DATABASE_URL is required for PostgreSQL mode")
     raw = psycopg.connect(dsn, row_factory=tuple_row)
     raw.execute("SELECT set_config('search_path', 'trade_os_compat,trosa,core,identity,audit,sela,public', false)")
+    # Pin the business timezone for every application connection.  The legacy
+    # runtime stores local (Asia/Shanghai) wall-clock strings and projects
+    # timestamps with ``compat_local_date``; without this the meaning of a
+    # naive timestamp and every ``timestamptz::text`` column depends on where
+    # the PostgreSQL server happens to run.
+    raw.execute("SELECT set_config('TimeZone', 'Asia/Shanghai', false)")
     raw.execute("SELECT set_config('trade_os.user', %s, false)", (str(user or "hamid"),))
     raw.commit()
     return CompatConnection(raw)
