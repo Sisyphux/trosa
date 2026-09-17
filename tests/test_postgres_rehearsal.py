@@ -711,6 +711,42 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             )
         self.connection.rollback()
 
+    def test_contact_delete_and_undo_restore_on_postgres(self):
+        """Undo of a deleted contact must re-insert through the compat view."""
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(
+            client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200
+        )
+        customer_id = load_fixture()['customer_id']
+        contact_id = trosa_domain.create_contact(self.connection, customer_id=customer_id, values={
+            'name': 'Undo Target Buyer',
+            'title': 'Buyer',
+            'email': 'undo-target@example.test',
+            'phone': '+1-555-0177',
+            'preferred_channel': 'email',
+            'contact_type': 'person',
+            'is_primary': False,
+            'notes': 'created to be deleted and restored',
+        })
+        self.connection.commit()
+
+        deleted = client.delete(f'/api/contacts/{contact_id}')
+        self.assertEqual(deleted.status_code, 200, deleted.get_data(as_text=True))
+        token = deleted.get_json()['undo_token']
+
+        restored_response = client.post(f'/api/undo/{token}')
+        self.assertEqual(restored_response.status_code, 200, restored_response.get_data(as_text=True))
+
+        restored = trosa_domain.customer_contacts(self.connection, customer_id)
+        match = next((item for item in restored if int(item['id']) == int(contact_id)), None)
+        self.assertIsNotNone(match, restored)
+        self.assertEqual(match['email'], 'undo-target@example.test')
+        self.assertEqual(match['name'], 'Undo Target Buyer')
+
     def test_flask_acceptance_routes_use_canonical_postgres(self):
         """Exercise the normal HTTP workflow against real PostgreSQL."""
         module = self._app_module()

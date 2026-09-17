@@ -1611,15 +1611,13 @@ def _restore_undo_entity(conn, entity):
                 values['is_done'] = 1
                 values['completed_at'] = values.get('completed_at') or _calendar_now_text()
     if not _snapshot_entity(conn, table_name, entity_id):
+        # Compatibility relations are views; their INSTEAD OF triggers derive
+        # the current user from trosa.compat_current_user().  The view has no
+        # legacy_user_id column, so the restore must not add one.
         insert_columns = ['id'] + list(values.keys())
         placeholders = ','.join('?' for _ in insert_columns)
-        if postgres_mode():
-            insert_columns = ['legacy_user_id'] + insert_columns
-            values = {'legacy_user_id': getattr(g, 'current_user', '') or '', 'id': entity_id, **values}
-            placeholders = ','.join('?' for _ in insert_columns)
-        insert_values = ([values[key] for key in insert_columns] if postgres_mode()
-                         else [entity_id] + [values[key] for key in values])
-        conn.execute(f'INSERT INTO {relation} ({",".join(insert_columns)}) VALUES ({placeholders})', insert_values)
+        insert_params = [entity_id] + [values[key] for key in values]
+        conn.execute(f'INSERT INTO {relation} ({",".join(insert_columns)}) VALUES ({placeholders})', insert_params)
     elif values:
         assignments = ','.join(f'{key}=?' for key in values)
         conn.execute(f'UPDATE {relation} SET {assignments} WHERE id=?',
@@ -13039,13 +13037,10 @@ def update_contact(contact_id):
 def delete_contact(contact_id):
     conn = get_db()
     c = conn.cursor()
-    if postgres_mode():
-        owner_rows = _active_customers(conn)
-        before = next((item for owner in owner_rows
-                       for item in _customer_contacts(conn, int(owner['id']))
-                       if int(item.get('id') or 0) == int(contact_id)), None)
-    else:
-        before = _snapshot_entity(conn, 'contacts', contact_id)
+    # Snapshot through the stable compatibility contract so the undo restore
+    # targets the same relation and scalar types (is_primary integer,
+    # created_at text) as the rest of the contact write/undo path.
+    before = _snapshot_entity(conn, 'contacts', contact_id)
     if not before:
         conn.close()
         return jsonify({'error': '联系人不存在'}), 404
