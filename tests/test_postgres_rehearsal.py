@@ -14,6 +14,7 @@ import unittest
 import base64
 import importlib.util
 import io
+import json
 from pathlib import Path
 from unittest import mock
 from urllib.parse import urlparse
@@ -444,6 +445,159 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         trosa_domain.set_customer_deleted(self.connection, customer_id=hamid_customer_id, deleted=False)
         self.assertEqual(trosa_domain.customer_record(self.connection, hamid_customer_id)['name'], 'Hamid changed')
         self.connection.commit()
+
+    def test_customer_history_binding_keeps_shared_account_siblings_apart(self):
+        """A shared canonical account must not attribute one sibling's history to another."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+
+        def ident(seed):
+            return self.connection.execute(
+                "SELECT trosa.compat_uuid(?)", (seed,)
+            ).fetchone()[0]
+
+        company_id = ident('binding-test:company')
+        account_id = ident('binding-test:account')
+        hamid_customer_id, amy_customer_id = 910001, 910002
+        events = {
+            'hamid': (ident('binding-test:event:hamid'), 'HAMID-ONLY', hamid_customer_id),
+            'amy': (ident('binding-test:event:amy'), 'AMY-ONLY', amy_customer_id),
+            'unbound': (ident('binding-test:event:unbound'), 'UNBOUND', None),
+        }
+        tasks = {
+            'hamid': (ident('binding-test:task:hamid'), 'HAMID TASK', hamid_customer_id),
+            'amy': (ident('binding-test:task:amy'), 'AMY TASK', amy_customer_id),
+            'unbound': (ident('binding-test:task:unbound'), 'UNBOUND TASK', None),
+        }
+        messages = {
+            'hamid': (ident('binding-test:message:hamid'), 'HAMID MAIL', hamid_customer_id),
+            'amy': (ident('binding-test:message:amy'), 'AMY MAIL', amy_customer_id),
+            'unbound': (ident('binding-test:message:unbound'), 'UNBOUND MAIL', None),
+        }
+        try:
+            self.connection.execute(
+                '''INSERT INTO core.companies (id, organization_id, canonical_name, normalized_name)
+                   VALUES (?, trosa.compat_org_id(), 'Binding Test Co', 'binding test co')''',
+                (company_id,),
+            )
+            self.connection.execute(
+                '''INSERT INTO trosa.accounts (id, organization_id, company_id, display_name)
+                   VALUES (?, trosa.compat_org_id(), ?, 'Binding Test')''',
+                (account_id, company_id),
+            )
+            for user, legacy_id in (('hamid', hamid_customer_id), ('amy', amy_customer_id)):
+                self.connection.execute(
+                    '''INSERT INTO trosa.account_legacy_refs
+                           (organization_id, legacy_user_id, legacy_customer_id, account_id,
+                            source_db, legacy_payload)
+                       VALUES (trosa.compat_org_id(), ?, ?, ?, 'binding-test', '{}'::jsonb)''',
+                    (user, legacy_id, account_id),
+                )
+
+            def bind(customer_id):
+                payload = {'is_reported': True}
+                if customer_id is not None:
+                    payload['customer_id'] = customer_id
+                return json.dumps(payload)
+
+            for kind, items in (
+                ('follow_up_logs', events),
+                ('reminders', tasks),
+                ('outreach_emails', messages),
+            ):
+                for idx, (item_key, (target_id, content, customer_id)) in enumerate(items.items()):
+                    payload = bind(customer_id)
+                    if kind == 'follow_up_logs':
+                        self.connection.execute(
+                            '''INSERT INTO trosa.timeline_events
+                                   (id, account_id, event_type, direction, content, source_module,
+                                    source_reference, occurred_at, payload)
+                               VALUES (?, ?, 'email', 'inbound', ?, 'binding-test', ?, trosa.compat_time('2026-08-01'), ?::jsonb)''',
+                            (target_id, account_id, content, item_key, payload),
+                        )
+                    elif kind == 'reminders':
+                        # One open follow-up per account per day is a database
+                        # invariant, so give each test task its own day.
+                        self.connection.execute(
+                            '''INSERT INTO trosa.tasks
+                                   (id, account_id, title, content, reason, due_at, status,
+                                    task_type, legacy_payload)
+                               VALUES (?, ?, ?, ?, 'binding test', trosa.compat_time(?), 'open',
+                                       'follow_up', ?::jsonb)''',
+                            (target_id, account_id, content, content,
+                             '2026-08-%02d' % (2 + idx), payload),
+                        )
+                    else:
+                        self.connection.execute(
+                            '''INSERT INTO trosa.outreach_messages
+                                   (id, account_id, subject, body, sent_at, legacy_payload)
+                               VALUES (?, ?, ?, ?, trosa.compat_time('2026-08-03'), ?::jsonb)''',
+                            (target_id, account_id, content, content, payload),
+                        )
+            for user in ('hamid', 'amy'):
+                for kind, items in (
+                    ('follow_up_logs', events),
+                    ('reminders', tasks),
+                    ('outreach_emails', messages),
+                ):
+                    for idx, (item_key, (target_id, content, customer_id)) in enumerate(items.items()):
+                        self.connection.execute(
+                            '''INSERT INTO trosa.legacy_row_refs
+                                   (organization_id, legacy_user_id, table_name, legacy_id, target_id)
+                               VALUES (trosa.compat_org_id(), ?, ?, ?, ?)''',
+                            (user, kind, {'hamid': 910, 'amy': 920}[user] + idx * 10 + 1, target_id),
+                        )
+            self.connection.commit()
+
+            hamid_interactions = trosa_domain.customer_interactions(self.connection, hamid_customer_id)
+            self.assertIn('HAMID-ONLY', {item['content'] for item in hamid_interactions})
+            self.assertNotIn('AMY-ONLY', {item['content'] for item in hamid_interactions})
+            self.assertNotIn('UNBOUND', {item['content'] for item in hamid_interactions})
+            hamid_tasks = trosa_domain.customer_tasks(self.connection, hamid_customer_id)
+            self.assertIn('HAMID TASK', {item['title'] for item in hamid_tasks})
+            self.assertNotIn('AMY TASK', {item['title'] for item in hamid_tasks})
+            self.assertNotIn('UNBOUND TASK', {item['title'] for item in hamid_tasks})
+
+            db.set_db_user('amy')
+            amy_connection = db.get_db()
+            try:
+                amy_interactions = trosa_domain.customer_interactions(amy_connection, amy_customer_id)
+                self.assertIn('AMY-ONLY', {item['content'] for item in amy_interactions})
+                self.assertNotIn('HAMID-ONLY', {item['content'] for item in amy_interactions})
+                self.assertNotIn('UNBOUND', {item['content'] for item in amy_interactions})
+                amy_tasks = trosa_domain.customer_tasks(amy_connection, amy_customer_id)
+                self.assertIn('AMY TASK', {item['title'] for item in amy_tasks})
+                self.assertNotIn('HAMID TASK', {item['title'] for item in amy_tasks})
+                # The legacy-shaped projections must apply the same binding.
+                amy_mail = amy_connection.execute(
+                    '''SELECT subject FROM trosa.outreach_emails WHERE customer_id=?''',
+                    (amy_customer_id,),
+                ).fetchall()
+                self.assertIn('AMY MAIL', {row['subject'] for row in amy_mail})
+                self.assertNotIn('HAMID MAIL', {row['subject'] for row in amy_mail})
+            finally:
+                amy_connection.close()
+                db.set_db_user('hamid')
+        finally:
+            target_ids = [item[0] for item in
+                          list(events.values()) + list(tasks.values()) + list(messages.values())]
+            marks = ','.join('?' for _ in target_ids)
+            self.connection.execute(
+                f'DELETE FROM trosa.legacy_row_refs WHERE target_id IN ({marks})', target_ids)
+            self.connection.execute(
+                f'DELETE FROM trosa.timeline_events WHERE id IN ({marks})', target_ids)
+            self.connection.execute(
+                f'DELETE FROM trosa.tasks WHERE id IN ({marks})', target_ids)
+            self.connection.execute(
+                f'DELETE FROM trosa.outreach_messages WHERE id IN ({marks})', target_ids)
+            self.connection.execute(
+                'DELETE FROM trosa.account_legacy_refs WHERE account_id=?', (account_id,))
+            self.connection.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
+            self.connection.execute('DELETE FROM core.companies WHERE id=?', (company_id,))
+            self.connection.commit()
 
     def test_flask_acceptance_routes_use_canonical_postgres(self):
         """Exercise the normal HTTP workflow against real PostgreSQL."""

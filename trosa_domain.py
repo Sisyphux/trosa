@@ -305,6 +305,7 @@ def record_external_interaction(
             ).fetchone()
             contact_method_id = contact['contact_method_id'] if contact else None
         payload = {
+            'customer_id': int(customer_id),
             'is_reported': bool(is_reported),
             **({'related_task_id': int(related_task_id)} if related_task_id else {}),
         }
@@ -432,9 +433,9 @@ def merge_open_task(
            (id, account_id, title, content, reason, due_at, status, task_type,
             source_activity_legacy_id, manual_order, legacy_payload, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, trosa.compat_time(?), 'open', ?, ?, 0,
-                   '{}'::jsonb, coalesce(trosa.compat_time(?), now()), now())''',
+                   ?::jsonb, coalesce(trosa.compat_time(?), now()), now())''',
         (task_id, account_id, title, content, reason, due_on, task_type,
-         str(source_interaction_id or ''), now),
+         str(source_interaction_id or ''), json.dumps({'customer_id': int(customer_id)}), now),
     )
     conn.execute(
         '''INSERT INTO trosa.legacy_row_refs
@@ -993,9 +994,10 @@ def create_outreach_message(conn: Any, *, customer_id: int, subject: str, conten
     if not account: raise ValueError('customer is not visible to the current user')
     legacy_id = conn.execute("SELECT trosa.compat_next_id('outreach_emails', trosa.compat_current_user())").fetchone()[0]
     message_id = conn.execute("SELECT trosa.compat_uuid('outreach:' || trosa.compat_current_user() || ':' || ?::text)", (legacy_id,)).fetchone()[0]
-    conn.execute('''INSERT INTO trosa.outreach_messages (id,account_id,subject,body,sent_at,reply_status,created_at)
-                    VALUES (?,?,?,?,trosa.compat_time(?),?,coalesce(trosa.compat_time(?),now()))''',
-                 (message_id, account['account_id'], subject, content, sent_on, reply_status, created_at))
+    conn.execute('''INSERT INTO trosa.outreach_messages (id,account_id,subject,body,sent_at,reply_status,created_at,legacy_payload)
+                    VALUES (?,?,?,?,trosa.compat_time(?),?,coalesce(trosa.compat_time(?),now()),?::jsonb)''',
+                 (message_id, account['account_id'], subject, content, sent_on, reply_status, created_at,
+                  json.dumps({'customer_id': int(customer_id)})))
     conn.execute('''INSERT INTO trosa.legacy_row_refs (organization_id,legacy_user_id,table_name,legacy_id,target_id)
                     VALUES (trosa.compat_org_id(),trosa.compat_current_user(),'outreach_emails',?,?)''', (legacy_id,message_id))
     return int(legacy_id)

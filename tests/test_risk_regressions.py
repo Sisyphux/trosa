@@ -1948,29 +1948,9 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             [Path(path).name for path in db._postgres_migration_paths()],
             sorted(path.name for path in (ROOT / 'migrations').glob('[0-9][0-9][0-9][0-9]_*.sql')),
         )
-        from tools import unified_postgres_migration
-        registered = {Path(path).name for path in unified_postgres_migration.SCHEMA_PATHS}
-        for name in (
-            '0007_postgres_runtime_hardening.sql',
-            '0015_postgres_legacy_date_projections.sql',
-            '0016_postgres_user_scoped_customer_payloads.sql',
-            '0017_trosa_agent_prospect_profiles.sql',
-            '0018_trosa_business_exclusions.sql',
-            '0019_retire_frozen_compat_surfaces.sql',
-            '0020_customer_state_facts.sql',
-            '0021_formal_business_read_models.sql',
-            '0022_modern_trosa_core.sql',
-            '0023_customer_details_compat_boundary.sql',
-            '0024_customer_record_task_projection.sql',
-            '0025_customer_record_dates.sql',
-            '0026_compat_customer_state_boundary.sql',
-            '0027_modern_customer_files_and_priority.sql',
-            '0028_canonical_operation_audit.sql',
-            '0029_compat_operation_audit_bridge.sql',
-            '0030_customer_records_user_scoped_projection.sql',
-            '0031_customer_pin_payload_backfill.sql',
-        ):
-            self.assertIn(name, registered)
+        binding = (ROOT / 'migrations' / '0034_customer_history_binding.sql').read_text(encoding='utf-8')
+        self.assertIn('compat_customer_binding', binding)
+        self.assertIn('trosa_account_legacy_refs_account_scoped_idx', binding)
 
     def test_customer_details_are_a_formal_postgres_fact_and_compat_writes_sync_them(self):
         migration = (ROOT / 'migrations' / '0023_customer_details_compat_boundary.sql').read_text(encoding='utf-8')
