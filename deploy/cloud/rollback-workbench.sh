@@ -39,7 +39,7 @@ printf 'rolled back to %s\n' "\$TARGET"
 EOF
 )
 
-"$SCRIPT_DIR/run-workbench-command.sh" \
+bash "$SCRIPT_DIR/run-workbench-command.sh" \
   "$TRADE_OS_ECS_INSTANCE_ID" \
   "$TRADE_OS_ECS_REGION" \
   "$remote_command"
