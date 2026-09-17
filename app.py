@@ -3012,8 +3012,15 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
         where.append('ref.legacy_id=?')
         params.append(item_id)
     if dedupe_key is not None:
-        where.append('COALESCE(item.legacy_payload->>\'compat_dedupe_key\', item.dedupe_key)=?')
-        params.append(dedupe_key)
+        # Callers pass either the raw transport key (internal writers) or the
+        # canonical key this projection returns to API clients.  Match both so
+        # an archive keyed by the visible dedupe_key reaches the same fact
+        # instead of silently creating a second, already-archived row.
+        where.append(
+            "(COALESCE(item.legacy_payload->>'compat_dedupe_key', item.dedupe_key)=? "
+            "OR item.dedupe_key=?)"
+        )
+        params.extend([dedupe_key, dedupe_key])
     rows = conn.execute(
         '''SELECT ref.legacy_id AS id, ar.legacy_customer_id AS customer_id,
                   item.item_type, item.title, item.content, item.dedupe_key,

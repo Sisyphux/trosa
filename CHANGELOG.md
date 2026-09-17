@@ -22,6 +22,13 @@
 - 数据边界：只改 `app/engine.py` 的请求参数与结果解析，不动接口、数据表、迁移和写入逻辑。
 - 验证：新增 `DeepSeekThinkingModeTest`，覆盖关闭思考、空结果显式报错、连接测试预算；AI 相关回归通过。
 
+## 2026-09-17 — 修复：Inbox 待归属沟通“删除”无效果
+
+- 根因：PostgreSQL 下 `/api/inbox` 返回的是规范化的 `compat:<user>:<raw>` dedupe_key，但 `/api/inbox/archive` 与 `create_inbox_item` 只按 `legacy_payload->>'compat_dedupe_key'`（原始 key）匹配。客户端拿界面上的 dedupe_key 归档时匹配不到原条目，于是走了“新建一条已归档条目”的分支：原条目保持 `open`，Inbox 看起来毫无变化，同时每次点击都会多出一条 `已归档` 垃圾记录。SQLite 模式返回原始 key，因此单测覆盖不到。
+- 修复：`trosa_domain.create_inbox_item` 与 `app._modern_inbox_rows` 的 dedupe_key 过滤同时匹配原始 key 与规范 key（`item.dedupe_key`），界面按可见 dedupe_key 归档/去重都能落到同一条事实。
+- 影响范围：仅 Inbox dedupe 查找；不改接口、数据表、迁移和写入语义。
+- 验证：新增 PostgreSQL rehearsal 回归 `test_inbox_archive_accepts_visible_dedupe_key`（归档可见 key 后条目离开 Inbox 且只保留一条 archived 事实）；完整 SQLite 回归 305 项、PostgreSQL rehearsal 24 项通过。
+
 ## 2026-09-17 — Inbox 待归属沟通可直接删除
 
 - 待归属沟通行内新增“删除”：确认后这条内容不写任何客户记录，直接从 Inbox 移除（内部走既有归档状态，保留审计与恢复能力）；适用于自动通知邮件等无用信号。归属按钮、展开详情里同样提供。

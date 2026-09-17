@@ -1979,6 +1979,66 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(count, 1)
 
+    def test_inbox_archive_accepts_visible_dedupe_key(self):
+        """Archiving by the dedupe_key the API exposes must remove the row.
+
+        The projection returns the canonical ``compat:<user>:<raw>`` key while
+        the compatibility lookup historically only matched the raw transport
+        key.  Posting the visible key therefore missed the existing fact and
+        created a second, already-archived row, leaving the item open in Inbox.
+        """
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        raw_key = 'gmail:archive-visible-key@example.com:rehearsal-message-1'
+
+        db.set_db_user('hamid')
+        connection = db.get_db()
+        try:
+            connection.execute('BEGIN')
+            item_id = module._create_inbox_item(
+                connection, item_type='gmail_capture', title='待归属 Gmail 回复：Archive probe',
+                content=json.dumps({'messages': [{'text': 'probe'}]}),
+                dedupe_key=raw_key, status='open', created_at='2026-09-17 09:00:00',
+            )
+            connection.commit()
+        finally:
+            connection.close()
+            db.set_db_user(None)
+
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        visible = next(
+            item for item in client.get('/api/inbox').get_json()['items']
+            if item['id'] == item_id
+        )
+        self.assertNotEqual(visible['dedupe_key'], raw_key)
+        archived = client.post('/api/inbox/archive', json={
+            'dedupe_key': visible['dedupe_key'],
+            'customer_id': visible['customer_id'],
+            'item_type': visible['item_type'],
+        })
+        self.assertEqual(archived.status_code, 200, archived.get_json())
+
+        module._INBOX_CACHE.clear()
+        self.assertFalse(any(
+            item['id'] == item_id for item in client.get('/api/inbox').get_json()['items']
+        ))
+        rows = self.connection.execute(
+            """SELECT item.status, count(*) AS total FROM trosa.inbox_items item
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid' AND ref.table_name='inbox_items'
+                  AND COALESCE(item.legacy_payload->>'compat_dedupe_key', item.dedupe_key)=?
+                GROUP BY item.status""",
+            (raw_key,),
+        ).fetchall()
+        self.assertEqual([(row['status'], row['total']) for row in rows], [('archived', 1)])
+
     def test_failed_write_leaves_no_partial_state(self):
         """A mid-transaction failure must roll back the whole business action."""
         import db

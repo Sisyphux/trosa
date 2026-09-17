@@ -730,9 +730,10 @@ def create_inbox_item(
                   AND ref.legacy_user_id=trosa.compat_current_user()
                   AND ref.table_name='inbox_items'
                   AND (item.legacy_payload->>'compat_dedupe_key'=?
-                       OR (item.legacy_payload->>'compat_dedupe_key' IS NULL AND item.dedupe_key=?))
+                       OR (item.legacy_payload->>'compat_dedupe_key' IS NULL AND item.dedupe_key=?)
+                       OR item.dedupe_key=?)
                 ORDER BY item.created_at, ref.legacy_id LIMIT 1''',
-            (dedupe_key, dedupe_key),
+            (dedupe_key, dedupe_key, dedupe_key),
         ).fetchone()
     if existing:
         conn.execute(
