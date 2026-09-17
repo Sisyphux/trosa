@@ -2666,6 +2666,81 @@ class AiEngineConfigTest(unittest.TestCase):
             config_dir.cleanup()
 
 
+class DeepSeekThinkingModeTest(unittest.TestCase):
+    """DeepSeek V4 默认开启思考；整理任务必须关闭思考，并把空结果显式报错。"""
+
+    def setUp(self):
+        import app.engine as engine
+
+        self.engine = engine
+        self.config_dir = tempfile.TemporaryDirectory()
+        self.config_path = os.path.join(self.config_dir.name, 'ai-config.env')
+        self.original_env = {key: os.environ.get(key) for key in engine._AI_CONFIG_KEYS}
+        self.patchers = [
+            mock.patch.object(engine, '_AI_CONFIG_FILE', self.config_path),
+            mock.patch.object(engine, '_AI_CONFIG_ENV_BASELINE', {key: None for key in engine._AI_CONFIG_KEYS}),
+        ]
+        for patcher in self.patchers:
+            patcher.start()
+        for key in engine._AI_CONFIG_KEYS:
+            os.environ.pop(key, None)
+        engine.save_ai_config({
+            'backend': 'deepseek',
+            'api_key': 'unit-test-deepseek-key',
+            'base_url': 'https://api.deepseek.com',
+            'model': 'deepseek-v4-flash',
+        })
+
+    def tearDown(self):
+        engine = self.engine
+        for patcher in reversed(self.patchers):
+            patcher.stop()
+        for key, value in self.original_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        engine._runtime_ai_config()
+        self.config_dir.cleanup()
+
+    def test_deepseek_chat_disables_thinking_and_returns_content(self):
+        response = mock.Mock()
+        response.json.return_value = {
+            'choices': [{'finish_reason': 'stop', 'message': {'content': '{"summary":"ok"}'}}],
+        }
+        with mock.patch.object(self.engine.requests, 'post', return_value=response) as request:
+            result = self.engine._call_deepseek('把原文整理为 JSON')
+        self.assertEqual(result, '{"summary":"ok"}')
+        payload = request.call_args.kwargs['json']
+        self.assertEqual(payload['thinking'], {'type': 'disabled'})
+        self.assertEqual(payload['model'], 'deepseek-v4-flash')
+
+    def test_reasoning_only_response_becomes_explicit_error(self):
+        response = mock.Mock()
+        response.json.return_value = {
+            'choices': [{
+                'finish_reason': 'length',
+                'message': {'content': '', 'reasoning_content': '先思考一下……'},
+            }],
+        }
+        with mock.patch.object(self.engine.requests, 'post', return_value=response):
+            result = self.engine._call_deepseek('把原文整理为 JSON')
+        self.assertTrue(result.startswith('[ERROR_DEEPSEEK'), result)
+        self.assertNotEqual(result.strip(), '')
+
+    def test_connection_probe_uses_a_budget_and_disables_thinking(self):
+        response = mock.Mock()
+        response.json.return_value = {
+            'choices': [{'finish_reason': 'stop', 'message': {'content': '连接成功'}}],
+        }
+        with mock.patch.object(self.engine.requests, 'post', return_value=response) as request:
+            result = self.engine.test_ai_connection({'backend': 'deepseek'})
+        self.assertTrue(result['success'], result)
+        payload = request.call_args.kwargs['json']
+        self.assertEqual(payload['thinking'], {'type': 'disabled'})
+        self.assertGreater(payload['max_tokens'], 8)
+
+
 class CustomerFileAttachmentTest(unittest.TestCase):
     """客户文件附件：上传、列表、预览/下载、删除和越权隔离。"""
 

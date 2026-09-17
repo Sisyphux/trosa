@@ -473,7 +473,10 @@ def test_ai_connection(config=None):
             response = requests.post(
                 f'{base_url}/v1/chat/completions' if provider == 'lmstudio' else f'{base_url}/chat/completions',
                 headers=headers,
-                json={'model': model, 'messages': [{'role': 'user', 'content': '只回复：连接成功'}], 'temperature': 0, 'max_tokens': 8},
+                # A tiny budget is enough for connectivity; disable thinking so
+                # the reasoning trace cannot swallow the whole probe.
+                json={'model': model, 'messages': [{'role': 'user', 'content': '只回复：连接成功'}],
+                      'temperature': 0, 'max_tokens': 32, **_provider_payload_options(provider)},
                 timeout=30,
             )
         response.raise_for_status()
@@ -720,12 +723,13 @@ def extract_text_from_image(image_data_url: str) -> str:
                     }],
                     'temperature': 0,
                     'max_tokens': 3000,
+                    **_provider_payload_options(provider),
                 },
                 timeout=120,
             )
             response.raise_for_status()
             payload = response.json()
-            content = (payload.get('choices') or [{}])[0].get('message', {}).get('content')
+            content, _reason = _chat_message_content(payload)
         if not content:
             return "[ERROR_VISION] 当前共享模型没有返回识别文字；请确认模型支持图片输入。"
         return str(content)
@@ -753,6 +757,36 @@ ZHIPU_BASE_URL = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/
 ZHIPU_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
 
 
+# DeepSeek V4 models enable thinking by default.  The shared CRM connection is
+# used for evidence-bound extraction (summaries, JSON facts, screenshots), and
+# the reasoning trace is spent from the same output budget as the answer.  With
+# the previous 3072-token cap a longer input could exhaust the budget on
+# ``reasoning_content`` and return an empty ``content``, which every caller
+# silently treated as “AI 没有反应”.  Opt out explicitly for this provider.
+_DEEPSEEK_THINKING_DISABLED = {'type': 'disabled'}
+
+
+def _provider_payload_options(provider):
+    """Return provider-specific request options shared by every AI call."""
+    if provider == 'deepseek':
+        return {'thinking': dict(_DEEPSEEK_THINKING_DISABLED)}
+    return {}
+
+
+def _chat_message_content(payload):
+    """Read ``content`` from an OpenAI-compatible response, tolerating reasoning."""
+    choices = payload.get('choices') or [{}]
+    message = choices[0].get('message') or {}
+    content = message.get('content')
+    if content:
+        return str(content), ''
+    if message.get('reasoning_content'):
+        return '', 'reasoning_only'
+    if choices[0].get('finish_reason') == 'length':
+        return '', 'truncated'
+    return '', 'empty'
+
+
 def _call_deepseek(prompt: str, model: str = None) -> str:
     """调用 DeepSeek API（OpenAI 兼容）"""
     if not DEEPSEEK_API_KEY:
@@ -767,11 +801,19 @@ def _call_deepseek(prompt: str, model: str = None) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
         "max_tokens": 3072,
+        **_provider_payload_options('deepseek'),
     }
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=180)
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        content, reason = _chat_message_content(resp.json())
+        if content:
+            return content
+        if reason == 'reasoning_only':
+            return "[ERROR_DEEPSEEK] 模型只返回了思考过程，未返回整理结果，请更换非思考模型"
+        if reason == 'truncated':
+            return "[ERROR_DEEPSEEK] 模型输出被截断，请缩短本次沟通内容后重试"
+        return "[ERROR_DEEPSEEK] 模型没有返回任何内容"
     except requests.exceptions.ConnectionError:
         return "[ERROR_DEEPSEEK]"
     except Exception as e:

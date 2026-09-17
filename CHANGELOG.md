@@ -1,3 +1,11 @@
+## 2026-09-17 — 修复“AI 帮我整理”再次无反应：DeepSeek V4 思考模式吞掉输出
+
+- 根因：共享 AI 接入的 DeepSeek V4 系列默认开启思考（`thinking`），推理过程与最终答案共用 `max_tokens` 预算。`_call_deepseek` 固定 3072 且未关闭思考时，整理/摘要这类较长输入会把预算耗在 `reasoning_content` 上，返回空 `content`；`/api/inbox/analyze-reply` 于是静默回退成“原文截断 + 未知”，界面看起来像 AI 没反应。
+- 修复：所有 DeepSeek 调用（整理、连接测试、截图识别）显式发送 `thinking: {"type": "disabled"}`；连接测试的 `max_tokens` 从 8 提到 32，避免思考模型下误报“没有返回可用模型内容”。
+- 修复：模型只返回思考内容或输出被截断时，现在返回明确的 `[ERROR_DEEPSEEK] …`，不再把空字符串当作成功结果。
+- 数据边界：只改 `app/engine.py` 的请求参数与结果解析，不动接口、数据表、迁移和写入逻辑。
+- 验证：新增 `DeepSeekThinkingModeTest`，覆盖关闭思考、空结果显式报错、连接测试预算；AI 相关回归通过。
+
 ## 2026-09-17 — 修复沟通记录串客户：历史记录按原始客户绑定，禁止共享主档别名扇出
 
 - 根因：`trosa.customer_interactions` / `trosa.customer_tasks` 视图只按 account 关联 `account_legacy_refs`；同一用户名下两个客户（如 Kaze 与 Action Plus Exhibitions and Interiors）指向同一 canonical 公司账号后，每条沟通记录会扇出到每个别名客户，客户详情“现在 / 最近一次重要沟通”、时间线、下一步因此显示另一客户的记录。Today 在 0033 只做了去重而非正确归属。
