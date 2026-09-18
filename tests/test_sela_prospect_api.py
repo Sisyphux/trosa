@@ -682,6 +682,13 @@ class SelaProspectApiTest(unittest.TestCase):
             changes = json.loads(profile['research_json'])['agent_state']['contact_permission_changes']
             self.assertEqual(changes[-1]['to'], 'allowed')
             self.assertIn('批量误标', changes[-1]['note'])
+            audit = conn.execute(
+                "SELECT action, target_type, target_id, details FROM operation_logs"
+                " WHERE target_type='sela_prospect' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            self.assertEqual(audit['action'], 'UNBLOCK')
+            self.assertEqual(audit['target_id'], customer_id)
+            self.assertIn('批量误标', audit['details'])
         finally:
             conn.close()
 
@@ -702,6 +709,16 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertFalse(removed.get_json()['record']['is_active'])
         self.assertFalse(any(
             row.get('record_id') == record_id for row in self.exclusion_records()))
+        conn = self.hamid_db()
+        try:
+            audit = conn.execute(
+                "SELECT action, target_type, target_id FROM operation_logs"
+                " WHERE target_type='business_exclusion' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            self.assertEqual(audit['action'], 'UNBLOCK')
+            self.assertEqual(audit['target_id'], exclusion_id)
+        finally:
+            conn.close()
 
 
 if __name__ == '__main__':

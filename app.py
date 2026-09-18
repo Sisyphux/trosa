@@ -5222,6 +5222,14 @@ def customer_agent_prospect_contact_permission(customer_id):
             conn.rollback()
             return jsonify({'success': False, 'error': error.message}), error.status
         prospect = _sela_prospect_view(conn, updated)
+        wanted = str(payload.get('permission') or '').strip().lower()
+        audit_note = str(payload.get('note') or payload.get('reason') or '').strip()[:500]
+        _record_operation_log(
+            conn, 'UNBLOCK' if wanted == 'allowed' else 'BLOCK',
+            'sela_prospect', customer_id,
+            f'{getattr(g, "current_user", "")} 将联系权限改为 {wanted}：{audit_note}',
+            _sela_now(),
+        )
         conn.commit()
     except Exception:
         try:
@@ -5757,6 +5765,11 @@ def delete_business_exclusion(exclusion_id):
         }
         conn.execute('BEGIN IMMEDIATE')
         record = _sela_upsert_business_exclusion(conn, value, _sela_now())
+        _record_operation_log(
+            conn, 'UNBLOCK', 'business_exclusion', exclusion_id,
+            f'{getattr(g, "current_user", "")} 停用业务排除 {old["source"]}:{old["source_id"]}：{reason[:500]}',
+            _sela_now(),
+        )
         conn.commit()
     except CrmWriteError as exc:
         conn.rollback()

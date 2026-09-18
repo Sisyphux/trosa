@@ -1,3 +1,9 @@
+## 2026-09-18 — 解禁/停用审计进中央表
+
+- 背景：人工解禁（`contact-permission`）与业务排除停用（`DELETE /api/business-exclusions`）的审计只写在各自记录 JSON 里，中央 `audit.operation_log_events` 查不到。
+- 修复：两处人工写入同事务追加 `_record_operation_log`（`UNBLOCK`/`BLOCK` + 操作人 + 原因），SQLite 5754；回归在 `test_sela_prospect_api` 断言中央审计行。
+- 数据边界：只加审计写，不改业务语义与迁移。
+
 ## 2026-09-18 — Inbox 视觉验收修复：未归属沟通直接显示发件人身份
 
 - 验收发现：待归属 Gmail 条目的主名称还是系统标题“待归属 Gmail 邮件：xxx”，与徽章重复且难读。
