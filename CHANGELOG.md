@@ -1,3 +1,9 @@
+## 2026-09-18 — 修复归档客户仍出现在今日跟进（PostgreSQL）
+
+- 根因：归档客户是按用户软删除：`trosa_domain.set_customer_deleted` 只把 `trosa.account_legacy_refs.legacy_payload.is_deleted` 置 `1`，不改共享 `trosa.accounts.deleted_at`。`trosa.today_tasks` 视图只过滤 `customer.deleted_at IS NULL`，没有应用客户列表（`trosa.customer_records`）同款 per-alias 归档判定，于是已归档客户带着 open 待办继续出现在今日跟进。
+- 修复：迁移 0038 重定义 `trosa.today_tasks`：归档判定改为 payload 优先（`lower(coalesce(customer_ref.legacy_payload->>'is_deleted', 由 accounts.deleted_at 兜底)) NOT IN ('1','true')`），与 0030 `customer_records` 语义一致；其余别名列去重与 `compat_customer_binding` 逻辑不变。SQLite 模式的 Today 查询原本已过滤 `is_deleted`，不受影响。
+- 回归：`tests/test_postgres_rehearsal.py` 新增归档→待办立即离开今日跟随、取消归档→恢复的端到端演练（走 canonical `set_customer_deleted` 写路径）；PostgreSQL 演练 26 项全部通过。
+
 ## 2026-09-18 — 修复：永久删除客户在存在联系人沟通/外联/交付/回执时 500
 
 - 根因（外键顺序）：`_permanent_delete_customer_pg` 在删除 `core.contact_methods` 之前就删了联系人引用，而该表被 `trosa.timeline_events`、`trosa.outreach_messages`、`trosa.email_delivery_events`、`trosa.email_message_receipts` 引用；随后又在删除 `trosa.accounts` 前未清理 `audit.integration_receipts`（以及 `agent_actions`/`agent_proposals`/`imported_activity_rows`）。带 Sela 外联、交付事件或联系人沟通的客户因此触发 `email_delivery_events_contact_method_id_fkey`、`outreach_messages_contact_method_id_fkey`、`integration_receipts_account_id_fkey`，永久删除返回 500「永久删除失败，未更改任何数据」。

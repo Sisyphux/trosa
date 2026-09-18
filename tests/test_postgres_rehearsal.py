@@ -1704,6 +1704,57 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             )
             self.connection.commit()
 
+    def test_archiving_customer_removes_its_task_from_today(self):
+        """An archived Customer's open Task must leave 今日跟进 immediately.
+
+        Archiving is the per-user soft delete in set_customer_deleted, so the
+        Today view must honor that per-alias payload instead of only the
+        shared accounts.deleted_at.
+        """
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        task_id = ids['task_id']
+        try:
+            today = trosa_domain.today_tasks(self.connection, due_on_or_before='2031-12-31')
+            self.assertTrue(
+                any(row['id'] == task_id and row['customer_id'] == customer_id for row in today)
+            )
+
+            trosa_domain.set_customer_deleted(
+                self.connection, customer_id=customer_id, deleted=True,
+                changed_at='2026-09-14T00:00:00',
+            )
+            self.connection.commit()
+
+            rows = self.connection.execute(
+                '''SELECT id, customer_id FROM trosa.today_tasks WHERE id=?''',
+                (task_id,),
+            ).fetchall()
+            self.assertEqual(rows, [])
+            today = trosa_domain.today_tasks(self.connection, due_on_or_before='2031-12-31')
+            self.assertFalse(
+                any(row['id'] == task_id and row['customer_id'] == customer_id for row in today)
+            )
+
+            trosa_domain.set_customer_deleted(
+                self.connection, customer_id=customer_id, deleted=False,
+                changed_at='2026-09-18T00:00:00',
+            )
+            self.connection.commit()
+            today = trosa_domain.today_tasks(self.connection, due_on_or_before='2031-12-31')
+            self.assertTrue(
+                any(row['id'] == task_id and row['customer_id'] == customer_id for row in today)
+            )
+        finally:
+            trosa_domain.set_customer_deleted(
+                self.connection, customer_id=customer_id, deleted=False,
+                changed_at='2026-09-18T00:00:00',
+            )
+            self.connection.commit()
+
     def test_customer_history_stays_bound_to_its_own_customer_on_merged_account(self):
         """A merged account must never leak history between Customer aliases.
 
