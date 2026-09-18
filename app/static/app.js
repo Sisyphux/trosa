@@ -1519,6 +1519,7 @@ var INBOX_CATEGORY_LABELS = {
   sela_identity_review: 'sela 身份待确认',
   new_reply: '客户有新回复',
   capture: '待归属沟通',
+  other: '其他事项',
 };
 var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_follow_up', 'sela_identity_review', 'other'];
 var _inboxExpanded = new Set();
@@ -1550,18 +1551,62 @@ async function inboxGroupExportEmails(cat, countryEncoded) {
   await doExportEmails(ids);
 }
 
+// 主过滤按统一动作类别组织，避免按 item_type 罗列一排碎片 chips。
+var INBOX_FILTER_META = {
+  all: { label: '全部', match: function() { return true; } },
+  new_reply: { label: '客户回复', match: function(cat) { return cat === 'new_reply'; } },
+  capture: { label: '待归属沟通', match: function(cat) { return cat === 'capture'; } },
+  sela: { label: 'Sela 判断', match: function(cat) { return cat.indexOf('sela_') === 0; } },
+};
+var INBOX_FILTER_ORDER = ['all', 'new_reply', 'capture', 'sela'];
+
+function inboxTypeLabel(item) {
+  switch (item.item_type) {
+    case 'customer_reply': return '客户回复';
+    case 'gmail_capture': return 'Gmail';
+    case 'browser_capture': return '浏览器采集';
+    case 'sela_agent_request': return 'Sela 请求';
+    case 'sela_follow_up': return 'Sela 跟进';
+    case 'sela_identity_review': return 'Sela 身份';
+    default: return 'Inbox';
+  }
+}
+
 function renderInbox(counts) {
   counts = counts || {};
   var navCount = document.getElementById('inboxNavCount');
   if (navCount) navCount.textContent = counts.all || inboxItems.length || '';
   var overview = document.getElementById('inboxOverview');
   if (overview) {
-    overview.innerHTML = '<strong>' + (counts.all || inboxItems.length || 0) + '</strong><span>项需要判断</span><p>已记录的事实和明确待办会自动安静处理；新回复、待归属沟通和 Sela 请求会留在这里。</p>';
+    overview.innerHTML = '<strong>' + (counts.all || inboxItems.length || 0) + '</strong><span>项需要判断</span>' +
+      '<p>已记录的事实和明确待办会自动安静处理；新回复、待归属沟通和 Sela 请求会留在这里。</p>';
   }
-  var items = inboxFilter === 'all' ? inboxItems : inboxItems.filter(function(item) { return item.item_type === inboxFilter; });
+  var catMeta = INBOX_FILTER_META[inboxFilter] || INBOX_FILTER_META.all;
+  var items = inboxItems.filter(function(item) { return catMeta.match(inboxCategory(item)); });
+  // 过滤 chips 用完整 inboxItems 计数并动态渲染，保证新类型的数量出入可见。
+  var filterCounts = {};
+  inboxItems.forEach(function(item) {
+    var cat = inboxCategory(item);
+    INBOX_FILTER_ORDER.forEach(function(key) {
+      if (INBOX_FILTER_META[key].match(cat)) filterCounts[key] = (filterCounts[key] || 0) + 1;
+    });
+  });
+  var filtersEl = document.getElementById('inboxFilters');
+  if (filtersEl) {
+    filtersEl.innerHTML = INBOX_FILTER_ORDER.map(function(key) {
+      var meta = INBOX_FILTER_META[key];
+      var countText = key === 'all' ? inboxItems.length : (filterCounts[key] || 0);
+      return '<button class="inbox-filter' + (key === inboxFilter ? ' active' : '') + '" data-inbox-filter="' + key +
+        '" onclick="setInboxFilter(\'' + key + '\')">' + meta.label +
+        (countText ? '<span class="inbox-filter-count">' + countText + '</span>' : '') + '</button>';
+    }).join('');
+    updateFilterIndicator(filtersEl);
+  }
   var list = document.getElementById('inboxList');
   if (!items.length) {
-    list.innerHTML = '<div class="inbox-empty"><strong>Inbox 已清空</strong><span>新的客户回复、重要变化和到期复查会出现在这里。</span></div>';
+    list.innerHTML = '<div class="inbox-empty"><strong>' +
+      (inboxItems.length ? '这个分类已清空' : 'Inbox 已清空') +
+      '</strong><span>新的客户回复、重要变化和到期复查会出现在这里。</span></div>';
     return;
   }
   // 按待办动作/情况分组，组内保留原顺序；组间按 INBOX_CATEGORY_ORDER 排序。
@@ -1577,6 +1622,7 @@ function renderInbox(counts) {
     if (!groups[cat]) return;
     var groupItems = groups[cat];
     // 动作分组内按国家再分组：不同国家通常需要不同开发话术，批量操作按国家隔离。
+    // 只有一个国家或条目很小时不再铺子组头和批量按钮，避免单条记录被包在两层组框里。
     var byCountry = {};
     groupItems.forEach(function(item) {
       var country = (item.country || '').trim() || '其他';
@@ -1586,6 +1632,7 @@ function renderInbox(counts) {
     var countryNames = Object.keys(byCountry).filter(function(c) { return c !== '其他'; })
       .sort(function(a, b) { return byCountry[b].length - byCountry[a].length; });
     if (byCountry['其他']) countryNames.push('其他');
+    var flatCountry = countryNames.length <= 1 && byCountry[countryNames[0] || '其他'].length <= 2;
 
     html += '<div class="inbox-group" data-category="' + cat + '">';
     html += '<div class="inbox-group-header"><span class="inbox-group-title">' + (INBOX_CATEGORY_LABELS[cat] || cat) + '</span><span class="inbox-group-count">' + groupItems.length + '</span></div>';
@@ -1594,8 +1641,9 @@ function renderInbox(counts) {
       var countryItems = byCountry[country];
       var ids = countryItems.map(function(item) { return Number(item.customer_id || 0); }).filter(Boolean);
       _inboxGroupCustomerIds[cat + '::' + country] = ids;
-      var showCountryHeader = !(cat === 'sela_identity_review' && country === '其他' && countryNames.length === 1);
-      html += '<div class="inbox-country-group">';
+      var showCountryHeader = !flatCountry &&
+        !(cat === 'sela_identity_review' && country === '其他' && countryNames.length === 1);
+      html += showCountryHeader ? '<div class="inbox-country-group">' : '<div class="inbox-country-group inbox-country-flat">';
       if (showCountryHeader) {
         html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
         if (ids.length > 0 && cat !== 'sela_follow_up') {
@@ -1637,7 +1685,9 @@ function renderInboxItemHtml(item) {
     if (!customerId && captureMatch && captureMatch.customer_id) {
       mainAction = '<button class="btn btn-sm btn-primary" onclick="quickConfirmCapture(' + itemId + ')">归属 ' + escapeHtml(captureMatch.company || '客户') + '</button>';
     } else {
-      mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">确认归属并记录</button>';
+      // 已归属的待归属沟通不再叫“归属”，行内动作就是记录到客户时间线。
+      mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">' +
+        (customerId ? '记录到时间线' : '确认归属并记录') + '</button>';
     }
     deleteAction = '<button class="text-action" onclick="deleteInboxCapture(' + itemId + ')">删除</button>';
   } else if (selaReview) {
@@ -1695,11 +1745,26 @@ function renderInboxItemHtml(item) {
   var toggleIcon = expanded ? '▾' : '▸';
   var toggleBtn = '<button class="inbox-toggle" onclick="toggleInboxItem(\'' + escapeHtml(key) + '\')" aria-label="' + (expanded ? '收起' : '展开') + '">' + toggleIcon + '</button>';
   var quickAction = expanded ? '' : '<span class="inbox-item-quick-action">' + mainAction + deleteAction + '</span>';
+  var alreadyAssigned = customerId > 0;
+  var typeChip = '<span class="inbox-item-type-chip inbox-type-' + escapeHtml(item.item_type) + '">' + escapeHtml(inboxTypeLabel(item)) + '</span>';
+  var assignedMark = alreadyAssigned ? '<span class="inbox-item-assigned" title="这条沟通已归属客户">已归属</span>' : '';
+  var metaText = [
+    (item.country || '').trim(),
+    (item.contact_name || '').trim(),
+  ].filter(Boolean).join(' · ');
+  var meta = metaText ? '<span class="inbox-item-meta">' + escapeHtml(metaText) + '</span>' : '';
+  var identityText = isInboxCommunicationCapture(item) && !alreadyAssigned
+    ? (item.capture_identity || item.capture_sender_email || '') : '';
 
   return '<article class="inbox-item inbox-' + escapeHtml(item.item_type) + (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
     '<div class="inbox-item-row">' +
       '<span class="inbox-item-date">' + escapeHtml(formatDate(item.created_at)) + '</span>' +
-      '<h3 class="inbox-item-name">' + customerTitle + '</h3>' +
+      '<div class="inbox-item-main">' +
+        '<h3 class="inbox-item-name">' + customerTitle + assignedMark + '</h3>' +
+        '<div class="inbox-item-meta-row">' + typeChip + meta +
+          (identityText ? '<span class="inbox-item-identity">' + escapeHtml(identityText) + '</span>' : '') +
+        '</div>' +
+      '</div>' +
       '<span class="inbox-summary-why">' + escapeHtml(summaryText) + '</span>' +
       quickAction +
       toggleBtn +

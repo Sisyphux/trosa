@@ -478,7 +478,9 @@ _validate_production_auth_config()
 _CALENDAR_TZ = timezone(timedelta(hours=8))
 _INBOX_CACHE = {}
 _INBOX_CACHE_LOCK = threading.Lock()
-_INBOX_CACHE_TTL_SECONDS = 300
+# Inbox 列表缓存必须短：客户刚完成归属/分类时，页面下一次轮询就要看到
+# 客户名称、国家等上下文，300 秒的旧缓存会让“已写入”的事实看起来丢失。
+_INBOX_CACHE_TTL_SECONDS = 30
 
 # 周报（本周工作）聚合结果缓存：按成员与周起始日键控，写入后立即失效。
 # 缓存过期后先返回最近一次结果，再由后台静默生成新摘要，避免用户看到长时间空白。

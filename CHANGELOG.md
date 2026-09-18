@@ -1,3 +1,12 @@
+## 2026-09-18 — Inbox 页面改造：客户上下文可见 + 列表清爽化
+
+- 修复：客户完成归属或分类后，Inbox 页面长时间显示不到客户名称、国家等信息——`/api/inbox` 服务端缓存 TTL 从 300 秒收紧到 30 秒，下一次轮询立刻反映已写入的客户事实（写入成功时缓存本就即时失效，此处消除跨刷新的陈旧窗口）。
+- 列表重构：过滤 chips 改为按统一动作类别动态渲染（全部 / 客户回复 / 待归属沟通 / Sela 判断），每个 chip 带实时计数；新条目类型自动获得入口，不再出现裸内部分类键（如 `other`）。
+- 条目行：每条沟通显示类型徽章（客户回复 / Gmail / 浏览器采集 / Sela 请求）、已归属客户的名称链接、国家与联系人上下文、“已归属”标记和待归属沟通的发件身份；主操作与删除保留在行内。
+- 分组降噪：所属分类下只有一个国家且条目很少时，不再铺国别子组头与“今天跟进 / 导出邮箱”批量按钮；条目多、跨国家时依然保留国家分组与批量动作。
+- 前端回归：新增 `tests/support/inbox_render_check.cjs`（经 `test_risk_regressions` 集成），用真实 `loadInbox()` 数据流校验 chips 计数、中文分类标签、客户上下文渲染与小分组降噪；`/api/inbox` 与 `/api/inbox/counts` 接口形状未改。
+- 是否需要迁移：否。
+
 ## 2026-09-18 — 修复归档客户仍出现在今日跟进（PostgreSQL）
 
 - 根因：归档客户是按用户软删除：`trosa_domain.set_customer_deleted` 只把 `trosa.account_legacy_refs.legacy_payload.is_deleted` 置 `1`，不改共享 `trosa.accounts.deleted_at`。`trosa.today_tasks` 视图只过滤 `customer.deleted_at IS NULL`，没有应用客户列表（`trosa.customer_records`）同款 per-alias 归档判定，于是已归档客户带着 open 待办继续出现在今日跟进。

@@ -3420,5 +3420,26 @@ class FrontendArchitectureInvariantTest(unittest.TestCase):
         self.assertIn('frontend architecture invariants: OK', result.stdout)
 
 
+class InboxRenderRegressionTest(unittest.TestCase):
+    """Inbox 页面渲染回归：chips 计数、中文分类标签与客户上下文必须可见。"""
+
+    def test_inbox_render_invariants(self):
+        harness = ROOT / 'tests' / 'support' / 'inbox_render_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('inbox render regression: OK', result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

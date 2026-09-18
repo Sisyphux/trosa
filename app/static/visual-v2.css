@@ -459,6 +459,20 @@ textarea.form-control { min-height: 112px; }
 .inbox-inline-decision label { display: grid; gap: 5px; color: var(--v2-ink-muted); font-size: .72rem; }
 .inbox-inline-decision input { min-width: 0; height: 36px; padding: 0 12px; border: 1px solid var(--v2-line); border-radius: 12px; background: var(--v2-paper-strong); color: var(--v2-ink); font: inherit; font-size: .8rem; }
 .inbox-inline-decision .btn { min-height: 36px; border-radius: 12px; }
+.inbox-filter-count { margin-left: 7px; padding: 1px 7px; border: 1px solid var(--v2-line); border-radius: 999px; background: var(--v2-paper-strong); color: var(--v2-ink-soft); font-size: .66rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.inbox-filter.active .inbox-filter-count { color: var(--v2-ink); }
+.inbox-item-main { display: grid; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 360px; }
+.inbox-item-main .inbox-item-name { display: flex; align-items: center; gap: 8px; margin: 0; overflow: hidden; }
+.inbox-item-main .inbox-item-name h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-item-meta-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.inbox-item-type-chip { flex-shrink: 0; padding: 2px 9px; border: 1px solid var(--v2-line); border-radius: 999px; background: rgba(255,253,249,.7); color: var(--v2-ink-soft); font-size: .66rem; font-weight: 650; letter-spacing: .02em; }
+.inbox-item-type-chip.inbox-type-customer_reply { color: var(--v2-moss); background: var(--v2-moss-soft); border-color: rgba(83,105,76,.2); }
+.inbox-item-assigned { flex-shrink: 0; color: var(--v2-moss); font-size: .64rem; font-weight: 650; letter-spacing: .02em; }
+.inbox-item-meta, .inbox-item-identity { color: var(--v2-ink-muted); font-size: .7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-item-summary { min-width: 0; }
+.inbox-item-row .inbox-summary-why { min-width: 0; flex: 1 1 160px; }
+.inbox-country-flat { margin-left: 0; border-left: 0; padding-left: 0; }
+.inbox-country-flat .inbox-item-collapsed { padding-left: 4px; }
 
 /* Customers */
 #page-customers .page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 22px; }
