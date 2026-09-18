@@ -673,7 +673,7 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
         self.assertNotIn(reminder_id, [row['id'] for row in today.get_json()])
 
-    def test_confirmed_outreach_keeps_non_development_and_future_tasks(self):
+    def test_confirmed_outreach_closes_development_tasks_and_keeps_human_tasks(self):
         created = self.post_prospect(prospect())
         self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
         customer_id = created.get_json()['trosa_id']
@@ -682,6 +682,11 @@ class SelaProspectApiTest(unittest.TestCase):
         )
         future_dev_task = self.add_reminder(
             customer_id, '二次开发: Acrílicos S.A.', '2026-09-20', reason='计划内的二次开发',
+        )
+        # Imported development tasks are often dated after the contact; the
+        # confirmed contact still satisfies the pre-contact task.
+        later_dev_task = self.add_reminder(
+            customer_id, '开发新客户: Acrílicos S.A.', '2026-09-25', reason='官网导入，待首次联系',
         )
 
         sent = prospect()
@@ -694,7 +699,8 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
         self.assertEqual(self.reminder_done(human_task), 0)
-        self.assertEqual(self.reminder_done(future_dev_task), 0)
+        self.assertEqual(self.reminder_done(future_dev_task), 1)
+        self.assertEqual(self.reminder_done(later_dev_task), 1)
 
     def test_human_can_unblock_dnc_and_sela_cannot(self):
         body = prospect()

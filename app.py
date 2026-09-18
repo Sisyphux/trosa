@@ -4331,23 +4331,19 @@ def _sela_prospect_revision(conn, profile, customer=None):
     })
 
 
-def _complete_routine_development_tasks(conn, customer_id, *, due_on_or_before, completed_at):
+def _complete_routine_development_tasks(conn, customer_id, *, completed_at):
     """Close legacy routine development tasks once a real outreach happened.
 
-    Mirrors the manual ``add_follow_history`` rule (the open follow-up due on or
-    before the contact date is satisfied) but only for routine development
-    tasks, so a deliberate human next step is never auto-closed.  Idempotent:
-    once closed, a later Sela refresh finds no open match.
+    A confirmed contact satisfies the prospect's pre-contact development task
+    (make first contact), whatever synthetic due date the import gave it: the
+    old rows were dated ahead of the contact, so a due-date comparison left them
+    behind in Today.  Only routine development markers are matched, so a
+    deliberate human next step is never auto-closed; an explicitly human task is
+    not marked.  Idempotent: once closed, a later Sela refresh finds no match.
     """
-    day = str(due_on_or_before or '')[:10]
-    if not day:
-        return []
     closed = []
     for task in _customer_tasks(conn, customer_id):
         if str(task.get('reminder_type') or '') != 'follow_up':
-            continue
-        due = str(task.get('remind_date') or '')[:10]
-        if not due or due > day:
             continue
         text = ' '.join(str(task.get(key) or '') for key in ('title', 'content', 'reason'))
         if not any(marker in text for marker in _ROUTINE_DEVELOPMENT_TASK_MARKERS):
@@ -4481,8 +4477,7 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                      json.dumps({'source_id': source_id})),
                 )
             if status != 'BOUNCED':
-                _complete_routine_development_tasks(
-                    conn, customer_id, due_on_or_before=sent_date, completed_at=now)
+                _complete_routine_development_tasks(conn, customer_id, completed_at=now)
         return outreach_id
     existing = conn.execute(
         '''SELECT * FROM outreach_emails
@@ -4571,10 +4566,9 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                 (recipient, contact_id, outreach_id, event_type, event_message_id,
                  _SELA_PROSPECT_INTEGRATION, sent_at or now),
             )
-        if status != 'BOUNCED':
-            _complete_routine_development_tasks(
-                conn, customer_id, due_on_or_before=sent_date, completed_at=now)
-    return outreach_id
+            if status != 'BOUNCED':
+                _complete_routine_development_tasks(conn, customer_id, completed_at=now)
+        return outreach_id
 
 
 def _sela_upsert_prospect(conn, prospect):
