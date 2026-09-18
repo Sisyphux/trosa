@@ -152,6 +152,7 @@ let _pageNavigationToken = 0;
 let calendarData = {};
 let calendarYear, calendarMonth;
 let selectedCustomers = new Set();
+let selectedNewPool = new Set();
 let selectedTodayCustomers = new Set();
 let currentUser = null;
 let overviewWeekOffset = 0;
@@ -1086,6 +1087,86 @@ function setConnectionStatus(state, message) {
 }
 window.addEventListener('offline', function() { setConnectionStatus('offline'); });
 window.addEventListener('online', function() { verifyConnectionAfterResume(false); });
+
+// ---- 统一操作状态（用户主动写入的全局反馈）----
+// 所有用户触发的写操作，无论有没有专属按钮，都必须让用户看到“处理中 → 已保存 /
+// 失败 + 重试”。这里只维护全局状态位，复用 connection-status 的视觉与
+// aria-live；按钮态仍由 setActionFeedback 负责，成功/失败文案与重试在 finish 时
+// 收口。失败时状态位保持可见并由调用方回滚本地 UI，避免前端长期停留在乐观假象。
+var _actionStatusPending = {};
+var _actionStatusResult = null;
+var _actionStatusSeq = 0;
+var _actionStatusTimer = null;
+
+function renderActionStatus() {
+  var el = document.getElementById('actionStatus');
+  var text = document.getElementById('actionStatusText');
+  var retry = document.getElementById('actionStatusRetry');
+  if (!el || !text || !retry) return;
+  el.classList.remove('is-success', 'is-error');
+  retry.hidden = true;
+  retry.onclick = null;
+  var pendingIds = Object.keys(_actionStatusPending);
+  if (pendingIds.length) {
+    text.textContent = pendingIds.length > 1
+      ? '正在保存 ' + pendingIds.length + ' 项…'
+      : (_actionStatusPending[pendingIds[0]] || '正在保存…');
+    el.hidden = false;
+    return;
+  }
+  if (!_actionStatusResult) { el.hidden = true; return; }
+  el.classList.add(_actionStatusResult.state === 'error' ? 'is-error' : 'is-success');
+  text.textContent = _actionStatusResult.message || (_actionStatusResult.state === 'error' ? '未保存' : '已保存');
+  if (_actionStatusResult.retry) {
+    retry.hidden = false;
+    retry.onclick = function() {
+      var retryAction = _actionStatusResult.retry;
+      _actionStatusResult = null;
+      renderActionStatus();
+      if (typeof retryAction === 'function') retryAction();
+    };
+  }
+  el.hidden = false;
+}
+
+// 开始一个用户操作：返回操作 id，供 finishActionStatus 结算。多个操作并行时
+// 显示聚合计数，只有最后一个完成后才展示成功。
+function beginActionStatus(id, message) {
+  if (!id) id = 'action-' + (++_actionStatusSeq);
+  _actionStatusPending[id] = message || '正在保存…';
+  _actionStatusResult = null;
+  if (_actionStatusTimer) { clearTimeout(_actionStatusTimer); _actionStatusTimer = null; }
+  renderActionStatus();
+  return id;
+}
+
+// 结算一个用户操作。state: 'success' | 'error'。失败时保持可见并可选提供重试动作；
+// 成功在最后一个待处理操作结束后短暂展示后自动隐藏。
+function finishActionStatus(id, state, message, retry) {
+  if (id) delete _actionStatusPending[id];
+  var stillPending = Object.keys(_actionStatusPending).length > 0;
+  if (state === 'error') {
+    _actionStatusResult = { state: 'error', message: message || '未保存', retry: retry || null };
+  } else if (!stillPending && !(_actionStatusResult && _actionStatusResult.state === 'error')) {
+    // 并行操作里只要有一个失败，就不能被后到的成功掩盖。
+    _actionStatusResult = { state: 'success', message: message || '已保存', retry: null };
+    if (_actionStatusTimer) clearTimeout(_actionStatusTimer);
+    _actionStatusTimer = setTimeout(function() {
+      _actionStatusResult = null;
+      _actionStatusTimer = null;
+      renderActionStatus();
+    }, 2200);
+  }
+  renderActionStatus();
+}
+
+// 退出登录 / 切换账号时清空，避免把上一个用户的失败状态留在屏幕上。
+function resetActionStatus() {
+  _actionStatusPending = {};
+  _actionStatusResult = null;
+  if (_actionStatusTimer) { clearTimeout(_actionStatusTimer); _actionStatusTimer = null; }
+  renderActionStatus();
+}
 
 function refreshViewAfterConnectionRestore() {
   if (!currentUser || document.hidden || document.querySelector('.modal-overlay.show')) return;
@@ -4668,19 +4749,35 @@ function openBatchSetModal(field, type) {
 }
 
 async function submitBatchSet() {
-  var field = document.getElementById('batchSetField').value;
-  var type = document.getElementById('batchSetType').value;
-  var value = document.getElementById('batchSetValue').value;
-  var ids = type === 'existing' ? Array.from(selectedCustomers) : Array.from(selectedNewPool);
-  if (ids.length === 0) { showToast('请选择要操作的项', 'warning'); return; }
+  if (!beginWrite('batchSet')) return;
   try {
+    var field = document.getElementById('batchSetField').value;
+    var type = document.getElementById('batchSetType').value;
+    var value = document.getElementById('batchSetValue').value;
+    var ids = type === 'existing' ? Array.from(selectedCustomers) : Array.from(selectedNewPool);
+    if (ids.length === 0) { showToast('请选择要操作的项', 'warning'); return; }
     var endpoint = field === 'level' ? '/api/customers/batch/level' : '/api/customers/batch/business-stage';
-    await api(endpoint, { method: 'POST', body: JSON.stringify({ ids: ids, value: value }) });
-    showToast('批量更新成功', 'success');
-    closeModal('batchSetModal', true);
-    if (type === 'existing') { clearCustomerSelection(); loadCustomers(); }
-    else { clearNewPoolSelection(); loadNewPool(); }
-  } catch(e) {}
+    var button = document.getElementById('batchSetSubmit');
+    var reset = setActionFeedback(button, 'pending', '更新中…');
+    var actionId = beginActionStatus('batch-set', '正在批量更新…');
+    try {
+      await api(endpoint, { method: 'POST', body: JSON.stringify({ ids: ids, value: value }), silentError: true });
+      setActionFeedback(button, 'success', '已更新');
+      showToast('批量更新成功', 'success');
+      finishActionStatus(actionId, 'success', '批量更新已保存');
+      closeModal('batchSetModal', true);
+      if (type === 'existing') { clearCustomerSelection(); loadCustomers(); }
+      else { clearNewPoolSelection(); loadNewPool(); }
+    } catch(e) {
+      // 批量写入失败时保持弹窗打开，让用户可以直接重试，而不是误报成功。
+      setActionFeedback(button, 'error', '更新失败');
+      showToast('批量更新未保存，请重试', 'error');
+      finishActionStatus(actionId, 'error', '批量更新未保存', function() { submitBatchSet(); });
+      reset(1800);
+    }
+  } finally {
+    endWrite('batchSet');
+  }
 }
 
 async function batchDeleteCustomers() {
@@ -5559,15 +5656,30 @@ async function editCustomerWaiting() {
   var current = (_customerDetailCache && _customerDetailCache.customer_judgment) || '';
   var waiting = await showAppPrompt({ title: '更新当前等待', message: '写下正在等待的回复、文件或确认；留空即可清除。', label: '当前等待', value: current, submitLabel: '保存' });
   if (waiting === null) return;
+  var cache = liveCustomerCache(scope);
+  var previous = cache ? (cache.customer_judgment || '') : null;
+  // 立即显示新的“当前等待”，失败再回滚；不依赖重新打开客户资料。
+  if (cache) {
+    cache.customer_judgment = waiting.trim();
+    renderCustomerFactsBrief(cache);
+  }
+  var actionId = beginActionStatus('waiting-' + customerId, '正在保存当前等待…');
   try {
-    var updated = await api('/api/customers/' + customerId + '/waiting', { method: 'PUT', body: JSON.stringify({ waiting: waiting.trim() }) });
-    var cache = liveCustomerCache(scope);
+    var updated = await api('/api/customers/' + customerId + '/waiting', { method: 'PUT', body: JSON.stringify({ waiting: waiting.trim() }), silentError: true });
     if (cache) {
       cache.customer_judgment = updated.waiting || '';
       renderCustomerFactsBrief(cache);
     }
     showToast(waiting.trim() ? '当前等待已更新' : '当前等待已清除', 'success');
-  } catch (e) {}
+    finishActionStatus(actionId, 'success', waiting.trim() ? '当前等待已更新' : '当前等待已清除');
+  } catch (e) {
+    if (cache && previous !== null) {
+      cache.customer_judgment = previous;
+      renderCustomerFactsBrief(cache);
+    }
+    showToast('当前等待未保存，请重试', 'error');
+    finishActionStatus(actionId, 'error', '当前等待未保存', function() { editCustomerWaiting(); });
+  }
 }
 
 var CUSTOMER_LEVEL_BASE_OPTIONS = ['A', 'B', 'C', 'D'];
@@ -5897,9 +6009,12 @@ async function saveCustomer() {
     notes: document.getElementById('editNotes').value.trim()
   };
   var scope = beginCustomerScope(id);
+  var button = document.getElementById('saveCustomerFooterBtn');
+  var reset = setActionFeedback(button, 'pending', '保存中…');
+  var actionId = beginActionStatus('customer-save-' + id, '正在保存客户资料…');
   try {
     var previousNextFollowUp = _customerDetailCache && _customerDetailCache.next_follow_up;
-    await api('/api/customers/' + id, { method: 'PUT', body: JSON.stringify(data) });
+    await api('/api/customers/' + id, { method: 'PUT', body: JSON.stringify(data), silentError: true });
     var cache = liveCustomerCache(scope);
     if (cache) {
       Object.keys(data).forEach(function(key) { cache[key] = data[key]; });
@@ -5909,11 +6024,19 @@ async function saveCustomer() {
     }
     var msg = '客户更新成功';
     showToast(msg, 'success');
+    finishActionStatus(actionId, 'success', '客户资料已保存');
+    setActionFeedback(button, 'success', '已保存');
     markModalClean('customerEditModal');
     if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else loadDashboard();
     return true;
-  } catch(e) { return false; }
+  } catch(e) {
+    showToast('客户资料未保存，请重试', 'error');
+    finishActionStatus(actionId, 'error', '客户资料未保存', function() { saveCustomer(); });
+    setActionFeedback(button, 'error', '保存失败');
+    reset(1800);
+    return false;
+  }
 }
 
 async function deleteCustomer(id) {
@@ -6121,16 +6244,29 @@ async function addContact() {
   if (!name && !email) { showToast('姓名和邮箱至少填一项', 'warning'); return false; }
   var data = { name: name, title: document.getElementById('contactTitle').value.trim(), email: email, phone: document.getElementById('contactPhone').value.trim(), whatsapp: document.getElementById('contactWhatsapp').value.trim(), linkedin: document.getElementById('contactLinkedin').value.trim() };
   var scope = beginCustomerScope(id);
+  var button = document.getElementById('addContactSubmit');
+  var reset = setActionFeedback(button, 'pending', '添加中…');
+  var actionId = beginActionStatus('contact-add-' + id, '正在添加联系人…');
   try {
-    var saved = await api('/api/customers/' + id + '/contacts', { method: 'POST', body: JSON.stringify(data) });
+    var saved = await api('/api/customers/' + id + '/contacts', { method: 'POST', body: JSON.stringify(data), silentError: true });
     showToast('联系人已添加', 'success');
+    finishActionStatus(actionId, 'success', '联系人已添加');
     if (liveCustomerCache(scope)) {
       document.getElementById('contactName').value = ''; document.getElementById('contactTitle').value = '';
       document.getElementById('contactEmail').value = ''; document.getElementById('contactPhone').value = ''; document.getElementById('contactWhatsapp').value = ''; document.getElementById('contactLinkedin').value = '';
       patchCustomerWorkspaceContact(saved && saved.contact, { merged: !!(saved && saved.merged) });
     }
+    setActionFeedback(button, 'success', '已添加');
+    reset(1200);
     return true;
-  } catch(e) { return false; }
+  } catch(e) {
+    // 保留已填内容，用户可以直接重试，不必重新输入。
+    setActionFeedback(button, 'error', '添加失败');
+    showToast('联系人未添加，请重试', 'error');
+    finishActionStatus(actionId, 'error', '联系人未添加', function() { addContact(); });
+    reset(1800);
+    return false;
+  }
 }
 
 async function addBulkContacts() {
@@ -6171,13 +6307,24 @@ async function addBulkContacts() {
 
 async function deleteContact(contactId) {
   if (!await showAppConfirm({ title: '删除联系人', message: '确认删除该联系人？', submitLabel: '删除' })) return;
+  var id = Number(contactId);
   var customerId = document.getElementById('editCustomerId').value;
   var scope = beginCustomerScope(customerId);
+  var cache = liveCustomerCache(scope);
+  var previous = cache && Array.isArray(cache.contacts)
+    ? cache.contacts.find(function(item) { return Number(item.id) === id; }) : null;
+  // 联系人列表可见时立即移除；服务端拒绝（如仍被引用）则回滚，保证前后端一致。
+  if (previous) patchCustomerWorkspaceContact(previous, { remove: true });
+  var actionId = beginActionStatus('contact-delete-' + id, '正在删除联系人…');
   try {
-    await api('/api/contacts/' + contactId, { method: 'DELETE' });
+    await api('/api/contacts/' + id, { method: 'DELETE', silentError: true });
     showToast('联系人已删除', 'success');
-    if (liveCustomerCache(scope)) patchCustomerWorkspaceContact({ id: contactId }, { remove: true });
-  } catch(e) {}
+    finishActionStatus(actionId, 'success', '联系人已删除');
+  } catch(e) {
+    if (previous) patchCustomerWorkspaceContact(previous);
+    showToast('联系人未删除，请重试', 'error');
+    finishActionStatus(actionId, 'error', '联系人未删除', function() { deleteContact(id); });
+  }
 }
 
 // ========== 客户文件附件 ==========
@@ -6823,39 +6970,54 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
   renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
 }
 
+// 把“本周工作”标记立即应用到当前工作区缓存与时间线；乐观更新与失败回滚共用。
+function applyTimelineReportState(scope, recordType, id, isReported) {
+  var cache = liveCustomerCache(scope);
+  if (!cache) return false;
+  (cache.timeline_items || []).forEach(function(item) {
+    if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
+  });
+  cache.follow_history = (cache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
+  cache.outreach_emails = (cache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
+  renderFollowTimeline(cache.follow_history, cache.outreach_emails,
+    [customerTimelineKey({ type: recordType, id: id })]);
+  var workspace = cache.id && _customerWorkspaceCache[cache.id];
+  if (workspace && workspace.timeline && Array.isArray(workspace.timeline.items)) {
+    workspace.timeline.items.forEach(function(item) {
+      if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
+    });
+    workspace.savedAt = Date.now();
+  }
+  return true;
+}
+
 async function toggleReport(type, id) {
   var customerId = _customerDetailCache && _customerDetailCache.id;
   var scope = beginCustomerScope(customerId);
+  var recordType = type === 'follow' ? 'follow' : 'outreach';
+  var url = type === 'follow'
+    ? '/api/follow-history/' + id + '/report'
+    : '/api/outreach/' + id + '/report';
+  var current = findCustomerTimelineEntry(recordType, id);
+  var previous = current ? !!current.is_reported : null;
+  var optimistic = previous === null ? true : !previous;
+  // 立即反映用户意图：星标先翻转，网络失败再回滚；确认后以服务端权威结果覆盖，
+  // 不再等时间线读取回来才动。
+  if (previous !== null) applyTimelineReportState(scope, recordType, id, optimistic);
+  var actionId = beginActionStatus('report-' + recordType + '-' + id,
+    optimistic ? '正在加入本周工作…' : '正在移出本周工作…');
   try {
-    var url = type === 'follow'
-      ? '/api/follow-history/' + id + '/report'
-      : '/api/outreach/' + id + '/report';
-    var res = await api(url, { method: 'POST' });
-    showToast(res.is_reported ? '已加入本周工作' : '已从本周工作中移除', 'success');
-    // The write has succeeded, so reflect its durable state before the
-    // follow-up read finishes. This keeps the marker responsive even when a
-    // tunnel or slow connection delays the timeline refresh.
-    var recordType = type === 'follow' ? 'follow' : 'outreach';
+    var res = await api(url, { method: 'POST', silentError: true });
     var isReported = !!res.is_reported;
-    var cache = liveCustomerCache(scope);
-    if (cache) {
-      (cache.timeline_items || []).forEach(function(item) {
-        if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
-      });
-      cache.follow_history = (cache.timeline_items || []).filter(function(item) { return item.type === 'follow'; });
-      cache.outreach_emails = (cache.timeline_items || []).filter(function(item) { return item.type === 'outreach'; });
-      renderFollowTimeline(cache.follow_history, cache.outreach_emails,
-        [customerTimelineKey({ type: recordType, id: id })]);
-    }
-    var workspace = customerId && _customerWorkspaceCache[customerId];
-    if (workspace && workspace.timeline && Array.isArray(workspace.timeline.items)) {
-      workspace.timeline.items.forEach(function(item) {
-        if (item.type === recordType && Number(item.id) === Number(id)) item.is_reported = isReported;
-      });
-      workspace.savedAt = Date.now();
-    }
+    applyTimelineReportState(scope, recordType, id, isReported);
+    showToast(isReported ? '已加入本周工作' : '已从本周工作中移除', 'success');
+    finishActionStatus(actionId, 'success', isReported ? '已加入本周工作' : '已从本周工作中移除');
     reconcileCustomerTimeline().catch(function() {});
-  } catch(e) { showToast('本周工作状态未能保存，请重试', 'error'); }
+  } catch(e) {
+    if (previous !== null) applyTimelineReportState(scope, recordType, id, previous);
+    showToast('本周工作状态未能保存，请重试', 'error');
+    finishActionStatus(actionId, 'error', '本周工作状态未保存', function() { toggleReport(type, id); });
+  }
 }
 
 function updateFollowHistorySaveLabel() {
@@ -7007,14 +7169,24 @@ async function deleteOutreach(outreachId) {
   if (!await showAppConfirm({ title: '删除记录', message: '确认删除这条记录？', submitLabel: '删除' })) return;
   var customerModal = document.getElementById('customerEditModal').classList.contains('show');
   var scope = beginCustomerScope();
+  var removed = customerModal ? findCustomerTimelineEntry('outreach', outreachId) : null;
+  // 立即从时间线移除；失败时把记录放回原位，避免“看似删掉其实还在”。
+  if (customerModal && liveCustomerCache(scope)) removeCustomerTimelineEntry('outreach', outreachId);
+  var actionId = beginActionStatus('outreach-delete-' + outreachId, '正在删除记录…');
   try {
-    await api('/api/outreach/' + outreachId, { method: 'DELETE' });
+    await api('/api/outreach/' + outreachId, { method: 'DELETE', silentError: true });
     showToast('记录已删除', 'success');
-    if (customerModal && liveCustomerCache(scope)) {
-      removeCustomerTimelineEntry('outreach', outreachId);
-      reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
-    } else loadHistory();
-  } catch(e) {}
+    finishActionStatus(actionId, 'success', '记录已删除');
+    if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    else loadHistory();
+  } catch(e) {
+    if (customerModal && removed && liveCustomerCache(scope)) {
+      var changedKey = upsertCustomerTimelineEntry(removed);
+      syncCustomerWorkspaceAfterOutreach(scope.customerId, removed, changedKey);
+    }
+    showToast('记录未删除，请重试', 'error');
+    finishActionStatus(actionId, 'error', '记录未删除', function() { deleteOutreach(outreachId); });
+  }
 }
 
 
@@ -8129,18 +8301,28 @@ async function deleteFollowLog(logId) {
   if (!await showAppConfirm({ title: '移除跟进记录', message: '确认移除这条跟进记录？移除后仍可撤销。', submitLabel: '移除' })) return;
   var customerModal = document.getElementById('customerEditModal').classList.contains('show');
   var scope = beginCustomerScope();
+  var removed = customerModal ? findCustomerTimelineEntry('follow', logId) : null;
+  // 立即从时间线移除；失败时放回，成功后再给出撤销入口。
+  if (customerModal && liveCustomerCache(scope)) removeCustomerTimelineEntry('follow', logId);
+  var actionId = beginActionStatus('follow-delete-' + logId, '正在移除记录…');
   try {
-    var removed = customerModal ? findCustomerTimelineEntry('follow', logId) : null;
-    await api('/api/follow-history/' + logId, { method: 'DELETE' });
+    await api('/api/follow-history/' + logId, { method: 'DELETE', silentError: true });
+    finishActionStatus(actionId, 'success', '记录已移除');
     if (customerModal) {
-      if (liveCustomerCache(scope)) removeCustomerTimelineEntry('follow', logId);
       showFollowUndoToast(logId, removed);
       reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     } else {
       showFollowUndoToast(logId, removed);
       loadHistory();
     }
-  } catch(e) { showToast('删除失败', 'error'); }
+  } catch(e) {
+    if (customerModal && removed && liveCustomerCache(scope)) {
+      var changedKey = upsertCustomerTimelineEntry(removed);
+      syncCustomerWorkspaceAfterCommunication(removed.customer_id || scope.customerId, removed, changedKey);
+    }
+    showToast('记录未移除，请重试', 'error');
+    finishActionStatus(actionId, 'error', '记录未移除', function() { deleteFollowLog(logId); });
+  }
 }
 
 function showFollowUndoToast(logId, removed) {
@@ -8986,6 +9168,7 @@ function showLogin() {
   if (_loginUsersController) _loginUsersController.abort();
   _loginUsersController = typeof AbortController === 'function' ? new AbortController() : null;
   currentUser = null;
+  resetActionStatus();
   var invitationOverlay = document.getElementById('invitationOverlay');
   if (invitationOverlay) { invitationOverlay.hidden = true; invitationOverlay.style.display = 'none'; }
   stopInboxAutoRefresh();

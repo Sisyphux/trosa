@@ -3441,5 +3441,58 @@ class InboxRenderRegressionTest(unittest.TestCase):
         self.assertIn('inbox render regression: OK', result.stdout)
 
 
+class ActionFeedbackRegressionTest(unittest.TestCase):
+    """用户操作实时反馈：统一全局状态位 + 高频写操作乐观更新/失败回滚。"""
+
+    def _run_harness(self, name, expected):
+        harness = ROOT / 'tests' / 'support' / name
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(expected, result.stdout)
+
+    def test_action_feedback_flow_in_a_real_dom(self):
+        self._run_harness('action_feedback_check.cjs', 'action feedback regression: OK')
+
+    def test_unified_action_status_is_wired_into_the_shell(self):
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        stylesheet = (ROOT / 'app' / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('id="actionStatus"', html)
+        self.assertIn('id="actionStatusRetry"', html)
+        self.assertIn('function beginActionStatus(', javascript)
+        self.assertIn('function finishActionStatus(', javascript)
+        self.assertIn('function resetActionStatus(', javascript)
+        self.assertIn('.action-status', stylesheet)
+
+    def test_high_frequency_writes_paint_and_roll_back(self):
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        toggle = javascript[javascript.index('async function toggleReport('):javascript.index('function updateFollowHistorySaveLabel(')]
+        self.assertIn('beginActionStatus(', toggle)
+        self.assertIn('applyTimelineReportState(scope, recordType, id, optimistic)', toggle)
+        self.assertIn('applyTimelineReportState(scope, recordType, id, previous)', toggle)
+        self.assertIn("finishActionStatus(actionId, 'error'", toggle)
+        # Contact removal is optimistic and restores the removed card on failure.
+        delete_contact = javascript[javascript.index('async function deleteContact('):javascript.index('// ========== 客户文件附件 ==========')]
+        self.assertIn('patchCustomerWorkspaceContact(previous, { remove: true })', delete_contact)
+        self.assertIn('patchCustomerWorkspaceContact(previous);', delete_contact)
+        # A failed batch must never be reported as a success.
+        batch = javascript[javascript.index('async function submitBatchSet('):javascript.index('async function batchDeleteCustomers(')]
+        self.assertIn("finishActionStatus(actionId, 'error'", batch)
+        self.assertIn('批量更新未保存', batch)
+        # New-pool selection is declared so its batch path can report status.
+        self.assertIn('let selectedNewPool = new Set();', javascript)
+
+
 if __name__ == '__main__':
     unittest.main()

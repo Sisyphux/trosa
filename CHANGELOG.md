@@ -84,6 +84,16 @@
 - 数据边界：不改表结构与迁移；仅新增人工写入路径，Sela 仍只能置 DNC、不能清 DNC。
 - 验证：新增 `test_human_can_unblock_dnc_and_sela_cannot` 与 business-exclusion 停用回归；prospect 回归 18 项通过。
 
+## 2026-09-18 — 统一的用户操作实时反馈：全局状态位 + 高频写操作乐观更新/失败回滚
+
+- 现状核查：客户工作区已有“写后即时回显（local echo）”、作用域 generation、传输层写单飞、按钮 pending/success 与撤销等机制，但反馈分散在各 handler 里；部分高频写操作（联系人增删、开发信删除、跟进标记、客户等待、批量状态、客户资料保存）没有统一的“处理中/已保存/失败”可见状态，失败时也缺少回滚，界面可能停留在未落库的乐观结果或与后端不一致。
+- 统一机制（不重复建设）：新增全局操作状态位 `#actionStatus`（`beginActionStatus` / `finishActionStatus` / `resetActionStatus`），复用现有 connection-status 的视觉与 `aria-live`。用户主动写入统一显示“处理中 → 已保存”，失败时保持可见并提供“重试”；并行操作按数量聚合，切换账号时清空。按钮态仍由既有 `setActionFeedback` 负责，成功/失败文案与重试在结算时收口。
+- 乐观更新 + 失败回滚（复用现有 cache helper）：跟进/开发信“本周工作”标记先翻转星标再确认；联系人删除先从列表移除、被服务端拒绝（如仍被引用）时放回；跟进记录与开发信删除同样先移除、失败回滚并保留撤销入口；客户“当前等待”先更新“现在”卡片、失败回滚。成功后一律以服务端返回的权威结果重新覆盖缓存，后台读取只做对账，不会撤销用户已确认的写入。
+- 失败一致性与提示：联系人新增/删除、客户资料保存、批量等级/阶段、当前等待等改为单条上下文错误提示（`silentError` 去掉通用的“请求失败”二次提示），失败不再误报成功；批量写入失败时保持弹窗打开以便直接重试。
+- 顺带修复：`selectedNewPool` 此前未声明（`updateSelection('newpool')` / 新客户池批量路径会抛 `ReferenceError`），现与 `selectedCustomers` 一并声明，使新客户池批量操作也能走统一反馈。
+- 数据边界：只改 `app/static/app.js`、`app/static/index.html`、`app/static/style.css`、`tests`；不动 `app.py`、接口、数据表、迁移与写入语义，无迁移编号。
+- 验证：新增 jsdom 回归 `tests/support/action_feedback_check.cjs` 与 `ActionFeedbackRegressionTest`（状态位生命周期与重试、星标乐观翻转/回滚、联系人删除回滚、联系人新增反馈、批量失败不报成功、新客户池选择可用）；完整 Python 回归 313 项、`node --check`、`browser-extension npm test` 全部通过。
+
 ## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
 
 - 根因（并发覆盖）：旧的 `release-commit.sh` 只在本地取发布锁，而锁是可被崩溃进程永久留下的 `$TMPDIR` 目录；两个入口若拿到不同 `TMPDIR` 或旧锁残留，就不互斥。更关键的是，锁只保证“不并行”，不保证“后发布者包含先发布者”：两个任务从同一 production 版本开发时，A 先上线后，B 若已通过本地门禁，仍可能把基于旧基线的候选推到 ECS，ECS 只按 `current` 符号链接切换，不校验候选是否包含当前 production，于是 A 的功能被静默覆盖。

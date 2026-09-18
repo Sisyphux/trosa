@@ -57,6 +57,7 @@
 <!-- Toast Container -->
 <div class="toast-container" id="toastContainer"></div>
 <div class="connection-status" id="connectionStatus" role="status" aria-live="polite" hidden><span class="connection-status-spinner" aria-hidden="true"></span><span id="connectionStatusText">正在连接…</span></div>
+<div class="action-status" id="actionStatus" role="status" aria-live="polite" hidden><span class="action-status-spinner" aria-hidden="true"></span><span id="actionStatusText">正在保存…</span><button type="button" class="action-status-retry" id="actionStatusRetry" hidden>重试</button></div>
 
 <!-- Sidebar Toggle (Mobile) -->
 <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" title="打开导航" aria-expanded="false" aria-controls="sidebar">
@@ -629,7 +630,7 @@
                 <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">邮箱</label><input type="email" class="form-control" id="contactEmail"></div><div class="form-group"><label class="form-label">电话</label><input type="text" class="form-control" id="contactPhone"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">WhatsApp</label><input type="text" class="form-control" id="contactWhatsapp"></div><div class="form-group"><label class="form-label">领英</label><input type="text" class="form-control" id="contactLinkedin"></div></div>
-                <button class="btn btn-primary btn-sm" onclick="addContact()">添加联系人</button>
+                <button class="btn btn-primary btn-sm" id="addContactSubmit" type="button" onclick="addContact()">添加联系人</button>
               </div>
             </details>
           </div>
@@ -986,7 +987,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('batchSetModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitBatchSet()">应用</button>
+      <button class="btn btn-primary" id="batchSetSubmit" type="button" onclick="submitBatchSet()">应用</button>
     </div>
   </div>
 </div>
