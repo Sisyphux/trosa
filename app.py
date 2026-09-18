@@ -3546,6 +3546,7 @@ def _sela_business_exclusion_view(row):
         'source': str(row.get('source') or 'business_exclusion'),
         'source_id': str(row.get('source_id') or ''),
         'reason': str(row.get('reason') or ''),
+        'is_active': bool(row.get('is_active')),
         'updated_at': str(row.get('updated_at') or ''),
     }
 
@@ -5140,6 +5141,101 @@ def customer_agent_prospect_exclusion_decision(customer_id):
     return _sela_exclusion_decision_response(source_id, request.get_json(silent=True))
 
 
+def _sela_set_contact_permission(conn, profile, permission, note, now, actor):
+    """Human-only contact-permission change with an audit trail.
+
+    Sela's service identity is deliberately rejected here: unblocking DNC
+    reverses a durable business suppression, so only an interactive Trosa
+    login may do it.  The route below is also absent from the Sela
+    allowlist, so a service Bearer token cannot reach it at all.
+    """
+    profile = dict(profile)
+    permission = str(permission or '').strip().lower()
+    if permission not in {'allowed', 'do_not_contact'}:
+        raise CrmWriteError('联系权限必须是 allowed 或 do_not_contact')
+    note_text = _sela_prospect_text(note, 2000)
+    if len(note_text.strip()) < 2:
+        raise CrmWriteError('请填写解禁/停止联系的原因（至少 2 个字），用于审计')
+    research = _sela_json_value(profile.get('research_json'), {})
+    state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
+    changes = state.get('contact_permission_changes')
+    if not isinstance(changes, list):
+        changes = []
+    changes.append({
+        'at': now,
+        'actor': str(actor or ''),
+        'from': str(profile.get('contact_permission') or 'allowed'),
+        'to': permission,
+        'note': note_text.strip(),
+    })
+    state['contact_permission_changes'] = changes[-20:]
+    if permission == 'allowed':
+        state['exclusion_resolution'] = 'HUMAN_UNBLOCKED'
+        state['exclusion_resolved_at'] = now
+        state['exclusion_resolution_note'] = note_text.strip()
+    else:
+        state['exclusion_resolution'] = 'HUMAN_BLOCKED'
+        state['exclusion_resolved_at'] = now
+        state['exclusion_resolution_note'] = note_text.strip()
+    research['agent_state'] = state
+    relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    scope = ('organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND '
+             if postgres_mode() else '')
+    conn.execute(
+        f'''UPDATE {relation}
+               SET research_json=?,
+                   contact_permission=?,
+                   suppression_reason=?,
+                   suppression_at=?,
+                   updated_at=?
+             WHERE {scope}id=?''',
+        (json.dumps(research, ensure_ascii=False), permission,
+         '' if permission == 'allowed' else note_text.strip(),
+         '' if permission == 'allowed' else now, now, profile['id']),
+    )
+    return _sela_profile_by_source(conn, str(profile['source_id']))
+
+
+@app.route('/api/customers/<int:customer_id>/agent-prospect/contact-permission', methods=['POST'])
+@login_required
+def customer_agent_prospect_contact_permission(customer_id):
+    """Human-only unblock/block for a prospect's contact permission."""
+    if _sela_service_integration_user():
+        return jsonify({'success': False, 'error': 'Sela 不能自助解禁，请由人工在 Trosa 中操作'}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': '请求必须是 JSON 对象'}), 400
+    conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        profile = _sela_profile_for_customer(conn, customer_id)
+        if not profile:
+            conn.rollback()
+            return jsonify({'success': False, 'error': '该客户没有 sela Prospect 档案'}), 404
+        try:
+            updated = _sela_set_contact_permission(
+                conn, profile, payload.get('permission'),
+                payload.get('note') or payload.get('reason'),
+                _sela_now(), getattr(g, 'current_user', ''),
+            )
+        except CrmWriteError as error:
+            conn.rollback()
+            return jsonify({'success': False, 'error': error.message}), error.status
+        prospect = _sela_prospect_view(conn, updated)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception('contact permission change failed for customer %s', customer_id)
+        return jsonify({'success': False, 'error': '联系权限写入失败'}), 500
+    finally:
+        conn.close()
+    schedule_safety_backup('contact_permission_change')
+    return jsonify({'success': True, 'status': 'SYNCED', 'prospect': prospect})
+
+
 @app.route('/api/integrations/sela/exclusions', methods=['GET'])
 @login_required
 def sela_integration_exclusions():
@@ -5621,6 +5717,57 @@ def update_business_exclusion(exclusion_id):
     finally:
         conn.close()
     schedule_safety_backup('business_exclusion_update')
+    return jsonify({'success': True, 'record': record})
+
+
+@app.route('/api/business-exclusions/<int:exclusion_id>', methods=['DELETE'])
+@login_required
+def delete_business_exclusion(exclusion_id):
+    """Human-only deactivation (soft delete) of a business exclusion."""
+    if _sela_service_integration_user():
+        return jsonify({'success': False, 'error': 'Sela 不能自助解禁，请由人工在 Trosa 中操作'}), 403
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({'error': '业务排除请求必须是 JSON 对象'}), 400
+    reason = str(payload.get('reason') or payload.get('note') or '').strip()
+    conn = get_db()
+    try:
+        relation = 'trosa.business_exclusions' if postgres_mode() else 'business_exclusions'
+        existing = conn.execute(
+            f'''SELECT * FROM {relation}
+                 WHERE {('organization_id=trosa.compat_org_id() AND ' if postgres_mode() else '')}
+                       id=? AND legacy_user_id=? LIMIT 1''',
+            (exclusion_id, _sela_prospect_user()),
+        ).fetchone()
+        if not existing:
+            return jsonify({'error': '业务排除记录不存在'}), 404
+        old = dict(existing)
+        if not bool(old.get('is_active')):
+            return jsonify({'success': True, 'record': _sela_business_exclusion_view(old)})
+        value = {
+            'source': old['source'], 'source_id': old['source_id'],
+            'canonical_name': old['canonical_name'],
+            'aliases': _sela_json_value(old['aliases_json'], []),
+            'domains': _sela_json_value(old['domains_json'], []),
+            'country': old['country'],
+            'status': old['status'],
+            'match_policy': old['match_policy'],
+            'reason': (old['reason'] + ' | 停用：' + reason[:500]) if reason else old['reason'],
+            'is_active': False,
+        }
+        conn.execute('BEGIN IMMEDIATE')
+        record = _sela_upsert_business_exclusion(conn, value, _sela_now())
+        conn.commit()
+    except CrmWriteError as exc:
+        conn.rollback()
+        return jsonify({'error': str(exc)}), getattr(exc, 'status_code', 400)
+    except Exception:
+        conn.rollback()
+        logger.exception('delete business exclusion failed')
+        return jsonify({'error': '业务排除停用失败'}), 500
+    finally:
+        conn.close()
+    schedule_safety_backup('business_exclusion_delete')
     return jsonify({'success': True, 'record': record})
 
 

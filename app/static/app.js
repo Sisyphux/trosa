@@ -5418,7 +5418,8 @@ function renderCustomerFactsBrief(customer) {
       var label = String(url).replace(/^https?:\/\//i, '').replace(/\/$/, '');
       return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
     }).join(' · ');
-    var permission = agentProspect.contact_permission === 'do_not_contact'
+    var isDnc = agentProspect.contact_permission === 'do_not_contact';
+    var permission = isDnc
       ? '已停止联系' + (agentProspect.suppression_reason ? '：' + agentProspect.suppression_reason : '')
       : '';
     var exclusionReview = agentProspect.exclusion_review || null;
@@ -5427,7 +5428,7 @@ function renderCustomerFactsBrief(customer) {
       : '';
     agentResearchHtml = '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">sela 研究</span><span class="customer-fact-gap-count">' + escapeHtml(researchTags || '已导入') + '</span></div><p class="customer-fact-context-copy">' + renderRichText(researchText.slice(0, 720)) + '</p>' +
       (agentProspect.angle ? '<small class="customer-fact-files">沟通角度：' + escapeHtml(agentProspect.angle) + '</small>' : '') +
-      (permission ? '<small class="customer-fact-files">联系权限：' + escapeHtml(permission) + '</small>' : '') +
+      (permission ? '<small class="customer-fact-files">联系权限：' + escapeHtml(permission) + '</small><div><button type="button" class="text-action" onclick="setCustomerContactPermission(\'allowed\')">恢复联系（人工解禁）</button></div>' : '') +
       exclusionReviewHtml +
       (researchSources ? '<small class="customer-fact-files">公开来源：' + researchSources + '</small>' : '') +
     '</section>';
@@ -5479,6 +5480,36 @@ async function resolveCustomerSelaExclusionReview(decision) {
     showToast('排除身份决定已保存到 Trosa', 'success');
   } catch (e) {
     showToast((e && e.message) || '保存排除身份决定失败', 'error');
+  }
+}
+
+async function setCustomerContactPermission(permission) {
+  var customer = _customerDetailCache || {};
+  var customerId = Number(customer.id || (document.getElementById('editCustomerId') || {}).value || 0);
+  if (!customerId) { showToast('缺少客户 ID', 'error'); return; }
+  var unblocking = permission === 'allowed';
+  if (!await showAppConfirm({
+    title: unblocking ? '恢复联系（人工解禁）' : '停止联系',
+    message: unblocking
+      ? '这会解除 DNC 并恢复 sela 跟进资格。请确认已核实误标或客户已同意恢复联系。'
+      : '这会在 Trosa 记录停止联系，并阻止 sela 后续外联。',
+    submitLabel: unblocking ? '确认恢复联系' : '停止联系', danger: !unblocking,
+  })) return;
+  var note = await showAppPrompt({
+    title: '填写原因（必填）', message: '解禁/停止联系的原因会写入审计记录。',
+    label: '原因', value: '', submitLabel: '保存',
+  });
+  if (note === null) return;
+  if (String(note).trim().length < 2) { showToast('请填写至少 2 个字的原因', 'error'); return; }
+  try {
+    await api('/api/customers/' + customerId + '/agent-prospect/contact-permission', {
+      method: 'POST', body: { permission: permission, note: note }
+    });
+    delete _customerWorkspaceCache[customerId];
+    await openEditModal(customerId);
+    showToast(unblocking ? '已恢复联系，sela 可继续跟进' : '已记录停止联系', 'success');
+  } catch (e) {
+    showToast((e && e.message) || '保存联系权限失败', 'error');
   }
 }
 

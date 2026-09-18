@@ -55,6 +55,12 @@
 - 修复：`_get_customers_postgres` 改为两段稳定排序——先按用户选择的排序键排（含方向），再稳定排序把置顶客户按 pinned_order 提到最前；搜索结果在相关度平分时也优先置顶客户。
 - 影响范围：仅 `/api/customers` 返回顺序；不改数据、迁移、接口契约。
 - 验证：新增回归 `test_postgres_customer_list_keeps_marked_customers_first`（desc 日期排序下标记客户仍在最前）与 `test_postgres_customer_search_keeps_marked_customers_on_score_ties`。
+## 2026-09-18 — 人工解禁 DNC/PAUSED：联系权限恢复 allowed + 审计
+
+- 根因：`agent_prospect_profiles.contact_permission='do_not_contact'` 一旦置位（人工 reject / 回复 opt-out / 粘性 upsert 闩锁）即永久生效，派生 `outreach_status=PAUSED`；全仓无 `SET contact_permission='allowed'` 回写，Sela 按设计也不能自助解禁，误标后 9 家 prospect 卡死。
+- 修复：新增人工独占 `POST /api/customers/<id>/agent-prospect/contact-permission`（`allowed`/`do_not_contact` + 必填原因，写入 `contact_permission_changes` 审计链；Sela 服务 token 明确 403，且该路径不在 Sela 白名单内）；客户详情“已停止联系”处加“恢复联系（人工解禁）”按钮。`business_exclusions` 视图补 `is_active` 并新增人工独占 `DELETE /api/business-exclusions/<id>`（停用）。
+- 数据边界：不改表结构与迁移；仅新增人工写入路径，Sela 仍只能置 DNC、不能清 DNC。
+- 验证：新增 `test_human_can_unblock_dnc_and_sela_cannot` 与 business-exclusion 停用回归；prospect 回归 18 项通过。
 
 ## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
 

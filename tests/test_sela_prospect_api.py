@@ -625,5 +625,84 @@ class SelaProspectApiTest(unittest.TestCase):
             conn.close()
 
 
+    def test_human_can_unblock_dnc_and_sela_cannot(self):
+        body = prospect()
+        body['agent_state'] = {'exclusion_review': {
+            'canonical_name': 'Acrílicos Histórico', 'matched_value': 'acrilicos',
+            'registry_status': 'recommended_pending', 'source': 'legacy_exclusion_registry',
+        }}
+        created = self.post_prospect(body)
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        blocked = self.client.post(
+            '/api/integrations/sela/prospects/prospect-1/exclusion-decision',
+            json={'decision': 'reject', 'note': '同一主体，停止联系。'}, headers=self.headers(),
+        )
+        self.assertEqual(blocked.status_code, 200, blocked.get_data(as_text=True))
+        self.assertTrue(blocked.get_json()['prospect']['do_not_contact'])
+        suppressed = [row for row in self.exclusion_records()
+                      if row.get('status') == 'do_not_contact']
+        self.assertTrue(suppressed)
+
+        # Sela service token must not reach the human-only unblock route.
+        denied = self.client.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': 'sela 自助解禁'},
+            headers=self.headers('sela-v2:unblock:denied'),
+        )
+        self.assertIn(denied.status_code, (401, 403), denied.get_data(as_text=True))
+
+        # Human login can unblock with an audit note.
+        login = self.client.post('/api/auth/login', json={'user': 'hamid'})
+        self.assertEqual(login.status_code, 200, login.get_data(as_text=True))
+        missing_note = self.client.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': ''},
+        )
+        self.assertEqual(missing_note.status_code, 400, missing_note.get_data(as_text=True))
+        unblocked = self.client.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': '批量误标，人工核实后恢复'},
+        )
+        self.assertEqual(unblocked.status_code, 200, unblocked.get_data(as_text=True))
+        body = unblocked.get_json()
+        self.assertTrue(body['success'])
+        self.assertFalse(body['prospect']['do_not_contact'])
+        self.assertNotEqual(body['prospect']['outreach_status'], 'PAUSED')
+        suppressed_after = [row for row in self.exclusion_records()
+                            if row.get('status') == 'do_not_contact']
+        self.assertFalse(suppressed_after)
+        conn = self.hamid_db()
+        try:
+            profile = conn.execute(
+                'SELECT contact_permission, suppression_reason, research_json FROM agent_prospect_profiles'
+            ).fetchone()
+            self.assertEqual(profile['contact_permission'], 'allowed')
+            self.assertEqual(profile['suppression_reason'], '')
+            changes = json.loads(profile['research_json'])['agent_state']['contact_permission_changes']
+            self.assertEqual(changes[-1]['to'], 'allowed')
+            self.assertIn('批量误标', changes[-1]['note'])
+        finally:
+            conn.close()
+
+    def test_business_exclusion_view_exposes_is_active_and_supports_deactivate(self):
+        login = self.client.post('/api/auth/login', json={'user': 'hamid'})
+        self.assertEqual(login.status_code, 200, login.get_data(as_text=True))
+        created = self.client.post('/api/business-exclusions', json={
+            'canonical_name': 'Block Co', 'source_id': 'block-co-1', 'reason': '测试排除',
+        })
+        self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
+        record_id = created.get_json()['record']['record_id']
+        exclusion_id = int(record_id.split(':')[1])
+        listed = self.client.get('/api/business-exclusions').get_json()['records']
+        self.assertTrue(next(row for row in listed if row['record_id'] == record_id)['is_active'])
+        removed = self.client.delete(
+            f'/api/business-exclusions/{exclusion_id}', json={'reason': '误标，人工停用'})
+        self.assertEqual(removed.status_code, 200, removed.get_data(as_text=True))
+        self.assertFalse(removed.get_json()['record']['is_active'])
+        self.assertFalse(any(
+            row.get('record_id') == record_id for row in self.exclusion_records()))
+
+
 if __name__ == '__main__':
     unittest.main()
