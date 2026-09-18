@@ -1,3 +1,13 @@
+## 2026-09-18 — 退信与系统通知邮件不再涌入 Inbox
+
+- 背景：Gmail 同步把 Mail Delivery Subsystem 退信、no-reply 系统邮件（44 条）当成“待归属沟通”要求人工处理，76% 的 Inbox 判断都是无效噪声；正确业务是退信=投递事实 → Sela 换邮箱重发。
+- 修复（入库）：`gmail_sync._store_message` 识别邮件系统发件人（mailer-daemon/postmaster、Mail Delivery Subsystem 标题、Delivery Status Notification/Returned mail/退信等主题）与 no-reply/no reply/donotreply/notifications 系统发件人：退信不建 Inbox 条目、不写时间线，静默解析失败收件人与 SMTP 编码（如 `550 5.1.1`），落为 `email_delivery_events`（event_type=bounced，source=gmail-bounce，写信失败收件人匹配到联系人则绑定 contact_method/contact）；no-reply 纯噪声直接静默处理。两者均记入 Gmail receipt，永不重复处理。
+- 修复（存量）：`GET /api/inbox` 在缓存失效周期内执行一次幂等清扫 `_archive_noise_gmail_captures`，把历史上仍 open 的同类 Gmail 采集条目自动归档，归档事实与操作日志留有审计；用户刷新后不再看到旧噪声。
+- Sela 联动：这些 bounced 投递事件与 Sela 自身回执使用同一张 `email_delivery_events`，Sela 选取联系邮箱时沿用既有排除逻辑（有 bounced 记录的邮箱不再用于触达），自然“拿其他邮箱重新发送”。
+- 影响范围：`gmail_sync.py`、`app.py`（一次性清扫）；不改接口契约、迁移与 Inbox 其余语义。
+- 验证：SQLite 回归新增 `GmailNoiseFilterTest`（分类器/收件人/SMTP 码提取）、`GmailNoiseStoreBehaviorTest`（退信落投递事实且 Inbox 为空、no-reply 静默）；PostgreSQL rehearsal 覆盖退信入库与历史清除；此前 Inbox 页面回归继续通过。
+
+
 ## 2026-09-18 — Inbox 页面改造：客户上下文可见 + 列表清爽化
 
 - 修复：客户完成归属或分类后，Inbox 页面长时间显示不到客户名称、国家等信息——`/api/inbox` 服务端缓存 TTL 从 300 秒收紧到 30 秒，下一次轮询立刻反映已写入的客户事实（写入成功时缓存本就即时失效，此处消除跨刷新的陈旧窗口）。

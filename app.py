@@ -70,6 +70,7 @@ from gmail_sync import (
     build_authorization_url,
     complete_oauth_authorization,
     disconnect_gmail,
+    gmail_noise_role,
     gmail_status,
     start_gmail_sync,
 )
@@ -9601,7 +9602,48 @@ def get_recycle_bin_count():
 
 # ========== Inbox API ==========
 
+def _archive_noise_gmail_captures(conn):
+    """Archive historical open Gmail captures that are daemon/noise reports.
+
+    退信与 no-reply 邮件曾按“待归属”进入 Inbox（44 条 Mail Delivery / Claude
+    通知这样的噪声）。入库侧已停止新建这些条目；这里把历史上仍 open 的
+    同类条目一次性安静归档，避免用户 reload 后继续看到旧噪声。
+    """
+    archived = 0
+    if postgres_mode():
+        rows = _modern_inbox_rows(conn, status='open', item_type='gmail_capture')
+    else:
+        rows = conn.execute(
+            "SELECT i.* FROM inbox_items i WHERE i.status='open' AND i.item_type='gmail_capture'"
+        ).fetchall()
+    for raw in rows:
+        item = dict(raw)
+        try:
+            payload = json.loads(item.get('content') or '')
+        except (TypeError, ValueError):
+            continue
+        messages = payload.get('messages') if isinstance(payload, dict) else []
+        if not (isinstance(messages, list) and messages):
+            continue
+        role = gmail_noise_role(messages[0] if isinstance(messages[0], dict) else {})
+        if not (role['delivery_notice'] or role['noise']):
+            continue
+        try:
+            _set_inbox_status(
+                conn, inbox_item_id=int(item['id']), status='archived',
+                changed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            )
+            archived += 1
+        except (ValueError, TypeError):
+            continue
+    if archived:
+        conn.commit()
+        logger.info('Inbox 噪声 Gmail 采集已自动归档: %s 条', archived)
+    return archived
+
+
 @app.route('/api/inbox', methods=['GET'])
+
 @login_required
 def get_inbox():
     """Return persisted items that require a human decision."""
@@ -9613,6 +9655,7 @@ def get_inbox():
 
     conn = get_db()
     try:
+        _archive_noise_gmail_captures(conn)
         if postgres_mode():
             customer_rows = {int(row['id']): row for row in _active_customers(conn, include_deleted=True)}
             # Every open canonical Inbox item is actionable human-review

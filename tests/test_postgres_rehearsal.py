@@ -1080,6 +1080,58 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(gmail_sync._store_message('hamid', 'owner@rehearsal.example', message, 'duplicate')['state'], 'duplicate')
 
+        bounce = gmail_sync.normalize_gmail_message({
+            'id': 'pg-rehearsal-gmail-bounce', 'threadId': 'pg-rehearsal-thread-bounce',
+            'internalDate': '1780000000000',
+            'payload': {'mimeType': 'multipart/alternative', 'headers': [
+                {'name': 'From', 'value': 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>'},
+                {'name': 'To', 'value': 'Owner <owner@rehearsal.example>'},
+                {'name': 'Subject', 'value': 'Delivery Status Notification'},
+            ], 'parts': [{'mimeType': 'text/plain', 'body': {'data': base64.urlsafe_b64encode((
+                '由于系统找不到电子邮件地址 buyer@rehearsal.example，无法递送该邮件。'
+                '响应如下：550 5.1.1 The email account that you tried to reach does not exist.'
+            ).encode()).decode().rstrip('=')}}]},
+        }, 'owner@rehearsal.example')
+        bounce_result = gmail_sync._store_message('hamid', 'owner@rehearsal.example', bounce, 'PG Gmail bounce')
+        self.assertEqual(bounce_result['state'], 'delivery_notice', bounce_result)
+        self.assertIsNone(bounce_result.get('inbox_item_id'))
+        bounce_rows = self.connection.execute(
+            """SELECT event_type, source, count(*) FROM trosa.email_delivery_events
+                WHERE source='gmail-bounce' GROUP BY event_type, source"""
+        ).fetchall()
+        normalized = [
+            tuple(dict(row).values())
+            if not isinstance(row, (tuple, list)) else tuple(row)
+            for row in bounce_rows
+        ]
+        self.assertEqual(sorted(normalized), [('bounced', 'gmail-bounce', 1)])
+        self.assertEqual(
+            self.connection.execute(
+                '''SELECT count(*) FROM trosa.inbox_items
+                    WHERE item_type='gmail_capture' AND status='open' '''
+            ).fetchone()[0],
+            0,
+        )
+        # 历史上已 open 的同类噪声会被 GET /api/inbox 的一次性清扫自动归档。
+        module = self._app_module()
+        module._create_inbox_item(
+            self.connection, item_type='gmail_capture', title='待归属 Gmail 邮件：Mail Delivery Subsystem',
+            content=json.dumps({'messages': [{
+                'sender_email': 'mailer-daemon@googlemail.com',
+                'sender': 'Mail Delivery Subsystem', 'subject': 'Delivery Status Notification',
+                'text': '550 5.1.1 buyer@rehearsal.example does not exist.',
+            }]}),
+            dedupe_key='gmail:owner@rehearsal.example:legacy-noise-1',
+            status='open', created_at='2026-09-17 09:00:00',
+        )
+        self.assertEqual(module._archive_noise_gmail_captures(self.connection), 1)
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT count(*) FROM trosa.inbox_items WHERE item_type='gmail_capture' AND status='open'"
+            ).fetchone()[0],
+            0,
+        )
+
         verification = {
             'email': 'smtp-worker@rehearsal.example',
             'normalized': 'smtp-worker@rehearsal.example',

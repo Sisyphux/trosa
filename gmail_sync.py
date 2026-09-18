@@ -348,8 +348,80 @@ def disconnect_gmail(user):
 
 
 def _normalize_email(value):
-    value = str(value or '').strip().casefold()
-    return value if re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', value) else ''
+    return str(value or '').strip().lower()
+
+
+# 系统生成的邮件不是需要人工判断的客户沟通：退信是投递事实（哪个邮箱失败、
+# 让 Sela 下次换邮箱重发），no-reply 通知是纯噪声。两者都不应出现在 Inbox。
+_BOUNCE_SENDER_LOCALS = {'mailer-daemon', 'mailerdaemon', 'postmaster'}
+_BOUNCE_SENDER_TITLES = ('mail delivery subsystem', 'mail delivery system')
+_BOUNCE_SUBJECT_HINTS = (
+    'delivery status notification', 'mail delivery subsystem', 'mail delivery system',
+    'returned mail', 'undelivered mail returned to sender', 'undeliverable mail',
+    'mail delivery failed', 'failure notice', '退信',
+)
+_NOISE_LOCAL_PREFIXES = (
+    'no-reply', 'noreply', 'no_reply', 'no.reply', 'donotreply', 'do-not-reply',
+    'no-reply', 'noreply', 'notifications',
+)
+_NOISE_ADDRESS_DOMAINS = ()
+_BOUNCE_SMTP_RE = re.compile(r'\b(\d{3})\s*[-–]?\s*(\d\.\d{1,3}\.\d{1,3})\b')
+_ADDRESS_RE = re.compile(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+')
+_INFRA_LOCAL_RE = re.compile(r'^(mailer-daemon|mailerdaemon|postmaster|noreply|no-reply|no_reply|no\.reply)([.+_-].*)?$')
+
+
+def gmail_noise_role(message):
+    """Classify one Gmail message as machine-generated noise, not a human reply.
+
+    ``delivery_notice`` is a bounce/daemon report describing failed delivery of
+    our own outbound mail; ``noise`` is any other no-reply notification.  Both
+    must never become an Inbox item that asks a human to assign them.
+    """
+    sender_email = _normalize_email(message.get('sender_email'))
+    local, _, domain = sender_email.partition('@')
+    if not sender_email:
+        return {'delivery_notice': False, 'noise': False}
+    label = _normalize_email(message.get('sender'))
+    subject = _normalize_email(message.get('subject'))
+    delivery_notice = (
+        local in _BOUNCE_SENDER_LOCALS
+        or any(title in label or title in subject for title in _BOUNCE_SENDER_TITLES)
+        or any(hint in subject for hint in _BOUNCE_SUBJECT_HINTS)
+    )
+    noise = (
+        not delivery_notice
+        and bool(local)
+        and any(local.startswith(prefix) for prefix in _NOISE_LOCAL_PREFIXES)
+    )
+    return {'delivery_notice': delivery_notice, 'noise': noise}
+
+
+def _bounce_recipient_candidates(message, account=''):
+    """Extract plausible failed-delivery recipient addresses from a bounce."""
+    own_account = _normalize_email(account)
+    addresses = set()
+    for value in [message.get('subject'), message.get('text'), message.get('snippet'),
+                  *([item.get('email') for item in message.get('to', [])] if isinstance(message.get('to'), list) else [])]:
+        for match in _ADDRESS_RE.findall(str(value or '')):
+            email = _normalize_email(match)
+            if not email or email == own_account:
+                continue
+            local, _, domain = email.partition('@')
+            if _INFRA_LOCAL_RE.match(local) or domain in _NOISE_ADDRESS_DOMAINS:
+                continue
+            addresses.add(email)
+    return sorted(addresses)
+
+
+def _bounce_delivery_details(message, account=''):
+    """Return (smtp_code, enhanced_status, diagnostic, recipients) for one bounce."""
+    text = ' '.join(str(message.get(key) or '') for key in ('subject', 'text', 'snippet'))
+    smtp_match = _BOUNCE_SMTP_RE.search(text)
+    smtp_code = smtp_match.group(1) if smtp_match else ''
+    enhanced_status = smtp_match.group(2) if smtp_match else ''
+    diagnostic = re.sub(r'\s+', ' ', text).strip()[:800]
+    recipients = _bounce_recipient_candidates(message, account)
+    return smtp_code, enhanced_status, diagnostic, recipients
 
 
 def _decode_header(value):
@@ -892,6 +964,71 @@ def _insert_source(cursor, activity_id, account, message):
                     message.get('time', ''), message.get('direction', 'unknown'), message.get('text', '')[:12000]))
 
 
+def _record_gmail_bounce_delivery(cursor, message, account, now):
+    """Persist a Gmail bounce as a canonical delivery fact (no human action)."""
+    smtp_code, enhanced_status, diagnostic, recipients = _bounce_delivery_details(message, account)
+    provider_message_id = str(message.get('message_id') or '').strip()
+    if not provider_message_id:
+        return
+    payload = json.dumps({
+        'gmail_account': _normalize_email(account),
+        'recipients': recipients,
+        'message_id': provider_message_id,
+    }, ensure_ascii=False)
+    match = _matches_for_emails(cursor, recipients) if recipients else {'status': 'ignored'}
+    customer_id = match.get('customer_id')
+    contact_id = match.get('contact_id')
+    event_id = f'gmail-bounce:{provider_message_id}'
+    occurred_at = str(message.get('date') or now)[:10]
+    if postgres_mode():
+        existing = cursor.execute(
+            '''SELECT id FROM trosa.email_delivery_events
+                WHERE organization_id=trosa.compat_org_id()
+                  AND event_type='bounced' AND source='gmail-bounce'
+                  AND provider_message_id=?''',
+            (provider_message_id,),
+        ).fetchone()
+        if existing:
+            return
+        contact_method_id = None
+        if customer_id and contact_id:
+            row = cursor.execute(
+                '''SELECT contact_method_id FROM trosa.contact_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND legacy_customer_id=? AND legacy_contact_id=?''',
+                (customer_id, contact_id),
+            ).fetchone()
+            contact_method_id = row['contact_method_id'] if row else None
+        cursor.execute(
+            '''INSERT INTO trosa.email_delivery_events
+               (id, organization_id, contact_method_id, event_type, smtp_code, enhanced_status,
+                diagnostic_text, provider_message_id, source, occurred_at, legacy_payload)
+               VALUES (trosa.compat_uuid(?), trosa.compat_org_id(), ?, 'bounced', ?, ?, ?, ?, 'gmail-bounce',
+                       trosa.compat_time(?), ?::jsonb)
+               ON CONFLICT (id) DO NOTHING''',
+            (event_id, contact_method_id, smtp_code, enhanced_status, diagnostic,
+             provider_message_id, occurred_at, payload),
+        )
+        return
+    existing = cursor.execute(
+        '''SELECT id FROM email_delivery_events
+            WHERE event_type='bounced' AND source='gmail-bounce' AND message_id=?''',
+        (provider_message_id,),
+    ).fetchone()
+    if existing:
+        return
+    cursor.execute(
+        '''INSERT INTO email_delivery_events
+           (email, contact_id, event_type, smtp_code, enhanced_status, diagnostic_text,
+            message_id, source, occurred_at)
+           VALUES (?, ?, 'bounced', ?, ?, ?, ?, 'gmail-bounce', ?)''',
+        (recipients[0] if recipients else '',
+         match.get('contact_id') if match.get('status') == 'matched' else None,
+         smtp_code, enhanced_status, diagnostic, provider_message_id, occurred_at),
+    )
+
+
 def _store_message(user, account, message, summary):
     """Persist one message atomically after a fresh exact-email match."""
     old_user = get_current_user()
@@ -915,6 +1052,15 @@ def _store_message(user, account, message, summary):
             conn.rollback()
             return {'state': 'duplicate'}
         match = _matches_for_emails(c, message.get('external_emails') or [])
+        noise = gmail_noise_role(message)
+        if noise['delivery_notice'] or noise['noise']:
+            # 退信与系统 no-reply 邮件不是客户沟通：不建 Inbox 条目、不进时间线。
+            # 退信同时落一条 email_delivery_events 事实，Sela 换邮箱重发时有据可依。
+            _store_state(c, message, match)
+            if noise['delivery_notice']:
+                _record_gmail_bounce_delivery(c, message, account, _now_text())
+            conn.commit()
+            return {'state': 'delivery_notice' if noise['delivery_notice'] else 'noise'}
         now = _now_text()
         if match['status'] == 'matched':
             escaped_summary = html.escape(str(summary or _fallback_summary(message)), quote=False)

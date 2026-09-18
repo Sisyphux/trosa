@@ -194,3 +194,106 @@ class GmailSyncTest(unittest.TestCase):
             self.assertEqual(gmail_job.kwargs['seconds'], 300)
         finally:
             scheduler.scheduler = previous_scheduler
+
+
+class GmailNoiseFilterTest(unittest.TestCase):
+    """退信与 no-reply 系统邮件不得进入 Inbox 待归属队列。"""
+
+    def test_bounce_recipient_and_classifier(self):
+        self.assertEqual(
+            gmail_sync.gmail_noise_role({'sender_email': 'mailer-daemon@googlemail.com'}),
+            {'delivery_notice': True, 'noise': False})
+        self.assertEqual(
+            gmail_sync.gmail_noise_role({'sender_email': 'no-reply@email.claude.com', 'subject': 'Welcome'}),
+            {'delivery_notice': False, 'noise': True})
+        self.assertEqual(
+            gmail_sync.gmail_noise_role({'sender_email': 'buyer@example.com'}),
+            {'delivery_notice': False, 'noise': False})
+        message = {
+            'sender_email': 'mailer-daemon@googlemail.com',
+            'sender': 'Mail Delivery Subsystem',
+            'subject': 'Mail Delivery Subsystem',
+            'text': '** 找不到地址 ** 由于系统找不到电子邮件地址 info@gruppoog.com.co，'
+                    '或该地址无法接收邮件，因此无法递送您的邮件。响应如下：550 5.1.1 The email account does not exist.',
+        }
+        self.assertEqual(
+            gmail_sync._bounce_recipient_candidates(message, 'owner@example.com'), ['info@gruppoog.com.co'])
+        smtp_code, enhanced, _, _ = gmail_sync._bounce_delivery_details(message)
+        self.assertEqual((smtp_code, enhanced), ('550', '5.1.1'))
+
+
+
+class GmailNoiseStoreBehaviorTest(unittest.TestCase):
+    """系统退信/no-reply 不再变成 Inbox 待归属条目。"""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.original_db_dir = db.DB_DIR
+        env = {
+            'GMAIL_CLIENT_ID': 'gmail-client',
+            'GMAIL_CLIENT_SECRET': 'gmail-secret',
+            'GMAIL_SYNC_ENABLED': 'false',
+        }
+        self.environment = mock.patch.dict(os.environ, env, clear=False)
+        self.environment.start()
+        db.DB_DIR = self.tempdir.name
+        db.init_all_dbs()
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company) VALUES ('Mina', 'Buyer Co.')")
+            self.customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute("""INSERT INTO contacts (customer_id, name, email, is_primary)
+                            VALUES (?, 'Mina Buyer', 'buyer@example.com', 1)""", (self.customer_id,))
+            self.contact_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+    def tearDown(self):
+        db.cancel_safety_backup()
+        db.DB_DIR = self.original_db_dir
+        self.environment.stop()
+        self.tempdir.cleanup()
+
+    def test_store_bounce_records_delivery_fact_and_no_inbox_item(self):
+        message = {
+            'message_id': 'bounce-1', 'thread_id': 't1',
+            'sender_email': 'mailer-daemon@googlemail.com',
+            'sender': 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>',
+            'subject': 'Delivery Status Notification',
+            'date': '2026-09-07',
+            'text': '由于系统找不到电子邮件地址 buyer@example.com，无法递送该邮件。'
+                    '响应：550 5.1.1 The email account that you tried to reach does not exist.',
+            'direction': 'inbound',
+        }
+        result = gmail_sync._store_message('hamid', 'owner@example.com', message, '')
+        self.assertEqual(result['state'], 'delivery_notice')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM inbox_items").fetchone()[0], 0)
+            event = conn.execute(
+                "SELECT email, contact_id, event_type, source, message_id FROM email_delivery_events"
+            ).fetchone()
+            self.assertEqual(event, ('buyer@example.com', self.contact_id, 'bounced', 'gmail-bounce', 'bounce-1'))
+            self.assertEqual(conn.execute(
+                "SELECT match_status FROM gmail_message_states").fetchone()[0], 'ignored')
+        finally:
+            conn.close()
+
+    def test_store_noreply_notification_is_silent_noise(self):
+        message = {
+            'message_id': 'noreply-1', 'thread_id': 't2',
+            'sender_email': 'no-reply@email.claude.com',
+            'sender': 'Claude Team',
+            'subject': 'Your workspace receipt',
+            'date': '2026-09-06',
+            'text': 'Receipt for your subscription.',
+        }
+        result = gmail_sync._store_message('hamid', 'owner@example.com', message, '')
+        self.assertEqual(result['state'], 'noise')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM inbox_items").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM email_delivery_events").fetchone()[0], 0)
+        finally:
+            conn.close()
