@@ -11,6 +11,13 @@
 - 影响范围：`postgres_compat.py`、`trosa_domain.py`、`app.py`、迁移 `0037`、`tests/test_postgres_rehearsal.py`、本变更日志；不改接口形状、表结构与运行契约。
 - 验证：PostgreSQL rehearsal 29 项全部通过（含 5 项新回归：业务时区与 session 无关、Inbox 可见键为原始键且归档单条、Sela 可见键恢复 `candidate_id`、客户资料保存保留 Sela 链接与最近联系、并发邀请单一赢家）；完整 SQLite 回归 305 项通过；迁移完整性门禁通过。
 
+## 2026-09-18 — 修复：客户高亮标记（置顶）不再优先显示在客户栏
+
+- 根因：PostgreSQL 客户列表走 Python 排序，排序键把“是否置顶”与日期方向放进同一个 key 再整体 `reverse`。前端默认 `order=desc`，反转后置顶客户沉到列表末尾且 pinned_order 倒序，SQLite 路径因 SQL `ORDER BY is_pinned DESC` 不受影响，所以正式环境优先显示消失而本地开发看似正常。搜索路径的平分决胜也丢掉了置顶优先。
+- 修复：`_get_customers_postgres` 改为两段稳定排序——先按用户选择的排序键排（含方向），再稳定排序把置顶客户按 pinned_order 提到最前；搜索结果在相关度平分时也优先置顶客户。
+- 影响范围：仅 `/api/customers` 返回顺序；不改数据、迁移、接口契约。
+- 验证：新增回归 `test_postgres_customer_list_keeps_marked_customers_first`（desc 日期排序下标记客户仍在最前）与 `test_postgres_customer_search_keeps_marked_customers_on_score_ties`。
+
 ## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
 
 - 根因（并发覆盖）：旧的 `release-commit.sh` 只在本地取发布锁，而锁是可被崩溃进程永久留下的 `$TMPDIR` 目录；两个入口若拿到不同 `TMPDIR` 或旧锁残留，就不互斥。更关键的是，锁只保证“不并行”，不保证“后发布者包含先发布者”：两个任务从同一 production 版本开发时，A 先上线后，B 若已通过本地门禁，仍可能把基于旧基线的候选推到 ECS，ECS 只按 `current` 符号链接切换，不校验候选是否包含当前 production，于是 A 的功能被静默覆盖。

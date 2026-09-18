@@ -6951,14 +6951,22 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
             item['match_context'] = rank.get('context') or contexts.get(item['id'])
             item['_search_score'] = rank.get('score', 0)
             item['match_reasons'] = list(dict.fromkeys(interpreted_filters[:4] + rank.get('reasons', [])))[:6]
-        customers.sort(key=lambda item: (-item.get('_search_score', 0), str(item.get(sort_key) or ''), item['id']))
+        # Relevance leads, then marked customers keep their priority on ties,
+        # mirroring the SQL tie-breaker used by the SQLite path.
+        customers.sort(key=lambda item: (-item.get('_search_score', 0),
+                                         0 if item.get('is_pinned') else 1,
+                                         item.get('pinned_order') or 0,
+                                         str(item.get(sort_key) or ''), item['id']))
         customers = _deduplicate_customer_search_results(customers)
         for item in customers:
             item.pop('_search_score', None)
     else:
+        # Marked customers always lead the list in pinned_order.  The requested
+        # sort (and its direction) applies inside each group, so ``desc`` may
+        # never push highlighted customers below unmarked ones.
+        customers.sort(key=lambda item: (str(item.get(sort_key) or ''), item['id']), reverse=reverse)
         customers.sort(key=lambda item: (0 if item.get('is_pinned') else 1,
-                                         item.get('pinned_order') or 0,
-                                         str(item.get(sort_key) or ''), item['id']), reverse=reverse)
+                                         item.get('pinned_order') or 0))
         for item in customers:
             item['match_reasons'] = list(dict.fromkeys(interpreted_filters))
             item['search_matches'] = []

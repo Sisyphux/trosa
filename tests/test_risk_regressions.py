@@ -2327,6 +2327,98 @@ class InputBoundaryRegressionTest(unittest.TestCase):
 class PostgresCompatibilityRegressionTest(unittest.TestCase):
     """SQLite-shaped writes must remain valid against PostgreSQL views."""
 
+    def test_postgres_customer_list_keeps_marked_customers_first(self):
+        """Descending date sort must never push highlighted customers to the bottom."""
+        spec = importlib.util.spec_from_file_location('crm_app_pinned_order_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        customers = [
+            {'id': 1, 'company': '新客户A', 'name': 'A', 'is_pinned': False, 'pinned_order': 0,
+             'updated_at': '2026-09-18 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-18 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+            {'id': 2, 'company': '新客户B', 'name': 'B', 'is_pinned': False, 'pinned_order': 0,
+             'updated_at': '2026-09-17 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-17 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+            {'id': 3, 'company': '标记客户C', 'name': 'C', 'is_pinned': True, 'pinned_order': 1,
+             'updated_at': '2026-09-01 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-01 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+            {'id': 4, 'company': '标记客户D', 'name': 'D', 'is_pinned': True, 'pinned_order': 2,
+             'updated_at': '2026-09-02 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-02 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+        ]
+        facts = {item['id']: {'next_task_date': '', 'next_task_title': '',
+                              'latest_communication_date': '', 'latest_email_date': '',
+                              'latest_email_status': '', 'has_contact': False,
+                              'contact_state': 'uncontacted', 'waiting_reply': False,
+                              'latest_activity': ''} for item in customers}
+        empty_conn = mock.Mock()
+        with mock.patch.object(module, '_active_customers', return_value=[dict(item) for item in customers]), \
+             mock.patch.object(module, '_customer_business_facts', return_value=facts), \
+             mock.patch.object(module, '_customer_contacts', return_value=[]):
+            payload = module._get_customers_postgres(
+                empty_conn, cleaned_search='', search_tokens=[], business_stage='', level='',
+                sort='updated_at', order='desc', include_deleted='0', view='all',
+                country_filter='', business_role='', field_filter='', judgment_filter='',
+                next_state='', last_from='', last_to='', tag_filter='',
+                days_min=0, days_max=0, page_value='', page=1, per_page=30,
+                interpreted_filters=[], silent_days=45, regular_days=75)
+        ordered = [item['id'] for item in payload['customers']]
+        self.assertEqual(ordered, [3, 4, 1, 2])
+
+    def test_postgres_customer_search_keeps_marked_customers_on_score_ties(self):
+        spec = importlib.util.spec_from_file_location('crm_app_pinned_search_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        customers = [
+            {'id': 1, 'company': 'Alpha', 'name': 'Alpha', 'is_pinned': False, 'pinned_order': 0,
+             'updated_at': '2026-09-18 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-18 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+            {'id': 2, 'company': 'Alpha 标记客户', 'name': 'Alpha 标记客户', 'is_pinned': True, 'pinned_order': 1,
+             'updated_at': '2026-09-10 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+             'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+             'business_stage': '', 'business_role': '', 'customer_judgment': '',
+             'country': '', 'status': '', 'created_at': '2026-09-10 09:00:00',
+             'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''},
+        ]
+        facts = {item['id']: {'next_task_date': '', 'next_task_title': '',
+                              'latest_communication_date': '', 'latest_email_date': '',
+                              'latest_email_status': '', 'has_contact': False,
+                              'contact_state': 'uncontacted', 'waiting_reply': False,
+                              'latest_activity': ''} for item in customers}
+        ranks = {1: {'score': 5, 'matches': ['alpha'], 'reasons': [], 'context': None},
+                 2: {'score': 5, 'matches': ['alpha'], 'reasons': [], 'context': None}}
+        empty_conn = mock.Mock()
+        with mock.patch.object(module, '_active_customers', return_value=[dict(item) for item in customers]), \
+             mock.patch.object(module, '_customer_business_facts', return_value=facts), \
+             mock.patch.object(module, '_customer_contacts', return_value=[]), \
+             mock.patch.object(module, '_customer_search_rank_data', return_value=ranks), \
+             mock.patch.object(module, '_customer_search_match_contexts', return_value={2: {'title': 'Alpha'}}), \
+             mock.patch.object(module, '_deduplicate_customer_search_results', side_effect=lambda items: items):
+            payload = module._get_customers_postgres(
+                empty_conn, cleaned_search='alpha', search_tokens=['alpha'], business_stage='', level='',
+                sort='updated_at', order='desc', include_deleted='0', view='all',
+                country_filter='', business_role='', field_filter='', judgment_filter='',
+                next_state='', last_from='', last_to='', tag_filter='',
+                days_min=0, days_max=0, page_value='', page=1, per_page=30,
+                interpreted_filters=[], silent_days=45, regular_days=75)
+        ordered = [item['id'] for item in payload['customers']]
+        self.assertEqual(ordered, [2, 1])
+
     def test_sqlite_empty_string_literals_are_not_used_in_postgres_sql(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('deleted_at = ""', source)
