@@ -1662,7 +1662,14 @@ function renderInbox(counts) {
 
 function renderInboxItemHtml(item) {
   var selaReview = parseSelaIdentityReview(item);
-  var name = (selaReview && selaReview.company) || item.customer_company || item.customer_name || item.capture_identity || item.title || '未关联客户';
+  // 已归属条目显示客户；未归属沟通直接显示发件人身份，系统标题只作最后兜底。
+  var senderName = String(item.capture_sender || '').replace(/<[^>]*>/g, '').trim();
+  var senderEmail = String(item.capture_sender_email || '').trim();
+  var name = item.customer_company || item.customer_name
+    || (isInboxCommunicationCapture(item) ? (senderName || senderEmail) : '')
+    || (selaReview && selaReview.company)
+    || item.capture_identity
+    || item.title || '未关联客户';
   var customerId = Number(item.customer_id || 0);
   var itemId = item.id ? String(item.id) : '';
   var key = item.dedupe_key || [item.item_type, item.customer_id, item.created_at].join('-');
@@ -1703,7 +1710,13 @@ function renderInboxItemHtml(item) {
 
   var summaryText = '';
   if (isInboxCommunicationCapture(item)) {
-    summaryText = truncateCaptureSummary(item.capture_content || item.title || '待确认的客户沟通', 110);
+    var captureText = String(item.capture_content || item.title || '待确认的客户沟通');
+    // 摘要首行常是“发件人 · 方向”前缀，与名称重复，去掉后再截断。
+    var firstBreak = captureText.indexOf('\n');
+    if (firstBreak > 0 && firstBreak < 120 && senderName && captureText.slice(0, firstBreak).indexOf(senderName) !== -1) {
+      captureText = captureText.slice(firstBreak + 1);
+    }
+    summaryText = truncateCaptureSummary(captureText, 110);
   } else if (selaReview) {
     summaryText = selaIdentityReasonLabel(selaReview.reason) + ' · ' + selaIdentityQualificationLabel(selaReview.research && selaReview.research.qualification_status);
   } else {
@@ -1754,7 +1767,7 @@ function renderInboxItemHtml(item) {
   ].filter(Boolean).join(' · ');
   var meta = metaText ? '<span class="inbox-item-meta">' + escapeHtml(metaText) + '</span>' : '';
   var identityText = isInboxCommunicationCapture(item) && !alreadyAssigned
-    ? (item.capture_identity || item.capture_sender_email || '') : '';
+    ? (senderEmail || String(item.capture_identity || '')) : '';
 
   return '<article class="inbox-item inbox-' + escapeHtml(item.item_type) + (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
     '<div class="inbox-item-row">' +

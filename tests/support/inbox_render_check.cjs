@@ -46,6 +46,11 @@ const items = [
     created_at: '2026-09-17 08:00:00', dedupe_key: 'k2' },
   { id: 3, item_type: 'ai_suggestion', customer_id: 0, title: '旧签名条目',
     created_at: '2026-09-11 08:00:00', dedupe_key: 'k3' },
+  { id: 4, item_type: 'gmail_capture', customer_id: 0, country: '土耳其',
+    title: '待归属 Gmail 邮件：chris@texfireco.com',
+    capture_sender: 'Chris Moore', capture_sender_email: 'chris@texfireco.com',
+    capture_content: 'Hi, we need 2.8mm clear acrylic sheets.',
+    created_at: '2026-09-13 08:00:00', dedupe_key: 'k4' },
 ];
 
 const respond = (payload) => ({ ok: true, status: 200, json: async () => payload });
@@ -69,8 +74,8 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   const chips = Array.from(doc.querySelectorAll('#inboxFilters .inbox-filter'));
   const chipKeys = chips.map((chip) => chip.dataset.inboxFilter);
   assert.deepEqual(chipKeys, ['all', 'new_reply', 'capture', 'sela']);
-  assert.equal(doc.querySelector('[data-inbox-filter="all"] .inbox-filter-count').textContent, '3');
-  assert.equal(doc.querySelector('[data-inbox-filter="capture"] .inbox-filter-count').textContent, '1');
+  assert.equal(doc.querySelector('[data-inbox-filter="all"] .inbox-filter-count').textContent, '4');
+  assert.equal(doc.querySelector('[data-inbox-filter="capture"] .inbox-filter-count').textContent, '2');
 
   // 分类标签不允许裸内部键
   const titles = Array.from(doc.querySelectorAll('.inbox-group-title')).map((el) => el.textContent);
@@ -87,6 +92,14 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(captureText.includes('Hamid'), captureText);
   assert.ok(captureText.includes('已归属'), captureText);
   assert.ok(captureArticle.querySelector('.inbox-item-type-chip'), captureText);
+
+  // 未归属沟通显示发件人身份，系统标题不作为主名称
+  const unassigned = Array.from(doc.querySelectorAll('article.inbox-gmail_capture'))
+    .find((el) => el.textContent.includes('Chris Moore'));
+  assert.ok(unassigned, '未归属 Gmail 条目应渲染');
+  assert.ok(unassigned.textContent.includes('chris@texfireco.com'), unassigned.textContent);
+  assert.ok(!unassigned.querySelector('.inbox-item-name').textContent.includes('待归属'),
+    `系统标题不应作为主名称: ${unassigned.querySelector('.inbox-item-name').textContent}`);
 
   // 单国家小分组不再铺国家组头和批量按钮
   assert.equal(doc.querySelectorAll('#page-inbox .inbox-country-header').length, 0);
