@@ -1,3 +1,10 @@
+## 2026-09-18 — 修复：永久删除客户在存在联系人沟通/外联/交付/回执时 500
+
+- 根因（外键顺序）：`_permanent_delete_customer_pg` 在删除 `core.contact_methods` 之前就删了联系人引用，而该表被 `trosa.timeline_events`、`trosa.outreach_messages`、`trosa.email_delivery_events`、`trosa.email_message_receipts` 引用；随后又在删除 `trosa.accounts` 前未清理 `audit.integration_receipts`（以及 `agent_actions`/`agent_proposals`/`imported_activity_rows`）。带 Sela 外联、交付事件或联系人沟通的客户因此触发 `email_delivery_events_contact_method_id_fkey`、`outreach_messages_contact_method_id_fkey`、`integration_receipts_account_id_fkey`，永久删除返回 500「永久删除失败，未更改任何数据」。
+- 修复：删除顺序改为“先子后父”。先删除账号下全部审计/沟通/外联/交付/回执与文件行，再删除联系人方法（仅当无任何引用时才删），删除账号前用显式引用计数门禁校验（残留引用直接 fail closed 回滚，不再半删），最后清理公司与不再被引用的人员。共享账号分支保持不变：只删本投影行，并对联系人/人员删除加全量 NOT EXISTS 保护。
+- 影响范围：仅 `app.py` 的 `_permanent_delete_customer_pg` 及其两个新辅助函数；不改接口、表结构、迁移与写入语义。
+- 验证：新增 PostgreSQL rehearsal 回归 `test_permanent_delete_clears_contact_linked_communication_and_receipts`（联系人方法关联的时间线/外联/交付/回执 + integration receipt 全部清除，联系人、人员、账号删除，无悬空引用）；原 `test_permanent_delete_removes_children_and_protects_shared_account` 继续通过。完整 PostgreSQL rehearsal 30 项、SQLite 回归 312 项通过。
+
 ## 2026-09-18 — PostgreSQL 兼容收口：时区、可见键、客户资料写空、并发与日期投影
 
 以 Inbox 归档 dedupe_key 为入口的全库 SQLite→PostgreSQL 行为差异专项排查；所有修复均在真实 PostgreSQL rehearsal 中验证。

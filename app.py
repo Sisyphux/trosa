@@ -9265,6 +9265,56 @@ def _remove_customer_files_selective(customer_id, own_file_paths):
             logger.warning(f'清理客户文件目录失败: {e}')
 
 
+def _delete_unreferenced_customer_contact_methods(conn, contact_refs):
+    """Delete a customer's contact methods only when nothing references them.
+
+    ``core.contact_methods`` is referenced by every communication/outreach/
+    delivery/receipt row, so deleting a method before those children is a
+    foreign-key failure.  The caller removes the account's own children first;
+    the NOT EXISTS guards keep a shared or externally referenced method from
+    being deleted (or raising) when another projection or the Sela prospect
+    link still needs it.
+    """
+    for contact in contact_refs:
+        contact_method_id = contact['contact_method_id']
+        if not contact_method_id:
+            continue
+        conn.execute(
+            'DELETE FROM core.email_verification_observations WHERE contact_method_id=?',
+            (contact_method_id,),
+        )
+        conn.execute(
+            '''DELETE FROM core.contact_methods WHERE id=?
+                 AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE contact_method_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE contact_method_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM trosa.timeline_events WHERE contact_method_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM trosa.outreach_messages WHERE contact_method_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM trosa.email_delivery_events WHERE contact_method_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM trosa.email_message_receipts WHERE contact_method_id=?)''',
+            (contact_method_id,) * 7,
+        )
+
+
+def _delete_unreferenced_customer_people(conn, contact_refs):
+    """Delete a customer's people once the company links are gone.
+
+    A person only becomes deletable after ``core.company_people`` is removed,
+    which happens with the last account of its company.  The guards keep a
+    person that another contact or company still references.
+    """
+    for contact in contact_refs:
+        person_id = contact['person_id']
+        if not person_id:
+            continue
+        conn.execute(
+            '''DELETE FROM core.people WHERE id=?
+                 AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE person_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM core.company_people WHERE person_id=?)
+                 AND NOT EXISTS (SELECT 1 FROM core.contact_methods WHERE person_id=?)''',
+            (person_id, person_id, person_id, person_id),
+        )
+
+
 def _permanent_delete_customer_pg(conn, customer_id):
     """Permanently remove one customer projection and its unshared canonical rows.
 
@@ -9318,31 +9368,6 @@ def _permanent_delete_customer_pg(conn, customer_id):
         (customer_id,),
     ).fetchall()
     conn.execute(
-        '''DELETE FROM trosa.contact_legacy_refs
-            WHERE organization_id=trosa.compat_org_id()
-              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
-        (customer_id,),
-    )
-    for contact in contact_refs:
-        if contact['contact_method_id']:
-            conn.execute(
-                'DELETE FROM core.email_verification_observations WHERE contact_method_id=?',
-                (contact['contact_method_id'],),
-            )
-            conn.execute(
-                '''DELETE FROM core.contact_methods WHERE id=?
-                   AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE contact_method_id=?)
-                   AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE contact_method_id=?)''',
-                (contact['contact_method_id'], contact['contact_method_id'], contact['contact_method_id']),
-            )
-        if contact['person_id']:
-            conn.execute(
-                '''DELETE FROM core.people WHERE id=?
-                   AND NOT EXISTS (SELECT 1 FROM trosa.contact_legacy_refs WHERE person_id=?)
-                   AND NOT EXISTS (SELECT 1 FROM core.company_people WHERE person_id=?)''',
-                (contact['person_id'], contact['person_id'], contact['person_id']),
-            )
-    conn.execute(
         '''DELETE FROM trosa.account_legacy_refs
             WHERE organization_id=trosa.compat_org_id()
               AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
@@ -9365,14 +9390,33 @@ def _permanent_delete_customer_pg(conn, customer_id):
                    AND NOT EXISTS (SELECT 1 FROM core.entity_files WHERE file_object_id=?)''',
                 (file_object_id, file_object_id),
             )
+        conn.execute(
+            '''DELETE FROM trosa.contact_legacy_refs
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+            (customer_id,),
+        )
+        _delete_unreferenced_customer_contact_methods(conn, contact_refs)
         return {'name': customer_name, 'shared': True,
                 'file_paths': file_paths, 'files_dir': customer_id}
     # Exclusive account: remove every canonical row that only this customer
-    # lineage could reference, in foreign-key order.
+    # lineage could reference.  Children are deleted before the parent rows
+    # they point at (contact methods, people, account, company), and the
+    # account delete is guarded so a residual reference fails closed instead of
+    # leaving a half-deleted customer.
+    for audit_table in ('integration_receipts', 'agent_proposals',
+                        'agent_actions', 'imported_activity_rows'):
+        conn.execute(f'DELETE FROM audit.{audit_table} WHERE account_id=?', (account_id,))
     conn.execute(
-        '''DELETE FROM trosa.email_delivery_events WHERE outreach_message_id IN
-           (SELECT id FROM trosa.outreach_messages WHERE account_id=?)''',
-        (account_id,),
+        '''DELETE FROM trosa.email_delivery_events
+            WHERE outreach_message_id IN
+                  (SELECT id FROM trosa.outreach_messages WHERE account_id=?)
+               OR contact_method_id IN
+                  (SELECT contact_method_id FROM trosa.contact_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND legacy_customer_id=?)''',
+        (account_id, customer_id),
     )
     conn.execute(
         '''DELETE FROM trosa.communication_source_items WHERE communication_source_id IN
@@ -9387,9 +9431,15 @@ def _permanent_delete_customer_pg(conn, customer_id):
     )
     conn.execute(
         '''DELETE FROM trosa.email_message_receipts
-            WHERE timeline_event_id IN (SELECT id FROM trosa.timeline_events WHERE account_id=?)
-               OR inbox_item_id IN (SELECT id FROM trosa.inbox_items WHERE account_id=?)''',
-        (account_id, account_id),
+            WHERE account_id=?
+               OR timeline_event_id IN (SELECT id FROM trosa.timeline_events WHERE account_id=?)
+               OR inbox_item_id IN (SELECT id FROM trosa.inbox_items WHERE account_id=?)
+               OR contact_method_id IN
+                  (SELECT contact_method_id FROM trosa.contact_legacy_refs
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND legacy_customer_id=?)''',
+        (account_id, account_id, account_id, customer_id),
     )
     conn.execute(
         '''DELETE FROM trosa.legacy_row_refs
@@ -9420,7 +9470,42 @@ def _permanent_delete_customer_pg(conn, customer_id):
                AND NOT EXISTS (SELECT 1 FROM core.entity_files WHERE file_object_id=?)''',
             (file_object_id, file_object_id),
         )
-    # trosa.customer_details cascades from the account delete below.
+    conn.execute(
+        '''DELETE FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''',
+        (customer_id,),
+    )
+    _delete_unreferenced_customer_contact_methods(conn, contact_refs)
+    # Guard the account delete against every table that still references it.
+    # ``trosa.customer_details`` is deliberately excluded: it cascades from the
+    # account delete.  A residual reference is a bug/foreign data, so fail the
+    # whole transaction instead of removing the projection and orphaning rows.
+    account_refs = conn.execute(
+        '''SELECT (SELECT count(*) FROM trosa.tasks WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.timeline_events WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.outreach_messages WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.inbox_items WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.email_message_receipts WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.research_reports WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.external_analysis_notes WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.account_understandings WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.ai_recommendations WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.web_monitor_observations WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.account_legacy_refs WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.contact_legacy_refs WHERE account_id=?)
+                + (SELECT count(*) FROM trosa.customer_states WHERE account_id=?)
+                + (SELECT count(*) FROM audit.integration_receipts WHERE account_id=?)
+                + (SELECT count(*) FROM audit.agent_proposals WHERE account_id=?)
+                + (SELECT count(*) FROM audit.agent_actions WHERE account_id=?)
+                + (SELECT count(*) FROM audit.imported_activity_rows WHERE account_id=?)
+                + (SELECT count(*) FROM core.entity_files WHERE account_id=?)
+                + (SELECT count(*) FROM trade_os_compat.customer_file_rows WHERE account_id=?)
+                AS total''',
+        (account_id,) * 19,
+    ).fetchone()
+    if int(account_refs['total'] or 0):
+        raise CrmWriteError('客户仍被其它记录引用，未执行永久删除', 409)
     conn.execute('DELETE FROM trosa.accounts WHERE id=?', (account_id,))
     if company_id and not conn.execute(
         'SELECT 1 FROM trosa.accounts WHERE company_id=?', (company_id,)
@@ -9435,9 +9520,13 @@ def _permanent_delete_customer_pg(conn, customer_id):
         conn.execute(
             '''DELETE FROM core.companies WHERE id=?
                AND NOT EXISTS (SELECT 1 FROM trosa.accounts WHERE company_id=?)
-               AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE company_id=?)''',
-            (company_id, company_id, company_id),
+               AND NOT EXISTS (SELECT 1 FROM sela.prospects WHERE company_id=?)
+               AND NOT EXISTS (SELECT 1 FROM core.entity_files WHERE company_id=?)''',
+            (company_id, company_id, company_id, company_id),
         )
+    # With the company links gone, any person that no other customer/contact
+    # references can now be removed.
+    _delete_unreferenced_customer_people(conn, contact_refs)
     return {'name': customer_name, 'shared': False,
             'file_paths': file_paths, 'files_dir': customer_id}
 

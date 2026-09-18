@@ -2251,6 +2251,117 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(orphans, 0)
         module._INBOX_CACHE.clear()
 
+    def test_permanent_delete_clears_contact_linked_communication_and_receipts(self):
+        """Permanent delete must remove every child the contact method/account anchors.
+
+        Regression: the delete removed ``core.contact_methods`` before the
+        timeline/outreach/delivery/receipt rows that reference it, and removed
+        ``trosa.accounts`` before its integration receipts.  A real customer
+        with a contact-linked communication, an outreach message and a Sela
+        receipt therefore returned 500 and removed nothing.
+        """
+        import db
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        marker = 'delete-fk-contact'
+        created = client.post('/api/customers', json={
+            'name': 'Contact Linked Delete Customer', 'company': 'Contact Linked Delete Co',
+            'country': 'US',
+            'contacts': [{'name': 'Linked Buyer', 'email': 'linked@delete-fk.example'}],
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+        contact_id = client.get(f'/api/customers/{customer_id}').get_json()['contacts'][0]['id']
+
+        account_id = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_customer_id=?''', (customer_id,),
+        ).fetchone()['account_id']
+        contact = self.connection.execute(
+            '''SELECT person_id, contact_method_id FROM trosa.contact_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND legacy_contact_id=?''', (contact_id,),
+        ).fetchone()
+        contact_method_id = contact['contact_method_id']
+        person_id = contact['person_id']
+        self.assertTrue(contact_method_id)
+
+        def uid(name):
+            return self.connection.execute("SELECT trosa.compat_uuid(?)", (name,)).fetchone()[0]
+
+        timeline_id = uid(marker + ':timeline')
+        outreach_id = uid(marker + ':outreach')
+        receipt_id = uid(marker + ':receipt')
+        self.connection.execute(
+            '''INSERT INTO trosa.timeline_events
+                   (id, account_id, contact_method_id, event_type, direction, content, occurred_at)
+               VALUES (?, ?, ?, 'communication', 'outbound', 'linked fact', now())''',
+            (timeline_id, account_id, contact_method_id),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.outreach_messages
+                   (id, account_id, contact_method_id, subject, body, provider_message_id, sent_at)
+               VALUES (?, ?, ?, 'Linked quote', 'Linked body', ?, now())''',
+            (outreach_id, account_id, contact_method_id, marker + '-msg'),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.email_delivery_events
+                   (id, organization_id, contact_method_id, outreach_message_id, event_type, occurred_at)
+               VALUES (?, trosa.compat_org_id(), ?, ?, 'delivered', now())''',
+            (uid(marker + ':delivery'), contact_method_id, outreach_id),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.email_message_receipts
+                   (id, organization_id, provider_message_id, account_id, contact_method_id, timeline_event_id)
+               VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?)''',
+            (receipt_id, marker + '-receipt-msg', account_id, contact_method_id, timeline_id),
+        )
+        self.connection.execute(
+            '''INSERT INTO audit.integration_receipts
+                   (id, organization_id, integration, idempotency_key, request_sha256,
+                    account_id, response_payload)
+               VALUES (?, trosa.compat_org_id(), 'sela', ?, 'sha', ?, '{}'::jsonb)''',
+            (uid(marker + ':integration'), marker + '-idem', account_id),
+        )
+        self.connection.commit()
+
+        deleted = client.delete(f'/api/customers/{customer_id}/permanent')
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+
+        for table in ('trosa.timeline_events', 'trosa.outreach_messages',
+                      'trosa.email_message_receipts', 'audit.integration_receipts'):
+            self.assertEqual(
+                self.connection.execute(
+                    f'SELECT count(*) FROM {table} WHERE account_id=?', (account_id,),
+                ).fetchone()[0],
+                0,
+                table,
+            )
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.email_delivery_events WHERE contact_method_id=?',
+            (contact_method_id,)).fetchone()[0], 0)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM core.contact_methods WHERE id=?', (contact_method_id,)).fetchone()[0], 0)
+        if person_id:
+            self.assertEqual(self.connection.execute(
+                'SELECT count(*) FROM core.people WHERE id=?', (person_id,)).fetchone()[0], 0)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.accounts WHERE id=?', (account_id,)).fetchone()[0], 0)
+        orphans = self.connection.execute(
+            '''SELECT count(*) FROM trosa.account_legacy_refs ref
+                 LEFT JOIN trosa.accounts account ON account.id=ref.account_id
+                WHERE account.id IS NULL''',
+        ).fetchone()[0]
+        self.assertEqual(orphans, 0)
+        module._INBOX_CACHE.clear()
+
     def test_sela_agent_request_visible_key_recovers_candidate_id(self):
         """A Sela human request keeps its source id through the PG Inbox projection.
 
