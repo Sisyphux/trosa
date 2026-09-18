@@ -1,3 +1,11 @@
+## 2026-09-18 — 开发信确认后自动关闭遗留开发类待办，不再滞留今日跟进
+
+- 根因：早期批量导入/开发实验创建的 `follow_up` 待办（标题“开发新客户: X”，备注“官网导入，待首次联系”）在 Sela 已确认发出开发信后仍为 open。`_sela_v2_upsert_outreach` 只写 outreach 与投递事件，从不关闭该待办；今日跟进视图展示所有 open 且非 `outreach_%` 的任务，于是已联系过的 prospect 一直以逾期人工待办出现。
+- 修复（写入路径）：Sela 确认外联（`SENT` 等，非退信）写回时，调用新增 `app._complete_routine_development_tasks` 关闭该客户到期（`remind_date <= 发送日`）且内容命中常规开发标记（开发新客户/二次开发/开发信/待首次联系/官网导入/新开发流程）的 `follow_up` 待办；口径对齐人工 `add_follow_history`（只关到期的当前跟进），但仅限常规开发任务，人工下一步与未来日期的待办不受影响。
+- 修复（存量）：迁移 `0039` 以同一规则和标记，把已有确认 Sela 外联满足的 open 常规开发待办标记完成（保留行与 `legacy_payload` 审计，不删除），立即从今日跟进移除。
+- 影响范围：`app.py`、迁移 `0039`、`tests/test_sela_prospect_api.py`；不改接口契约与 Today/Sela 其余语义。
+- 验证：新增两条 prospect 回归（确认外联关闭到期开发待办并从今日跟进消失；非开发任务与未来开发任务保持不变）；`tests/test_sela_prospect_api` 20 项通过，迁移完整性门禁通过。
+
 ## 2026-09-18 — 解禁/停用审计进中央表
 
 - 背景：人工解禁（`contact-permission`）与业务排除停用（`DELETE /api/business-exclusions`）的审计只写在各自记录 JSON 里，中央 `audit.operation_log_events` 查不到。

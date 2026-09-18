@@ -120,6 +120,29 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def add_reminder(self, customer_id, title, remind_date, *, reason='', content='', reminder_type='follow_up'):
+        conn = self.hamid_db()
+        try:
+            cursor = conn.execute(
+                '''INSERT INTO reminders (customer_id, title, content, reason, remind_date,
+                                         is_done, reminder_type, created_at)
+                   VALUES (?, ?, ?, ?, ?, 0, ?, '2026-08-04 10:00:00')''',
+                (customer_id, title, content, reason, remind_date, reminder_type),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def reminder_done(self, reminder_id):
+        conn = self.hamid_db()
+        try:
+            return conn.execute(
+                'SELECT is_done FROM reminders WHERE id=?', (reminder_id,),
+            ).fetchone()['is_done']
+        finally:
+            conn.close()
+
     def exclusion_records(self):
         response = self.client.get('/api/integrations/sela/exclusions', headers=self.headers())
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
@@ -624,6 +647,54 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+
+    def test_confirmed_outreach_closes_legacy_development_task(self):
+        created = self.post_prospect(prospect())
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        reminder_id = self.add_reminder(
+            customer_id, '开发新客户: Acrílicos S.A.', '2026-09-01',
+            reason='官网导入，待首次联系', content='开发新客户。\n备注：新开发流程实验中。',
+        )
+        self.assertEqual(self.reminder_done(reminder_id), 0)
+
+        sent = prospect()
+        sent.update({
+            'outreach_status': 'SENT',
+            'sent_at': '2026-09-09 10:10:00',
+            'gmail_message_id': 'message-1',
+        })
+        response = self.post_prospect(sent, 'sela-v2:prospect-1:sent')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+        self.assertEqual(self.reminder_done(reminder_id), 1)
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        today = self.client.get('/api/reminders/today')
+        self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
+        self.assertNotIn(reminder_id, [row['id'] for row in today.get_json()])
+
+    def test_confirmed_outreach_keeps_non_development_and_future_tasks(self):
+        created = self.post_prospect(prospect())
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        human_task = self.add_reminder(
+            customer_id, '联系 Acrílicos S.A.', '2026-09-01', reason='人工安排的下一步',
+        )
+        future_dev_task = self.add_reminder(
+            customer_id, '二次开发: Acrílicos S.A.', '2026-09-20', reason='计划内的二次开发',
+        )
+
+        sent = prospect()
+        sent.update({
+            'outreach_status': 'SENT',
+            'sent_at': '2026-09-09 10:10:00',
+            'gmail_message_id': 'message-1',
+        })
+        response = self.post_prospect(sent, 'sela-v2:prospect-1:sent')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+        self.assertEqual(self.reminder_done(human_task), 0)
+        self.assertEqual(self.reminder_done(future_dev_task), 0)
 
     def test_human_can_unblock_dnc_and_sela_cannot(self):
         body = prospect()

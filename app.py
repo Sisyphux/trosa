@@ -2908,6 +2908,16 @@ def gmail_integration_disconnect():
 
 _SELA_OUTREACH_STATUSES = {'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED'}
 
+# A confirmed automatic outreach is the contact fact that satisfies a prospect's
+# pre-contact development task.  These markers identify the legacy/imported
+# routine development task that must not stay in Today as a human follow-up once
+# Sela has actually made contact (TROSA_MAINTENANCE.md: auto-development nodes are
+# delivery history, not human tasks).  Keep in sync with
+# migrations/0039_autoclose_routine_development_tasks.sql.
+_ROUTINE_DEVELOPMENT_TASK_MARKERS = (
+    '开发新客户', '二次开发', '开发信', '待首次联系', '官网导入', '新开发流程',
+)
+
 
 def _sela_now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -4321,6 +4331,35 @@ def _sela_prospect_revision(conn, profile, customer=None):
     })
 
 
+def _complete_routine_development_tasks(conn, customer_id, *, due_on_or_before, completed_at):
+    """Close legacy routine development tasks once a real outreach happened.
+
+    Mirrors the manual ``add_follow_history`` rule (the open follow-up due on or
+    before the contact date is satisfied) but only for routine development
+    tasks, so a deliberate human next step is never auto-closed.  Idempotent:
+    once closed, a later Sela refresh finds no open match.
+    """
+    day = str(due_on_or_before or '')[:10]
+    if not day:
+        return []
+    closed = []
+    for task in _customer_tasks(conn, customer_id):
+        if str(task.get('reminder_type') or '') != 'follow_up':
+            continue
+        due = str(task.get('remind_date') or '')[:10]
+        if not due or due > day:
+            continue
+        text = ' '.join(str(task.get(key) or '') for key in ('title', 'content', 'reason'))
+        if not any(marker in text for marker in _ROUTINE_DEVELOPMENT_TASK_MARKERS):
+            continue
+        try:
+            _complete_task(conn, task_id=task['id'], completed_at=completed_at)
+        except ValueError:
+            continue
+        closed.append(task['id'])
+    return closed
+
+
 def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
     """Keep one Trosa outreach record for the source prospect's initial mail."""
     status = _sela_prospect_text(prospect.get('outreach_status'), 120).upper()
@@ -4441,6 +4480,9 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                      event_message_id, _SELA_PROSPECT_INTEGRATION, sent_at or now,
                      json.dumps({'source_id': source_id})),
                 )
+            if status != 'BOUNCED':
+                _complete_routine_development_tasks(
+                    conn, customer_id, due_on_or_before=sent_date, completed_at=now)
         return outreach_id
     existing = conn.execute(
         '''SELECT * FROM outreach_emails
@@ -4529,6 +4571,9 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                 (recipient, contact_id, outreach_id, event_type, event_message_id,
                  _SELA_PROSPECT_INTEGRATION, sent_at or now),
             )
+        if status != 'BOUNCED':
+            _complete_routine_development_tasks(
+                conn, customer_id, due_on_or_before=sent_date, completed_at=now)
     return outreach_id
 
 

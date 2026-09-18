@@ -1235,6 +1235,44 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(prospect_view['trosa_id'], prospect_customer_id)
         self.assertEqual(prospect_view['outreach_status'], 'SENT')
 
+        # A confirmed outreach must close the prospect's legacy routine
+        # development task instead of leaving it in Today as an overdue follow-up.
+        import db
+        db.set_db_user('hamid')
+        dev_task_id = module._merge_open_task(
+            self.connection, customer_id=prospect_customer_id,
+            title='开发新客户: Canonical Sela Prospect Co',
+            content='开发新客户。\n备注：新开发流程实验中。',
+            reason='官网导入，待首次联系', due_on='2026-09-19', now='2026-08-04 10:00:00',
+        )
+        self.connection.commit()
+        self.assertEqual(
+            self.connection.execute(
+                '''SELECT task.status FROM trosa.tasks task
+                    JOIN trosa.legacy_row_refs ref ON ref.target_id=task.id
+                   WHERE ref.table_name='reminders' AND ref.legacy_user_id='hamid'
+                     AND ref.legacy_id=?''', (dev_task_id,)
+            ).fetchone()['status'],
+            'open',
+        )
+        sent_again = dict(prospect)
+        sent_again['sent_at'] = '2026-09-21T10:00:00+08:00'
+        confirmed_again = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-sela-canonical-prospect-2'},
+            json={'prospect': sent_again},
+        )
+        self.assertEqual(confirmed_again.status_code, 200, confirmed_again.get_json())
+        self.assertEqual(
+            self.connection.execute(
+                '''SELECT task.status FROM trosa.tasks task
+                    JOIN trosa.legacy_row_refs ref ON ref.target_id=task.id
+                   WHERE ref.table_name='reminders' AND ref.legacy_user_id='hamid'
+                     AND ref.legacy_id=?''', (dev_task_id,)
+            ).fetchone()['status'],
+            'done',
+        )
+
         # Verification is a shared Trosa fact, not an Agent-side cache.
         verification_result = {
             'email': 'canonical-prospect@canonical-sela.example',
