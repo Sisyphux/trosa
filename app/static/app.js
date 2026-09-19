@@ -1645,7 +1645,6 @@ function inboxTypeLabel(item) {
     case 'gmail_capture': return 'Gmail';
     case 'browser_capture': return '浏览器采集';
     case 'sela_agent_request': return 'Sela 请求';
-    case 'sela_follow_up': return 'Sela 跟进';
     case 'sela_identity_review': return 'Sela 身份';
     default: return 'Inbox';
   }
