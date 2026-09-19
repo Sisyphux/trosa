@@ -8,7 +8,10 @@
 - 修复（失败分类）：`release-remote.sh` 的 `DEPLOY_RESULT.json` 新增 `failure_class`：`backup_failed`（生成失败，phase=backup）、`backup_verification_failed`（校验/可恢复性/OSS 镜像失败，phase=backup_verify|backup_store）、`release_failed`（迁移/激活/健康失败）、`release_refused`、`release_busy`。`trosa-release` 在终态打印 `TROSA_RELEASE_FAILURE_CLASS <class>`，`check --release-id` 的 JSON 也带 `failure_class`。本地下载失败只存在于客户端（`local_download_failed`），不写入服务端结果。
 - 影响范围：`deploy/cloud/backup-remote.sh`（新增）、`backup-workbench.sh`、`release-remote.sh`、`release-commit.sh`、`trosa-release`、`deploy/cloud/README.md`、`DEPLOYMENT.md`、测试。不改变数据库敏感即需备份的安全要求与保护级别；OSS 为可选镜像（`TRADE_OS_BACKUP_OSS_URI` + 自校验的 `TRADE_OS_BACKUP_UPLOAD_CMD`，配置但无法校验时 fail closed）。
 - 是否需要迁移：否（不新增迁移文件，不修改 schema）。
-- 当前状态：新增 `tests/test_release_backup_transfer.py`（18 项：云端备份成功/生成失败/校验失败/不可恢复/OSS 无上传器/OSS 自报不符/OSS 成功、本地下载失败与备份失败区分、下载校验、失败分类映射、发布入口契约）与既有发布回归全部通过；随后完成一次真实数据库敏感发布并按云端快照实际恢复到临时库验证。
+- 验证中发现并修复（真实发布）：`write_result` 把 `json.dumps(None)` 得到的 JSON `null` 直接嵌进 Python heredoc，导致 Python 源码非法、`DEPLOY_RESULT.json` / `.last-deploy-result.json` 变 0 字节，客户端轮询永远拿不到终态而报 `unknown`（发布本身其实成功）。改为嵌入 Python 字面量（空值 → `None`），并加回归 `test_write_result_embeds_valid_python_for_failure_class`。
+- 验证中发现并修复（本地归档）：`backup-workbench.sh` 期望的 bundle 名与 helper 以 release id 生成的名字不一致，导致 scp 找不到文件；下载成功判定改为"本地文件存在且 SHA-256 与远端一致"，不再信任传输进程退出码（scp/Workbench 常常写完整文件后卡在控制通道，被看门狗杀掉返回非零）；每次传输加超时上限（默认 60s，可 `TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT` 调整），并清理 ECS 上超过 2 天的旧 bundle。
+- 传输中断排查结论：ECS→本地继续出现"传输到约 2.8MB 后停滞"（`scp`/`scp -O`/`rsync 2.6.9` 均在 ~2.8MB 停住，Workbench session/中继直接连接超时），与发布控制面无关（Cloud Assistant 健康、ECS 负载/磁盘正常）。这是外部网络路径问题，只能通过"云端保留 + 本地可选 + 有界重试 + 按内容校验"兜底，不能作为发布硬依赖。
+- 当前状态：新增 `tests/test_release_backup_transfer.py`（20 项：云端备份成功/生成失败/校验失败/不可恢复/OSS 无上传器/OSS 自报不符/OSS 成功、本地下载失败与备份失败区分、下载校验、看门狗上限、write_result 字面量、失败分类映射、发布入口契约）与既有发布回归全部通过；已用真实发布验证（production `6f6cbdc`，`write_result` 修复后结果文件完整、客户端 `TROSA_RELEASE_STATE success`），并用 ECS 云端快照实际恢复到临时库：`pg_restore` 无错，`trosa.accounts`/`core.companies`/`trosa.outreach_messages`/`trosa.timeline_events` 行数与生产完全一致、迁移账本 40 条完整。
 
 ## 2026-09-18 — 发布链路网络异常韧性：unknown 不判失败、check 恢复查询、有界重试
 
