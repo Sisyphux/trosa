@@ -159,6 +159,13 @@ release commit，最后调用 `trosa-release publish`。底层发布器让 ECS �
 符号链接并重启）→ health（契约 + 页面 + systemd + 迁移账本 +
 release 指针五项深度检查）；失败时按阶段自动回滚代码并写入机器可读结果。
 
+发布机制本身有版本门：`release-commit.sh` 在真正发布前，要求当前执行的发布基础设施
+（`deploy/cloud/` 与 `tools/release_baseline.py`）与最新 `origin/main` 一致。调用者
+checkout 落后（例如历史 worktree 里残留旧脚本）或脚本被改动时，自动从 `origin/main`
+的干净临时 worktree 重新执行同一份正式逻辑；无法同步/读取 `origin/main` 时明确拒绝
+（fail closed），绝不把已废弃的发布行为重新带回生产。任务代码不需要等于 main ——
+这里检查的只是发布机制来源。
+
 并发发布安全由两层保证：
 
 - **本地**：`release-commit.sh` 用共享 git 目录中的可移植锁（死进程/超时可回收）串行化

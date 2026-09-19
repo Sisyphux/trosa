@@ -115,6 +115,12 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 
 - 发布候选在临时 release worktree 中 `cherry-pick -x`，release commit 内保留原始
   commit SHA，可反查来源。
+- **发布机制必须来自最新 main**：同一个 production commit 不应因为“从哪个 worktree
+  发起”而走不同版本的发布机制。`publish` / `auto-publish` / `release-commit` 在真正
+  发布前检查自己的发布基础设施（`deploy/cloud/` 与 `tools/release_baseline.py`）是否
+  与 `origin/main` 一致；调用者 checkout 落后或有差异时，自动改从 `origin/main` 的干净
+  临时 worktree 重新执行正式发布逻辑，读不到 `origin/main` 则明确拒绝（fail closed）。
+  任务代码可以领先 main（发布输入本来就是 task commit），但发布机制本身不能。
 - **发布只接受真正 ready 的任务**：`publish` 会先校验任务区干净、门禁证据对应当前
   HEAD、HEAD 已包含最新 `origin/main`（并在需要时先消解迁移编号碰撞），任一不满足
   即拒绝并要求 `sync` + `test`。直接调用 `release-commit.sh --branch agent/<id>`

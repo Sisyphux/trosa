@@ -23,6 +23,10 @@
 set -euo pipefail
 export LC_ALL=C
 
+# 保留原始参数：发布基础设施版本门在解析之后可能需要用它们从 origin/main 的
+# 干净 worktree 重新执行同一份正式发布逻辑。
+ORIGINAL_ARGS=("$@")
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${TRADE_OS_SOURCE_DIR:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 SOURCE_DIR="$(git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
@@ -128,6 +132,55 @@ if [[ -n "$RELEASE_ID_SPEC" ]] && [[ ! "$RELEASE_ID_SPEC" =~ ^[A-Za-z0-9._-]{1,1
   fail "非法 release id：$RELEASE_ID_SPEC"
 fi
 [[ -d "$SOURCE_DIR/.git" || -f "$SOURCE_DIR/.git" ]] || fail "$SOURCE_DIR 不是一个 Git 工作树"
+
+# ---------------------------------------------------------------------------
+# 发布基础设施版本门（release infrastructure authority）
+# ---------------------------------------------------------------------------
+# 同一 production commit 不应因为“从哪个 worktree 发起”而走不同版本的发布机制。
+# 任务代码可以领先 main（发布输入本来就是 task HEAD/commit），但发布机制本身
+# 必须来自当前权威 origin/main：否则一个历史 worktree 里残留的旧 release-commit.sh
+# 会把已经废弃的发布行为（例如旧版强制本地备份）重新带回生产。
+#
+# 这里只检查发布基础设施（deploy/cloud/ 与 tools/release_baseline.py）是否与
+# origin/main 一致，不要求任务代码等于 main。不一致时，自动从 origin/main 的干净
+# 临时 worktree 重新执行同一份正式发布逻辑；解析不到 origin/main 时 fail closed。
+# 逃生/自举口：TRADE_OS_RELEASE_DRIVER_MAIN=1 表示“当前已在权威驱动中”。
+release_driver_is_behind() {
+  local base=$1
+  # HEAD 不包含 origin/main => 旧 checkout。
+  git -C "$SOURCE_DIR" merge-base --is-ancestor "$base" HEAD 2>/dev/null || return 0
+  # 发布基础设施相对 origin/main 有差异（无论提交还是未提交）=> 不能信任当前脚本。
+  git -C "$SOURCE_DIR" diff --quiet "$base" -- deploy/cloud tools/release_baseline.py 2>/dev/null || return 0
+  return 1
+}
+
+if [[ "${TRADE_OS_RELEASE_DRIVER_MAIN:-0}" != "1" ]]; then
+  run_step_guard_label="发布基础设施版本检查"
+  printf '\n==> %s（要求来自最新 origin/%s）\n' "$run_step_guard_label" "$TARGET_BRANCH"
+  git -C "$SOURCE_DIR" fetch --quiet origin "$TARGET_BRANCH" \
+    || fail "无法同步 origin/$TARGET_BRANCH，不能确认发布脚本是否为最新；拒绝用旧脚本发布（fail closed）"
+  DRIVER_BASE="$(git -C "$SOURCE_DIR" rev-parse --verify --quiet "$BASE_REF" || true)"
+  [[ -n "$DRIVER_BASE" ]] || fail "无法读取 origin/$TARGET_BRANCH"
+  if release_driver_is_behind "$DRIVER_BASE"; then
+    DRIVER_DIR="$(mktemp -d "${WORK_TMPDIR}/trosa-release-driver.XXXXXX")" \
+      || fail '无法创建发布驱动临时目录'
+    git -C "$SOURCE_DIR" worktree add --detach --quiet "$DRIVER_DIR" "$DRIVER_BASE" \
+      || fail "无法从 origin/$TARGET_BRANCH 创建干净发布驱动 worktree"
+    printf '当前脚本不是最新 origin/%s；改从权威 release worktree 重新执行发布：%s\n' \
+      "$TARGET_BRANCH" "$DRIVER_DIR"
+    driver_status=0
+    env -u TRADE_OS_SOURCE_DIR \
+      TRADE_OS_RELEASE_DRIVER_MAIN=1 \
+      bash "$DRIVER_DIR/deploy/cloud/release-commit.sh" \
+      ${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"} || driver_status=$?
+    git -C "$SOURCE_DIR" worktree remove --force -- "$DRIVER_DIR" >/dev/null 2>&1 \
+      || rm -rf -- "$DRIVER_DIR"
+    git -C "$SOURCE_DIR" worktree prune >/dev/null 2>&1 || true
+    exit "$driver_status"
+  fi
+  printf '完成：%s（当前脚本已与 origin/%s 的发布机制一致）\n' \
+    "$run_step_guard_label" "$TARGET_BRANCH"
+fi
 
 cleanup() {
   local status=$?
