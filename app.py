@@ -3072,6 +3072,12 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
                   item.status, item.snoozed_until::text AS snoozed_until,
                   item.resolved_at::text AS resolved_at, item.resolution_reason,
                   item.resolution_note, item.created_at::text AS created_at,
+                  COALESCE(item.question_kind, '') AS question_kind,
+                  COALESCE(item.question_key, '') AS question_key,
+                  COALESCE(item.source_type, '') AS source_type,
+                  COALESCE(item.resolution_source, '') AS resolution_source,
+                  COALESCE(item.resolved_by, '') AS resolved_by,
+                  item.evidence,
                   item.id AS canonical_id, item.legacy_payload
              FROM trosa.inbox_items item
              JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
