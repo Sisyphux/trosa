@@ -13,6 +13,7 @@
 """
 import json
 import logging
+import re
 from datetime import datetime
 
 import inbox_questions as iq
@@ -62,7 +63,43 @@ def _capture_message_id(content):
     return str(payload.get('message_id') or payload.get('id') or '').strip()
 
 
-def _noise_capture(content):
+_EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
+_NOISE_TITLE_HINTS = (
+    'mailer-daemon', 'mail delivery', 'delivery status notification',
+    'undeliverable', 'failure notice', 'returned mail', '退信',
+    'no-reply', 'noreply', 'no.reply', 'donotreply',
+)
+
+_SELF_RESOLVING_REVIEW_REASONS = {
+    'TROSA_REVISION_CONFLICT': (
+        'technical_conflict',
+        '这是技术性版本冲突，由 Sela 重新读取最新状态处理，不需要人工判断。'),
+    'CUSTOMER_ALREADY_LINKED': (
+        'already_linked', '来源已经关联到现有客户，系统已有答案。'),
+    'CUSTOMER_ALREADY_HAS_SELA_PROSPECT': (
+        'already_linked', '来源已经存在 Sela 线索，系统已有答案。'),
+}
+
+
+def _identity_review_reason(content):
+    try:
+        payload = json.loads(content or '{}')
+    except (TypeError, ValueError):
+        return ''
+    if not isinstance(payload, dict):
+        return ''
+    return str(payload.get('reason') or '').strip()
+
+
+def _noise_capture(content, title=''):
+    """True when a capture is a delivery notice or a no-reply notification.
+
+    Historical Sela captures store the sender display string while Gmail sync
+    captures store ``sender_email``; accept both and fall back to the title.
+    """
+    lowered_title = str(title or '').casefold()
+    if any(hint in lowered_title for hint in _NOISE_TITLE_HINTS):
+        return True
     try:
         import gmail_sync
         payload = json.loads(content or '{}')
@@ -71,10 +108,18 @@ def _noise_capture(content):
     if not isinstance(payload, dict):
         return False
     messages = payload.get('messages') if isinstance(payload.get('messages'), list) else []
+    if not messages:
+        messages = [payload]
     for message in messages:
         if not isinstance(message, dict):
             continue
-        role = gmail_sync.gmail_noise_role(message)
+        candidate = dict(message)
+        if not candidate.get('sender_email'):
+            source = str(payload.get('conversation_identity') or '') + ' ' + str(candidate.get('sender') or '')
+            match = _EMAIL_RE.search(source)
+            if match:
+                candidate['sender_email'] = match.group(0)
+        role = gmail_sync.gmail_noise_role(candidate)
         if role['delivery_notice'] or role['noise']:
             return True
     return False
@@ -152,7 +197,7 @@ def _update_question_metadata(conn, row, question_kind, question_key, source_typ
 
 def reconcile_inbox_connection(conn):
     """重新判定当前用户所有 open Inbox 条目，返回各结果的计数。"""
-    stats = {'scanned': 0, 'retired': 0, 'noise': 0, 'later_fact': 0, 'metadata': 0}
+    stats = {'scanned': 0, 'retired': 0, 'noise': 0, 'later_fact': 0, 'self_resolved': 0, 'metadata': 0}
     now = _now_text()
     for row in _open_rows(conn):
         stats['scanned'] += 1
@@ -173,7 +218,7 @@ def reconcile_inbox_connection(conn):
             continue
 
         # 自动关闭：退信/系统通知是投递事实。
-        if item_type == 'gmail_capture' and _noise_capture(row.get('content')):
+        if item_type == 'gmail_capture' and _noise_capture(row.get('content'), row.get('title')):
             resolve_inbox_item(
                 conn, inbox_item_id=row['id'], resolved_at=now,
                 resolution_reason='inbound_noise',
@@ -193,6 +238,20 @@ def reconcile_inbox_connection(conn):
             )
             stats['later_fact'] += 1
             continue
+
+        # 自动关闭：身份 review 的结论系统已经知道（技术冲突 / 已关联），不该问人。
+        if item_type in ('sela_identity_review', 'sela_exclusion_review'):
+            self_resolving = _SELF_RESOLVING_REVIEW_REASONS.get(
+                _identity_review_reason(row.get('content')))
+            if self_resolving:
+                reason_code, note = self_resolving
+                resolve_inbox_item(
+                    conn, inbox_item_id=row['id'], resolved_at=now,
+                    resolution_reason=reason_code, resolution_note=note,
+                    resolution_source='auto',
+                )
+                stats['self_resolved'] += 1
+                continue
 
         # 补齐问题元数据并收敛同一发件人的证据到同一问题键。
         if item_type in ('gmail_capture', 'browser_capture'):

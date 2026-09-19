@@ -68,7 +68,32 @@ UPDATE trosa.inbox_items
         OR title ILIKE '%failure notice%'
         OR title ILIKE '%returned mail%'
         OR title ILIKE '%退信%'
-        OR title ILIKE '%mailer-daemon%');
+        OR title ILIKE '%mailer-daemon%'
+        OR title ILIKE '%no-reply%'
+        OR title ILIKE '%noreply%'
+        OR title ILIKE '%donotreply%');
+
+-- 历史身份 review 中系统其实已有答案的（技术冲突/已关联）不再占用人工。
+UPDATE trosa.inbox_items
+   SET status = 'resolved',
+       resolved_at = COALESCE(resolved_at, now()),
+       resolution_source = 'auto',
+       resolution_reason = 'technical_conflict',
+       resolution_note = '技术性版本冲突由 Sela 重新读取最新状态处理，不需要人工判断。'
+ WHERE status = 'open'
+   AND item_type = 'sela_identity_review'
+   AND content LIKE '%TROSA_REVISION_CONFLICT%';
+
+UPDATE trosa.inbox_items
+   SET status = 'resolved',
+       resolved_at = COALESCE(resolved_at, now()),
+       resolution_source = 'auto',
+       resolution_reason = 'already_linked',
+       resolution_note = '来源已经关联到现有客户或 Sela 线索，系统已有答案。'
+ WHERE status = 'open'
+   AND item_type IN ('sela_identity_review', 'sela_exclusion_review')
+   AND (content LIKE '%CUSTOMER_ALREADY_LINKED%'
+        OR content LIKE '%CUSTOMER_ALREADY_HAS_SELA_PROSPECT%');
 
 CREATE INDEX IF NOT EXISTS trosa_inbox_question_key_idx
     ON trosa.inbox_items (question_key)

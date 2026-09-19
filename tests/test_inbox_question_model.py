@@ -187,6 +187,48 @@ class InboxQuestionModelTest(unittest.TestCase):
         payload = self.client.get('/api/inbox').get_json()
         self.assertEqual(payload['counts']['all'], 0)
 
+    def test_self_resolving_identity_review_reasons_auto_close(self):
+        conn = self._conn()
+        try:
+            for source_id, reason in (('p1', 'TROSA_REVISION_CONFLICT'),
+                                      ('p2', 'CUSTOMER_ALREADY_LINKED')):
+                conn.execute(
+                    '''INSERT INTO inbox_items
+                       (item_type, title, content, dedupe_key, status, created_at,
+                        question_kind, question_key, source_type)
+                       VALUES ('sela_identity_review', 'sela 身份待确认', ?,
+                               ?, 'open', '2026-09-18 09:00:00',
+                               'identity_review', ?, 'sela')''',
+                    (json.dumps({'source_id': source_id, 'reason': reason}),
+                     'sela:prospect-review:' + source_id,
+                     'sela:prospect-review:' + source_id),
+                )
+            conn.commit()
+            stats = inbox_reconcile.reconcile_inbox_connection(conn)
+        finally:
+            conn.close()
+        self.assertEqual(stats['self_resolved'], 2)
+        self.assertEqual(self.client.get('/api/inbox').get_json()['counts']['all'], 0)
+
+    def test_multiple_matches_identity_review_stays(self):
+        conn = self._conn()
+        try:
+            conn.execute(
+                '''INSERT INTO inbox_items
+                   (item_type, title, content, dedupe_key, status, created_at,
+                    question_kind, question_key, source_type)
+                   VALUES ('sela_identity_review', 'sela 身份待确认', ?,
+                           'sela:prospect-review:p3', 'open', '2026-09-18 09:00:00',
+                           'identity_review', 'sela:prospect-review:p3', 'sela')''',
+                (json.dumps({'source_id': 'p3', 'reason': 'MULTIPLE_TROSA_MATCHES'}),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        payload = self.client.get('/api/inbox').get_json()
+        self.assertEqual(payload['counts']['all'], 1)
+        self.assertEqual(payload['questions'][0]['kind'], 'identity_review')
+
 
 if __name__ == '__main__':
     unittest.main()
