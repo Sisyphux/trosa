@@ -1,8 +1,9 @@
 """Migration directory integrity regressions.
 
 Guards the parallel-development contract: ``migrations/`` is the single source
-of truth, its numbering is unique and contiguous, and both the runtime
-(``db.py``) and the rehearsal/apply tool see exactly the same files.  These
+of truth, its numbering is unique (gaps are expected when parallel tasks merge
+out of order), and both the runtime (``db.py``) and the rehearsal/apply tool see
+exactly the same files.  These
 tests need no database and run in the fast release gate, so a task cannot merge
 a migration that the formal apply path would silently miss.
 """
@@ -72,10 +73,12 @@ class MigrationCheckerRejectionTest(unittest.TestCase):
             self.assertEqual(check_migrations.check_directory(tmp), [])
             self.assertEqual(check_migrations.missing_numbers(tmp), ["0002"])
 
-    def test_real_repository_has_no_gaps(self):
-        self.assertEqual(
-            check_migrations.missing_numbers(str(ROOT / "migrations")), []
-        )
+    def test_real_repository_has_no_duplicates_or_invalid_names(self):
+        # 并行任务会预留编号、可能乱序合并，因此编号空档是预期且非致命
+        # （见 README 与 test_gap_is_reported_but_not_fatal）；这里只要求目录
+        # 本身合法：文件名规范、编号唯一。
+        problems = check_migrations.check_directory(str(ROOT / "migrations"))
+        self.assertEqual(problems, [])
 
     def test_invalid_name_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

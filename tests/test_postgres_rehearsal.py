@@ -1112,7 +1112,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             ).fetchone()[0],
             0,
         )
-        # 历史上已 open 的同类噪声会被 GET /api/inbox 的一次性清扫自动归档。
+        # 历史上已 open 的同类噪声由 Inbox 重新判定自动关闭（写入/启动时，不在读取时）。
         module = self._app_module()
         module._create_inbox_item(
             self.connection, item_type='gmail_capture', title='待归属 Gmail 邮件：Mail Delivery Subsystem',
@@ -1124,12 +1124,21 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             dedupe_key='gmail:owner@rehearsal.example:legacy-noise-1',
             status='open', created_at='2026-09-17 09:00:00',
         )
-        self.assertEqual(module._archive_noise_gmail_captures(self.connection), 1)
+        from inbox_reconcile import reconcile_inbox_connection
+        stats = reconcile_inbox_connection(self.connection)
+        self.assertGreaterEqual(stats['noise'], 1)
         self.assertEqual(
             self.connection.execute(
                 "SELECT count(*) FROM trosa.inbox_items WHERE item_type='gmail_capture' AND status='open'"
             ).fetchone()[0],
             0,
+        )
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT count(*) FROM trosa.inbox_items WHERE item_type='gmail_capture'"
+                " AND status='resolved' AND resolution_source='auto'"
+            ).fetchone()[0],
+            1,
         )
 
         verification = {

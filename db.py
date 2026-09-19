@@ -1459,6 +1459,12 @@ USER_TABLE_SQL = [
         resolved_at TEXT DEFAULT '',
         resolution_reason TEXT DEFAULT '',
         resolution_note TEXT DEFAULT '',
+        question_kind TEXT DEFAULT '',
+        question_key TEXT DEFAULT '',
+        source_type TEXT DEFAULT '',
+        resolution_source TEXT DEFAULT '',
+        resolved_by TEXT DEFAULT '',
+        evidence TEXT DEFAULT '[]',
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     )
     ''',
@@ -1625,6 +1631,12 @@ USER_MIGRATIONS = {
     'inbox_items': {
         'resolution_reason': "TEXT DEFAULT ''",
         'resolution_note': "TEXT DEFAULT ''",
+        'question_kind': "TEXT DEFAULT ''",
+        'question_key': "TEXT DEFAULT ''",
+        'source_type': "TEXT DEFAULT ''",
+        'resolution_source': "TEXT DEFAULT ''",
+        'resolved_by': "TEXT DEFAULT ''",
+        'evidence': "TEXT DEFAULT '[]'",
     },
     'import_unmatched_customers': {
         'unmatched_hash': "TEXT DEFAULT ''",
@@ -1959,6 +1971,8 @@ def init_user_tables(user):
                      ON outreach_emails(is_reported, sent_date, customer_id)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_inbox_status_type_customer
                      ON inbox_items(status, item_type, customer_id, created_at DESC)''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_inbox_open_question_key
+                     ON inbox_items(question_key) WHERE status='open' ''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_proposals_pending
                      ON agent_proposals(status, customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_gateway_idempotency_key
@@ -2138,6 +2152,18 @@ def init_system_db():
 
 # ========== 全部初始化 ==========
 
+def _reconcile_inbox_after_init():
+    """Apply Inbox question rules once per process start (not on reads)."""
+    try:
+        from inbox_reconcile import reconcile_all_users
+        results = reconcile_all_users()
+        changed = sum(sum(stats.values()) for stats in results.values() if isinstance(stats, dict))
+        if changed:
+            logger.info('Inbox 启动重新判定完成，处理 %d 项', changed)
+    except Exception:
+        logger.warning('Inbox 启动重新判定失败', exc_info=True)
+
+
 def init_all_dbs():
     """初始化所有数据库"""
     # Keep the guard here as well as in the official entrypoint.  This closes
@@ -2154,6 +2180,7 @@ def init_all_dbs():
             if status != 'ok':
                 logger.warning(f'数据库完整性检查 [{name}]: {status}')
         logger.info('PostgreSQL unified data base initialized')
+        _reconcile_inbox_after_init()
         return integrity
     ensure_db_dir()
     ensure_db_identity()
@@ -2176,3 +2203,4 @@ def init_all_dbs():
             logger.warning(f'数据库完整性检查 [{name}]: {status}')
     
     logger.info('所有数据库初始化完成')
+    _reconcile_inbox_after_init()

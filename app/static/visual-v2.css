@@ -7478,3 +7478,86 @@ html.motion-lite .card {
   line-height: 1.55 !important;
   color: var(--ui-ink-muted) !important;
 }
+
+/* Inbox 问题模型：围绕“我需要决定什么”组织，而不是技术来源。 */
+#page-inbox .inbox-question .inbox-item-name {
+  font-size: 14px;
+}
+
+#page-inbox .inbox-question .inbox-summary-why {
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#page-inbox .inbox-question-why,
+#page-inbox .inbox-question-known,
+#page-inbox .inbox-question-sela {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: rgba(255, 253, 249, .5);
+}
+
+#page-inbox .inbox-question-why span,
+#page-inbox .inbox-question-known span,
+#page-inbox .inbox-question-sela > span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: var(--ui-ink-muted);
+}
+
+#page-inbox .inbox-question-why p,
+#page-inbox .inbox-question-sela p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+#page-inbox .inbox-question-known ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+#page-inbox .inbox-question-sela div {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+#page-inbox .inbox-question-sela div span {
+  margin: 0;
+  min-width: 32px;
+  color: var(--ui-ink-muted);
+}
+
+#page-inbox .inbox-question-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#page-inbox .inbox-evidence-item {
+  padding: 10px 12px;
+  border-left: 2px solid var(--ui-line);
+}
+
+#page-inbox .inbox-evidence-item .inbox-evidence-meta {
+  font-size: 11px;
+  letter-spacing: .03em;
+  color: var(--ui-ink-muted);
+}
+
+#page-inbox .inbox-evidence-item p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}

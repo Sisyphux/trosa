@@ -39,6 +39,7 @@ from trosa_domain import (
     customer_contacts as _customer_contacts,
     record_external_interaction,
 )
+import inbox_questions as _inbox_questions
 
 
 logger = logging.getLogger(__name__)
@@ -1085,21 +1086,27 @@ def _store_message(user, account, message, summary):
         prefix = 'Gmail 邮件归属有冲突' if match['status'] == 'ambiguous' else '待归属 Gmail 邮件'
         identity = message.get('primary_external_email') or message.get('sender_email') or '未识别对象'
         dedupe_key = 'gmail:' + account + ':' + message.get('message_id', '')
+        question_key = _inbox_questions.question_key_for('gmail_capture', dedupe_key, identity)
         if postgres_mode():
             inbox_id = create_inbox_item(
                 conn, item_type='gmail_capture', customer_id=None,
                 title=prefix + '：' + identity[:180],
                 content=json.dumps(capture, ensure_ascii=False), dedupe_key=dedupe_key,
                 status='open', created_at=now,
+                question_kind=_inbox_questions.QUESTION_IDENTITY,
+                question_key=question_key,
+                source_type=_inbox_questions.ITEM_TYPE_SOURCE['gmail_capture'],
             )
             _store_state(c, message, match, inbox_item_id=inbox_id)
             conn.commit()
             return {'state': match['status'], 'inbox_item_id': inbox_id}
         c.execute('''INSERT OR IGNORE INTO inbox_items
-                    (item_type, customer_id, title, content, dedupe_key, status, created_at)
-                    VALUES ('gmail_capture', NULL, ?, ?, ?, 'open', ?)''',
+                    (item_type, customer_id, title, content, dedupe_key, status, created_at,
+                     question_kind, question_key, source_type)
+                    VALUES ('gmail_capture', NULL, ?, ?, ?, 'open', ?, ?, ?, ?)''',
                   (prefix + '：' + identity[:180], json.dumps(capture, ensure_ascii=False),
-                   dedupe_key, now))
+                   dedupe_key, now, _inbox_questions.QUESTION_IDENTITY, question_key,
+                   _inbox_questions.ITEM_TYPE_SOURCE['gmail_capture']))
         inbox_row = c.execute('SELECT id FROM inbox_items WHERE dedupe_key=?',
                               (dedupe_key,)).fetchone()
         _store_state(c, message, match, inbox_item_id=(inbox_row['id'] if inbox_row else None))

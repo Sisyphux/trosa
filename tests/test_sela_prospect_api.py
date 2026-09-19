@@ -257,6 +257,16 @@ class SelaProspectApiTest(unittest.TestCase):
         listed = self.client.get('/api/integrations/sela/prospects', headers=self.headers())
         self.assertEqual(listed.get_json()['prospects'][0]['reason'], 'Current agent update.')
 
+        # 技术性的 revision conflict 由 Sela 重试，不应转嫁成人工 Inbox 问题。
+        conn = self.hamid_db()
+        try:
+            review = conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review' AND status='open'"
+            ).fetchone()[0]
+            self.assertEqual(review, 0)
+        finally:
+            conn.close()
+
     def test_ambiguous_identity_becomes_trosa_inbox_review_not_a_local_queue(self):
         conn = self.hamid_db()
         for name in ('Existing A', 'Existing B'):

@@ -74,6 +74,8 @@ from gmail_sync import (
     gmail_status,
     start_gmail_sync,
 )
+import inbox_questions as _inbox_questions
+from inbox_reconcile import reconcile_current_user as _reconcile_inbox_current_user
 from trosa_domain import (
     active_customers as _active_customers,
     customer_contacts as _customer_contacts,
@@ -636,6 +638,11 @@ def invalidate_request_caches(response):
                         _WEEKLY_SUMMARY_CACHE.pop(key, None)
             else:
                 _WEEKLY_SUMMARY_CACHE.clear()
+        # Automatic Inbox decisions (noise, later facts, retired types) run on
+        # writes, never on reads.  Gated to the paths that can change Inbox so
+        # unrelated writes stay cheap.
+        if request.path.startswith(('/api/inbox', '/api/integrations/sela', '/api/extension')):
+            _reconcile_inbox_after_write()
     return response
 
 
@@ -3911,6 +3918,7 @@ def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now):
     _create_inbox_item(
         conn, item_type='sela_identity_review', title='sela Prospect 身份待确认', content=content,
         dedupe_key=f'sela:prospect-review:{source_id}', status='open', created_at=now,
+        **_inbox_question_meta('sela_identity_review', f'sela:prospect-review:{source_id}', source_id),
     )
 
 
@@ -3929,6 +3937,7 @@ def _sela_exclusion_review_inbox(conn, customer_id, source_id, review, now):
         conn, item_type='sela_exclusion_review', customer_id=customer_id,
         title='sela 排除身份待确认', content=content,
         dedupe_key=f'sela:exclusion-review:{source_id}', status='open', created_at=now,
+        **_inbox_question_meta('sela_exclusion_review', f'sela:exclusion-review:{source_id}', source_id),
     )
 
 
@@ -4991,7 +5000,10 @@ def sela_integration_upsert_prospect():
             return jsonify(response_body)
 
         result = _sela_upsert_prospect(conn, prospect)
-        if result.get('status') == 'REVIEW':
+        # TROSA_REVISION_CONFLICT is a technical retry signal for the agent, not
+        # a question for a human.  Sela re-reads the current revision; creating
+        # an Inbox item would transfer an internal conflict onto the user.
+        if result.get('status') == 'REVIEW' and str(result.get('reason') or '') != 'TROSA_REVISION_CONFLICT':
             _sela_prospect_review_inbox(
                 conn, source_id, prospect, str(result.get('reason') or 'IDENTITY_REVIEW'),
                 _sela_now(),
@@ -5441,6 +5453,7 @@ def sela_integration_create_agent_need():
                 conn, item_type=_SELA_AGENT_REQUEST_TYPE, customer_id=customer_id,
                 title=item['title'], content=item['content'], dedupe_key=item['dedupe_key'],
                 status='open', created_at=_sela_now(),
+                **_inbox_question_meta(_SELA_AGENT_REQUEST_TYPE, item['dedupe_key'], item.get('source_id') or ''),
             )
             if postgres_mode():
                 existing = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)
@@ -5619,6 +5632,7 @@ def sela_integration_capture_unmatched_reply():
                 conn, item_type='gmail_capture', title=f'待归属 Gmail 回复：{sender or subject or message_id}',
                 content=json.dumps(raw, ensure_ascii=False), dedupe_key=dedupe_key,
                 status='open', created_at=_sela_now(),
+                **_inbox_question_meta('gmail_capture', dedupe_key, raw.get('conversation_identity') or ''),
             )
             if postgres_mode():
                 existing = next(iter(_modern_inbox_rows(conn, item_id=inbox_id)), None)
@@ -9553,51 +9567,409 @@ def get_recycle_bin_count():
 
 # ========== Inbox API ==========
 
-def _archive_noise_gmail_captures(conn):
-    """Archive historical open Gmail captures that are daemon/noise reports.
+def _reconcile_inbox_after_write():
+    """应用写入规则后重新判定 Inbox，避免旧问题继续占用人工。
 
-    退信与 no-reply 邮件曾按“待归属”进入 Inbox（44 条 Mail Delivery / Claude
-    通知这样的噪声）。入库侧已停止新建这些条目；这里把历史上仍 open 的
-    同类条目一次性安静归档，避免用户 reload 后继续看到旧噪声。
+    在写入请求成功后运行（见 ``invalidate_request_caches``），不修改响应内容。
+    任何失败都只记录日志；Inbox 读取本身没有副作用。
     """
-    archived = 0
+    try:
+        _reconcile_inbox_current_user()
+    except Exception:
+        logger.warning('Inbox 重新判定失败', exc_info=True)
+
+
+def _question_identity_for_item(item):
+    """身份待归属问题按发件人/会话身份收敛为一个问题。"""
+    if str(item.get('item_type') or '') in _CAPTURE_INBOX_TYPES:
+        capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
+        return capture.get('identity') or capture.get('sender_email') or ''
+    return ''
+
+
+def _apply_question_metadata(item):
+    """给每条 Inbox 证据补齐业务问题元数据（问题类别/问题键/来源）。"""
+    item_type = str(item.get('item_type') or '')
+    kind = str(item.get('question_kind') or '').strip() or _inbox_questions.question_kind_for(item_type)
+    key = str(item.get('question_key') or '').strip()
+    if not key:
+        key = _inbox_questions.question_key_for(
+            item_type, item.get('dedupe_key') or '', _question_identity_for_item(item))
+    item['question_kind'] = kind
+    item['question_label'] = _inbox_questions.question_label(kind)
+    item['question_key'] = key
+    item['source_type'] = str(item.get('source_type') or '').strip() or _inbox_questions.source_type_for(item_type)
+    item['source_label'] = item.get('source_label') or _inbox_questions.source_label_for(item_type)
+    return item
+
+
+def _inbox_question_meta(item_type, dedupe_key, identity=''):
+    """问题元数据，供所有入队写入方复用。"""
+    return {
+        'question_kind': _inbox_questions.question_kind_for(item_type),
+        'question_key': _inbox_questions.question_key_for(item_type, dedupe_key, identity),
+        'source_type': _inbox_questions.source_type_for(item_type),
+    }
+
+
+def _load_open_inbox_items(conn):
+    """读取当前用户所有 open 证据，并投影为客户上下文（兼容旧字段）。"""
     if postgres_mode():
-        rows = _modern_inbox_rows(conn, status='open', item_type='gmail_capture')
+        customer_rows = {int(row['id']): row for row in _active_customers(conn, include_deleted=True)}
+        # Every open canonical Inbox item is actionable human-review state.
+        raw_rows = _modern_inbox_rows(conn, status='open')
     else:
-        rows = conn.execute(
-            "SELECT i.* FROM inbox_items i WHERE i.status='open' AND i.item_type='gmail_capture'"
-        ).fetchall()
-    for raw in rows:
+        customer_rows = {}
+        raw_rows = conn.execute('''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country,
+                                          COALESCE(c.is_pinned, 0) AS is_pinned
+                                   FROM inbox_items i LEFT JOIN customers c ON c.id=i.customer_id
+                                  WHERE i.status='open'
+                                  ORDER BY i.created_at DESC''').fetchall()
+    items = []
+    for raw in raw_rows:
         item = dict(raw)
-        try:
-            payload = json.loads(item.get('content') or '')
-        except (TypeError, ValueError):
+        if str(item.get('item_type') or '') in _inbox_questions.RETIRED_ITEM_TYPES:
             continue
-        messages = payload.get('messages') if isinstance(payload, dict) else []
-        if not (isinstance(messages, list) and messages):
-            continue
-        role = gmail_noise_role(messages[0] if isinstance(messages[0], dict) else {})
-        if not (role['delivery_notice'] or role['noise']):
-            continue
-        try:
-            _set_inbox_status(
-                conn, inbox_item_id=int(item['id']), status='archived',
-                changed_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            )
-            archived += 1
-        except (ValueError, TypeError):
-            continue
-    if archived:
-        conn.commit()
-        logger.info('Inbox 噪声 Gmail 采集已自动归档: %s 条', archived)
-    return archived
+        if postgres_mode():
+            customer = customer_rows.get(int(item['customer_id'])) if item.get('customer_id') else None
+            item.update({
+                'customer_name': (customer or {}).get('name', ''),
+                'customer_company': (customer or {}).get('company', ''),
+                'country': (customer or {}).get('country', ''),
+                'is_pinned': 1 if (customer or {}).get('is_pinned') else 0,
+                'virtual': False,
+            })
+        else:
+            item['virtual'] = False
+        reliable_contact = _reliable_customer_contact(conn, item.get('customer_id')) if item.get('customer_id') else None
+        item['primary_contact_id'] = item['contact_id'] = (reliable_contact or {}).get('id')
+        item['primary_contact_name'] = item['contact_name'] = (reliable_contact or {}).get('name', '')
+        item['source'] = (
+            'gmail' if item.get('item_type') == 'gmail_capture'
+            else 'browser_extension' if item.get('item_type') == 'browser_capture'
+            else 'sela_agent' if item.get('item_type') == 'sela_agent_request'
+            else 'inbox'
+        )
+        if item.get('item_type') == 'customer_reply':
+            item.update({'direction': 'inbound', 'activity_type': 'customer_reply',
+                         'follow_date': (item.get('created_at') or '')[:10],
+                         'source_label': 'Inbox 客户回复'})
+        elif item.get('item_type') in _CAPTURE_INBOX_TYPES:
+            capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
+            item.update({
+                'capture_content': capture.get('content', ''), 'capture_direction': capture.get('direction', 'unknown'),
+                'capture_activity_type': capture.get('activity_type', 'follow_up'), 'capture_date': capture.get('date', ''),
+                'capture_channel': capture.get('channel', ''), 'capture_platform': capture.get('platform', ''),
+                'capture_source_url': capture.get('source_url', ''), 'capture_identity': capture.get('identity', ''),
+                'capture_sender': capture.get('sender', ''), 'capture_sender_email': capture.get('sender_email', ''),
+                'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
+            })
+        _apply_question_metadata(item)
+        items.append(item)
+    return items
+
+
+def _question_customer(members):
+    for member in members:
+        if member.get('customer_id'):
+            return {
+                'id': member.get('customer_id'),
+                'name': member.get('customer_name') or '',
+                'company': member.get('customer_company') or '',
+                'country': member.get('country') or '',
+                'contact_name': member.get('contact_name') or '',
+            }
+    return None
+
+
+def _question_evidence(member):
+    item_type = str(member.get('item_type') or '')
+    detail = ''
+    if item_type in _CAPTURE_INBOX_TYPES:
+        detail = member.get('capture_content') or ''
+    elif item_type in ('sela_identity_review', 'sela_exclusion_review'):
+        review = _inbox_sela_review_payload(member)
+        detail = review.get('explanation') or review.get('reason_label') or ''
+    else:
+        detail = member.get('content') or ''
+    return {
+        'item_id': member.get('id'),
+        'item_type': item_type,
+        'source_type': member.get('source_type') or '',
+        'source_label': member.get('source_label') or '',
+        'date': member.get('capture_date') or (member.get('created_at') or '')[:10],
+        'identity': member.get('capture_identity') or '',
+        'detail': detail,
+    }
+
+
+def _inbox_sela_review_payload(item):
+    """Normalize a Sela identity-review payload into business context."""
+    try:
+        payload = json.loads(str(item.get('content') or '') or '{}')
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    reason = str(payload.get('reason') or '').strip()
+    reason_labels = {
+        'TROSA_REVISION_CONFLICT': '客户资料或来源有冲突',
+        'MULTIPLE_TROSA_MATCHES': '多个客户都匹配到这个来源',
+        'SOURCE_IDENTITY_CONFLICT': '来源身份与已有客户冲突',
+        'EXTERNAL_IDENTITY_CONFLICT': '外部身份与已有记录冲突',
+        'IDENTITY_REVIEW': '身份需要人工确认',
+    }
+    explanation = str(payload.get('reason_note') or payload.get('explanation') or '').strip()
+    if not explanation:
+        if reason == 'MULTIPLE_TROSA_MATCHES':
+            explanation = '来源同时匹配到多个客户，系统无法安全地自动选择。'
+        elif reason in ('SOURCE_IDENTITY_CONFLICT', 'EXTERNAL_IDENTITY_CONFLICT'):
+            explanation = '来源身份与已有客户的资料冲突，需要人工判断是否为同一主体。'
+    return {
+        'source_id': str(payload.get('source_id') or '').strip(),
+        'company': str(payload.get('company') or '').strip(),
+        'website': str(payload.get('website') or '').strip(),
+        'email': str(payload.get('email') or '').strip(),
+        'reason': reason,
+        'reason_label': reason_labels.get(reason, reason or '身份待确认'),
+        'explanation': explanation,
+    }
+
+
+def _question_headline(kind, primary, suggested, customer):
+    if kind == _inbox_questions.QUESTION_IDENTITY:
+        if customer:
+            return '确认这次沟通的归属并记录到 ' + (customer.get('company') or customer.get('name') or '客户')
+        if suggested and suggested.get('company'):
+            return '这可能属于 ' + suggested['company'] + '，请确认归属'
+        return '这条沟通属于哪个客户？'
+    if kind == _inbox_questions.QUESTION_REPLY:
+        return primary.get('title') or '记录客户回复并确认下一步'
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return primary.get('title') or '是否批准这个对外动作？'
+    if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+        return primary.get('title') or '确认这是否是同一个业务主体'
+    return primary.get('title') or '需要你作出判断'
+
+
+def _question_why(kind, primary):
+    if kind == _inbox_questions.QUESTION_IDENTITY:
+        return '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。'
+    if kind == _inbox_questions.QUESTION_REPLY:
+        return '沟通事实与下一步需要人工确认后才写入客户时间线和待办。'
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return '该动作超出自动执行范围；批准前系统不会执行或记录任何业务承诺。'
+    if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+        return '仅凭名称或来源无法安全判定是否为同一主体，需要你的业务判断。'
+    return '系统缺少作出安全判断所需的信息。'
+
+
+def _question_options(kind, primary, suggested, sela_review):
+    if kind == _inbox_questions.QUESTION_IDENTITY:
+        options = []
+        if suggested and suggested.get('customer_id'):
+            options.append({'key': 'assign_suggested', 'action': 'record', 'style': 'primary',
+                            'label': '归到 ' + (suggested.get('company') or '建议客户')})
+        options.append({'key': 'assign_other', 'action': 'record',
+                        'label': '选择其他客户并记录' if suggested else '选择客户并记录',
+                        'style': 'primary' if not options else ''})
+        options.append({'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '不是客户沟通'})
+        return options
+    if kind == _inbox_questions.QUESTION_REPLY:
+        return [
+            {'key': 'record', 'action': 'record', 'style': 'primary', 'label': '记录到时间线'},
+            {'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '无需记录'},
+        ]
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return [
+            {'key': 'approve', 'action': 'approve', 'style': 'primary', 'requires_note': True,
+             'label': '批准并记录结果'},
+            {'key': 'skip', 'action': 'skip', 'style': 'text', 'label': '本轮跳过'},
+        ]
+    if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+        return [
+            {'key': 'same', 'action': 'identity_same', 'style': 'primary', 'label': '是同一主体'},
+            {'key': 'different', 'action': 'identity_different', 'style': 'text', 'label': '不是同一主体'},
+        ]
+    return [{'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '无需处理'}]
+
+
+def _build_inbox_questions(items, matches_by_item):
+    """把多条证据收敛成用户真正需要决定的问题。"""
+    groups = {}
+    order = []
+    for item in items:
+        key = item.get('question_key') or (str(item.get('item_type')) + ':' + str(item.get('id')))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(item)
+    questions = []
+    for key in order:
+        members = sorted(groups[key], key=lambda row: (row.get('created_at') or '', row.get('id') or 0))
+        primary = members[0]
+        kind = primary.get('question_kind') or _inbox_questions.QUESTION_IDENTITY
+        customer = _question_customer(members)
+        suggested = None
+        if kind == _inbox_questions.QUESTION_IDENTITY:
+            for member in members:
+                candidate = matches_by_item.get(int(member.get('id')))
+                if candidate:
+                    suggested = candidate
+                    break
+        sela_review = None
+        if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+            sela_review = _inbox_sela_review_payload(primary)
+        known = []
+        if customer:
+            facts = [value for value in (customer.get('company'), customer.get('country'),
+                                         customer.get('contact_name')) if value]
+            known.append('客户：' + (customer.get('name') or customer.get('company') or '已关联客户'))
+            if facts:
+                known.append('资料：' + ' · '.join(facts))
+        else:
+            identity = primary.get('capture_identity') or ''
+            if identity:
+                known.append('来源身份：' + identity)
+            known.append('尚未关联任何客户')
+        if len(members) > 1:
+            known.append('该问题现有 %d 条相关证据' % len(members))
+        if customer:
+            known.append('已归属客户')
+        questions.append({
+            'key': key,
+            'kind': kind,
+            'kind_label': _inbox_questions.question_label(kind),
+            'question': _inbox_questions.question_text(kind),
+            'headline': _question_headline(kind, primary, suggested, customer),
+            'why': _question_why(kind, primary),
+            'customer': customer,
+            'suggested_customer': suggested,
+            'known_facts': known,
+            'evidence': [_question_evidence(member) for member in members],
+            'options': _question_options(kind, primary, suggested, sela_review),
+            'sela_review': sela_review,
+            'primary_item_id': primary.get('id'),
+            'item_ids': [member.get('id') for member in members],
+            'source_type': primary.get('source_type') or '',
+            'source_label': primary.get('source_label') or '',
+            'created_at': primary.get('created_at') or '',
+        })
+    questions.sort(key=lambda row: (row.get('created_at') or ''))
+    return questions
+
+
+
+def _inbox_capture_suggestions(conn, items):
+    """计算身份待归属问题的一键归属建议（只依据精确证据）。"""
+    matches_by_item = {}
+    captures = [item for item in items
+                if item.get('item_type') in _CAPTURE_INBOX_TYPES and not item.get('customer_id')]
+    if not captures:
+        return matches_by_item
+    try:
+        if postgres_mode():
+            customer_rows = [{
+                'id': int(customer['id']), 'name': customer.get('name', ''),
+                'company': customer.get('company', ''), 'country': customer.get('country', ''),
+                'website': customer.get('website', ''),
+                'contacts': [{'email': contact.get('email', ''), 'name': contact.get('name', '')}
+                             for contact in _customer_contacts(conn, int(customer['id']))],
+            } for customer in _active_customers(conn)]
+        else:
+            grouped = {}
+            for row in conn.execute(
+                    """SELECT c.id, c.name, c.company, c.country, c.website, ct.email, ct.name AS contact_name
+                       FROM customers c LEFT JOIN contacts ct ON ct.customer_id=c.id
+                       WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)""").fetchall():
+                entry = grouped.setdefault(int(row['id']), {
+                    'id': int(row['id']), 'name': row['name'], 'company': row['company'],
+                    'country': row['country'] or '', 'website': row['website'] or '', 'contacts': [],
+                })
+                if row['email'] or row['contact_name']:
+                    entry['contacts'].append({'email': row['email'] or '', 'name': row['contact_name'] or ''})
+            customer_rows = list(grouped.values())
+        for match in _capture_customer_matches(captures, customer_rows):
+            matches_by_item[int(match['item_id'])] = match
+    except Exception:
+        logger.warning('Inbox 归属建议计算失败', exc_info=True)
+    return matches_by_item
+
+
+def _inbox_question_counts(questions, items):
+    counts = {'all': len(questions), 'questions': len(questions), 'items': len(items)}
+    for question in questions:
+        kind = question.get('kind') or ''
+        counts[kind] = counts.get(kind, 0) + 1
+    # Legacy count keys keep the navigation badge and older clients working.
+    counts['capture'] = counts.get(_inbox_questions.QUESTION_IDENTITY, 0)
+    counts['customer_reply'] = counts.get(_inbox_questions.QUESTION_REPLY, 0)
+    counts['sela_agent_request'] = counts.get(_inbox_questions.QUESTION_APPROVAL, 0)
+    return counts
+
+
+def _inbox_group_item_ids(conn, item_id):
+    """Return the open Inbox evidence that makes up one human question."""
+    try:
+        item_id = int(item_id)
+    except (TypeError, ValueError):
+        return None, []
+    if postgres_mode():
+        row = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)
+        if not row:
+            return None, []
+        question_key = str(row.get('question_key') or '').strip()
+        if not question_key:
+            return row, [item_id]
+        members = [int(member['id']) for member in _modern_inbox_rows(conn, status='open')
+                   if str(member.get('question_key') or '') == question_key]
+        return row, members or [item_id]
+    row = conn.execute('SELECT * FROM inbox_items WHERE id=?', (item_id,)).fetchone()
+    if not row:
+        return None, []
+    question_key = str(row['question_key'] or '').strip()
+    if not question_key:
+        return dict(row), [item_id]
+    members = conn.execute(
+        "SELECT id FROM inbox_items WHERE status='open' AND question_key=?", (question_key,),
+    ).fetchall()
+    return dict(row), [int(member['id']) for member in members] or [item_id]
+
+
+def _resolve_inbox_question_group(conn, item_id, *, resolved_at, reason='', note='',
+                                  resolution_source='human', resolved_by=''):
+    """A human/automated decision closes every piece of evidence of one question."""
+    row, item_ids = _inbox_group_item_ids(conn, item_id)
+    if row is None:
+        raise ValueError('inbox item is not visible')
+    for member_id in item_ids:
+        _resolve_inbox_item(
+            conn, inbox_item_id=member_id, resolved_at=resolved_at,
+            resolution_reason=reason, resolution_note=note,
+            resolution_source=resolution_source, resolved_by=resolved_by,
+        )
+    return item_ids
+
+
+def _archive_inbox_question_group(conn, item_id, *, changed_at, resolution_source='human',
+                                  resolved_by='', note=''):
+    row, item_ids = _inbox_group_item_ids(conn, item_id)
+    if row is None:
+        raise ValueError('inbox item is not visible')
+    for member_id in item_ids:
+        _set_inbox_status(conn, inbox_item_id=member_id, status='archived', changed_at=changed_at,
+                          resolution_source=resolution_source, resolved_by=resolved_by,
+                          resolution_note=note)
+    return item_ids
 
 
 @app.route('/api/inbox', methods=['GET'])
-
 @login_required
 def get_inbox():
-    """Return persisted items that require a human decision."""
+    """Return the open questions that still need a human decision.
+
+    读取没有业务副作用：自动处理（噪声、后续事实、退役类型）只在写入或启动时进行。
+    """
     cache_key = g.current_user
     with _INBOX_CACHE_LOCK:
         cached = _INBOX_CACHE.get(cache_key)
@@ -9606,95 +9978,11 @@ def get_inbox():
 
     conn = get_db()
     try:
-        _archive_noise_gmail_captures(conn)
-        if postgres_mode():
-            customer_rows = {int(row['id']): row for row in _active_customers(conn, include_deleted=True)}
-            # Every open canonical Inbox item is actionable human-review
-            # state.  Historical item-type exclusions belong only to the
-            # SQLite recovery adapter; retaining them here would make modern
-            # signal types silently disappear from the product queue.
-            raw_rows = _modern_inbox_rows(conn, status='open')
-            items = []
-            for raw in raw_rows:
-                item = dict(raw)
-                customer = customer_rows.get(int(item['customer_id'])) if item.get('customer_id') else None
-                item.update({
-                    'customer_name': (customer or {}).get('name', ''),
-                    'customer_company': (customer or {}).get('company', ''),
-                    'country': (customer or {}).get('country', ''),
-                    'is_pinned': 1 if (customer or {}).get('is_pinned') else 0,
-                    'virtual': False,
-                })
-                reliable_contact = _reliable_customer_contact(conn, item.get('customer_id')) if item.get('customer_id') else None
-                item['primary_contact_id'] = item['contact_id'] = (reliable_contact or {}).get('id')
-                item['primary_contact_name'] = item['contact_name'] = (reliable_contact or {}).get('name', '')
-                item['source'] = (
-                    'gmail' if item.get('item_type') == 'gmail_capture'
-                    else 'browser_extension' if item.get('item_type') == 'browser_capture'
-                    else 'sela_agent' if item.get('item_type') == 'sela_agent_request'
-                    else 'inbox'
-                )
-                if item.get('item_type') == 'customer_reply':
-                    item.update({'direction': 'inbound', 'activity_type': 'customer_reply',
-                                 'follow_date': (item.get('created_at') or '')[:10],
-                                 'source_label': 'Inbox 客户回复'})
-                elif item.get('item_type') in _CAPTURE_INBOX_TYPES:
-                    capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
-                    item.update({
-                        'capture_content': capture.get('content', ''), 'capture_direction': capture.get('direction', 'unknown'),
-                        'capture_activity_type': capture.get('activity_type', 'follow_up'), 'capture_date': capture.get('date', ''),
-                        'capture_channel': capture.get('channel', ''), 'capture_platform': capture.get('platform', ''),
-                        'capture_source_url': capture.get('source_url', ''), 'capture_identity': capture.get('identity', ''),
-                        'capture_sender': capture.get('sender', ''), 'capture_sender_email': capture.get('sender_email', ''),
-                        'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
-                    })
-                items.append(item)
-        else:
-            raw_rows = conn.execute('''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country,
-                                              COALESCE(c.is_pinned, 0) AS is_pinned,
-                                              (SELECT ct.id FROM contacts ct WHERE ct.customer_id=i.customer_id
-                                               AND ct.is_primary=1 ORDER BY ct.created_at ASC, ct.id ASC LIMIT 1) AS primary_contact_id,
-                                              (SELECT ct.name FROM contacts ct WHERE ct.customer_id=i.customer_id
-                                               AND ct.is_primary=1 ORDER BY ct.created_at ASC, ct.id ASC LIMIT 1) AS primary_contact_name
-                                       FROM inbox_items i LEFT JOIN customers c ON c.id=i.customer_id
-                                      WHERE i.status='open' AND i.item_type NOT IN ('new_customer', 'ai_suggestion', 'uncontacted_follow_up')
-                                      ORDER BY i.created_at DESC''').fetchall()
-            items = []
-            for row in raw_rows:
-                item = dict(row)
-                item['virtual'] = False
-                reliable_contact = _reliable_customer_contact(conn, item.get('customer_id')) if item.get('customer_id') else None
-                item['contact_id'] = (reliable_contact or {}).get('id')
-                item['contact_name'] = (reliable_contact or {}).get('name', '')
-                item['source'] = ('gmail' if item.get('item_type') == 'gmail_capture' else
-                                  'browser_extension' if item.get('item_type') == 'browser_capture' else
-                                  'sela_agent' if item.get('item_type') == 'sela_agent_request' else 'inbox')
-                if item.get('item_type') == 'customer_reply':
-                    item.update({'direction': 'inbound', 'activity_type': 'customer_reply',
-                                 'follow_date': (item.get('created_at') or '')[:10], 'source_label': 'Inbox 客户回复'})
-                elif item.get('item_type') in _CAPTURE_INBOX_TYPES:
-                    capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
-                    item.update({
-                        'capture_content': capture.get('content', ''), 'capture_direction': capture.get('direction', 'unknown'),
-                        'capture_activity_type': capture.get('activity_type', 'follow_up'), 'capture_date': capture.get('date', ''),
-                        'capture_channel': capture.get('channel', ''), 'capture_platform': capture.get('platform', ''),
-                        'capture_source_url': capture.get('source_url', ''), 'capture_identity': capture.get('identity', ''),
-                        'capture_sender': capture.get('sender', ''), 'capture_sender_email': capture.get('sender_email', ''),
-                        'source_label': capture.get('platform') or capture.get('channel') or '待归属沟通',
-                    })
-                items.append(item)
-        priority = {'customer_reply': 0, 'browser_capture': 1, 'gmail_capture': 1,
-                    'sela_agent_request': 2}
-        items.sort(key=lambda item: (priority.get(item.get('item_type'), 9), item.get('created_at') or ''))
-        counts = {
-            'all': len(items),
-            'customer_reply': sum(item.get('item_type') == 'customer_reply' for item in items),
-            'browser_capture': sum(item.get('item_type') == 'browser_capture' for item in items),
-            'gmail_capture': sum(item.get('item_type') == 'gmail_capture' for item in items),
-            'capture': sum(item.get('item_type') in _CAPTURE_INBOX_TYPES for item in items),
-            'sela_agent_request': sum(item.get('item_type') == 'sela_agent_request' for item in items),
-        }
-        payload = {'items': items, 'counts': counts}
+        items = _load_open_inbox_items(conn)
+        matches_by_item = _inbox_capture_suggestions(conn, items)
+        questions = _build_inbox_questions(items, matches_by_item)
+        counts = _inbox_question_counts(questions, items)
+        payload = {'items': items, 'questions': questions, 'counts': counts}
     finally:
         conn.close()
 
@@ -9711,23 +9999,14 @@ def get_inbox_counts():
         cached = _INBOX_CACHE.get(g.current_user)
         if cached and time.monotonic() - cached['created_at'] < _INBOX_CACHE_TTL_SECONDS:
             return jsonify(cached['payload']['counts'])
-    # Before Inbox is first opened, expose persisted actionable items cheaply.
+    # Before Inbox is first opened, expose persisted actionable questions cheaply.
     conn = get_db()
     try:
-        if postgres_mode():
-            rows = _modern_inbox_rows(conn, status='open')
-            counts = {}
-            for item in rows:
-                counts[item['item_type']] = counts.get(item['item_type'], 0) + 1
-        else:
-            rows = conn.execute('''SELECT item_type, COUNT(*) AS count FROM inbox_items
-                                   WHERE status='open'
-                                     AND item_type NOT IN ('new_customer', 'ai_suggestion', 'uncontacted_follow_up')
-                                   GROUP BY item_type''').fetchall()
-            counts = {row['item_type']: row['count'] for row in rows}
+        items = _load_open_inbox_items(conn)
+        questions = _build_inbox_questions(items, {})
+        counts = _inbox_question_counts(questions, items)
     finally:
         conn.close()
-    counts['all'] = sum(counts.values())
     return jsonify(counts)
 
 
@@ -9759,6 +10038,7 @@ def add_inbox_reply():
         conn, item_type='customer_reply', customer_id=customer_id,
         title='客户回复待记录', content=content, dedupe_key=dedupe_key,
         status='open', created_at=now,
+        **_inbox_question_meta('customer_reply', dedupe_key, str(customer_id)),
     )
     conn.commit()
     conn.close()
@@ -10091,13 +10371,84 @@ def archive_inbox_item():
         c.execute('SELECT id FROM inbox_items WHERE dedupe_key = ?', (key,))
         existing = c.fetchone()
     if existing:
-        _set_inbox_status(conn, inbox_item_id=existing['id'], status='archived', changed_at=now)
+        try:
+            _archive_inbox_question_group(
+                conn, existing['id'], changed_at=now, resolution_source='human',
+                resolved_by=getattr(g, 'current_user', ''),
+                note='用户确认不需要处理该问题。')
+        except ValueError:
+            _set_inbox_status(conn, inbox_item_id=existing['id'], status='archived', changed_at=now,
+                              resolution_source='human', resolved_by=getattr(g, 'current_user', ''),
+                              resolution_note='用户确认不需要处理该问题。')
     else:
         _create_inbox_item(conn, item_type=item_type, customer_id=customer_id, title='已归档',
-                           dedupe_key=key, status='archived', created_at=now, resolved_at=now)
+                           dedupe_key=key, status='archived', created_at=now, resolved_at=now,
+                           resolution_source='human', resolved_by=getattr(g, 'current_user', ''),
+                           question_kind=_inbox_questions.question_kind_for(item_type),
+                           source_type=_inbox_questions.source_type_for(item_type),
+                           resolution_note='用户确认不需要处理该问题。')
     conn.commit()
     conn.close()
     return jsonify({'success': True})
+
+
+@app.route('/api/inbox/<int:item_id>/decide', methods=['POST'])
+@login_required
+def decide_inbox_question(item_id):
+    """人工决定一个 Inbox 问题并关闭它（不冒充任何业务动作）。
+
+    只记录「这次需要人工作出的判断已经结束」；真正的业务动作（记录沟通、发送、
+    创建待办）仍走各自的事务入口，例如 ``follow_history`` 与 Sela 决定接口。
+    """
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    decision = str(data.get('decision') or '').strip().lower()
+    note = str(data.get('note') or '').strip()[:4000]
+    try:
+        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号')
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    conn = get_db()
+    try:
+        row, item_ids = _inbox_group_item_ids(conn, item_id)
+        if not row:
+            return jsonify({'error': '该 Inbox 条目已处理或不存在'}), 404
+        item_type = str(row.get('item_type') or '')
+        question_kind = str(row.get('question_kind') or '').strip() or _inbox_questions.question_kind_for(item_type)
+        now = _calendar_now_text()
+        actor = getattr(g, 'current_user', '')
+        if decision == 'archive':
+            _archive_inbox_question_group(conn, item_id, changed_at=now, resolution_source='human',
+                                          resolved_by=actor, note=note or '用户确认不需要处理。')
+        elif question_kind == _inbox_questions.QUESTION_IDENTITY_REVIEW and decision in ('same', 'different'):
+            if decision == 'same' and customer_id:
+                _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
+            _resolve_inbox_question_group(
+                conn, item_id, resolved_at=now, reason='identity_' + decision,
+                resolution_source='human', resolved_by=actor,
+                note=note or ('人工确认是同一主体' if decision == 'same' else '人工确认不是同一主体'))
+        elif question_kind == _inbox_questions.QUESTION_APPROVAL and decision in ('approve', 'skip'):
+            if decision != 'skip' and not note:
+                return jsonify({'error': '批准时必须记录处理结果'}), 400
+            _resolve_inbox_question_group(
+                conn, item_id, resolved_at=now, reason=decision,
+                resolution_source='human', resolved_by=actor,
+                note=note or '本轮跳过，暂不处理。')
+        else:
+            return jsonify({'error': '不支持的 Inbox 决定'}), 400
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'error': error.message}), error.status
+    except Exception:
+        conn.rollback()
+        logger.exception('Inbox 决定写入失败: %s', item_id)
+        return jsonify({'error': 'Inbox 决定写入失败，未保存任何更改'}), 500
+    finally:
+        conn.close()
+    log_operation('INBOX_DECISION', 'inbox_item', item_id, f'决定: {decision}')
+    return jsonify({'success': True, 'decided': decision, 'resolved_item_ids': item_ids})
 
 
 @app.route('/api/inbox/<int:item_id>/record-reply', methods=['POST'])
@@ -11962,6 +12313,12 @@ def record_customer_communication(customer_id, data, before_commit=None):
             if inbox_item['item_type'] in ('browser_capture', 'gmail_capture') and inbox_item['customer_id'] not in (None, customer_id):
                 raise CrmWriteError('该待归属沟通已归属其他客户', 409)
             inbox_before = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
+            # 同一个问题的多条证据一起关闭，避免记录后旧问题仍然停留在 Inbox。
+            _, inbox_group_ids = _inbox_group_item_ids(conn, inbox_item_id)
+            inbox_group_before = {
+                member_id: _snapshot_entity(conn, 'inbox_items', member_id)
+                for member_id in inbox_group_ids
+            }
         now = _calendar_now_text()
         if postgres_mode():
             completed_reminder = next((task for task in _customer_tasks(conn, customer_id)
@@ -12012,7 +12369,9 @@ def record_customer_communication(customer_id, data, before_commit=None):
         if inbox_item_id:
             if inbox_item['item_type'] in _CAPTURE_INBOX_TYPES and inbox_item['customer_id'] is None:
                 _assign_inbox_customer(conn, inbox_item_id=inbox_item_id, customer_id=customer_id)
-            _resolve_inbox_item(conn, inbox_item_id=inbox_item_id, resolved_at=now)
+            _resolve_inbox_question_group(conn, inbox_item_id, resolved_at=now,
+                                          reason='recorded', resolution_source='human',
+                                          resolved_by=getattr(g, 'current_user', ''))
         if postgres_mode():
             activity = next((item for item in _customer_interactions(conn, customer_id)
                              if int(item.get('id') or 0) == int(activity_id)), None) or {}
@@ -12039,8 +12398,9 @@ def record_customer_communication(customer_id, data, before_commit=None):
             _undo_entity('customers', customer_id, customer_before, _snapshot_entity(conn, 'customers', customer_id)),
         ])
         if inbox_item_id:
-            undo_entities.append(_undo_entity('inbox_items', inbox_item_id, inbox_before,
-                                              _snapshot_entity(conn, 'inbox_items', inbox_item_id)))
+            for member_id, member_before in inbox_group_before.items():
+                undo_entities.append(_undo_entity('inbox_items', member_id, member_before,
+                                                  _snapshot_entity(conn, 'inbox_items', member_id)))
         undo_description = '撤销记录沟通'
         undo_token = _create_undo_action(conn, 'RECORD_COMMUNICATION', 'follow_up_log', activity_id,
                                          undo_entities, undo_description)
@@ -12812,6 +13172,7 @@ def extension_save_unassigned():
     data = request.get_json(silent=True) or {}
     identity = data.get('conversation_identity') or data.get('email') or data.get('phone') or '未识别对象'
     fingerprint = 'browser-unassigned:' + hashlib.sha256(json.dumps(data.get('messages') or [], ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+    question_key = _inbox_questions.question_key_for('browser_capture', fingerprint, identity)
     conn = get_db()
     if postgres_mode():
         before = next(iter(_modern_inbox_rows(conn, dedupe_key=fingerprint)), None)
@@ -12819,14 +13180,19 @@ def extension_save_unassigned():
             conn, item_type='browser_capture', customer_id=None,
             title=f'待归属沟通：{identity}', content=json.dumps(data, ensure_ascii=False),
             dedupe_key=fingerprint, status='open', created_at=_calendar_now_text(),
+            question_kind=_inbox_questions.QUESTION_IDENTITY, question_key=question_key,
+            source_type=_inbox_questions.ITEM_TYPE_SOURCE['browser_capture'],
         )
         created = before is None
     else:
         c = conn.cursor()
         c.execute('''INSERT OR IGNORE INTO inbox_items
-                     (item_type, customer_id, title, content, dedupe_key, status, created_at)
-                     VALUES ('browser_capture', NULL, ?, ?, ?, 'open', ?)''',
-                  (f'待归属沟通：{identity}', json.dumps(data, ensure_ascii=False), fingerprint, _calendar_now_text()))
+                     (item_type, customer_id, title, content, dedupe_key, status, created_at,
+                      question_kind, question_key, source_type)
+                     VALUES ('browser_capture', NULL, ?, ?, ?, 'open', ?, ?, ?, ?)''',
+                  (f'待归属沟通：{identity}', json.dumps(data, ensure_ascii=False), fingerprint,
+                   _calendar_now_text(), _inbox_questions.QUESTION_IDENTITY, question_key,
+                   _inbox_questions.ITEM_TYPE_SOURCE['browser_capture']))
         created = c.rowcount == 1
     conn.commit()
     conn.close()

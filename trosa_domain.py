@@ -612,42 +612,59 @@ def set_customer_judgment(conn: Any, *, customer_id: int, judgment: str, updated
 
 def resolve_inbox_item(
     conn: Any, *, inbox_item_id: int, resolved_at: str, resolution_note: str = '',
-    resolution_reason: str = '',
+    resolution_reason: str = '', resolution_source: str = 'human', resolved_by: str = '',
 ) -> None:
-    """Resolve an Inbox item through the canonical Inbox fact."""
+    """Resolve an Inbox item through the canonical Inbox fact.
+
+    ``resolution_source`` separates a human decision from an automatic close.
+    Auto-closing never proves a business action happened; it only states that
+    the question no longer needs a human.
+    """
     if not postgres_mode():
         conn.execute(
-            '''UPDATE inbox_items SET status='resolved', resolved_at=?, resolution_reason=?, resolution_note=?
+            '''UPDATE inbox_items SET status='resolved', resolved_at=?, resolution_reason=?, resolution_note=?,
+                   resolution_source=?, resolved_by=?
                  WHERE id=? AND status='open' ''',
-            (resolved_at, resolution_reason, resolution_note, inbox_item_id),
+            (resolved_at, resolution_reason, resolution_note, resolution_source, resolved_by, inbox_item_id),
         )
         return
     changed = conn.execute(
         '''UPDATE trosa.inbox_items item
-              SET status='resolved', resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?
+              SET status='resolved', resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
+                  resolution_source=?, resolved_by=?
              FROM trosa.legacy_row_refs ref
             WHERE ref.organization_id=trosa.compat_org_id()
               AND ref.legacy_user_id=trosa.compat_current_user()
               AND ref.table_name='inbox_items' AND ref.legacy_id=?
               AND item.id=ref.target_id AND item.status='open' ''',
-        (resolved_at, resolution_reason, resolution_note, inbox_item_id),
+        (resolved_at, resolution_reason, resolution_note, resolution_source, resolved_by, inbox_item_id),
     )
     if not changed.rowcount:
         raise ValueError('inbox item is not visible or already resolved')
 
 
-def set_inbox_status(conn: Any, *, inbox_item_id: int, status: str, changed_at: str) -> None:
+def set_inbox_status(conn: Any, *, inbox_item_id: int, status: str, changed_at: str,
+                     resolution_source: str = '', resolved_by: str = '', resolution_note: str = '') -> None:
     """Set a canonical Inbox lifecycle status while preserving its content."""
     if not postgres_mode():
-        conn.execute('UPDATE inbox_items SET status=?, resolved_at=? WHERE id=?',
-                     (status, changed_at, inbox_item_id))
+        conn.execute('''UPDATE inbox_items SET status=?, resolved_at=?,
+                              resolution_source=CASE WHEN ?<>'' THEN ? ELSE resolution_source END,
+                              resolved_by=CASE WHEN ?<>'' THEN ? ELSE resolved_by END,
+                              resolution_note=CASE WHEN ?<>'' THEN ? ELSE resolution_note END
+                         WHERE id=?''',
+                     (status, changed_at, resolution_source, resolution_source,
+                      resolved_by, resolved_by, resolution_note, resolution_note, inbox_item_id))
         return
     changed = conn.execute(
-        '''UPDATE trosa.inbox_items item SET status=?, resolved_at=trosa.compat_time(?)
+        '''UPDATE trosa.inbox_items item SET status=?, resolved_at=trosa.compat_time(?),
+                  resolution_source=CASE WHEN ?<>'' THEN ? ELSE item.resolution_source END,
+                  resolved_by=CASE WHEN ?<>'' THEN ? ELSE item.resolved_by END,
+                  resolution_note=CASE WHEN ?<>'' THEN ? ELSE item.resolution_note END
              FROM trosa.legacy_row_refs ref
             WHERE ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=trosa.compat_current_user()
               AND ref.table_name='inbox_items' AND ref.legacy_id=? AND item.id=ref.target_id''',
-        (status, changed_at, inbox_item_id),
+        (status, changed_at, resolution_source, resolution_source,
+         resolved_by, resolved_by, resolution_note, resolution_note, inbox_item_id),
     )
     if not changed.rowcount:
         raise ValueError('inbox item is not visible to the current user')
@@ -682,8 +699,14 @@ def create_inbox_item(
     conn: Any, *, item_type: str, title: str, content: str = '', customer_id: int | None = None,
     dedupe_key: str = '', status: str = 'open', created_at: str = '', resolved_at: str = '',
     resolution_reason: str = '', resolution_note: str = '',
+    question_kind: str = '', question_key: str = '', source_type: str = '',
+    resolution_source: str = '', resolved_by: str = '', evidence: str = '',
 ) -> int:
     """Create or refresh a canonical Inbox item and return its stable API id.
+
+    ``question_kind``/``question_key`` describe the human question this item
+    raises; ``item_type`` stays the technical evidence type.  Automated writers
+    pass the metadata so the Inbox never has to re-derive it from raw payloads.
 
     ``legacy_row_refs`` and the namespaced raw dedupe key are transport
     adapters only.  Inbox content and status are held by ``trosa.inbox_items``.
@@ -695,18 +718,27 @@ def create_inbox_item(
         if existing:
             conn.execute(
                 '''UPDATE inbox_items SET customer_id=?, item_type=?, title=?, content=?, status=?,
-                       resolved_at=?, resolution_reason=?, resolution_note=? WHERE id=?''',
+                       resolved_at=?, resolution_reason=?, resolution_note=?,
+                       question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
+                       question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
+                       source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
+                       evidence=CASE WHEN ?<>'' THEN ? ELSE evidence END
+                     WHERE id=?''',
                 (customer_id, item_type, title, content, status, resolved_at, resolution_reason,
-                 resolution_note, existing['id']),
+                 resolution_note, question_kind, question_kind, question_key, question_key,
+                 source_type, source_type, evidence, evidence, existing['id']),
             )
             return int(existing['id'])
         cursor = conn.execute(
             '''INSERT INTO inbox_items
                (item_type, customer_id, title, content, dedupe_key, status, created_at,
-                resolved_at, resolution_reason, resolution_note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                resolved_at, resolution_reason, resolution_note,
+                question_kind, question_key, source_type, resolution_source, resolved_by, evidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (item_type, customer_id, title, content, dedupe_key, status, created_at,
-             resolved_at, resolution_reason, resolution_note),
+             resolved_at, resolution_reason, resolution_note,
+             question_kind, question_key, source_type, resolution_source, resolved_by,
+             evidence or '[]'),
         )
         return int(cursor.lastrowid)
 
@@ -746,10 +778,15 @@ def create_inbox_item(
     if existing:
         conn.execute(
             '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
-                   resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?
+                   resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
+                   question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
+                   question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
+                   source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
+                   evidence=COALESCE(NULLIF(?, '')::jsonb, evidence)
                  WHERE id=?''',
             (account_id, item_type, title, content, status, resolved_at, resolution_reason,
-             resolution_note, existing['id']),
+             resolution_note, question_kind, question_kind, question_key, question_key,
+             source_type, source_type, evidence, existing['id']),
         )
         return int(existing['legacy_id'])
     legacy_id = conn.execute(
@@ -763,12 +800,16 @@ def create_inbox_item(
     inserted = conn.execute(
         '''INSERT INTO trosa.inbox_items
            (id, account_id, item_type, title, content, dedupe_key, status, created_at,
-            resolved_at, resolution_reason, resolution_note, legacy_payload)
+            resolved_at, resolution_reason, resolution_note,
+            question_kind, question_key, source_type, resolution_source, resolved_by, evidence,
+            legacy_payload)
            VALUES (?, ?, ?, ?, ?, CASE WHEN ?='' THEN '' ELSE 'compat:' || trosa.compat_current_user() || ':' || ? END, ?, coalesce(trosa.compat_time(?), now()),
-                   trosa.compat_time(?), ?, ?, ?::jsonb)
+                   trosa.compat_time(?), ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
            ON CONFLICT (dedupe_key) WHERE dedupe_key <> '' DO NOTHING''',
         (target_id, account_id, item_type, title, content, dedupe_key, dedupe_key, status,
-         created_at, resolved_at, resolution_reason, resolution_note, payload),
+         created_at, resolved_at, resolution_reason, resolution_note,
+         question_kind, question_key, source_type, resolution_source, resolved_by,
+         evidence or '[]', payload),
     )
     if dedupe_key and not inserted.rowcount:
         # A concurrent writer won the dedupe race: fall back to its row
@@ -777,10 +818,15 @@ def create_inbox_item(
         if existing:
             conn.execute(
                 '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
-                       resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?
+                       resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
+                       question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
+                       question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
+                       source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
+                       evidence=COALESCE(NULLIF(?, '')::jsonb, evidence)
                      WHERE id=?''',
                 (account_id, item_type, title, content, status, resolved_at, resolution_reason,
-                 resolution_note, existing['id']),
+                 resolution_note, question_kind, question_kind, question_key, question_key,
+                 source_type, source_type, evidence, existing['id']),
             )
             return int(existing['legacy_id'])
         # Never fabricate a legacy ref that points at a row we did not insert.

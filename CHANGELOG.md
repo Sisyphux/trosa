@@ -8,6 +8,18 @@
 - 是否需要迁移：否。
 - 当前状态：本地修复完成，`ActionFeedbackRegressionTest` 与 `node --check app/static/app.js` 通过。
 
+## 2026-09-19 — Inbox 重构为「未决问题」队列
+
+- 背景：Inbox 此前把“收到一条东西”“系统自动处理失败”和“用户确实需要作出决定”混成同一种未完成事项。新的产品定义是：Inbox 只承接系统无法安全自行继续、必须由人作出判断的未决问题。
+- 数据模型：`trosa.inbox_items` 新增 `question_kind`（业务问题类别）、`question_key`（同一问题收敛键）、`source_type`（技术来源，仅作次级信息）、`resolution_source`/`resolved_by`（人工/自动关闭与操作者）、`evidence`；新增迁移 `migrations/0052_inbox_question_model.sql` 完成列新增、历史分类回填与历史噪声/退役类型的自动关闭。
+- 自动处理（不再进入/自动关闭）：退信、投递状态、no-reply 系统通知；`TROSA_REVISION_CONFLICT` 技术冲突不再转嫁给用户（保留 REVIEW 返回给 Sela 重试）；已退役历史队列类型（`new_customer`/`ai_suggestion`/`uncontacted_follow_up`/`sela_follow_up`/`sela_proposal`）；同一封邮件后来已匹配进时间线的旧待归属问题。自动关闭一律写入 `resolution_source='auto'` 与原因，原文/来源/时间保留可审计。
+- 读取无副作用：`GET /api/inbox` 不再在读取时归档历史噪声；自动判定集中在 `inbox_reconcile.py`，于写入路径和进程启动时运行。
+- 问题收敛：同一发件人/同一来源的多条证据在读取投影中合并为一个问题（`questions`），关闭问题时同组证据一起解决；`record_customer_communication` 记录沟通时也会关闭同一问题的全部证据并纳入 undo 快照。
+- 前端：Inbox 改为按「我需要决定什么」组织，卡片展示客户/发件人上下文、为什么需要你、系统已知、证据和可执行选项；技术字段与原始 JSON 不再作为主体。新增 `POST /api/inbox/<id>/decide` 用于身份待确认问题的人工决定闭环，关闭问题不等于执行业务动作。
+- 影响范围：`app.py`、`gmail_sync.py`、`trosa_domain.py`、`db.py`、新增 `inbox_questions.py` 与 `inbox_reconcile.py`、`app/static/app.js`、`app/static/index.html`、`app/static/visual-v2.css`、迁移与测试。
+- 是否需要迁移：是。发布流程会应用 `0052`。
+- 当前状态：本地 SQLite 回归（含新增 `tests/test_inbox_question_model.py`）与前端 Inbox 渲染回归通过；PostgreSQL rehearsal 与发布状态待发布角色确认。
+
 ## 2026-09-19 — 退役 sela“已有客户跟进”接口并清理历史运行态
 
 - 背景：sela 的第二条业务线更正为“开发 prospect 时请求人工补充事实”，不再是已有客户跟进。sela 侧已退役 `follow-up` CLI 与 `propose_follow_up`，不再调用 Trosa 的旧接口；本次在 Trosa 侧同步退役对应接口与遗留状态。

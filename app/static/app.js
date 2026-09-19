@@ -163,6 +163,7 @@ let _batchCompleteMode = ''; // today
 let dashboardReminders = [];
 let todayScheduleData = {};
 let inboxItems = [];
+let inboxQuestions = [];
 let inboxFilter = 'all';
 let userPreferences = null;
 let customerFilters = {};
@@ -1446,9 +1447,21 @@ async function loadInbox() {
     var data = await api('/api/inbox');
     if (token !== _inboxLoadToken) return;
     inboxItems = data.items || [];
+    inboxQuestions = data.questions || [];
     _captureMatches = {};
+    // 服务端问题模型已带归属建议，直接种入行内一键归属，无需二次请求。
+    inboxQuestions.forEach(function(question) {
+      var suggested = question.suggested_customer;
+      if (suggested && suggested.customer_id && question.primary_item_id) {
+        _captureMatches[Number(question.primary_item_id)] = {
+          item_id: question.primary_item_id,
+          customer_id: suggested.customer_id,
+          company: suggested.company || '',
+          reason: suggested.reason || '',
+        };
+      }
+    });
     renderInbox(data.counts || {});
-    refreshCaptureMatches();
   } catch (e) {
     if (token === _inboxLoadToken && list) {
       list.innerHTML = '<div class="empty-state list-error-state"><p>Inbox 暂时无法加载</p><button class="btn btn-sm" type="button" onclick="loadInbox()">重新加载</button></div>';
@@ -1461,25 +1474,8 @@ async function loadInbox() {
   }
 }
 
-// 待归属沟通的行内快速处理：按发件邮箱/域名/公司名规则匹配建议客户，不依赖模型。
+// 待归属沟通的行内快速处理：服务端问题模型已给出归属建议，这里只缓存建议。
 var _captureMatches = {};
-var _captureMatchesToken = 0;
-
-async function refreshCaptureMatches() {
-  var token = ++_captureMatchesToken;
-  try {
-    var data = await api('/api/inbox/capture-matches');
-    if (token !== _captureMatchesToken) return;
-    _captureMatches = {};
-    (data.matches || []).forEach(function(match) {
-      if (match && match.item_id) _captureMatches[Number(match.item_id)] = match;
-    });
-    renderInbox();
-  } catch (e) {
-    if (token !== _captureMatchesToken) return;
-    renderInbox();
-  }
-}
 
 function truncateCaptureSummary(text, limit) {
   var value = String(text || '').replace(/\s+/g, ' ').trim();
@@ -1585,22 +1581,23 @@ function isInboxCommunicationCapture(item) {
   return !!item && (item.item_type === 'browser_capture' || item.item_type === 'gmail_capture');
 }
 
-function inboxCategory(item) {
-  if (item.item_type === 'sela_agent_request') return 'sela_agent_request';
-  if (item.item_type === 'sela_identity_review') return 'sela_identity_review';
-  if (item.item_type === 'customer_reply') return 'new_reply';
-  if (isInboxCommunicationCapture(item)) return 'capture';
-  return 'other';
+function inboxQuestionTypeLabel(question) {
+  if (!question) return 'Inbox';
+  if (question.source_type === 'gmail') return 'Gmail';
+  if (question.source_type === 'browser') return '浏览器采集';
+  if (question.source_type === 'sela') return 'Sela';
+  return 'Inbox';
 }
 
-var INBOX_CATEGORY_LABELS = {
-  sela_agent_request: 'sela 需要你判断',
-  sela_identity_review: 'sela 身份待确认',
-  new_reply: '客户有新回复',
-  capture: '待归属沟通',
-  other: '其他事项',
+var INBOX_QUESTION_FILTER_LABELS = {
+  all: '全部',
+  identity: '待归属',
+  reply: '客户回复',
+  approval: '待批准',
+  identity_review: '身份待确认',
 };
-var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_identity_review', 'other'];
+var INBOX_QUESTION_FILTER_ORDER = ['all', 'identity', 'reply', 'approval', 'identity_review'];
+
 var _inboxExpanded = new Set();
 
 function toggleInboxItem(key) {
@@ -1609,258 +1606,172 @@ function toggleInboxItem(key) {
   renderInbox();
 }
 
-var _inboxGroupCustomerIds = {};
-
-async function inboxGroupTodayFollow(cat, countryEncoded) {
-  var country = decodeURIComponent(countryEncoded || '');
-  var ids = _inboxGroupCustomerIds[cat + '::' + country] || [];
-  if (ids.length === 0) { showToast('该分组暂无客户', 'info'); return; }
-  if (!await showAppConfirm({ title: '安排今日跟进', message: '将 ' + country + ' 的 ' + ids.length + ' 个客户的下次跟进设为今天？', submitLabel: '安排' })) return;
-  try {
-    await api('/api/customers/batch/next_follow_up', { method: 'POST', body: JSON.stringify({ ids: ids, value: localDateString() }) });
-    showToast('已将 ' + ids.length + ' 个客户设为今天跟进', 'success');
-    loadInbox();
-  } catch(e) {}
-}
-
-async function inboxGroupExportEmails(cat, countryEncoded) {
-  var country = decodeURIComponent(countryEncoded || '');
-  var ids = _inboxGroupCustomerIds[cat + '::' + country] || [];
-  if (ids.length === 0) { showToast('该分组暂无客户', 'info'); return; }
-  await doExportEmails(ids);
-}
-
-// 主过滤按统一动作类别组织，避免按 item_type 罗列一排碎片 chips。
-var INBOX_FILTER_META = {
-  all: { label: '全部', match: function() { return true; } },
-  new_reply: { label: '客户回复', match: function(cat) { return cat === 'new_reply'; } },
-  capture: { label: '待归属沟通', match: function(cat) { return cat === 'capture'; } },
-  sela: { label: 'Sela 判断', match: function(cat) { return cat.indexOf('sela_') === 0; } },
-};
-var INBOX_FILTER_ORDER = ['all', 'new_reply', 'capture', 'sela'];
-
-function inboxTypeLabel(item) {
-  switch (item.item_type) {
-    case 'customer_reply': return '客户回复';
-    case 'gmail_capture': return 'Gmail';
-    case 'browser_capture': return '浏览器采集';
-    case 'sela_agent_request': return 'Sela 请求';
-    case 'sela_identity_review': return 'Sela 身份';
-    default: return 'Inbox';
-  }
-}
-
 function renderInbox(counts) {
   counts = counts || {};
   var navCount = document.getElementById('inboxNavCount');
-  if (navCount) navCount.textContent = counts.all || inboxItems.length || '';
+  if (navCount) navCount.textContent = counts.all || inboxQuestions.length || '';
   var overview = document.getElementById('inboxOverview');
   if (overview) {
-    overview.innerHTML = '<strong>' + (counts.all || inboxItems.length || 0) + '</strong><span>项需要判断</span>' +
-      '<p>已记录的事实和明确待办会自动安静处理；新回复、待归属沟通和 Sela 请求会留在这里。</p>';
+    overview.innerHTML = '<strong>' + (counts.all || inboxQuestions.length || 0) + '</strong><span>个问题需要判断</span>' +
+      '<p>系统能自行处理的噪声、退信、技术冲突和重复证据不会出现在这里；这里只留下必须由你决定的问题。</p>';
   }
-  var catMeta = INBOX_FILTER_META[inboxFilter] || INBOX_FILTER_META.all;
-  var items = inboxItems.filter(function(item) { return catMeta.match(inboxCategory(item)); });
-  // 过滤 chips 用完整 inboxItems 计数并动态渲染，保证新类型的数量出入可见。
-  var filterCounts = {};
-  inboxItems.forEach(function(item) {
-    var cat = inboxCategory(item);
-    INBOX_FILTER_ORDER.forEach(function(key) {
-      if (INBOX_FILTER_META[key].match(cat)) filterCounts[key] = (filterCounts[key] || 0) + 1;
-    });
-  });
   var filtersEl = document.getElementById('inboxFilters');
   if (filtersEl) {
-    filtersEl.innerHTML = INBOX_FILTER_ORDER.map(function(key) {
-      var meta = INBOX_FILTER_META[key];
-      var countText = key === 'all' ? inboxItems.length : (filterCounts[key] || 0);
+    var kinds = INBOX_QUESTION_FILTER_ORDER.filter(function(key) {
+      return key === 'all' || (counts[key] || 0) > 0;
+    });
+    filtersEl.innerHTML = kinds.map(function(key) {
+      var countText = key === 'all' ? inboxQuestions.length : (counts[key] || 0);
       return '<button class="inbox-filter' + (key === inboxFilter ? ' active' : '') + '" data-inbox-filter="' + key +
-        '" onclick="setInboxFilter(\'' + key + '\')">' + meta.label +
+        '" onclick="setInboxFilter(\'' + key + '\')">' + INBOX_QUESTION_FILTER_LABELS[key] +
         (countText ? '<span class="inbox-filter-count">' + countText + '</span>' : '') + '</button>';
     }).join('');
     updateFilterIndicator(filtersEl);
   }
   var list = document.getElementById('inboxList');
-  if (!items.length) {
+  if (!list) return;
+  var questions = inboxQuestions.filter(function(question) {
+    return inboxFilter === 'all' || question.kind === inboxFilter;
+  });
+  if (!questions.length) {
     list.innerHTML = '<div class="inbox-empty"><strong>' +
-      (inboxItems.length ? '这个分类已清空' : 'Inbox 已清空') +
-      '</strong><span>新的客户回复、重要变化和到期复查会出现在这里。</span></div>';
+      (inboxQuestions.length ? '这个分类已清空' : 'Inbox 已清空') +
+      '</strong><span>当前没有需要你作出判断的问题。新的客户回复或无法自动确定的归属会出现在这里。</span></div>';
     return;
   }
-  // 按待办动作/情况分组，组内保留原顺序；组间按 INBOX_CATEGORY_ORDER 排序。
-  var groups = {};
-  items.forEach(function(item) {
-    var cat = inboxCategory(item);
-    if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(item);
-  });
-  _inboxGroupCustomerIds = {};
-  var html = '';
-  INBOX_CATEGORY_ORDER.forEach(function(cat) {
-    if (!groups[cat]) return;
-    var groupItems = groups[cat];
-    // 动作分组内按国家再分组：不同国家通常需要不同开发话术，批量操作按国家隔离。
-    // 只有一个国家或条目很小时不再铺子组头和批量按钮，避免单条记录被包在两层组框里。
-    var byCountry = {};
-    groupItems.forEach(function(item) {
-      var country = (item.country || '').trim() || '其他';
-      if (!byCountry[country]) byCountry[country] = [];
-      byCountry[country].push(item);
-    });
-    var countryNames = Object.keys(byCountry).filter(function(c) { return c !== '其他'; })
-      .sort(function(a, b) { return byCountry[b].length - byCountry[a].length; });
-    if (byCountry['其他']) countryNames.push('其他');
-    var flatCountry = countryNames.length <= 1 && byCountry[countryNames[0] || '其他'].length <= 2;
-
-    html += '<div class="inbox-group" data-category="' + cat + '">';
-    html += '<div class="inbox-group-header"><span class="inbox-group-title">' + (INBOX_CATEGORY_LABELS[cat] || cat) + '</span><span class="inbox-group-count">' + groupItems.length + '</span></div>';
-    html += '<div class="inbox-group-body">';
-    countryNames.forEach(function(country) {
-      var countryItems = byCountry[country];
-      var ids = countryItems.map(function(item) { return Number(item.customer_id || 0); }).filter(Boolean);
-      _inboxGroupCustomerIds[cat + '::' + country] = ids;
-      var showCountryHeader = !flatCountry &&
-        !(cat === 'sela_identity_review' && country === '其他' && countryNames.length === 1);
-      html += showCountryHeader ? '<div class="inbox-country-group">' : '<div class="inbox-country-group inbox-country-flat">';
-      if (showCountryHeader) {
-        html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
-        if (ids.length > 0) {
-          html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupTodayFollow(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">今天跟进</button>';
-          html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupExportEmails(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">导出邮箱</button>';
-        }
-        html += '</div>';
-      }
-      countryItems.forEach(function(item) { html += renderInboxItemHtml(item); });
-      html += '</div>';
-    });
-    html += '</div></div>';
-  });
-  list.innerHTML = html;
+  list.innerHTML = questions.map(renderInboxQuestionHtml).join('');
 }
 
-function renderInboxItemHtml(item) {
-  var selaReview = parseSelaIdentityReview(item);
-  // 已归属条目显示客户；未归属沟通直接显示发件人身份，系统标题只作最后兜底。
-  var senderName = String(item.capture_sender || '').replace(/<[^>]*>/g, '').trim();
-  var senderEmail = String(item.capture_sender_email || '').trim();
-  var name = item.customer_company || item.customer_name
-    || (isInboxCommunicationCapture(item) ? (senderName || senderEmail) : '')
-    || (selaReview && selaReview.company)
-    || item.capture_identity
-    || item.title || '未关联客户';
-  var customerId = Number(item.customer_id || 0);
-  var itemId = item.id ? String(item.id) : '';
-  var key = item.dedupe_key || [item.item_type, item.customer_id, item.created_at].join('-');
+function inboxQuestionCustomerName(question) {
+  var customer = question.customer || null;
+  if (customer) return customer.company || customer.name || '已关联客户';
+  var suggested = question.suggested_customer || null;
+  if (suggested && suggested.company) return suggested.company;
+  var evidence = (question.evidence || [])[0] || {};
+  return evidence.identity || question.source_label || '待确认';
+}
+
+function renderInboxEvidence(question) {
+  var evidence = question.evidence || [];
+  if (!evidence.length) return '';
+  return '<div class="inbox-question-evidence">' + evidence.map(function(entry) {
+    var detail = String(entry.detail || '').trim();
+    return '<div class="inbox-evidence-item">' +
+      '<div class="inbox-evidence-meta">' + escapeHtml(entry.source_label || '') +
+        (entry.date ? ' · ' + escapeHtml(formatDate(entry.date)) : '') + '</div>' +
+      (detail ? '<p>' + escapeHtml(detail) + '</p>' : '') +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function renderInboxSelaContext(review) {
+  if (!review) return '';
+  var rows = [];
+  if (review.company) rows.push('<div><span>主体</span><strong>' + escapeHtml(review.company) + '</strong></div>');
+  if (review.website) rows.push('<div><span>官网</span><strong>' + escapeHtml(review.website) + '</strong></div>');
+  if (review.email) rows.push('<div><span>邮箱</span><strong>' + escapeHtml(review.email) + '</strong></div>');
+  return '<div class="inbox-question-sela"><span>' + escapeHtml(review.reason_label || '身份待确认') + '</span>' +
+    rows.join('') +
+    (review.explanation ? '<p>' + escapeHtml(review.explanation) + '</p>' : '') + '</div>';
+}
+
+function renderInboxQuestionHtml(question) {
+  var key = question.key;
   var expanded = _inboxExpanded.has(key);
-  var customerTitle = customerId
+  var questionId = Number(question.primary_item_id);
+  var name = inboxQuestionCustomerName(question);
+  var customer = question.customer || null;
+  var customerId = customer ? Number(customer.id || 0) : 0;
+  var nameHtml = customerId
     ? '<button type="button" class="inbox-customer-link" onclick="openInboxCustomer(' + customerId + ')">' + escapeHtml(name) + '</button>'
     : escapeHtml(name);
-
-  var mainAction = '';
-  var captureMatch = null;
-  var deleteAction = '';
-  if (item.item_type === 'sela_agent_request') {
-    mainAction = '<button class="btn btn-sm btn-primary" onclick="resolveSelaAgentRequest(' + itemId + ',\'approve\')">记录决定</button>';
-  } else if (item.item_type === 'customer_reply') {
-    mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
-  } else if (isInboxCommunicationCapture(item)) {
-    captureMatch = _captureMatches[Number(itemId)] || null;
-    if (!customerId && captureMatch && captureMatch.customer_id) {
-      mainAction = '<button class="btn btn-sm btn-primary" onclick="quickConfirmCapture(' + itemId + ')">归属 ' + escapeHtml(captureMatch.company || '客户') + '</button>';
-    } else {
-      // 已归属的待归属沟通不再叫“归属”，行内动作就是记录到客户时间线。
-      mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxCapture(' + itemId + ')">' +
-        (customerId ? '记录到时间线' : '确认归属并记录') + '</button>';
-    }
-    deleteAction = '<button class="text-action" onclick="deleteInboxCapture(' + itemId + ')">删除</button>';
-  } else if (selaReview) {
-    mainAction = customerId
-      ? '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户资料</button>'
-      : (selaReview.website ? '<a class="btn btn-sm" href="' + escapeHtml(selaReview.website) + '" target="_blank" rel="noopener">查看官网</a>' : '<span class="sela-review-pending-label">待人工判断</span>');
-  } else {
-    mainAction = '<button class="btn btn-sm" onclick="openInboxCustomer(' + customerId + ')">查看客户</button>';
+  var kindChip = '<span class="inbox-item-type-chip inbox-type-' + escapeHtml(question.kind) + '">' +
+    escapeHtml(question.kind_label || '待处理') + '</span>';
+  var typeChip = '<span class="inbox-item-type-chip">' + escapeHtml(inboxQuestionTypeLabel(question)) + '</span>';
+  var metaParts = [];
+  if (customer) {
+    if (customer.country) metaParts.push(customer.country);
+    if (customer.contact_name) metaParts.push(customer.contact_name);
+  } else if (question.suggested_customer && question.suggested_customer.company) {
+    metaParts.push('建议：' + question.suggested_customer.company);
   }
-
-  var extraActions = '';
-  var archive = item.item_type === 'customer_reply' ? '<button class="text-action" onclick="archiveInboxItem(\'' + escapeHtml(item.dedupe_key) + '\',' + customerId + ',\'' + escapeHtml(item.item_type) + '\')">无需记录</button>' : '';
-
-  var summaryText = '';
-  if (isInboxCommunicationCapture(item)) {
-    var captureText = String(item.capture_content || item.title || '待确认的客户沟通');
-    // 摘要首行常是“发件人 · 方向”前缀，与名称重复，去掉后再截断。
-    var firstBreak = captureText.indexOf('\n');
-    if (firstBreak > 0 && firstBreak < 120 && senderName && captureText.slice(0, firstBreak).indexOf(senderName) !== -1) {
-      captureText = captureText.slice(firstBreak + 1);
-    }
-    summaryText = truncateCaptureSummary(captureText, 110);
-  } else if (selaReview) {
-    summaryText = selaIdentityReasonLabel(selaReview.reason) + ' · ' + selaIdentityQualificationLabel(selaReview.research && selaReview.research.qualification_status);
-  } else {
-    summaryText = item.content || item.title || '';
+  var meta = metaParts.length ? '<span class="inbox-item-meta">' + escapeHtml(metaParts.join(' · ')) + '</span>' : '';
+  var firstEvidence = (question.evidence || [])[0] || {};
+  var identitySpan = (!customer && question.kind === 'identity' && firstEvidence.identity)
+    ? '<span class="inbox-item-identity">' + escapeHtml(firstEvidence.identity) + '</span>' : '';
+  var options = question.options || [];
+  var primaryOption = options.filter(function(option) { return option.style === 'primary'; })[0] || options[0];
+  var quickAction = '';
+  if (primaryOption && !expanded) {
+    quickAction = '<span class="inbox-item-quick-action">' +
+      '<button class="btn btn-sm' + (primaryOption.style === 'primary' ? ' btn-primary' : '') +
+      '" onclick="runInboxOption(' + questionId + ',\'' + escapeHtml(primaryOption.key) + '\')">' +
+      escapeHtml(primaryOption.label) + '</button></span>';
   }
-
   var detail = '';
   if (expanded) {
-    var body = '';
-    if (isInboxCommunicationCapture(item)) {
-      var captureSource = [item.capture_platform || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'), item.capture_channel].filter(Boolean).join(' · ');
-      var captureMatch = _captureMatches[Number(itemId)] || null;
-      body = '<div class="inbox-why">来源：' + escapeHtml(captureSource) + '</div>' +
-        '<div class="inbox-evidence">原始对象：' + escapeHtml(item.capture_identity || '未识别') + '</div>' +
-        (captureMatch && captureMatch.customer_id && !customerId
-          ? '<div class="inbox-capture-suggestion">建议归属：' + escapeHtml(captureMatch.company || '客户') +
-            (captureMatch.reason ? '（' + escapeHtml(captureMatch.reason) + '）' : '') +
-            '<button type="button" class="btn btn-sm btn-primary" onclick="quickConfirmCapture(' + itemId + ')">一键归属</button></div>'
-          : '') +
-        '<p>' + escapeHtml(item.capture_content || item.content || '没有可显示的原文') + '</p>';
-    } else if (selaReview) {
-      body = renderSelaIdentityReview(selaReview, item);
-    } else {
-      body = '<p>' + escapeHtml(item.content || item.title || '') + '</p>';
-    }
-    var inlineDecision = '';
-    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_agent_request') {
-      var suggestedTitle = item.suggested_action || item.title || '联系客户并确认进展';
-      var taskDate = new Date(); taskDate.setDate(taskDate.getDate() + 1);
-      inlineDecision = '<div class="inbox-inline-decision">' +
-        '<label>下一步<input type="text" value="' + escapeHtml(suggestedTitle) + '"></label>' +
-        '<label>日期<input type="date" value="' + localDateString(taskDate) + '"></label>' +
-        '<button class="btn btn-sm btn-primary" type="button" onclick="createInboxTaskFromPanel(this,' + customerId + ')">安排</button>' +
-      '</div>';
-    }
-    detail = '<div class="inbox-item-detail">' + body + inlineDecision + '<div class="inbox-actions">' + mainAction + extraActions + archive + deleteAction + '</div></div>';
+    var known = (question.known_facts || []).map(function(fact) {
+      return '<li>' + escapeHtml(fact) + '</li>';
+    }).join('');
+    detail = '<div class="inbox-item-detail">' +
+      '<div class="inbox-question-why"><span>为什么需要你</span><p>' + escapeHtml(question.why || '') + '</p></div>' +
+      (question.sela_review ? renderInboxSelaContext(question.sela_review) : '') +
+      (known ? '<div class="inbox-question-known"><span>系统已知</span><ul>' + known + '</ul></div>' : '') +
+      renderInboxEvidence(question) +
+      '<div class="inbox-actions">' + options.map(function(option) {
+        var cls = 'btn btn-sm' + (option.style === 'primary' ? ' btn-primary' : (option.style === 'text' ? ' text-action' : ''));
+        return '<button class="' + cls + '" onclick="runInboxOption(' + questionId + ',\'' + escapeHtml(option.key) + '\')">' +
+          escapeHtml(option.label) + '</button>';
+      }).join('') + '</div>' +
+    '</div>';
   }
-
   var toggleIcon = expanded ? '▾' : '▸';
-  var toggleBtn = '<button class="inbox-toggle" onclick="toggleInboxItem(\'' + escapeHtml(key) + '\')" aria-label="' + (expanded ? '收起' : '展开') + '">' + toggleIcon + '</button>';
-  var quickAction = expanded ? '' : '<span class="inbox-item-quick-action">' + mainAction + deleteAction + '</span>';
-  var alreadyAssigned = customerId > 0;
-  var typeChip = '<span class="inbox-item-type-chip inbox-type-' + escapeHtml(item.item_type) + '">' + escapeHtml(inboxTypeLabel(item)) + '</span>';
-  var assignedMark = alreadyAssigned ? '<span class="inbox-item-assigned" title="这条沟通已归属客户">已归属</span>' : '';
-  var metaText = [
-    (item.country || '').trim(),
-    (item.contact_name || '').trim(),
-  ].filter(Boolean).join(' · ');
-  var meta = metaText ? '<span class="inbox-item-meta">' + escapeHtml(metaText) + '</span>' : '';
-  var identityText = isInboxCommunicationCapture(item) && !alreadyAssigned
-    ? (senderEmail || String(item.capture_identity || '')) : '';
-
-  return '<article class="inbox-item inbox-' + escapeHtml(item.item_type) + (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
+  var toggleBtn = '<button class="inbox-toggle" onclick="toggleInboxItem(\'' + escapeHtml(key) + '\')" aria-label="' +
+    (expanded ? '收起' : '展开') + '">' + toggleIcon + '</button>';
+  return '<article class="inbox-item inbox-question inbox-' + escapeHtml(question.kind) +
+    (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
     '<div class="inbox-item-row">' +
-      '<span class="inbox-item-date">' + escapeHtml(formatDate(item.created_at)) + '</span>' +
+      '<span class="inbox-item-date">' + escapeHtml(formatDate(question.created_at)) + '</span>' +
       '<div class="inbox-item-main">' +
-        '<h3 class="inbox-item-name">' + customerTitle + assignedMark + '</h3>' +
-        '<div class="inbox-item-meta-row">' + typeChip + meta +
-          (identityText ? '<span class="inbox-item-identity">' + escapeHtml(identityText) + '</span>' : '') +
-        '</div>' +
+        '<h3 class="inbox-item-name">' + nameHtml + '</h3>' +
+        '<div class="inbox-item-meta-row">' + kindChip + typeChip + meta + identitySpan + '</div>' +
       '</div>' +
-      '<span class="inbox-summary-why">' + escapeHtml(summaryText) + '</span>' +
-      quickAction +
-      toggleBtn +
-    '</div>' +
-    detail +
+      '<span class="inbox-summary-why">' + escapeHtml(question.headline || '') + '</span>' +
+      quickAction + toggleBtn +
+    '</div>' + detail +
     '</article>';
 }
+
+async function runInboxOption(questionId, optionKey) {
+  var question = inboxQuestions.find(function(candidate) {
+    return Number(candidate.primary_item_id) === Number(questionId);
+  });
+  if (!question) { showToast('该问题已处理，请刷新 Inbox', 'warning'); loadInbox(); return; }
+  var option = (question.options || []).filter(function(candidate) { return candidate.key === optionKey; })[0] || {};
+  var action = option.action || optionKey;
+  if (action === 'record') {
+    if (question.kind === 'identity' && optionKey === 'assign_suggested') return quickConfirmCapture(questionId);
+    if (question.kind === 'reply') return recordInboxReply(questionId);
+    return recordInboxCapture(questionId);
+  }
+  if (action === 'archive') return decideInboxQuestion(questionId, 'archive');
+  if (action === 'approve' || action === 'skip') return resolveSelaAgentRequest(questionId, action === 'skip' ? 'skip' : 'approve');
+  if (action === 'identity_same') return decideInboxQuestion(questionId, 'same');
+  if (action === 'identity_different') return decideInboxQuestion(questionId, 'different');
+  return decideInboxQuestion(questionId, action);
+}
+
+async function decideInboxQuestion(questionId, decision) {
+  try {
+    await api('/api/inbox/' + Number(questionId) + '/decide', {
+      method: 'POST',
+      body: JSON.stringify({ decision: decision })
+    });
+    showToast(decision === 'archive' ? '已确认不需要处理' : '已记录你的判断', 'success');
+    loadInbox();
+  } catch (e) {}
+}
+
 
 function parseSelaIdentityReview(item) {
   if (!item || item.item_type !== 'sela_identity_review') return null;
