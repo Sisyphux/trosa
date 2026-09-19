@@ -438,6 +438,9 @@ select.form-control {
 /* ========== Toast ========== */
 .toast-container { position: fixed; top: 24px; right: 24px; z-index: 2000; display: flex; flex-direction: column; gap: 10px; }
 .connection-status { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 2100; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid rgba(180,92,60,.28); border-radius: 999px; background: rgba(255,250,243,.94); color: #7e4937; box-shadow: 0 8px 24px rgba(70,48,32,.12); font-size: 13px; }
+/* 这两个状态条的基类都显式声明了 display，会覆盖浏览器对 [hidden] 的默认 display:none；
+   若不在这里补回，进入页面时元素虽然带 hidden 仍会显示自带的“正在连接…/正在保存…”。 */
+.connection-status[hidden] { display: none; }
 .connection-status.is-restored { border-color: rgba(61,126,82,.3); color: #356a45; }
 .connection-status-spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: connectionStatusSpin .8s linear infinite; }
 .connection-status.is-restored .connection-status-spinner { border: 0; width: 12px; height: 12px; animation: none; }
@@ -446,6 +449,7 @@ select.form-control {
 @media (max-width: 620px) { .connection-status { bottom: max(14px, env(safe-area-inset-bottom)); max-width: calc(100vw - 28px); white-space: nowrap; } }
 /* 统一操作状态：用户主动写入的全局“处理中 / 已保存 / 失败”反馈，位于连接状态之上。 */
 .action-status { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 2100; display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border: 1px solid rgba(63,54,45,.18); border-radius: 999px; background: rgba(255,255,255,.96); color: #3f362d; box-shadow: 0 10px 28px rgba(70,48,32,.14); font-size: 13px; max-width: calc(100vw - 28px); }
+.action-status[hidden] { display: none; }
 .action-status.is-success { border-color: rgba(61,126,82,.3); color: #356a45; }
 .action-status.is-error { border-color: rgba(180,60,60,.32); color: #8d3a3a; }
 .action-status-spinner { width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: connectionStatusSpin .8s linear infinite; flex: 0 0 auto; }

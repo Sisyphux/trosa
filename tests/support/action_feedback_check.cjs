@@ -30,6 +30,13 @@ const script = fs.readFileSync(path.join(staticDir, 'app.js'), 'utf8');
 const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only', pretendToBeVisual: true });
 const win = dom.window;
 const doc = win.document;
+
+// jsdom 默认不加载 <link> 样式；把真实样式表注入，才能断言 [hidden] 真的隐藏状态条。
+for (const name of ['style.css', 'visual-v2.css']) {
+  const style = doc.createElement('style');
+  style.textContent = fs.readFileSync(path.join(staticDir, name), 'utf8');
+  doc.head.appendChild(style);
+}
 win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
 win.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
 win.eval(script);
@@ -55,6 +62,24 @@ function follow(id, content, isReported = false) {
 
 function actionStatus() { return doc.getElementById('actionStatus'); }
 function actionStatusText() { return doc.getElementById('actionStatusText').textContent; }
+
+function displayOf(el) { return win.getComputedStyle(el).display; }
+
+// 状态条的基类显式设置了 display，必须用 [hidden] 规则补回 display:none，
+// 否则进入页面时即便带 hidden 也会一直显示自带的“正在连接…/正在保存…”。
+function checkStatusBarsRespectHidden() {
+  const connection = doc.getElementById('connectionStatus');
+  doc.body.appendChild(connection);
+  doc.body.appendChild(actionStatus());
+  assert.ok(actionStatus().hasAttribute('hidden'), 'action status starts hidden in the shell');
+  assert.equal(displayOf(actionStatus()), 'none', 'hidden action status must not render');
+  assert.equal(displayOf(connection), 'none', 'hidden connection status must not render');
+
+  actionStatus().hidden = false;
+  assert.equal(displayOf(actionStatus()), 'inline-flex', 'visible action status renders as a pill');
+  actionStatus().hidden = true;
+  assert.equal(displayOf(actionStatus()), 'none', 'action status hides again after finishing');
+}
 
 function checkUnifiedActionStatus() {
   win.resetActionStatus();
@@ -202,6 +227,7 @@ function checkNewPoolSelectionWorks() {
 }
 
 async function run() {
+  checkStatusBarsRespectHidden();
   checkUnifiedActionStatus();
   checkNewPoolSelectionWorks();
   await checkReportToggleOptimism();

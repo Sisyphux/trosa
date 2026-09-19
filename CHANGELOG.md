@@ -1,3 +1,13 @@
+## 2026-09-19 — 修复进入页面即显示“正在保存…”：状态条 hidden 属性失效
+
+- 现象：线上进入工作台后，未经任何操作就持续显示底部“正在保存…”转圈胶囊（以及潜在的同款“正在连接…”）。
+- 根因：`#actionStatus`（`统一操作状态`）与 `#connectionStatus` 在 shell 里用 `hidden` 属性默认隐藏，但它们的基类 `.action-status` / `.connection-status` 显式声明了 `display: inline-flex`。作者样式优先于浏览器 UA 的 `[hidden] { display: none }`，导致 `hidden` 形同虚设；页面加载时元素直接渲染出 HTML 里的静态兜底文案“正在保存…”，且没有任何 JS 会在无操作时改写它，于是永久停留。
+- 修复：在 `app/static/style.css` 补回 `.action-status[hidden] { display: none; }` 与 `.connection-status[hidden] { display: none; }`，与其它同类元素（如 `.action-status-retry[hidden]`、`.login-overlay[hidden]`）的既有写法一致。状态位的显示/隐藏逻辑（`beginActionStatus` / `finishActionStatus` / `resetActionStatus`）不变。
+- 测试：`tests/support/action_feedback_check.cjs` 注入真实样式表，新增 `checkStatusBarsRespectHidden`：断言初始 `hidden` 的状态条 `display:none`、取消隐藏后为可渲染胶囊、完成后再次隐藏；该断言在未修复的样式上会失败。
+- 影响范围：仅前端样式与回归用例；不改接口、数据模型与业务写入语义。
+- 是否需要迁移：否。
+- 当前状态：本地修复完成，`ActionFeedbackRegressionTest` 与 `node --check app/static/app.js` 通过。
+
 ## 2026-09-19 — 退役 sela“已有客户跟进”接口并清理历史运行态
 
 - 背景：sela 的第二条业务线更正为“开发 prospect 时请求人工补充事实”，不再是已有客户跟进。sela 侧已退役 `follow-up` CLI 与 `propose_follow_up`，不再调用 Trosa 的旧接口；本次在 Trosa 侧同步退役对应接口与遗留状态。
