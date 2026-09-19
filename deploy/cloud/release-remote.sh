@@ -63,8 +63,35 @@ LOCK_WAIT=${TRADE_OS_RELEASE_LOCK_WAIT:-900}
 # release's own result (used for wait/busy states that must not clobber the
 # result of the release actually running).
 MIRROR_LAST_RESULT=1
+# Explicit failure classification. Callers (local client, status, check) can
+# tell "the backup never happened" from "the backup is unverified" from "the
+# code deployment failed"; a local-download failure is client-side only and
+# never reaches this runner.
+FAILURE_CLASS=""
 
 NOW() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# Map a terminal (status, phase) pair to a stable failure class:
+#   backup_failed             dump generation failed
+#   backup_verification_failed checksum/restorability/cloud-mirror failed
+#   release_failed            code migration / activation / health failed
+#   release_refused           a gate refused without mutating production
+#   release_busy              another release held the lock
+classify_failure() {
+  local status=$1 phase=$2
+  case "$status" in
+    success|in_progress) printf '' ;;
+    refused) printf 'release_refused' ;;
+    busy) printf 'release_busy' ;;
+    *)
+      case "$phase" in
+        backup) printf 'backup_failed' ;;
+        backup_verify|backup_store) printf 'backup_verification_failed' ;;
+        *) printf 'release_failed' ;;
+      esac
+      ;;
+  esac
+}
 
 # ---------------------------------------------------------------- state helpers
 read_current_release() {
@@ -198,6 +225,7 @@ write_result() {
   # from globals set by each phase. Kept in one function so every terminal
   # state lands in the same machine-readable shape. All writes are atomic.
   local status=$1 phase=$2 error=${3:-} next=${4:-}
+  local failure_class="${FAILURE_CLASS:-$(classify_failure "$status" "$phase")}"
   local prod_id prod_commit prev_id prev_commit
   prod_id=$(read_current_release)
   prod_commit=$(release_commit "$REMOTE_ROOT/releases/$prod_id")
@@ -218,6 +246,7 @@ doc = {
   "health": json.loads(open("$RELEASE_DIR/.health.json").read()) if __import__("os").path.exists("$RELEASE_DIR/.health.json") else None,
   "error": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$error"),
   "next_action": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$next"),
+  "failure_class": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1] or None))" "$failure_class"),
   "updated_at": "$(NOW)",
 }
 print(json.dumps(doc, indent=2, sort_keys=True))
@@ -287,6 +316,10 @@ baseline_guard() {
   fi
   out=$(python3 "$helper" --repository "$GITHUB_REPOSITORY" \
     --production "$prod_commit" --candidate "$COMMIT_SHA" 2>/dev/null || true)
+  # The helper reads TRADE_OS_GITHUB_TOKEN / GITHUB_TOKEN from its environment
+  # (load_production_env already sourced /etc/trade-os/trade-os.env) and
+  # retries transient GitHub API failures internally; any remaining failure
+  # still refuses here (fail closed).
   allow=$(printf '%s' "$out" | python3 -c 'import json,sys
 try:
     print(json.load(sys.stdin).get("allow"))
@@ -429,6 +462,7 @@ unset _state_path
 
 # ---------------------------------------------------------------- deploy
 do_deploy() {
+  FAILURE_CLASS=""
   load_production_env
   mkdir -p "$RELEASE_DIR"
   exec >>"$LOG_FILE" 2>&1
@@ -618,48 +652,50 @@ EOF
       "re-run publish with explicit destructive approval after reviewing pending migrations; production unchanged"
     return 0
   fi
-  # ---- backup (server-local pre-migration snapshot; no download in publish path) ----
+  # ---- backup (authoritative cloud snapshot; no local download in the release path) ----
+  # A database-sensitive release must have a verified, restorable backup BEFORE
+  # any migration or traffic switch. The snapshot is generated on ECS, stored on
+  # the durable release-backups volume, and verified (size + SHA-256 +
+  # pg_restore --list). An OSS mirror is optional. The release never depends on
+  # downloading the backup to the operator's Mac, and a failed local download is
+  # NOT a release failure.
   local needs_backup
   needs_backup=$(printf '%s' "$plan_json" | python3 -c "import json,sys;print('1' if json.load(sys.stdin).get('requires_backup') else '0')" 2>/dev/null || printf '0')
   if [ "$needs_backup" = "1" ]; then
-    local pg_root="${TRADE_OS_POSTGRES_ROOT:-/opt/trade-os-postgres}"
-    local snap_dir="/var/lib/trade-os/release-backups/$RELEASE_ID"
-    mkdir -p "$snap_dir"
-    chmod 700 "$snap_dir" || true
-    if [ -x "$pg_root/backup.sh" ]; then
-      local backup_log="$snap_dir/backup.log" dump_rel="" database_sha=""
-      (cd "$pg_root" && ./backup.sh >"$backup_log" 2>&1) || {
-        write_result "failed" "backup" "pre-migration backup failed; see $backup_log" \
-          "fix backup, then re-run the same release; production and database unchanged"
-        return 1
-      }
-      dump_rel=$(sed -n 's/^backup=//p' "$backup_log" | tail -n 1)
-      database_sha=$(sed -n 's/^sha256=//p' "$backup_log" | tail -n 1)
-      if [ -z "$dump_rel" ] || [ -z "$database_sha" ] || [ "${dump_rel#/}" != "$dump_rel" ]; then
-        write_result "failed" "backup" "backup did not return a valid dump path and checksum" \
-          "re-run the same release; production and database unchanged"
-        return 1
-      fi
-      cp -- "$pg_root/$dump_rel" "$snap_dir/database.dump"
-      [ "$(sha256sum "$snap_dir/database.dump" | awk '{print $1}')" = "$database_sha" ] || {
-        write_result "failed" "backup" "backup checksum mismatch after copy" \
-          "re-run the same release; production and database unchanged"
-        return 1
-      }
-      python3 - <<EOF | atomic_write "$RELEASE_DIR/.backup.json"
-import json
-print(json.dumps({
-  "path": "$snap_dir/database.dump", "sha256": "$database_sha",
-  "verified": True, "scope": "pre-migration server-local",
-  "created_at": "$(NOW)",
-}, indent=2, sort_keys=True))
-EOF
-      printf 'backup ok: %s\n' "$snap_dir/database.dump"
-    else
-      write_result "failed" "backup" "postgres backup runner missing at $pg_root/backup.sh" \
-        "restore the postgres directory on ECS, then re-run the same release; production unchanged"
+    local backup_helper="$RELEASE_DIR/deploy/cloud/backup-remote.sh"
+    if [ ! -f "$backup_helper" ]; then
+      # Fall back to the deployed copy so a candidate that predates the helper
+      # (or a rollback target) can still take a verified snapshot.
+      backup_helper="$REMOTE_ROOT/current/deploy/cloud/backup-remote.sh"
+    fi
+    if [ ! -f "$backup_helper" ]; then
+      FAILURE_CLASS="backup_failed"
+      write_result "failed" "backup" "pre-migration backup failed: deploy/cloud/backup-remote.sh is missing from the candidate" \
+        "republish a candidate that contains the backup helper, then re-run; production and database unchanged"
       return 1
     fi
+    local backup_out backup_rc backup_json backup_stage backup_path
+    backup_out=$(bash "$backup_helper" "$RELEASE_ID" 2>&1)
+    backup_rc=$?
+    printf '%s\n' "$backup_out"
+    backup_json=$(printf '%s\n' "$backup_out" | grep '^TROSA_BACKUP_JSON ' | tail -n 1 | sed 's/^TROSA_BACKUP_JSON //')
+    if [ "$backup_rc" != "0" ] || [ -z "$backup_json" ]; then
+      case "$backup_rc" in
+        11) backup_stage="backup_verify" ;;
+        12) backup_stage="backup_store" ;;
+        *) backup_stage="backup" ;;
+      esac
+      case "$backup_stage" in
+        backup) FAILURE_CLASS="backup_failed" ;;
+        *) FAILURE_CLASS="backup_verification_failed" ;;
+      esac
+      write_result "failed" "$backup_stage" "pre-migration backup failed (helper exit $backup_rc, class=$FAILURE_CLASS)" \
+        "fix the backup on ECS, then re-run the same release; production and database unchanged"
+      return 1
+    fi
+    printf '%s' "$backup_json" | python3 -m json.tool | atomic_write "$RELEASE_DIR/.backup.json"
+    backup_path=$(printf '%s' "$backup_json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('path',''))" 2>/dev/null || true)
+    printf 'backup ok (cloud verified): %s\n' "$backup_path"
   fi
 
   # ---- migrate (explicit phase, before any traffic switch) ----
@@ -726,6 +762,7 @@ PYEOF
 
 # ---------------------------------------------------------------- rollback
 do_rollback() {
+  FAILURE_CLASS=""
   load_production_env
   mkdir -p "$RELEASE_DIR"
   exec >>"$LOG_FILE" 2>&1

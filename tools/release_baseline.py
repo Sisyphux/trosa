@@ -19,6 +19,16 @@ production commit, API error, rate limit, malformed response, diverged
 history -- the release is refused instead of guessed.  A refused release leaves
 production on its last confirmed healthy version.
 
+Transient failures (network errors, HTTP 5xx, rate limit) are retried a
+bounded number of times before failing closed; the decision logic itself is
+unchanged and still refuses anything it cannot prove.
+
+An optional GitHub token can be supplied via the ``TRADE_OS_GITHUB_TOKEN`` or
+``GITHUB_TOKEN`` environment variable to raise the compare API rate limit on
+the ECS runner (configure it in ``/etc/trade-os/trade-os.env``; it reaches the
+guard through ``load_production_env``).  The repository is public, so the
+guard also works without a token.
+
 This module is intentionally stdlib-only: the ECS runner executes it with the
 system Python before any release code is imported.
 """
@@ -30,12 +40,19 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 
 DEFAULT_API_BASE = "https://api.github.com"
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+
+# Bounded retry for transient GitHub API failures only.  A definitive answer
+# (4xx other than secondary rate limiting) is returned immediately and still
+# fails closed downstream.
+DEFAULT_RETRIES = 2
+_TRANSIENT_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
 
 # Compare statuses that prove the candidate still contains production.
 _CONTAINS_PRODUCTION = frozenset({"ahead", "identical"})
@@ -103,17 +120,35 @@ def _http_status(url: str, token: str | None, timeout: float,
         return getattr(response, "status", 200), body
 
 
+def _transient(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in _TRANSIENT_HTTP_CODES
+    return isinstance(exc, (urllib.error.URLError, OSError, TimeoutError))
+
+
 def fetch_compare_status(repository: str, production: str, candidate: str,
                          *, api_base: str = DEFAULT_API_BASE,
                          token: str | None = None, timeout: float = 20.0,
+                         retries: int = DEFAULT_RETRIES, sleep=time.sleep,
                          urlopen=urllib.request.urlopen) -> str:
     """Return the GitHub compare status for ``production...candidate``.
 
-    Raises on transport or parse failures so callers can fail closed.
+    Transient transport failures are retried up to ``retries`` extra times
+    with a short linear backoff.  Raises on transport or parse failures so
+    callers can fail closed.
     """
     url = (f"{api_base.rstrip('/')}/repos/{repository}/compare/"
            f"{production}...{candidate}")
-    _, body = _http_status(url, token, timeout, urlopen)
+    attempts = max(1, retries + 1)
+    for attempt in range(attempts):
+        try:
+            _, body = _http_status(url, token, timeout, urlopen)
+            break
+        except Exception as exc:
+            if attempt + 1 < attempts and _transient(exc):
+                sleep(attempt + 1)
+                continue
+            raise
     doc = json.loads(body)
     status = doc.get("status")
     if not isinstance(status, str) or not status:
@@ -123,7 +158,8 @@ def fetch_compare_status(repository: str, production: str, candidate: str,
 
 def assess(production: object, candidate: object, repository: str,
            *, api_base: str = DEFAULT_API_BASE, token: str | None = None,
-           timeout: float = 20.0, urlopen=urllib.request.urlopen) -> dict:
+           timeout: float = 20.0, retries: int = DEFAULT_RETRIES,
+           sleep=time.sleep, urlopen=urllib.request.urlopen) -> dict:
     """Full guard: resolve ancestry for a release and return a decision dict."""
     prod = (production or "").strip().lower() if isinstance(production, str) else ""
     cand = (candidate or "").strip().lower() if isinstance(candidate, str) else ""
@@ -139,7 +175,7 @@ def assess(production: object, candidate: object, repository: str,
     try:
         status = fetch_compare_status(
             repository, prod, cand, api_base=api_base, token=token,
-            timeout=timeout, urlopen=urlopen,
+            timeout=timeout, retries=retries, sleep=sleep, urlopen=urlopen,
         )
     except Exception:
         # Never guess: transport, auth, rate-limit and 404 all mean "unproven".

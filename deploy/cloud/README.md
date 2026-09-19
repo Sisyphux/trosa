@@ -6,6 +6,7 @@
 > ```bash
 > deploy/cloud/trosa-release status --json   # production / previous / migration / backup / health
 > deploy/cloud/trosa-release publish --commit <sha> [--release-id ID]
+> deploy/cloud/trosa-release check --release-id ID [--json]  # 按 release 恢复查询
 > deploy/cloud/trosa-release rollback        # 切回 previous_healthy（数据库不降级）
 > ```
 >
@@ -24,9 +25,13 @@
 > TABLE/COLUMN、TRUNCATE、DELETE 等数据丢失操作，拒绝自动发布，需明确
 > `--allow-destructive-db`）、`sensitive_runtime`（迁移代码变化但无新文件，
 > 按 compatible 处理）。触发器函数体内的行同步 DELETE 与 DROP
-> INDEX/CONSTRAINT 不算破坏性。备份是服务端本地快照（发布链路内），下载
-> 到 Mac 的异地归档只在需要时用 `backup-workbench.sh` 按需拉取，不再是
-> 每次发布的前置步骤。
+> INDEX/CONSTRAINT 不算破坏性。对数据库敏感改动，发布门禁要求切换流量前在
+> ECS 生成并校验一份权威备份（`deploy/cloud/backup-remote.sh`：大小 +
+> SHA-256 + `pg_restore --list` 可恢复性，可选 OSS 镜像），失败即中止；
+> 下载到 Mac 的异地归档是可选项，`workbench download` / `scp` / SSH 文件流
+> 失败**不会**阻塞发布。失败分类：`backup_failed`（备份失败）、
+> `backup_verification_failed`（备份校验/存储失败）、`release_failed`（代码
+> 发布失败）与客户端 `local_download_failed`（单纯下载失败）。
 >
 > `publish-workbench.sh` / `rollback-workbench.sh` 已冻结为兼容垫片（会打印
 > DEPRECATED 警告），待新机制经一次真实发布验证后删除。
@@ -114,7 +119,7 @@ deploy/cloud/auto-publish.sh --branch fix/modal-exit
 deploy/cloud/auto-publish.sh --dry-run --commit abc1234
 ```
 
-发布输入只有 commit 或 branch，不接受文件清单，也不会使用调用者的 index、未暂存改动或未跟踪文件。脚本会在基于 `origin/main` 的临时 worktree 中按顺序 cherry-pick 输入，拒绝运行数据、密钥、本地环境文件和生成运行时；数据库敏感改动会先运行 `backup-workbench.sh`。`--dry-run` 只构建候选并执行本地门禁，不访问 ECS、不备份、不推送、不发布。
+发布输入只有 commit 或 branch，不接受文件清单，也不会使用调用者的 index、未暂存改动或未跟踪文件。脚本会在基于 `origin/main` 的临时 worktree 中按顺序 cherry-pick 输入，拒绝运行数据、密钥、本地环境文件和生成运行时；数据库敏感改动由 ECS 在切换流量前生成并校验权威备份（`backup-remote.sh`），本地归档可选、不再阻塞发布。`--dry-run` 只构建候选并执行本地门禁，不访问 ECS、不备份、不推送、不发布。
 
 底层 `publish-workbench.sh` 仍可用于发布已提交且已推送的本地 `HEAD`；当前仓库公开，因此 ECS 可以直接下载对应 commit 的 GitHub 归档。仓库目前没有 GitHub Actions 或 Webhook 自动部署。
 
@@ -171,9 +176,46 @@ ECS 发布锁保证同一时间只有一个 release 在执行；同一 release �
 append-only `.release-ledger.jsonl` 记录每个终端结果；state / result / manifest /
 health / migration / backup 全部原子写入，发布中断不会留下半写状态。
 
-`backup-workbench.sh` 会调用 ECS PostgreSQL 生产目录的 verified logical dump，核对 dump
-的 SHA-256 和 `pg_restore --list`，再把数据库 dump、客户附件和 manifest 打包下载到 Mac 的
+## 发布结果状态机与网络异常语义
+
+`publish` / `rollback` 的每个结果都带 `TROSA_RELEASE_STATE` 行，只有五种状态：
+
+- `submitted`：RunCommand 已被 Cloud Assistant 接受（InvokeId 已返回），结果未确认；
+- `checking`：正在轮询 ECS 结果；
+- `success`：已确认成功；
+- `failed`：已确认失败/被拒（`refused` / `rolled_back` / `rollback_failed` / `busy`
+  归入 failed 家族，但各自仍保留 `TROSA_RELEASE_*` 细分行与退出码）；
+- `unknown`：无法确定（轮询失败、超时）。**unknown 不是发布失败**：production
+  状态未知，可能已变更；不要假定未变更，也不要盲目改代码。
+
+网络故障下的行为约定：
+
+1. `RunCommand` 已接受但 `DescribeInvocations` 失败/超时（传输层 exit 124 +
+   `CLOUD_ASSISTANT_PENDING` 行）→ 客户端报告 `TROSA_RELEASE_STATE unknown`
+   （exit 5），绝不报告"发射失败、production 未变更"；
+2. 只有 Cloud Assistant API 明确拒绝（HTTP 4xx）或发射未确认时才报告
+   "production 未变更，可直接重跑"；
+3. 恢复查询：`deploy/cloud/trosa-release check --release-id <ID> [--json]` 按该
+   release 只读询问 ECS 上的 `DEPLOY_RESULT.json`，归一输出上述状态；无结果时
+   返回 unknown（可能仍在 fetch 阶段、发射未被接受或已清理），稍后重跑 check 或
+   幂等重跑同一 publish；
+4. Cloud Assistant API 的瞬态网络错误有界重试（RunCommand 每次调用携带
+   ClientToken，重试幂等）；`DescribeInvocations` 只读查询在截止时间内自动重试；
+5. GitHub compare API（baseline 门）瞬态故障（网络错误 / 5xx / 429）默认重试
+   2 次（线性退避）后仍 fail closed；`TRADE_OS_GITHUB_TOKEN` 或 `GITHUB_TOKEN`
+   可提高限额（可在 ECS `/etc/trade-os/trade-os.env` 配置，经
+   `load_production_env` 传入 guard）。
+
+`deploy/cloud/backup-remote.sh` 在 ECS 上调用 PostgreSQL 生产目录的 verified logical dump，
+核对 SHA-256 与 `pg_restore --list` 可恢复性，并保留在 `/var/lib/trade-os/release-backups/<id>/`。
+配置 `TRADE_OS_BACKUP_OSS_URI` 与自校验的 `TRADE_OS_BACKUP_UPLOAD_CMD` 后会额外镜像到 OSS；
+镜像必须回传匹配的 `size=` 与 `sha256=`，否则判备份校验失败。
+
+`backup-workbench.sh` 在此之上可选地把数据库 dump、客户附件和 manifest 打包下载到 Mac 的
 `~/Library/Application Support/trosa/backups/`，核对 bundle SHA-256 后保留最近 14 天的归档。
+`--cloud-only` 只生成校验云端备份不下载；`--download=never|auto|require` 控制本地归档。
+下载失败（workbench/scp/SSH 文件流）只影响本地副本，退出码 20 并打印
+`TROSA_LOCAL_ARCHIVE local_download_failed`，与备份失败（10/11/12）严格区分。
 它不创建阿里云 ECS 系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建 ECS。应用在
 PostgreSQL 模式下不会把旧 SQLite 目录伪装成备份，也不会通过备份 API 恢复 SQLite 文件。
 

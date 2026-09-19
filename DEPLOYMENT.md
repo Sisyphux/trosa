@@ -158,9 +158,11 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 
 应用保持一个唯一可写 PostgreSQL 主数据库，不会把 SQLite 文件当作第二个运行中的数据库。正式备份脚本生成一致性 logical dump，执行 `pg_restore --list` 验证，再和客户附件打包并核对 SHA-256；不依赖应用内的 SQLite 快照定时器。任务失败只记录失败状态，不切换主库。
 
+数据库敏感发布在切换流量前会由 `deploy/cloud/backup-remote.sh` 在 ECS 生成并校验权威快照（大小 + SHA-256 + `pg_restore --list`），并保留在 `/var/lib/trade-os/release-backups/`；配置 OSS 镜像后同一份备份会额外留存到对象存储。本地下载是可选项，`workbench download` / `scp` / SSH 文件流失败不阻塞发布。
+
 本机 bundle 用于快速恢复误删和错误操作，但与主数据库仍可能位于同一台 ECS，不能抵御整机或磁盘损坏。正式上线还需要异地备份：
 
-1. 每天运行 `deploy/cloud/backup-workbench.sh`，把 PostgreSQL dump、附件和 manifest 加密复制到外接盘或可信对象存储。
+1. 每天运行 `deploy/cloud/backup-workbench.sh`，把 PostgreSQL dump、附件和 manifest 加密复制到外接盘或可信对象存储；若对象存储已配置，同一份云端备份本身就满足异地要求，本地拉取仅作补充。
 2. 至少保留 30 天，建议与应用的 90 天本地保留策略配合。
 3. 每月在测试目录恢复一次。
 4. 恢复前先保留当前版本；恢复后核对数据库完整性、客户数、最近沟通和待办。

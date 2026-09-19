@@ -16,10 +16,19 @@ import hmac
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+
+# Bounded retry for transient transport failures only.  Server-side explicit
+# rejections (HTTP 4xx) fail immediately; ambiguous network errors are retried
+# because RunCommand carries a ClientToken, which makes a re-submission of the
+# same command idempotent.  A read-only Describe* query is always retryable.
+DEFAULT_ATTEMPTS = 3
+_TRANSIENT_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 def fail(message: str) -> None:
@@ -47,7 +56,9 @@ def credentials(path: str | None) -> tuple[str, str]:
     return key_id, secret
 
 
-def request(region: str, action: str, parameters: dict[str, object], credentials_file: str | None) -> dict:
+def request(region: str, action: str, parameters: dict[str, object], credentials_file: str | None,
+            *, urlopen=urllib.request.urlopen, attempts: int = DEFAULT_ATTEMPTS,
+            sleep=time.sleep) -> dict:
     key_id, secret = credentials(credentials_file)
     params: dict[str, object] = {
         "Format": "JSON",
@@ -65,14 +76,29 @@ def request(region: str, action: str, parameters: dict[str, object], credentials
     signature = base64.b64encode(hmac.new(f"{secret}&".encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
     query = canonical + "&Signature=" + quote(signature)
     endpoint = f"https://ecs.{region}.aliyuncs.com/?{query}"
-    try:
-        with urllib.request.urlopen(endpoint, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")
-        fail(f"{action} HTTP {exc.code}: {body}")
-    except (OSError, json.JSONDecodeError) as exc:
-        fail(f"{action} 请求失败: {exc}")
+    last_error = ""
+    for attempt in range(max(1, attempts)):
+        try:
+            with urlopen(endpoint, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")
+            if exc.code in _TRANSIENT_HTTP_CODES and attempt + 1 < attempts:
+                last_error = f"HTTP {exc.code}"
+                sleep(attempt + 1)
+                continue
+            fail(f"{action} HTTP {exc.code}: {body}")
+        except (OSError, json.JSONDecodeError) as exc:
+            # A dropped connection is ambiguous: the request may already have
+            # been accepted server-side.  Bounded retry (RunCommand is made
+            # idempotent by ClientToken; reads are always safe) before giving
+            # up with an explicit ambiguity marker.
+            last_error = str(exc)
+            if attempt + 1 < attempts:
+                sleep(attempt + 1)
+                continue
+            print(f"CLOUD_ASSISTANT_AMBIGUOUS action={action} error={last_error[:120]}", file=sys.stderr)
+            fail(f"{action} 请求失败: {last_error}")
 
 
 def main() -> None:

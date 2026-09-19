@@ -1,3 +1,28 @@
+## 2026-09-19 — 发布备份传输解耦：云端校验门禁 + 本地下载可选
+
+- 根因（备份传输硬依赖）：`release-commit.sh` 对数据库敏感改动会在 push/发布之前 `run_step '数据库敏感改动本地备份'` 调 `backup-workbench.sh`。该脚本先在 ECS 生成 dump，再用 `workbench download`（回退 scp）拉回 Mac；`set -e` 使**任何**本地下载/传输失败都中止整个发布——即使 ECS 上已有完整、已校验的备份。本次实测 `workbench exec/download` 对当前实例持续 `连接超时`（Workbench session/中继路径不可用，见下），`scp` 走 22 端口正常，说明把"能否把文件拉到 Mac"当作发布前置条件是错误的安全边界。
+- 根因（传输中断）：排查 ECS→本地持续文件传输，`workbench exec` 与 `workbench download` 均立即返回 "连接超时，请检查安全组规则或网络连通性"（Workbench CLI v1.0.1）；daemon 日志显示其文件传输经阿里云 OSS 中继（`download: downloading from OSS`），此前一次 websocket `EOF` 使 session 进入 BROKEN，之后 session 反复因 1 分钟 idle 关闭，无法重建。Cloud Assistant 控制面本身健康（`CloudAssistantStatus=true`，`SupportSessionManager=true`，心跳新鲜），直连 SSH/scp 稳定（60MB/300MB 传输校验一致）。结论：本地传输链路可独立于发布控制面失败，必须可选化。
+- 修复（云端权威备份）：新增 `deploy/cloud/backup-remote.sh`，把"可靠、已校验、可恢复的备份"收敛为唯一实现：生产 `backup.sh` 生成 custom-format dump（其内部已 `pg_restore --list` + SHA-256）→ 复制到 ECS 持久目录 `/var/lib/trade-os/release-backups/<release-id>/database.dump` → 对副本重新校验非空、大小、SHA-256 与 `pg_restore --list` 可恢复性 → 可选 OSS 镜像。`release-remote.sh` 的 backup 阶段改为调用候选自带的该脚本（回退 ECS 上的已部署副本），仍是**切换流量前**的硬门禁，失败即中止且 production/数据库不变。
+- 修复（本地下载可选）：`backup-workbench.sh` 重写为云端优先：默认先生成并校验云端备份，`--cloud-only` 只校验不下载；本地归档由 `--download=auto|require|never` 控制，下载失败输出 `TROSA_LOCAL_ARCHIVE local_download_failed` 并以退出码 20 表示——与备份失败（10/11/12）严格区分，绝不被当作备份失败。传输默认 `auto`（优先已配置的 scp，再回退 Workbench，带重试）。
+- 修复（发布入口解耦）：`release-commit.sh` 不再在 publish 前要求本地备份；数据库敏感改动只需声明"权威备份在 ECS 生成并校验"。发布成功后可选拉一份 Mac 归档，下载失败只打印 `TROSA_RELEASE_LOCAL_ARCHIVE local_download_failed`，退出码仍为成功。保留旧严格行为的人口：`--require-local-backup` / `TRADE_OS_RELEASE_REQUIRE_LOCAL_BACKUP=1`。
+- 修复（失败分类）：`release-remote.sh` 的 `DEPLOY_RESULT.json` 新增 `failure_class`：`backup_failed`（生成失败，phase=backup）、`backup_verification_failed`（校验/可恢复性/OSS 镜像失败，phase=backup_verify|backup_store）、`release_failed`（迁移/激活/健康失败）、`release_refused`、`release_busy`。`trosa-release` 在终态打印 `TROSA_RELEASE_FAILURE_CLASS <class>`，`check --release-id` 的 JSON 也带 `failure_class`。本地下载失败只存在于客户端（`local_download_failed`），不写入服务端结果。
+- 影响范围：`deploy/cloud/backup-remote.sh`（新增）、`backup-workbench.sh`、`release-remote.sh`、`release-commit.sh`、`trosa-release`、`deploy/cloud/README.md`、`DEPLOYMENT.md`、测试。不改变数据库敏感即需备份的安全要求与保护级别；OSS 为可选镜像（`TRADE_OS_BACKUP_OSS_URI` + 自校验的 `TRADE_OS_BACKUP_UPLOAD_CMD`，配置但无法校验时 fail closed）。
+- 是否需要迁移：否（不新增迁移文件，不修改 schema）。
+- 当前状态：新增 `tests/test_release_backup_transfer.py`（18 项：云端备份成功/生成失败/校验失败/不可恢复/OSS 无上传器/OSS 自报不符/OSS 成功、本地下载失败与备份失败区分、下载校验、失败分类映射、发布入口契约）与既有发布回归全部通过；随后完成一次真实数据库敏感发布并按云端快照实际恢复到临时库验证。
+
+## 2026-09-18 — 发布链路网络异常韧性：unknown 不判失败、check 恢复查询、有界重试
+
+- 根因（误判失败）：`trosa-release publish` 的发射步骤把"Cloud Assistant 调用失败"一律当作"发射失败、服务端未启动新任务、production 未变更"。但 `run-cloud-assistant-command.sh` 在 RunCommand 已被接受（InvokeId 已返回）之后，任何一次 `DescribeInvocations` 网络失败都会因 `set -e` 直接中止整个轮询——此时 ECS 上的 release-runner 很可能已经 detached 启动，客户端却报"发射失败"，误导 Agent/人工以为 production 没变而改走错误分支。
+- 根因（无恢复能力）：发射/轮询被打断后，除了 `status` 看全局状态外，没有按 release id 恢复查询单一 release 终态的入口；客户端只有 success/refused/rolled_back/busy/failed 五类细分输出，没有明确的 `unknown` 语义，"没问到"与"确认失败"无法区分。
+- 根因（GitHub API 脆弱）：baseline 门依赖公网 GitHub compare API，任何一次瞬态网络错误或 5xx/429 都立即 fail closed 拒绝发布；token 支持已存在但只在客户端环境生效，未明确传导到 ECS runner 路径。
+- 修复（unknown 语义）：`run-cloud-assistant-command.sh` 定义三种结局——远端命令真实退出码；2 = Cloud Assistant 在提交前明确拒绝（未提交，可安全重跑）；124 = 已提交但结果未知（`CLOUD_ASSISTANT_PENDING invoke_id=…` 行）。RunCommand 已接受后 `DescribeInvocations` 失败一律在截止时间内重试，绝不中止为"命令失败"；截止到期即报告"已提交但结果未知"。`trosa-release publish/rollback` 收到 124 时输出 `TROSA_RELEASE_STATE unknown`（exit 5）并指引 `check --release-id` 恢复，绝不声称"production 未变更"；只有 API 明确拒绝或发射未确认时才保留原语义。
+- 修复（恢复查询）：新增 `trosa-release check --release-id <ID> [--json]`：只读查询该 release 的 `DEPLOY_RESULT.json`（辅以 `.last-deploy-result.json`），归一输出五种状态 `submitted / checking / success / failed / unknown`（`in_progress`→checking，failed/refused/rolled_back/rollback_failed/busy→failed 家族，无结果→unknown），并保留 commit/phase/production/next_action 明细。
+- 修复（状态机）：publish/rollback 全程输出 `TROSA_RELEASE_STATE submitted→checking→success|failed|unknown` 机器可读行，与既有 `TROSA_RELEASE_SUCCESS/REFUSED/…` 细分行、退出码并存，向后兼容。
+- 修复（有界重试）：`cloud-assistant.py` 对瞬态错误（网络错误、5xx、429）默认重试 2 次（线性退避），RunCommand 每次调用携带 ClientToken 保证重试幂等；HTTP 4xx 仍立即失败。`tools/release_baseline.py` 的 compare 请求同样对瞬态错误有界重试（默认 2 次），任何剩余失败仍 fail closed（`compare_unavailable` → refused），决策逻辑未变；`TRADE_OS_GITHUB_TOKEN` / `GITHUB_TOKEN` 经 `/etc/trade-os/trade-os.env` → `load_production_env` → guard 环境显式传导。
+- 影响范围：仅发布链路客户端与传输层（`trosa-release`、`run-cloud-assistant-command.sh`、`cloud-assistant.py`、`tools/release_baseline.py`、`release-remote.sh` 注释）与测试/文档。不改变 baseline 门决策、ECS 幂等语义、fail-close 行为、release id/ledger/原子写入契约；新增 `TRADE_OS_CLOUD_ASSISTANT_CLIENT`（stub 注入）、`TRADE_OS_CLOUD_ASSISTANT_TRANSPORT`（stub 注入）、`TRADE_OS_CLOUD_ASSISTANT_POLL_GRACE`、`TRADE_OS_RELEASE_POLL_INTERVAL` 四个仅在测试中使用的钩子，生产默认值与原行为一致。
+- 是否需要迁移：否。
+- 当前状态：新增网络异常模拟验收 `tests/test_release_network_resilience.py`（16 项：RunCommand 接受后 DescribeInvocations 持续失败→unknown、偶发失败自动重试成功、4xx 拒绝可安全重跑、publish unknown 不含"发射失败/production 未变更"、check 五状态归一、GitHub 瞬态重试/持续 fail-close/token 传递）与既有发布回归共 117 项全部通过。
+
 ## 2026-09-18 — 修正：已联系的 prospect，常规开发待办即使到期日晚于发送日也关闭
 
 - 问题：上一个修复要求“到期日 ≤ 发送日”才关闭常规开发待办。批量导入的开发待办常被排在联系日之后（如 8/18 已联系、任务到期 9/17），于是这些已联系过的 prospect 仍以逾期人工待办留在今日跟进。

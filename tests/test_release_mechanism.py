@@ -288,8 +288,11 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def test_cloud_assistant_client_does_not_require_executable_bit(self):
         text = (ROOT / "deploy" / "cloud" / "run-cloud-assistant-command.sh").read_text(encoding="utf-8")
-        self.assertIn('python3 "$script_dir/cloud-assistant.py" run', text)
-        self.assertIn('python3 "$script_dir/cloud-assistant.py" get', text)
+        # The client is always invoked via `python3` (default
+        # $script_dir/cloud-assistant.py; env override is a test hook only).
+        self.assertIn('client="${TRADE_OS_CLOUD_ASSISTANT_CLIENT:-$script_dir/cloud-assistant.py}"', text)
+        self.assertIn('python3 "$client" run', text)
+        self.assertIn('python3 "$client" get', text)
 
     def test_workbench_noninteractive_commands_explicitly_use_bash(self):
         text = (ROOT / "deploy" / "cloud" / "run-workbench-command.sh").read_text(encoding="utf-8")

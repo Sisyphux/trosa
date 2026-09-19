@@ -36,6 +36,10 @@ source "$SCRIPT_DIR/lib-release-lock.sh"
 LOCK_DIR=""
 DRY_RUN=0
 ALLOW_DESTRUCTIVE="${TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB:-0}"
+# Local archive is optional by default. Setting this to 1 restores the old
+# (stricter) behavior where a database-sensitive release also requires a
+# verified local Mac archive before publishing — opt-in only.
+REQUIRE_LOCAL_BACKUP="${TRADE_OS_RELEASE_REQUIRE_LOCAL_BACKUP:-0}"
 COMMIT_SPECS=()
 BRANCH_SPECS=()
 REV_BASE_SPEC=""
@@ -58,6 +62,9 @@ Usage:
   --dry-run        只做 cherry-pick、数据库预检与完整回归，不推送、不发布
   --allow-destructive-db
                    显式允许疑似破坏性数据库操作（仍会先备份）
+  --require-local-backup
+                   数据库敏感改动额外要求本地 Mac 归档成功（默认关闭；云端
+                   备份始终是发布门禁，本地归档失败不影响发布）
   --help           显示本说明
 
 发布输入只有 commit。调用者当前的 index、未暂存改动和未跟踪文件不参与发布，
@@ -96,6 +103,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-destructive-db) ALLOW_DESTRUCTIVE=1; shift ;;
+    --require-local-backup) REQUIRE_LOCAL_BACKUP=1; shift ;;
     --help|-h) usage; exit 0 ;;
     --)
       usage >&2
@@ -387,9 +395,18 @@ fi
 
 run_step '发布前 ECS 状态' check_cloud_status
 
+# 数据库敏感改动的安全要求不变：发布前必须有可靠、已校验、可恢复的备份。
+# 但这份权威备份在 ECS 上生成并保留（release-remote.sh 的 backup 阶段，
+# 校验大小/SHA-256/pg_restore --list，失败会中止发布），不再要求先下载到
+# 本地 Mac。workbench download / scp / SSH 文件流失败不会阻塞发布。
 if [[ "$DB_SENSITIVE" == 1 ]]; then
-  run_step '数据库敏感改动本地备份' \
-    env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" bash "$SCRIPT_DIR/backup-workbench.sh"
+  printf '\n==> 数据库敏感改动：权威备份在 ECS 切换流量前生成并校验（失败会中止发布）\n'
+  printf '    本地 Mac 归档为可选，不再是发布前置条件（如需强制：--require-local-backup）。\n'
+  if [[ "$REQUIRE_LOCAL_BACKUP" == 1 ]]; then
+    run_step '数据库敏感改动本地归档（显式要求）' \
+      env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_BACKUP_TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}" \
+      bash "$SCRIPT_DIR/backup-workbench.sh" --download=require
+  fi
 fi
 
 # 推送是必须的一步：ECS 按 commit SHA 从 GitHub 公开归档下载，本地存在不等于
@@ -447,7 +464,22 @@ if [[ "$public_ok" != 1 ]]; then
   exit 1
 fi
 
-printf '\nRELEASE_COMMIT_SUCCESS commit=%s base=%s release=%s commits=%s public_health=ok\n' \
-  "$RELEASE_SHA" "${BASE_SHA:0:9}" "$RELEASE_ID" "${#RELEASE_COMMITS[@]}"
+# 可选本地归档：发布已经成功，云端备份也已校验。这里再拉一份 Mac 归档只是
+# 便利；workbench/scp/SSH 文件流失败一律不改变发布结果。
+LOCAL_ARCHIVE_STATUS="skipped"
+if [[ "$DB_SENSITIVE" == 1 && "$REQUIRE_LOCAL_BACKUP" != 1 ]]; then
+  printf '\n==> 可选本地归档（失败不影响发布结果）\n'
+  if env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_BACKUP_TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}" \
+      bash "$SCRIPT_DIR/backup-workbench.sh" --download=auto; then
+    LOCAL_ARCHIVE_STATUS="ok"
+  else
+    archive_rc=$?
+    printf 'TROSA_RELEASE_LOCAL_ARCHIVE local_download_failed rc=%s（云端备份已完成，发布保持成功）\n' "$archive_rc" >&2
+    LOCAL_ARCHIVE_STATUS="local_download_failed"
+  fi
+fi
+
+printf '\nRELEASE_COMMIT_SUCCESS commit=%s base=%s release=%s commits=%s public_health=ok local_archive=%s\n' \
+  "$RELEASE_SHA" "${BASE_SHA:0:9}" "$RELEASE_ID" "${#RELEASE_COMMITS[@]}" "$LOCAL_ARCHIVE_STATUS"
 printf '本地 %s 分支未移动（调用者工作区保持原样）；需要跟随时执行 git fetch origin && git merge --ff-only origin/%s\n' \
   "$TARGET_BRANCH" "$TARGET_BRANCH"

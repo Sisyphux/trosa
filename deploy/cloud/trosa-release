@@ -16,6 +16,14 @@
 #    已是生产版本且健康时直接返回 success/already_production。
 # 4. 所有输出都是机器可读的：RESULT JSON 包含 release / production /
 #    previous / backup / migration / health / rollback 状态与 next_action。
+# 5. 发布结果状态机（TROSA_RELEASE_STATE 行 + check 输出）只有五种：
+#      submitted  RunCommand 已被 Cloud Assistant 接受，结果未确认
+#      checking   正在轮询 ECS 结果
+#      success    已确认成功
+#      failed     已确认失败/被拒（refused/rolled_back/busy 属 failed 家族，
+#                 仍保留各自的 TROSA_RELEASE_* 细分行）
+#      unknown    无法确定（轮询失败/超时）——绝不当作发布失败，用 check
+#                 --release-id 恢复查询，或重跑同一 publish（幂等）
 set -euo pipefail
 export LC_ALL=C
 
@@ -30,11 +38,13 @@ usage() {
 Usage:
   trosa-release publish --commit <sha> [--release-id ID] [--allow-destructive-db]
   trosa-release status [--json]
+  trosa-release check --release-id ID [--json]
   trosa-release rollback [--allow-destructive-db]
   trosa-release db-plan [--applied a,b,c] [--changed p1,p2]
 
 publish  把已推送到 GitHub 的 commit 发布为一个明确 release（幂等，可重跑）。
 status   查看 production / previous / migration / backup / health 的确定状态。
+check    按 release id 恢复查询该 release 的最终状态（发射中断后先跑这个）。
 rollback 切回上一个健康 release（数据库 forward-only，不降级 schema）。
 db-plan  本地预检本次改动的数据库分类（none/compatible/destructive）。
 EOF
@@ -64,9 +74,23 @@ esac
 GITHUB_REPOSITORY="${GITHUB_REMOTE#https://github.com/}"
 
 # ---- Cloud Assistant：无 SSH、无实例密码 ------------------------------------
+# 传输层可通过 TRADE_OS_CLOUD_ASSISTANT_TRANSPORT 覆盖（仅测试钩子；生产不设置，
+# 始终走内置 run-cloud-assistant-command.sh）。
+CA_TRANSPORT="${TRADE_OS_CLOUD_ASSISTANT_TRANSPORT:-$SCRIPT_DIR/run-cloud-assistant-command.sh}"
 ca_exec() {
-  bash "$SCRIPT_DIR/run-cloud-assistant-command.sh" \
+  bash "$CA_TRANSPORT" \
     "$TRADE_OS_ECS_INSTANCE_ID" "$TRADE_OS_ECS_REGION" "$1"
+}
+
+# 发布结果状态机：把服务端原始 status 归一为
+# submitted / checking / success / failed / unknown 五种之一。
+release_state_for() {
+  case "$1" in
+    success) printf 'success' ;;
+    failed|refused|rolled_back|rollback_failed|busy) printf 'failed' ;;
+    in_progress) printf 'checking' ;;
+    *) printf 'unknown' ;;
+  esac
 }
 
 remote_sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
@@ -108,6 +132,71 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
       printf '%s\n' "$output"
     fi
     ;;
+  check)
+    # 恢复查询：发射/轮询被打断后，按 release id 只读询问最终状态。
+    # 永不改状态；无法确定时明确返回 unknown（不猜、不重试发布）。
+    shift
+    as_json=0
+    CHECK_RELEASE_ID=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --release-id) [[ $# -ge 2 ]] || fail "--release-id 需要一个值"; CHECK_RELEASE_ID=$2; shift 2 ;;
+        --json) as_json=1; shift ;;
+        *) fail "check 未知参数：$1" ;;
+      esac
+    done
+    case "$CHECK_RELEASE_ID" in ''|*[!A-Za-z0-9._-]*) fail "check 需要合法的 --release-id" ;; esac
+    poll_out="$(ca_exec "cat '$REMOTE_ROOT/.last-deploy-result.json' 2>/dev/null; echo; cat '$REMOTE_ROOT/releases/$CHECK_RELEASE_ID/DEPLOY_RESULT.json' 2>/dev/null" 2>/dev/null || true)"
+    TROSA_POLL_OUT="$poll_out" python3 - "$CHECK_RELEASE_ID" <<'PY'
+import json, os, sys
+
+release_id = sys.argv[1]
+best = None
+for line in os.environ.get("TROSA_POLL_OUT", "").splitlines():
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        doc = json.loads(line)
+    except Exception:
+        continue
+    # 优先该 release 自己的 DEPLOY_RESULT.json（输入中的第二份）。
+    if doc.get("release") == release_id:
+        best = doc
+if best is None:
+    result = {
+        "release": release_id,
+        "state": "unknown",
+        "status": "unknown",
+        "reason": "ECS 上暂无该 release 的 DEPLOY_RESULT：可能仍在 fetch 阶段、"
+                  "发射命令未被接受，或该 release 已被清理",
+        "next_action": "稍后重跑 check；若刚发射过，重跑同一 publish 也是幂等安全的",
+    }
+else:
+    status = str(best.get("status", ""))
+    state = {
+        "success": "success",
+        "failed": "failed", "refused": "failed",
+        "rolled_back": "failed", "rollback_failed": "failed", "busy": "failed",
+        "in_progress": "checking",
+    }.get(status, "unknown")
+    result = {
+        "release": release_id,
+        "state": state,
+        "status": status or "unknown",
+        "commit": best.get("commit", ""),
+        "phase": best.get("phase", ""),
+        "production": best.get("production", {}),
+        "previous": best.get("previous", {}),
+        "error": best.get("error", ""),
+        "next_action": best.get("next_action", ""),
+        "failure_class": best.get("failure_class") or "",
+        "updated_at": best.get("updated_at", ""),
+    }
+print(json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False))
+PY
+    exit 0
+    ;;
   publish|rollback)
     # 只有 release 角色可以改动 production；dev/review 角色在这里被明确拒绝。
     trosa_require_release_role || exit 1
@@ -143,22 +232,35 @@ print(json.dumps({'deploy_state':'unknown','reason':'ECS 运行的是旧发布�
     # trosa-operator 不能登录、不能获得通用 root shell；它只可 sudo 到 ECS
     # 上参数校验过的包装器。包装器下载并 detached 启动既有 release-remote.sh。
     launch="sudo /usr/local/lib/trosa/release-runner '$REMOTE_ROOT' '$SERVICE_NAME' '$RELEASE_ID' '$COMMIT' '$GITHUB_REMOTE' '$mode' '$ALLOW_DESTRUCTIVE'"
-    if ! launch_out="$(ca_exec "$launch")"; then
+    launch_rc=0
+    launch_out="$(ca_exec "$launch")" || launch_rc=$?
+    if [[ "$launch_rc" != 0 ]]; then
       printf '%s\n' "$launch_out" >&2
-      fail "发射失败（Cloud Assistant 错误）。服务端未启动新任务，production 未变更；可直接重跑"
+      if [[ "$launch_rc" == 124 ]]; then
+        # 发射命令已被 Cloud Assistant 接受（或接受与否无法排除），但结果
+        # 未能确认：这是 unknown，不是发布失败。production 可能已变更。
+        printf 'TROSA_RELEASE_STATE unknown\n'
+        printf '发射已提交但结果未知（Cloud Assistant 轮询失败）。production 状态未知，请勿假定未变更。\n' >&2
+        printf '先恢复查询：trosa-release check --release-id %s；重跑同一 %s 也是幂等安全的。\n' "$RELEASE_ID" "$mode" >&2
+        exit 5
+      fi
+      fail "发射命令未成功执行（Cloud Assistant 提交被拒，或远端包装器校验失败）。production 未变更；可直接重跑"
     fi
     printf '%s\n' "$launch_out" | grep -q "launched $RELEASE_ID" || {
       printf '%s\n' "$launch_out" >&2
       fail "发射未确认。production 未变更；可直接重跑"
     }
+    printf 'TROSA_RELEASE_STATE submitted\n'
 
     # 轮询：只读 cat 结果文件，单次调用都是短命令，可安全重试。
     # 任何一次轮询失败都只意味着"本次没问到"，不代表发布失败。
     # 轮询窗口要覆盖服务端等待发布锁的时间（默认 900s）。
     deadline=$((SECONDS + ${TRADE_OS_RELEASE_POLL_TIMEOUT:-1200}))
+    poll_interval="${TRADE_OS_RELEASE_POLL_INTERVAL:-5}"
     last_status=""
+    printf 'TROSA_RELEASE_STATE checking\n'
     while [[ $SECONDS -lt $deadline ]]; do
-      sleep 5
+      sleep "$poll_interval"
       poll_out="$(ca_exec "cat '$REMOTE_ROOT/.last-deploy-result.json' 2>/dev/null; echo; cat '$REMOTE_ROOT/releases/$RELEASE_ID/DEPLOY_RESULT.json' 2>/dev/null" 2>/dev/null || true)"
       doc="$(printf '%s\n' "$poll_out" | python3 -c "
 import json,sys
@@ -177,6 +279,14 @@ print(json.dumps(best) if best else '')" 2>/dev/null || true)"
       last_status="$(printf '%s' "$doc" | python3 -c "import json,sys;print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
       if [[ "$last_status" != "in_progress" && -n "$last_status" ]]; then
         printf '%s\n' "$doc" | python3 -m json.tool
+        printf 'TROSA_RELEASE_STATE %s\n' "$(release_state_for "$last_status")"
+        # Explicit failure class: backup_failed / backup_verification_failed /
+        # release_failed / release_refused / release_busy. (A local download
+        # failure is client-side and never reaches the server result.)
+        failure_class="$(printf '%s' "$doc" | python3 -c "import json,sys;print(json.load(sys.stdin).get('failure_class') or '')" 2>/dev/null || true)"
+        if [[ -n "$failure_class" ]]; then
+          printf 'TROSA_RELEASE_FAILURE_CLASS %s\n' "$failure_class"
+        fi
         case "$last_status" in
           success) printf 'TROSA_RELEASE_SUCCESS release=%s\n' "$RELEASE_ID"; exit 0 ;;
           refused)
@@ -189,8 +299,9 @@ print(json.dumps(best) if best else '')" 2>/dev/null || true)"
         esac
       fi
     done
+    printf 'TROSA_RELEASE_STATE unknown\n'
     printf '轮询超时。release %s 仍在服务端执行或结果不可读。\n' "$RELEASE_ID" >&2
-    printf 'production 状态未知但服务端任务不受本机影响：重跑 status 查看，或重跑同一 publish（幂等）。\n' >&2
+    printf 'production 状态未知但服务端任务不受本机影响：先 trosa-release check --release-id %s 恢复查询，或重跑同一 %s（幂等）。\n' "$RELEASE_ID" "$mode" >&2
     exit 5
     ;;
   ""|--help|-h|help)
