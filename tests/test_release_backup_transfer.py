@@ -199,13 +199,14 @@ class BackupWorkbenchTests(unittest.TestCase):
     def wb(self, *args, runner_body: str, fetch_body: str | None = None,
            extra_env: dict | None = None):
         write_exec(self.runner, "#!/usr/bin/env bash\n" + runner_body)
-        env = clean_env(
-            TRADE_OS_WORKBENCH_ENV=str(self.env_file),
-            TRADE_OS_BACKUP_RUNNER=str(self.runner),
-            TRADE_OS_LOCAL_BACKUP_DIR=str(self.local_dir),
-            TRADE_OS_BACKUP_TRANSFER="auto",
-            **(extra_env or {}),
-        )
+        opts = {
+            "TRADE_OS_WORKBENCH_ENV": str(self.env_file),
+            "TRADE_OS_BACKUP_RUNNER": str(self.runner),
+            "TRADE_OS_LOCAL_BACKUP_DIR": str(self.local_dir),
+            "TRADE_OS_BACKUP_TRANSFER": "auto",
+        }
+        opts.update(extra_env or {})
+        env = clean_env(**opts)
         if fetch_body is not None:
             fetch = write_exec(self.tmp / "fetch.sh", "#!/usr/bin/env bash\n" + fetch_body)
             env["TRADE_OS_BACKUP_FETCH"] = str(fetch)
@@ -260,6 +261,21 @@ class BackupWorkbenchTests(unittest.TestCase):
             extra_env={"TRADE_OS_BACKUP_FETCH_ARCHIVE": str(archive)})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("TROSA_LOCAL_ARCHIVE ok", proc.stdout)
+
+    def test_hanging_download_is_bounded_and_local_only(self):
+        # A transport that hangs must not stall the release: the attempt is
+        # killed by the watchdog and classified local_download_failed.
+        proc = self.wb(
+            "--download=auto",
+            runner_body="printf 'TROSA_BACKUP_JSON {\"status\":\"ok\"}\\n'\n"
+                        "printf 'SHA256=abc\\n'\n",
+            fetch_body="exec sleep 30\n",
+            extra_env={"TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT": "2",
+                       "TRADE_OS_BACKUP_TRANSFER": "ssh",
+                       "TRADE_OS_SSH_HOST": "stub-host"})
+        self.assertEqual(proc.returncode, 20, proc.stderr)
+        self.assertIn("TROSA_BACKUP_STATUS ok", proc.stdout)
+        self.assertIn("TROSA_LOCAL_ARCHIVE local_download_failed", proc.stderr)
 
     def test_download_checksum_mismatch_is_local_only(self):
         proc = self.wb(

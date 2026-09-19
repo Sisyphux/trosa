@@ -50,8 +50,11 @@ POSTGRES_ROOT="${TRADE_OS_POSTGRES_ROOT:-/opt/trade-os-postgres}"
 REMOTE_ROOT="${TRADE_OS_REMOTE_ROOT:-/opt/trade-os}"
 LOCAL_BACKUP_ROOT="${TRADE_OS_LOCAL_BACKUP_DIR:-$HOME/Library/Application Support/trosa/backups}"
 STAMP="$(date -u +%Y%m%d%H%M%S)"
-RELEASE_ID="backup-${STAMP}"
+RELEASE_ID="${STAMP}"
 ARCHIVE_NAME="trosa-postgres-backup-${STAMP}.tar.gz"
+# The server-side helper derives its bundle path from RELEASE_ID; prefer the
+# ARCHIVE= line it returns and fall back to this only for the legacy inline
+# path on an ECS that predates the helper.
 REMOTE_ARCHIVE="/tmp/${ARCHIVE_NAME}"
 # Transport: auto (try scp then Workbench), ssh (scp only), workbench (only).
 TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}"
@@ -97,6 +100,8 @@ POSTGRES_ROOT='$POSTGRES_ROOT'
 DATA_DIR='$DATA_DIR'
 RELEASE_ID='$RELEASE_ID'
 if [ -r /etc/trade-os/trade-os.env ]; then set -a; . /etc/trade-os/trade-os.env; set +a; fi
+# Failed downloads can leave bundles behind; keep /tmp bounded.
+find /tmp -maxdepth 1 -name 'trosa-postgres-backup-*.tar.gz' -mtime +2 -delete 2>/dev/null || true
 helper=''
 for candidate in "\$REMOTE_ROOT/current/deploy/cloud/backup-remote.sh" \$(ls -1dt "\$REMOTE_ROOT"/releases/*/deploy/cloud/backup-remote.sh 2>/dev/null); do
   if [ -f "\$candidate" ]; then helper="\$candidate"; break; fi
@@ -156,6 +161,9 @@ backup_rc=$?
 
 backup_json="$(printf '%s\n' "$output" | grep '^TROSA_BACKUP_JSON ' | tail -n 1 | sed 's/^TROSA_BACKUP_JSON //')"
 remote_sha="$(printf '%s\n' "$output" | sed -n 's/^SHA256=//p' | tail -n 1)"
+remote_archive="$(printf '%s\n' "$output" | sed -n 's/^ARCHIVE=//p' | tail -n 1)"
+# The helper names the bundle after its release id; trust the returned path.
+[[ -n "$remote_archive" ]] && REMOTE_ARCHIVE="$remote_archive"
 
 # Classify the cloud backup result. A non-zero helper exit means the cloud
 # backup is not trustworthy, regardless of any transfer outcome.
@@ -192,35 +200,70 @@ if [[ -z "$remote_sha" ]]; then
   exit 20
 fi
 
+# Bound every transfer attempt. macOS has no coreutils ``timeout``, and the
+# Workbench CLI can hang in its session/relay path instead of failing fast; a
+# release must never wait on the optional local archive indefinitely.
+run_with_timeout() {
+  local limit=$1; shift
+  "$@" &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$waited" -ge "$limit" ]]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 1
+      kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+}
+
 download_once() {
-  local transport=$1
+  local transport=$1 attempt_timeout="${TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT:-60}"
   # Test hook: a caller-supplied fetcher receives <remote> <local-dir> <transport>.
   if [[ -n "${TRADE_OS_BACKUP_FETCH:-}" ]]; then
-    "$TRADE_OS_BACKUP_FETCH" "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT" "$transport"
+    run_with_timeout "$attempt_timeout" "$TRADE_OS_BACKUP_FETCH" \
+      "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT" "$transport"
     return $?
   fi
   case "$transport" in
     ssh)
       [[ -n "${TRADE_OS_SSH_HOST:-}" ]] || return 127
-      scp -o BatchMode=yes -o ConnectTimeout=10 \
+      run_with_timeout "$attempt_timeout" scp -o BatchMode=yes -o ConnectTimeout=10 \
         "${TRADE_OS_SSH_HOST}:${REMOTE_ARCHIVE}" "$LOCAL_BACKUP_ROOT/"
       ;;
     workbench)
       command -v workbench >/dev/null 2>&1 || return 127
-      workbench download "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT/" \
+      run_with_timeout "$attempt_timeout" workbench download "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT/" \
         --instance-id "$TRADE_OS_ECS_INSTANCE_ID" --region "$TRADE_OS_ECS_REGION" --force
       ;;
     *) return 2 ;;
   esac
 }
 
+# The expected local path once the transfer finishes.
+EXPECTED_LOCAL="$LOCAL_BACKUP_ROOT/$(basename "$REMOTE_ARCHIVE")"
+
+# A transfer is successful when the artifact on disk is complete and matches
+# the server-reported checksum. Do not trust the transport's exit status: scp
+# (and Workbench) can leave a fully written file behind and then hang on the
+# control channel, which the watchdog kills with a non-zero status.
+local_archive_verified() {
+  [[ -f "$EXPECTED_LOCAL" ]] || return 1
+  [[ "$(shasum -a 256 "$EXPECTED_LOCAL" | awk '{print $1}')" == "$remote_sha" ]]
+}
+
 download_with_retry() {
   local transport=$1 attempt
-  for attempt in 1 2 3; do
+  for attempt in 1 2; do
     if download_once "$transport"; then return 0; fi
+    if local_archive_verified; then return 0; fi
     sleep 2
   done
-  return 1
+  local_archive_verified
 }
 
 downloaded=0
@@ -228,13 +271,12 @@ case "$TRANSFER" in
   ssh) download_with_retry ssh && downloaded=1 ;;
   workbench) download_with_retry workbench && downloaded=1 ;;
   auto)
-    # Prefer the key-based SSH data path when configured (Workbench's session
-    # relay can time out independently of port 22); fall back to Workbench.
+    # Prefer the key-based SSH data path when configured (the Workbench
+    # session/relay can hang independently of port 22); fall back to a bounded
+    # Workbench attempt.
     if [[ -n "${TRADE_OS_SSH_HOST:-}" ]] && download_with_retry ssh; then
       downloaded=1
     elif download_with_retry workbench; then
-      downloaded=1
-    elif [[ -n "${TRADE_OS_SSH_HOST:-}" ]] && download_with_retry ssh; then
       downloaded=1
     fi
     ;;
@@ -247,7 +289,7 @@ if [[ "$downloaded" != 1 ]]; then
   exit 20
 fi
 
-local_archive="$LOCAL_BACKUP_ROOT/$ARCHIVE_NAME"
+local_archive="$EXPECTED_LOCAL"
 if [[ ! -f "$local_archive" ]]; then
   printf 'TROSA_LOCAL_ARCHIVE local_download_failed（下载后找不到 %s）\n' "$local_archive" >&2
   exit 20
