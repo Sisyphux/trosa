@@ -321,6 +321,51 @@ class BackupHardDependencyContractTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=30)
             self.assertEqual(proc.stdout, expected, (status, phase, proc.stderr))
 
+    def test_write_result_embeds_valid_python_for_failure_class(self):
+        # Regression: the failure_class value must be embedded as a Python
+        # literal. Embedding JSON ``null`` into the heredoc made the runner
+        # produce a 0-byte DEPLOY_RESULT.json, so polling never resolved.
+        text = read(RELEASE_REMOTE)
+
+        def extract(name: str) -> str:
+            start = text.index(f"{name}() {{")
+            # The function body may contain a bare ``}`` (the Python result
+            # dict), so terminate on a function end followed by a blank line.
+            end = text.index("\n}\n\n", start)
+            return text[start:end + len("\n}\n")]
+
+        classify = extract("classify_failure")
+        write = extract("write_result")
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "wr.sh"
+            script.write_text(
+                "set -uo pipefail\n"
+                f"RESULT_FILE='{tmp}/result.json'\n"
+                f"LAST_RESULT='{tmp}/last.json'\n"
+                f"STATE_FILE='{tmp}/state.json'\n"
+                f"RELEASE_DIR='{tmp}'\n"
+                f"REMOTE_ROOT='{tmp}'\n"
+                "printf '{}' > \"$STATE_FILE\"\n"
+                "RELEASE_ID=rel-x; COMMIT_SHA=abc; MODE=deploy\n"
+                "MIRROR_LAST_RESULT=1; FAILURE_CLASS=\"\"\n"
+                "NOW() { date -u +%Y-%m-%dT%H:%M:%SZ; }\n"
+                "atomic_write() { cat > \"$1\"; }\n"
+                "read_current_release() { printf 'none'; }\n"
+                "release_commit() { printf 'unknown'; }\n"
+                "append_ledger() { :; }\n"
+                + classify + write +
+                "write_result success done\n"
+                "FAILURE_CLASS='backup_failed'\n"
+                "write_result failed backup\n"
+                "cat \"$RESULT_FILE\"\n",
+                encoding="utf-8")
+            proc = subprocess.run(["bash", str(script)], capture_output=True,
+                                  text=True, timeout=30, cwd=str(ROOT))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            doc = json.loads(Path(tmp, "result.json").read_text(encoding="utf-8"))
+            self.assertEqual(doc["status"], "failed")
+            self.assertEqual(doc["failure_class"], "backup_failed")
+
     def test_backup_remote_is_shell_valid(self):
         proc = subprocess.run(["bash", "-n", str(BACKUP_REMOTE)],
                               capture_output=True, text=True, timeout=30)

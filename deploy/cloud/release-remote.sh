@@ -246,7 +246,7 @@ doc = {
   "health": json.loads(open("$RELEASE_DIR/.health.json").read()) if __import__("os").path.exists("$RELEASE_DIR/.health.json") else None,
   "error": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$error"),
   "next_action": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$next"),
-  "failure_class": $(python3 -c "import json,sys;print(json.dumps(sys.argv[1] or None))" "$failure_class"),
+  "failure_class": $(python3 -c "import sys;print(repr(sys.argv[1]) if sys.argv[1] else 'None')" "$failure_class"),
   "updated_at": "$(NOW)",
 }
 print(json.dumps(doc, indent=2, sort_keys=True))
