@@ -454,10 +454,15 @@ head_contains() { git -C "$1" merge-base --is-ancestor "$2" HEAD; }
 # 编号分配由 reconcile_migrations.py 在共享预留锁内从持久计数器取号，两个并发
 # 任务不会拿到同一个号；已进入 main 或已记录在 applied ledger 的迁移绝不改名。
 reconcile_task_migrations() {
-  local task=$1 wt=$2 base out applied
+  local task=$1 wt=$2 base out applied tool
   base="$(task_base_ref)"
   applied="$TASK_META_DIR/.applied-migrations"
-  out="$(python3 "$MAIN_ROOT/tools/reconcile_migrations.py" \
+  # Prefer the task tree's own copy when the task itself ships/updates the tool;
+  # otherwise fall back to the integration tree. Same bootstrap rule as test.
+  tool="$wt/tools/reconcile_migrations.py"
+  [[ -r "$tool" ]] || tool="$MAIN_ROOT/tools/reconcile_migrations.py"
+  [[ -r "$tool" ]] || fail "找不到迁移校正工具 $tool"
+  out="$(python3 "$tool" \
     --task-dir "$wt" --target-ref "$base" \
     --meta-dir "$TASK_META_DIR" --task "$task" \
     --applied-ledger "$applied" --apply 2>&1)" || {
