@@ -727,14 +727,14 @@ class CalendarAndAccessTest(unittest.TestCase):
             module.g.current_user = 'hamid'
             sela_conn = module.get_db()
             try:
-                sela_context = module._sela_customer_context(sela_conn, customer_id)
+                sela_facts = module._customer_business_facts(sela_conn, [customer_id])[customer_id]
             finally:
                 sela_conn.close()
         stats = client.get('/api/stats').get_json()
         self.assertEqual(listed['contact_state'], summary['contact_state'])
-        self.assertEqual(summary['contact_state'], sela_context['customer']['contact_state'])
+        self.assertEqual(summary['contact_state'], sela_facts['contact_state'])
         self.assertEqual(listed['next_task_date'], summary['next_task']['remind_date'])
-        self.assertEqual(summary['next_task_date'], sela_context['customer']['next_task_date'])
+        self.assertEqual(summary['next_task_date'], sela_facts['next_task_date'])
         self.assertTrue(listed['waiting_reply'])
         self.assertGreaterEqual(stats['uncontacted'], 1)
 

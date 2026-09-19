@@ -6847,17 +6847,8 @@ html.motion-lite .customer-gap-item { transition: none; }
 }
 
 /* sela review uses the existing Inbox and modal, including narrow screens. */
-#selaFollowUpModal .modal { background: var(--bg-100, #faf8f4); }
-#selaReviewBody .form-group { display: block; margin: 16px 0; }
-#selaReviewBody textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; }
-#selaReviewBody blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--border); overflow-wrap: anywhere; }
-.inbox-group[data-category="sela_follow_up"],
-.inbox-group[data-category="sela_follow_up"] .inbox-item-row { min-width: 0; max-width: 100%; }
 @media (max-width: 600px) {
-  .inbox-group[data-category="sela_follow_up"] .inbox-item-row { flex-wrap: wrap; }
-  .inbox-group[data-category="sela_follow_up"] .inbox-summary-why { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
   #page-inbox .command-shelf { min-width: 0; max-width: 100%; box-sizing: border-box; }
-  #selaFollowUpModal .modal-footer { flex-wrap: wrap; }
 }
 
 /* Weekly workspace refinement: a calmer editorial header, compact controls,

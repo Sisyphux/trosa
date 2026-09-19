@@ -1326,56 +1326,21 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(canonical['reply_status'], 'pending')
         self.assertEqual(canonical['delivery_events'], 1)
 
-        # Existing-customer work is a proposal/confirmation flow; it must not
-        # bypass the canonical audit and Task relations.
-        context = client.get('/api/integrations/sela/customers/1/context')
-        self.assertEqual(context.status_code, 200, context.get_json())
-        follow_up = client.post(
-            '/api/integrations/sela/follow-up',
-            headers={'X-Idempotency-Key': 'pg-sela-follow-up-1'},
-            json={
-                'customer_id': 1,
-                'revision': context.get_json()['revision'],
-                'assessment': 'The fixture customer needs a confirmed quotation follow-up.',
-                'evidence': [{
-                    'source': 'trosa.customer_record',
-                    'quote': 'The customer has an open quotation task.',
-                }],
-                'action': 'create_task',
-                'payload': {
-                    'title': 'Sela canonical quotation follow-up',
-                    'due_date': '2026-09-26',
-                    'reason': 'rehearsal evidence',
-                },
-            },
-        )
-        self.assertEqual(follow_up.status_code, 201, follow_up.get_json())
-        proposal_id = follow_up.get_json()['proposal_id']
-        confirmed = client.post(f'/api/agent/proposals/{proposal_id}/confirm')
-        self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
+        # The Sela existing-customer follow-up interface is retired; its
+        # endpoints must be gone and must not create proposal/Inbox state.
+        # The SPA static catch-all answers 405 for an unmapped POST, so an
+        # absent endpoint may surface as 404 (unmapped GET) or 405 (unmapped
+        # POST) as well as the normal 401/403 auth rejection.
+        for method, path in (('get', '/api/integrations/sela/customers/1/context'),
+                             ('post', '/api/integrations/sela/follow-up')):
+            response = getattr(client, method)(
+                path, headers={'X-Idempotency-Key': 'pg-sela-follow-up-1'})
+            self.assertIn(response.status_code, (401, 403, 404, 405), response.get_json())
         self.assertEqual(
             self.connection.execute(
-                "SELECT status FROM audit.agent_proposals WHERE id=trosa.compat_uuid(?)",
-                (f'agent-proposal:hamid:{proposal_id}',),
-            ).fetchone()['status'],
-            'confirmed',
-        )
-        self.assertEqual(
-            self.connection.execute(
-                "SELECT count(*) FROM trosa.tasks WHERE title=?",
-                ('Sela canonical quotation follow-up',),
+                "SELECT count(*) FROM audit.agent_proposals WHERE source='sela_follow_up'"
             ).fetchone()[0],
-            1,
-        )
-        self.assertEqual(
-            self.connection.execute(
-                "SELECT item.status FROM trosa.inbox_items item "
-                "JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id "
-                "WHERE ref.table_name='inbox_items' AND ref.legacy_user_id=? "
-                "AND item.legacy_payload->>'compat_dedupe_key'=?",
-                ('hamid', f'sela_proposal:{proposal_id}'),
-            ).fetchone()['status'],
-            'resolved',
+            0,
         )
 
         # Replies update the canonical timeline, outreach message, and the

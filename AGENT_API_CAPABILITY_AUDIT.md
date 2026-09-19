@@ -24,7 +24,7 @@ Sela / 其他 Agent
 
 - `get_db()` 在 SQLite 隔离/回滚边界内按当前认证用户路由；正式运行由 PostgreSQL 组织/成员作用域隔离。
 - 普通业务 API 和 `/api/agent/*` 使用 `login_required`；`/api/gateway/*` 使用个人 Bearer token、scope 和当前用户绑定。
-- Sela 使用受限 Bearer token 集成；prospects/exclusions 为 `sela-v2`，follow-up 为 `sela-follow-up-v1`，并具有事务、精确身份匹配、`REVIEW` 和幂等收据。
+- Sela 使用受限 Bearer token 集成；prospects/exclusions 为 `sela-v2`，并具有事务、精确身份匹配、`REVIEW` 和幂等收据。Sela 的旧“已有客户跟进”接口（`/customers`、`/customers/<id>/context`、`/follow-up`、`sela-follow-up-v1`）已退役，由 `0037` 迁移清理历史运行态。
 - Gateway 的低风险写入使用 `Idempotency-Key`，记录 `agent_actions`，并通过 undo token 提供冲突感知撤销；高风险操作不允许直接执行。
 - 统一沟通入口与 Gateway 的 `record_communication` 共同复用当前业务函数，能记录事实、完成匹配的到期待办、按需创建下一待办，并仅在成功后解决指定 Inbox 条目。
 

@@ -1586,7 +1586,6 @@ function isInboxCommunicationCapture(item) {
 }
 
 function inboxCategory(item) {
-  if (item.item_type === 'sela_follow_up') return 'sela_follow_up';
   if (item.item_type === 'sela_agent_request') return 'sela_agent_request';
   if (item.item_type === 'sela_identity_review') return 'sela_identity_review';
   if (item.item_type === 'customer_reply') return 'new_reply';
@@ -1595,14 +1594,13 @@ function inboxCategory(item) {
 }
 
 var INBOX_CATEGORY_LABELS = {
-  sela_follow_up: 'sela 跟进建议',
   sela_agent_request: 'sela 需要你判断',
   sela_identity_review: 'sela 身份待确认',
   new_reply: '客户有新回复',
   capture: '待归属沟通',
   other: '其他事项',
 };
-var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_follow_up', 'sela_identity_review', 'other'];
+var INBOX_CATEGORY_ORDER = ['new_reply', 'capture', 'sela_agent_request', 'sela_identity_review', 'other'];
 var _inboxExpanded = new Set();
 
 function toggleInboxItem(key) {
@@ -1727,7 +1725,7 @@ function renderInbox(counts) {
       html += showCountryHeader ? '<div class="inbox-country-group">' : '<div class="inbox-country-group inbox-country-flat">';
       if (showCountryHeader) {
         html += '<div class="inbox-country-header"><span class="inbox-country-title">' + escapeHtml(country) + '</span><span class="inbox-country-count">' + countryItems.length + '</span>';
-        if (ids.length > 0 && cat !== 'sela_follow_up') {
+        if (ids.length > 0) {
           html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupTodayFollow(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">今天跟进</button>';
           html += '<button class="btn btn-sm inbox-group-action" onclick="inboxGroupExportEmails(\'' + cat + '\',\'' + encodeURIComponent(country) + '\')">导出邮箱</button>';
         }
@@ -1762,9 +1760,7 @@ function renderInboxItemHtml(item) {
   var mainAction = '';
   var captureMatch = null;
   var deleteAction = '';
-  if (item.item_type === 'sela_follow_up' && /^sela_proposal:\d+$/.test(item.dedupe_key || '')) {
-    mainAction = '<button class="btn btn-sm btn-primary" onclick="openSelaFollowUpReview(' + Number(item.dedupe_key.split(':')[1]) + ')">核对跟进建议</button>';
-  } else if (item.item_type === 'sela_agent_request') {
+  if (item.item_type === 'sela_agent_request') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="resolveSelaAgentRequest(' + itemId + ',\'approve\')">记录决定</button>';
   } else if (item.item_type === 'customer_reply') {
     mainAction = '<button class="btn btn-sm btn-primary" onclick="recordInboxReply(' + itemId + ')">记录到时间线</button>';
@@ -1824,7 +1820,7 @@ function renderInboxItemHtml(item) {
       body = '<p>' + escapeHtml(item.content || item.title || '') + '</p>';
     }
     var inlineDecision = '';
-    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_follow_up' && item.item_type !== 'sela_agent_request') {
+    if (customerId && item.item_type !== 'customer_reply' && item.item_type !== 'sela_agent_request') {
       var suggestedTitle = item.suggested_action || item.title || '联系客户并确认进展';
       var taskDate = new Date(); taskDate.setDate(taskDate.getDate() + 1);
       inlineDecision = '<div class="inbox-inline-decision">' +
@@ -2042,94 +2038,6 @@ function recordInboxCapture(itemId) {
 
 async function openInboxCustomer(customerId) {
   await openEditModal(customerId);
-}
-
-var _selaReviewProposal = null;
-var SELA_FOLLOW_UP_LABELS = {
-  title: '下一步动作', due_date: '执行日期', reason: '安排原因', content: '实际沟通内容', follow_date: '沟通日期',
-  direction: '方向（inbound / outbound / two_way / unknown）', activity_type: '沟通渠道',
-  next_task: '后续动作', next_follow_up: '后续日期', task_id: '对应待办编号', result: '沟通结果',
-  country: '国家', website: '网站', field: '业务领域', industry: '行业', profile: '客户概况', notes: '备注'
-};
-async function openSelaFollowUpReview(id) {
-  try {
-    var response = await api('/api/agent/proposals/' + id);
-    var proposal = response.proposal;
-    if (!proposal || proposal.status !== 'pending') { showToast('这项建议已处理'); await loadInbox(); return; }
-    _selaReviewProposal = proposal;
-    _modalSaveHandlers.selaFollowUpModal = function() { submitSelaFollowUpReview(true); };
-    var modal = document.getElementById('selaFollowUpModal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'selaFollowUpModal'; modal.className = 'modal-overlay';
-      modal.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="selaReviewTitle">' +
-        '<div class="modal-header"><h3 id="selaReviewTitle">核对 sela 跟进建议</h3><button class="btn btn-sm" onclick="closeModal(\'selaFollowUpModal\')">关闭</button></div>' +
-        '<div class="modal-body" id="selaReviewBody"></div><div class="modal-footer">' +
-        '<button class="btn" onclick="submitSelaFollowUpReview(false)">取消这项建议</button>' +
-        '<button class="btn btn-primary" onclick="submitSelaFollowUpReview(true)">确认保存</button></div></div>';
-      modal.addEventListener('keydown', function(event) {
-        if (event.key !== 'Tab') return;
-        var controls = Array.from(modal.querySelectorAll('button:not(:disabled), textarea:not(:disabled)'));
-        var first = controls[0], last = controls[controls.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      });
-      document.body.appendChild(modal);
-    }
-    document.getElementById('selaReviewTitle').textContent = '核对跟进建议 · ' + (proposal.customer_name || '客户 #' + proposal.customer_id);
-    var payload = proposal.payload || {};
-    var body = document.getElementById('selaReviewBody'); body.textContent = '';
-    var intro = document.createElement('p'); intro.textContent = '请核对来源和将要保存的内容；确认后才会更新客户记录。'; body.appendChild(intro);
-    var assessment = document.createElement('p'); assessment.textContent = payload._sela_assessment || ''; body.appendChild(assessment);
-    (payload._sela_evidence || []).forEach(function(evidence) {
-      var quote = document.createElement('blockquote'); quote.textContent = evidence.source + '：' + evidence.quote; body.appendChild(quote);
-    });
-    Object.keys(payload).forEach(function(key) {
-      if (!SELA_FOLLOW_UP_LABELS[key]) return;
-      var label = document.createElement('label'); label.className = 'form-group'; label.textContent = SELA_FOLLOW_UP_LABELS[key];
-      var input = document.createElement('textarea'); input.className = 'form-control'; input.dataset.selaField = key;
-      input.value = payload[key] == null ? '' : String(payload[key]); input.rows = 3;
-      if (key === 'task_id') input.readOnly = true;
-      label.appendChild(input); body.appendChild(label);
-    });
-    openModal('selaFollowUpModal');
-  } catch (error) { showToast(error.message || '无法读取跟进建议', 'error'); }
-}
-function showSelaFollowUpUndo(token) {
-  var toast = document.createElement('div'); toast.className = 'toast success toast-with-action';
-  var text = document.createElement('span'); text.textContent = '跟进已保存'; toast.appendChild(text);
-  var button = document.createElement('button'); button.type = 'button'; button.textContent = '撤销'; toast.appendChild(button);
-  button.onclick = async function() {
-    button.disabled = true;
-    try { await api('/api/undo/' + encodeURIComponent(token), {method: 'POST'}); toast.remove(); showToast('已撤销业务变更'); await loadInbox(); }
-    catch (error) { button.disabled = false; showToast(error.message || '无法撤销', 'error'); }
-  };
-  document.getElementById('toastContainer').appendChild(toast);
-  setTimeout(function() { if (toast.isConnected) toast.remove(); }, 15000);
-}
-async function submitSelaFollowUpReview(confirmWrite) {
-  if (!_selaReviewProposal) return;
-  var proposal = _selaReviewProposal;
-  var buttons = document.querySelectorAll('#selaFollowUpModal button');
-  buttons.forEach(function(button) { button.disabled = true; });
-  try {
-    if (confirmWrite) {
-      var payload = Object.assign({}, proposal.payload);
-      document.querySelectorAll('#selaReviewBody [data-sela-field]').forEach(function(input) {
-        if (input.dataset.selaField !== 'task_id') payload[input.dataset.selaField] = input.value;
-      });
-      await api('/api/agent/proposals/' + proposal.id, {method: 'PUT', body: JSON.stringify(payload)});
-      var result = await api('/api/agent/proposals/' + proposal.id + '/confirm', {method: 'POST'});
-      showToast('跟进已保存');
-      if (result.undo_token) showSelaFollowUpUndo(result.undo_token);
-    } else {
-      await api('/api/agent/proposals/' + proposal.id + '/cancel', {method: 'POST'});
-      showToast('已取消建议');
-    }
-    markModalClean('selaFollowUpModal'); closeModal('selaFollowUpModal'); _selaReviewProposal = null;
-    await loadInbox();
-  } catch (error) { showToast(error.message || '保存失败，请重试', 'error'); }
-  finally { buttons.forEach(function(button) { button.disabled = false; }); }
 }
 
 var _communicationConfirmContext = null;

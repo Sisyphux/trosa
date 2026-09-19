@@ -38,7 +38,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 | 业务数据 | PostgreSQL 的 `identity`、`core`、`trosa`、`audit` 是正式事实源；`sela` schema 仅是历史导入/兼容面，不是 Sela Agent 的本地业务库；兼容层通过用户作用域映射旧形状。 | `TRADE_OS_DATABASE_URL` 是正式写入边界；`CRM_DB_PATH` 仅用于 SQLite 隔离/导入演练/明确批准的回滚，不把 Excel 变成同步源。 |
 | 关系闭环 | 客户/联系人 → 沟通事实 → 明确待办 → Today/日历 → 新事实。 | 沟通可以没有下一步；待办必须有动作和日期。 |
 | 保护与恢复 | `db.py` 负责 PostgreSQL 启动迁移、兼容层和来源审计；正式备份由 PostgreSQL logical dump + 附件 bundle 完成，`undo_actions` 保存冲突感知的操作快照。 | 改写入逻辑时必须保留用户隔离、来源、操作日志、undo、外键/唯一约束与可恢复备份。 |
-| Sela | 通过 Bearer token 调用受限 `/api/integrations/sela/*` 接口；prospect/exclusion 使用 `sela-v2`，follow-up 使用 `sela-follow-up-v1`，由 Trosa 在 PostgreSQL 事务中精确匹配身份并以幂等键防重。 | Sela 不直接读写 Trosa 的 PostgreSQL 或文件存储；其本地 SQLite 只保留 Agent 会话、诊断、有限传输 outbox 和 Gmail delivery journal。多重命中或身份冲突必须返回 `REVIEW`。 |
+| Sela | 通过 Bearer token 调用受限 `/api/integrations/sela/*` 接口；prospect/exclusion 使用 `sela-v2`，由 Trosa 在 PostgreSQL 事务中精确匹配身份并以幂等键防重。旧“已有客户跟进”接口已退役（见 `0037` 迁移）。 | Sela 不直接读写 Trosa 的 PostgreSQL 或文件存储；其本地 SQLite 只保留 Agent 会话、诊断、有限传输 outbox 和 Gmail delivery journal。多重命中或身份冲突必须返回 `REVIEW`。 |
 
 ### 已冻结或不应扩张的旧能力
 

@@ -1,3 +1,15 @@
+## 2026-09-19 — 退役 sela“已有客户跟进”接口并清理历史运行态
+
+- 背景：sela 的第二条业务线更正为“开发 prospect 时请求人工补充事实”，不再是已有客户跟进。sela 侧已退役 `follow-up` CLI 与 `propose_follow_up`，不再调用 Trosa 的旧接口；本次在 Trosa 侧同步退役对应接口与遗留状态。
+- 移除接口：`GET /api/integrations/sela/customers`、`GET /api/integrations/sela/customers/<id>/context`、`POST /api/integrations/sela/follow-up`，以及辅助函数 `_sela_customer_context`、`_sela_validate_follow_up_payload`；`/api/integrations/sela/health` 不再返回 `follow_up_api`，服务 token 路径白名单同步删除。`_SELA_PROFILE_FIELDS` 保留（仍服务 `/api/agent/proposals` 的资料更新校验）。
+- 清理确认/审核路径：`/api/agent/proposals` 的 GET/PUT 不再处理 `source='sela_follow_up'` 的客户名回填、`_sela_*` 字段校验与 revision guard（`g.sela_follow_up_guard`、`_run_crm_write` guard 一并移除）；其余 agent_api / agent_gateway 提议流程不变。
+- 前端：移除 Inbox 的 `sela_follow_up` 分类、标签、排序与“核对跟进建议”弹窗（`openSelaFollowUpReview`/`submitSelaFollowUpReview`/`showSelaFollowUpUndo`）及相关 CSS。Inbox 仍保留 `sela_agent_request`（人工事实/决策请求）与 `sela_identity_review`。
+- 历史运行态清理：新增迁移 `migrations/0041_retire_sela_follow_up.sql`，删除 `trosa.inbox_items`（`item_type='sela_follow_up'`）、`audit.agent_proposals`（`source='sela_follow_up'`）与 `audit.integration_receipts`（`integration='sela' AND idempotency_key LIKE 'followup:%'`）。已确认的真实 CRM 写入保存在时间线/待办中，不受影响。
+- 测试：删除 `tests/test_sela_follow_up.py`；PostgreSQL rehearsal 的 Sela 用例改为断言旧接口已不存在且不产生 proposal/Inbox 状态；`test_risk_regressions` 的共享事实用例改用 `_customer_business_facts` 作为 sela 侧读取口径。
+- 影响范围：Trosa 的 Sela 集成接口、Inbox 前端、迁移账本；不改 prospect/exclusion/reply/needs 接口、不改业务表结构、不改 CRM 写入语义。
+- 是否需要迁移：是。发布流程会应用 `0041` 清理历史遗留；无需人工操作。
+- 当前状态：已生效（本地）。完整 SQLite 回归 303 项通过（1 skip），迁移目录完整性校验通过。
+
 ## 2026-09-19 — 发布备份传输解耦：云端校验门禁 + 本地下载可选
 
 - 根因（备份传输硬依赖）：`release-commit.sh` 对数据库敏感改动会在 push/发布之前 `run_step '数据库敏感改动本地备份'` 调 `backup-workbench.sh`。该脚本先在 ECS 生成 dump，再用 `workbench download`（回退 scp）拉回 Mac；`set -e` 使**任何**本地下载/传输失败都中止整个发布——即使 ECS 上已有完整、已校验的备份。本次实测 `workbench exec/download` 对当前实例持续 `连接超时`（Workbench session/中继路径不可用，见下），`scp` 走 22 端口正常，说明把"能否把文件拉到 Mac"当作发布前置条件是错误的安全边界。
@@ -90,13 +102,13 @@
 
 以 Inbox 归档 dedupe_key 为入口的全库 SQLite→PostgreSQL 行为差异专项排查；所有修复均在真实 PostgreSQL rehearsal 中验证。
 
-- 根因（时区）：`trosa.compat_time` 旧定义是 `value::timestamptz`，naive 字符串按**数据库 session 时区**解释。演练机继承 `Asia/Shanghai`，而生产 Docker `postgres:17.11` 未设 `TZ`（UTC）；同一次写入因此相差 8 小时，且 `trosa.compat_local_date` 硬编码 `Asia/Shanghai`，本地时间 ≥16:00 的记录会滚到错误日期。修复（迁移 `0037`）：显式偏移/Z 视为绝对时刻，其余 naive 值一律按 `Asia/Shanghai` 解释；应用连接 `postgres_compat.connect()` 同时把 `TimeZone` 固定为 `Asia/Shanghai`，使 `timestamptz::text` 与旧 SQLite 本地时间形状一致。
+- 根因（时区）：`trosa.compat_time` 旧定义是 `value::timestamptz`，naive 字符串按**数据库 session 时区**解释。演练机继承 `Asia/Shanghai`，而生产 Docker `postgres:17.11` 未设 `TZ`（UTC）；同一次写入因此相差 8 小时，且 `trosa.compat_local_date` 硬编码 `Asia/Shanghai`，本地时间 ≥16:00 的记录会滚到错误日期。修复（迁移 `0041`）：显式偏移/Z 视为绝对时刻，其余 naive 值一律按 `Asia/Shanghai` 解释；应用连接 `postgres_compat.connect()` 同时把 `TimeZone` 固定为 `Asia/Shanghai`，使 `timestamptz::text` 与旧 SQLite 本地时间形状一致。
 - 根因（可见键）：canonical `inbox_items.dedupe_key` 存储为 `compat:<user>:<raw>`，但 `/api/inbox` 的现代投影把它直接暴露给前端。除已知归档失效外，`_sela_agent_request_source_id` 的锚定正则、前端 `sela_follow_up` 审核按钮正则、Gmail 附件指针解析都把可见键当原始键使用，导致 Sela 人工请求 `candidate_id` 丢失、审核按钮不渲染。修复：投影统一返回兼容视图同款原始功能键（`COALESCE(payload->>'compat_dedupe_key', dedupe_key)`），写入侧继续同时匹配原始/规范两种键。
 - 根因（客户资料写空）：`trosa_domain.update_customer` 无论调用方是否提供，都把所有字段以 `''` 默认写入 `account_legacy_refs.legacy_payload`；而 `trosa.customer_records` 把“payload 存在该键”当权威值。一次普通客户资料保存（含前端只改 `next_follow_up` 的 PUT）就会把 `external_source`/`external_id`（Sela 链接）、`status`、`type`、`last_contact` 清空。修复：`update_customer` 只写入调用方实际提供的键；PUT 仅在显式请求时写 `last_contact`；`customer_states` 同理只在提供时更新。
 - 根因（并发）：`/api/team/invitations/<id>/accept|revoke` 通过 `trade_os_compat.team_invitations` 视图更新并以 `rowcount` 判定成功。PostgreSQL 对 INSTEAD OF 视图统计的是匹配视图行数，触发器始终 upsert，两个并发请求都能拿到 `rowcount=1`，同一邀请可被接受两次。修复：PostgreSQL 分支改为对 `identity.team_invitations` 做条件更新并检查 canonical `rowcount`，失败方在 READ COMMITTED 下重判谓词后得到 0。
 - 根因（日期投影不一致）：`_modern_outreach_rows` 用 `sent_at::text`（session 相关、带时间的完整时间戳），而兼容视图/旧契约用 `trosa.compat_local_date(...)`（`YYYY-MM-DD`）；同一封开发信两条读取路径给出不同值，Sela `sent_at` 形状也被改变。修复：现代读取改用 `compat_local_date`。
 - 根因（dedupe 竞态恢复不对称）：`create_inbox_item` 首次查找已匹配原始/规范键，但并发冲突后的兜底只匹配规范键；找不到时还会写入指向未插入 UUID 的悬空 `legacy_row_refs`。修复：统一查找原始/规范/兼容三种键；冲突无法解析时显式报错，不再伪造引用。
-- 影响范围：`postgres_compat.py`、`trosa_domain.py`、`app.py`、迁移 `0037`、`tests/test_postgres_rehearsal.py`、本变更日志；不改接口形状、表结构与运行契约。
+- 影响范围：`postgres_compat.py`、`trosa_domain.py`、`app.py`、迁移 `0041`、`tests/test_postgres_rehearsal.py`、本变更日志；不改接口形状、表结构与运行契约。
 - 验证：PostgreSQL rehearsal 29 项全部通过（含 5 项新回归：业务时区与 session 无关、Inbox 可见键为原始键且归档单条、Sela 可见键恢复 `candidate_id`、客户资料保存保留 Sela 链接与最近联系、并发邀请单一赢家）；完整 SQLite 回归 305 项通过；迁移完整性门禁通过。
 
 ## 2026-09-18 — 修复：客户高亮标记（置顶）不再优先显示在客户栏
@@ -121,6 +133,7 @@
 - 顺带修复：`selectedNewPool` 此前未声明（`updateSelection('newpool')` / 新客户池批量路径会抛 `ReferenceError`），现与 `selectedCustomers` 一并声明，使新客户池批量操作也能走统一反馈。
 - 数据边界：只改 `app/static/app.js`、`app/static/index.html`、`app/static/style.css`、`tests`；不动 `app.py`、接口、数据表、迁移与写入语义，无迁移编号。
 - 验证：新增 jsdom 回归 `tests/support/action_feedback_check.cjs` 与 `ActionFeedbackRegressionTest`（状态位生命周期与重试、星标乐观翻转/回滚、联系人删除回滚、联系人新增反馈、批量失败不报成功、新客户池选择可用）；完整 Python 回归 313 项、`node --check`、`browser-extension npm test` 全部通过。
+ ([retire-sela-follow-up] 退役 sela 已有客户跟进接口并清理历史运行态)
 
 ## 2026-09-17 — 生产发布并发安全：production 基线门、发布串行化与原子 release 状态
 
