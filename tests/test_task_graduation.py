@@ -281,7 +281,8 @@ class AgentWorktreeGraduationContractTests(unittest.TestCase):
             capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        for token in ("gate --task", "reconcile --task", "hooks", "--offline"):
+        for token in ("gate --task", "reconcile --task", "hooks", "--offline",
+                      "guard"):
             self.assertIn(token, proc.stdout)
 
     def test_guard_helpers_are_wired(self):
@@ -290,6 +291,9 @@ class AgentWorktreeGraduationContractTests(unittest.TestCase):
             "require_main_workspace",
             "reconcile_task_migrations",
             "check_task_ready",
+            "cmd_guard",
+            "applied-ledger",
+            "guard) cmd_guard",
             "git-hooks",
             "commit-msg",
             'verify_result=stale',
@@ -487,6 +491,205 @@ class GateIntegrationTests(unittest.TestCase):
         proc = self._gate()
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("未基于最新", proc.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# 4. Write isolation: dev/review are refused before they can dirty main.
+# --------------------------------------------------------------------------- #
+
+
+def copy_workflow(repo: Path) -> None:
+    cloud = repo / "deploy" / "cloud"
+    cloud.mkdir(parents=True, exist_ok=True)
+    for name in ("agent-worktree.sh", "release-env.sh", "lib-release-lock.sh"):
+        (cloud / name).write_text(
+            (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+    hooks = cloud / "git-hooks"
+    hooks.mkdir()
+    for name in ("pre-commit", "commit-msg"):
+        (hooks / name).write_text(
+            (ROOT / "deploy" / "cloud" / "git-hooks" / name).read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+
+class GuardCommandTests(unittest.TestCase):
+    """``guard`` is the task-start gate, before any file is written.
+
+    A dev/review session that starts in the main workspace must be refused and
+    told to create/adopt first; a session already in its ``agent/<id>``
+    worktree passes; release / unset roles (manual integration) are never
+    blocked.  ``status`` stays read-only and must not be part of the refusal.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.repo = base / "repo"
+        init_repo(self.repo)
+        (self.repo / "README.md").write_text("repo\n", encoding="utf-8")
+        commit(self.repo, "init")
+        copy_workflow(self.repo)
+        self.worktrees = base / "worktrees"
+        self.worktrees.mkdir()
+
+    def _guard(self, cwd, role=None):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+        if role is not None:
+            env["TRADE_OS_AGENT_ROLE"] = role
+        env["TRADE_OS_WORKTREE_ROOT"] = str(self.worktrees)
+        return subprocess.run(
+            ["bash", str(self.repo / "deploy" / "cloud" / "agent-worktree.sh"), "guard"],
+            capture_output=True, text=True, cwd=str(cwd), env=env, timeout=30,
+        )
+
+    def test_dev_in_main_is_refused(self):
+        proc = self._guard(self.repo, role="dev")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("主工作区", proc.stderr)
+        self.assertIn("create", proc.stderr)
+
+    def test_review_in_main_is_refused(self):
+        self.assertNotEqual(self._guard(self.repo, role="review").returncode, 0)
+
+    def test_release_and_unset_in_main_are_allowed(self):
+        self.assertEqual(self._guard(self.repo, role="release").returncode, 0)
+        self.assertEqual(self._guard(self.repo, role=None).returncode, 0)
+
+    def test_dev_in_task_worktree_is_allowed(self):
+        git(self.repo, "worktree", "add", "-q", "-b", "agent/feature",
+            str(self.worktrees / "feature"), "main")
+        proc = self._guard(self.worktrees / "feature", role="dev")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("可以开始任务", proc.stdout)
+        self.assertIn("feature", proc.stdout)
+
+    def test_dev_on_non_task_branch_is_refused(self):
+        git(self.repo, "checkout", "-q", "-b", "scratch")
+        proc = self._guard(self.repo, role="dev")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("agent/<id>", proc.stderr)
+
+    def test_status_stays_read_only_for_dev_in_main(self):
+        proc = subprocess.run(
+            ["bash", str(self.repo / "deploy" / "cloud" / "agent-worktree.sh"), "status"],
+            capture_output=True, text=True, cwd=str(self.repo),
+            env={**os.environ, "TRADE_OS_AGENT_ROLE": "dev"},
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("主工作区", proc.stdout)
+
+
+# --------------------------------------------------------------------------- #
+# 5. Migration allocation is unique under real concurrency, and already
+#    published/applied migrations are never renamed.
+# --------------------------------------------------------------------------- #
+
+
+def _add_migration(repo: Path, name: str, body: str) -> str:
+    (repo / "migrations" / name).write_text(body, encoding="utf-8")
+    return commit(repo, f"add {name}")
+
+
+class MigrationAllocationConcurrencyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.repo = base / "repo"
+        self.worktrees = base / "worktrees"
+        self.worktrees.mkdir()
+        init_repo(self.repo)
+        (self.repo / "migrations").mkdir()
+        (self.repo / "migrations" / "0001_base.sql").write_text("select 1;\n", encoding="utf-8")
+        commit(self.repo, "init")
+        # Two tasks both add number 0002 with different names.
+        git(self.repo, "checkout", "-q", "-b", "agent/a")
+        _add_migration(self.repo, "0002_a.sql", "select 2;\n")
+        git(self.repo, "checkout", "-q", "main")
+        git(self.repo, "checkout", "-q", "-b", "agent/b")
+        _add_migration(self.repo, "0002_b.sql", "select 3;\n")
+        # main independently publishes its own 0002 while both tasks are open.
+        git(self.repo, "checkout", "-q", "main")
+        _add_migration(self.repo, "0002_main.sql", "select 4;\n")
+        git(self.repo, "worktree", "add", "-q", str(self.worktrees / "a"), "agent/a")
+        git(self.repo, "worktree", "add", "-q", str(self.worktrees / "b"), "agent/b")
+        self.meta = self.repo / ".git" / "trosa-tasks"
+        self.meta.mkdir()
+
+    def _reconcile(self, task, extra=()):
+        return [
+            sys.executable, str(ROOT / "tools" / "reconcile_migrations.py"),
+            "--task-dir", str(self.worktrees / task), "--target-ref", "main",
+            "--meta-dir", str(self.meta), "--task", task, "--apply", *extra,
+        ]
+
+    def _numbers(self, task):
+        return sorted(
+            int(name[:4]) for name in (
+                p.name for p in (self.worktrees / task / "migrations").glob("*.sql")
+            )
+        )
+
+    def test_concurrent_reconcile_allocates_distinct_numbers(self):
+        procs = [
+            subprocess.Popen(self._reconcile(task), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, cwd=str(self.repo))
+            for task in ("a", "b")
+        ]
+        outs = [proc.communicate(timeout=60) for proc in procs]
+        for proc, (out, err) in zip(procs, outs):
+            self.assertEqual(proc.returncode, 0, err + out)
+        numbers_a = self._numbers("a")
+        numbers_b = self._numbers("b")
+        self.assertEqual(numbers_a[0], 1)
+        self.assertEqual(numbers_b[0], 1)
+        # The two task migrations must have different numbers, neither == 2.
+        task_numbers = {n for n in numbers_a if n != 1} | {n for n in numbers_b if n != 1}
+        self.assertEqual(len(task_numbers), 2, (numbers_a, numbers_b))
+        self.assertNotIn(2, task_numbers)
+        self.assertTrue((self.meta / ".migration-counter").exists())
+
+    def test_applied_ledger_blocks_renumbering(self):
+        # A task migration that an environment may already have applied must be
+        # left exactly where it is; reconcile fails closed instead of guessing.
+        (self.meta / ".applied-migrations").write_text("0002_a.sql\n", encoding="utf-8")
+        proc = subprocess.run(
+            self._reconcile("a", extra=["--applied-ledger",
+                                        str(self.meta / ".applied-migrations")]),
+            capture_output=True, text=True, cwd=str(self.repo), timeout=60,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("applied", proc.stderr.lower())
+        self.assertTrue((self.worktrees / "a" / "migrations" / "0002_a.sql").exists())
+
+    def test_migration_already_in_main_is_not_renamed(self):
+        repo = Path(self.tmp.name) / "repo2"
+        init_repo(repo)
+        (repo / "migrations").mkdir()
+        (repo / "migrations" / "0001_base.sql").write_text("select 1;\n", encoding="utf-8")
+        commit(repo, "init")
+        git(repo, "checkout", "-q", "-b", "agent/c")
+        _add_migration(repo, "0002_c.sql", "select 2;\n")
+        git(repo, "checkout", "-q", "main")
+        _add_migration(repo, "0002_c.sql", "select 9;\n")
+        wts = Path(self.tmp.name) / "wts2"
+        wts.mkdir()
+        git(repo, "worktree", "add", "-q", str(wts / "c"), "agent/c")
+        meta = repo / ".git" / "trosa-tasks"
+        meta.mkdir()
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "reconcile_migrations.py"),
+             "--task-dir", str(wts / "c"), "--target-ref", "main",
+             "--meta-dir", str(meta), "--task", "c", "--apply"],
+            capture_output=True, text=True, cwd=str(repo), timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
+        self.assertTrue((wts / "c" / "migrations" / "0002_c.sql").exists())
 
 
 if __name__ == "__main__":

@@ -24,7 +24,10 @@ branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf 'detached')"
 toplevel="$(git rev-parse --show-toplevel 2>/dev/null || printf '?')"
 printf '提交被拒绝：%s 角色不能在集成分支 %s 上直接提交。\n' "$role" "$target" >&2
 printf '  当前目录：%s\n' "$toplevel" >&2
-printf '  请先进入任务隔离区再提交：\n' >&2
+printf '  这只是最后一道闸门；开发任务开始前应先运行：\n' >&2
+printf '    deploy/cloud/agent-worktree.sh guard\n' >&2
+printf '  它会拒绝 dev/review 在主工作区开始任务，避免主工作区先被写脏。\n' >&2
+printf '  进入任务隔离区：\n' >&2
 printf '    deploy/cloud/agent-worktree.sh create --task <id> --owner <name> --goal "..." --scope "..."\n' >&2
 printf '  若主工作区已有在途改动：\n' >&2
 printf '    deploy/cloud/agent-worktree.sh adopt --task <id> --owner <name> --goal "..." --scope "..."\n' >&2

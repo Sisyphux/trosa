@@ -5,11 +5,17 @@
 - **目录是唯一事实源**：`db.py` 与 `tools/unified_postgres_migration.py` 都按文件名排序
   自动发现迁移，不存在需要同步维护的第二份清单。新增迁移只需放入文件。
 - 新迁移编号必须先预留：`deploy/cloud/agent-worktree.sh create/adopt` 会把下一个空号写入
-  任务清单的 `reserved_migration`（跨主工作区与所有隔离区计算）。两个并行任务抢同一个
-  编号时，后合并者在合并前 `git mv` 到下一个空号。
+  任务清单的 `reserved_migration`（跨主工作区与所有隔离区计算）。预留在共享预留锁
+  （`trosa-tasks/.reserve.lock`）内完成，并写一份持久计数 `trosa-tasks/.migration-counter`；
+  `tools/reconcile_migrations.py` 用同一把锁和同一份计数取号，因此两个并发任务（同时
+  `create` 或同时 `reconcile`）不会拿到同一个号，编号单调递增、从不回收。
+- 两个并行任务抢同一个编号时，后合并者在合并前 `git mv` 到下一个空号。
 - **自动消解碰撞**：`sync`/`publish` 会自动调用 `tools/reconcile_migrations.py`，把本任务
   新增且与最新 main、其它 worktree 或他人预留冲突的迁移改名到下一个空号并提交；无冲突
   时不动任何文件。也可单独运行 `deploy/cloud/agent-worktree.sh reconcile --task <id>`。
+  自动改号只作用于“当前任务相对 merge-base 新增”的文件；已进入 main 的迁移不动；记录在
+  applied ledger（`trosa-tasks/.applied-migrations` 或 `--applied-ledger`）里的迁移视为可能
+  已被环境执行，命中即 fail closed 报错，宁愿人工新增前向迁移也不猜测。
 - 校验命令：
 
   ```bash

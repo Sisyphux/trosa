@@ -16,13 +16,17 @@
 原则：**一个任务 = 一个 worktree = 一个 `agent/<id>` 分支 = 一个逻辑完整的 commit（或一组 commit）**。
 主工作区只承载集成结果，始终保持干净或只有明确归属的发布操作。
 
-入口隔离是硬护栏，不只是一条约定：`agent-worktree.sh` 会把版本化的 git 护栏
-（`deploy/cloud/git-hooks/`）安装到共享 git 目录，两层一起生效：
-`pre-commit` 拒绝 `dev`/`review` 角色在集成分支（默认 `main`）上的提交；
-`commit-msg` 兜底拒绝集成分支上任何 `[<id>]` 任务提交（即使会话忘记设置角色）。
-必须先 `create`/`adopt` 进入 `agent/<id>` 隔离区；`release` 角色与人工集成提交不受
-影响（人工集成可用 `TRADE_OS_ALLOW_MAIN_COMMIT=1`）。`create`/`adopt` 本身也只能在
-主工作区执行，不能在某个任务隔离区里再建任务。
+入口隔离是硬护栏，不只是一条约定，分任务开始时和提交时两层：
+`agent-worktree.sh guard` 是**任务开始闸门** —— dev/review 角色如果在主工作区
+（或任何非 `agent/<id>` 目录）运行它，会被明确拒绝并要求先 `create`/`adopt`，
+因此在改写任何文件之前就会发现走错目录，而不是等到 commit；`release` 角色与
+人工集成调用 `guard` 不受影响，只读的 `status` 也不受影响。
+`agent-worktree.sh` 还会把版本化的 git 护栏（`deploy/cloud/git-hooks/`）安装到
+共享 git 目录，作为**提交时兜底**：`pre-commit` 拒绝 `dev`/`review` 角色在集成分支
+（默认 `main`）上的提交；`commit-msg` 再拒绝集成分支上任何 `[<id>]` 任务提交（即使
+会话忘记设置角色）。必须先 `create`/`adopt` 进入 `agent/<id>` 隔离区；`release` 角色
+与人工集成提交不受影响（人工集成可用 `TRADE_OS_ALLOW_MAIN_COMMIT=1`）。
+`create`/`adopt` 本身也只能在主工作区执行，不能在某个任务隔离区里再建任务。
 
 ### Agent 权限（`TRADE_OS_AGENT_ROLE`）
 
@@ -40,6 +44,7 @@
 
 ```bash
 cd ~/Desktop/Trosa
+deploy/cloud/agent-worktree.sh guard         # 任务开始闸门：dev/review 在主工作区会被拒绝
 deploy/cloud/agent-worktree.sh status        # 先确认自己在哪个环境（同时刷新入口护栏）
 deploy/cloud/agent-worktree.sh preflight     # 体检：主区是否干净、迁移编号是否冲突
 deploy/cloud/agent-worktree.sh create --task <id> \
@@ -48,7 +53,10 @@ deploy/cloud/agent-worktree.sh create --task <id> \
   --scope "预期修改的文件/模块"
 ```
 
-创建后进入隔离目录工作，并再次确认身份：
+开发/审查会话在动任何文件之前先运行 `guard`：它会告诉你“现在能否开始任务”。
+若输出“可以开始任务”，说明你已经在自己的 `agent/<id>` 隔离区；若被拒绝，按提示
+先在主工作区 `create`/`adopt`。`release` 角色或未设置角色（人工集成）运行 `guard`
+始终放行。进入隔离区后再确认身份：
 
 ```bash
 cd ../trosa-worktrees/<id>
@@ -129,8 +137,11 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 - **唯一事实源是 `migrations/` 目录**：运行时（`db.py`）与演练工具
   （`tools/unified_postgres_migration.py`）都按文件名排序自动发现，没有第二份清单。
 - 新迁移编号在 `create` / `adopt` 时统一预留（跨主工作区与所有隔离区取下一个空号），
-  写入任务清单的 `reserved_migration`。预留是原子操作：`agent-worktree.sh` 在共享
-  锁内完成“扫描最大编号 + 写任务清单”，因此两个并发任务不会拿到同一个号。
+  写入任务清单的 `reserved_migration`。分配是并发安全的：`agent-worktree.sh` 与
+  `tools/reconcile_migrations.py` 共用同一个共享预留锁（`trosa-tasks/.reserve.lock`），
+  并在锁内写一份持久计数 `trosa-tasks/.migration-counter`；编号单调递增、从不回收，
+  因此两个并发任务（无论是 `create` 还是同时 `reconcile`）不会拿到同一个号，也不
+  再只依赖“扫描当前哪个号为空”。
 - 每棵树、每次发布前由 `tools/check_migrations.py`（已接入 `release-test.sh` 快速门禁）
   校验：文件名合法、编号唯一。编号空档只作为警告（并行任务可能先发布较大编号，
   空档不会让运行时漏掉任何迁移）。
@@ -139,6 +150,11 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 - **自动消解**：`sync` 与 `publish` 会调用 `tools/reconcile_migrations.py`，把本任务新增
   且与最新 main / 其它 worktree / 他人预留冲突的迁移改名到下一个空号并提交；无冲突时
   不改动任何文件。也可单独运行 `agent-worktree.sh reconcile --task <id>`。
+- **改号边界（fail closed）**：reconcile 只处理“当前任务相对 merge-base 新增”的文件。
+  已经进入 main（目标引用里存在同名文件）的迁移不动；记录在 applied ledger
+  （`trosa-tasks/.applied-migrations`，或 `--applied-ledger` 指定的文件）里的迁移视为
+  可能已在环境执行，一旦命中即拒绝改号并报错；读不到目标引用的 `migrations/` 目录也
+  直接失败。无法安全自动处理时不会猜测，而是给出明确原因让人工新增前向迁移。
 - 迁移 **forward-only**：已应用的迁移文件不可再改内容（运行时会因 SHA-256 变化拒绝启动），
   修改必须新增前向迁移。
 

@@ -6,6 +6,7 @@
 # 任务在独立目录、独立分支上工作，并把发布输入收敛为 commit：
 #
 #   deploy/cloud/agent-worktree.sh status               # 判断“我在哪个环境/哪个任务”
+#   deploy/cloud/agent-worktree.sh guard                # 开发任务开始前的入口闸门（dev/review）
 #   deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区 + agent/<id> 分支
 #   deploy/cloud/agent-worktree.sh adopt --task <id>    # 把主工作区在途改动搬进隔离区
 #   deploy/cloud/agent-worktree.sh preflight            # 并发体检：脏主区 / 迁移编号冲突
@@ -22,6 +23,9 @@
 # - 版本化 pre-commit（deploy/cloud/git-hooks/pre-commit）安装到共享 git 目录，
 #   dev/review 角色在集成分支（main）上的提交会被拒绝，必须先进入 agent/<id> 隔离区；
 #   release 角色与未设置角色（人工）不受影响。
+# - guard 是开发任务开始前的闸门：dev/review 角色在主工作区（或任何非 agent/<id>
+#   目录）会被明确拒绝，要求先 create/adopt；不等到 commit 才报错，避免主工作区
+#   先被写脏。release/人工集成与只读 status 不受影响。
 # - create/adopt 只能在主工作区执行；不能在任务隔离区里再建任务。
 #
 # 任务边界：
@@ -95,6 +99,7 @@ usage() {
   cat <<'EOF'
 Usage:
   agent-worktree.sh status
+  agent-worktree.sh guard
   agent-worktree.sh preflight
   agent-worktree.sh create --task <id> [--base <ref>] [--fetch-base]
                            [--owner <name>] [--goal <text>] [--scope <text>]
@@ -116,6 +121,9 @@ Usage:
 TRADE_OS_WORKTREE_ROOT 覆盖）。
 
 status    在任意工作树里运行，报告当前环境、任务归属、未提交改动与预留迁移号。
+guard     开发任务开始前的入口闸门：dev/review 角色在主工作区（或非 agent/<id>
+          目录）会被拒绝，要求先 create/adopt 进入隔离区；release/人工集成不受
+          影响。只读，不改动任何文件。
 preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。
 create    建隔离区，写任务清单并预留下一个迁移编号；只能在主工作区执行。
 adopt     把主工作区的在途改动（默认全部；可用 --path 限定）整体搬进新任务区，
@@ -443,12 +451,16 @@ head_contains() { git -C "$1" merge-base --is-ancestor "$2" HEAD; }
 
 # 迁移编号校正：把本任务新增且与最新 main / 其它 worktree / 他人预留冲突的迁移
 # 自动改名到下一个空号，并提交改名。无冲突时不做任何改动。
+# 编号分配由 reconcile_migrations.py 在共享预留锁内从持久计数器取号，两个并发
+# 任务不会拿到同一个号；已进入 main 或已记录在 applied ledger 的迁移绝不改名。
 reconcile_task_migrations() {
-  local task=$1 wt=$2 base out
+  local task=$1 wt=$2 base out applied
   base="$(task_base_ref)"
+  applied="$TASK_META_DIR/.applied-migrations"
   out="$(python3 "$MAIN_ROOT/tools/reconcile_migrations.py" \
     --task-dir "$wt" --target-ref "$base" \
-    --meta-dir "$TASK_META_DIR" --task "$task" --apply 2>&1)" || {
+    --meta-dir "$TASK_META_DIR" --task "$task" \
+    --applied-ledger "$applied" --apply 2>&1)" || {
     printf '%s\n' "$out" >&2
     fail "任务 $task 迁移编号校正失败"
   }
@@ -852,12 +864,13 @@ cmd_publish() {
 }
 
 cmd_status() {
-  local top branch task dirty_count
+  local top branch task dirty_count role
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
   branch="$(git -C "$top" symbolic-ref --short -q HEAD || printf 'detached')"
   task="$(task_of_branch "$branch")"
-  printf '角色：%s（dev/review 不能发布；只有 release 能发布）\n' "$(trosa_agent_role)"
+  role="$(trosa_agent_role)"
+  printf '角色：%s（dev/review 不能发布；只有 release 能发布）\n' "$role"
   if [[ "$top" == "$MAIN_ROOT" ]]; then
     printf '环境：主工作区（集成 / 验收 / 发布）\n'
     printf '  路径：%s\n  分支：%s\n' "$top" "$branch"
@@ -869,6 +882,11 @@ cmd_status() {
       git -C "$top" status --short
     fi
     printf '  规则：不要在主工作区开发；先 create 一个任务区再改代码。\n'
+    case "$role" in
+      dev|development|review|readonly|read-only)
+        printf '  注意：你的角色是 %s，guard 会拒绝在主工作区开始开发任务；请先 create/adopt。\n' "$role"
+        ;;
+    esac
   elif [[ -n "$task" ]]; then
     printf '环境：任务隔离区\n'
     printf '  路径：%s\n  分支：%s\n  任务：%s\n' "$top" "$branch" "$task"
@@ -880,6 +898,35 @@ cmd_status() {
     printf '  路径：%s\n  分支：%s\n' "$top" "$branch"
     printf '  注意：该目录不受任务隔离规则保护。\n'
   fi
+}
+
+# 开发任务开始前的入口闸门。dev/review 角色只能从 agent/<id> 任务隔离区开始工作；
+# 在主工作区（或任何非任务目录）尝试开始开发会被明确拒绝，要求在写任何文件之前
+# 先 create/adopt。release 角色与未设置角色（人工集成）不受影响，只读的 status
+# 也不受影响。命令本身只读，不修改工作区、不申请编号。
+cmd_guard() {
+  local top branch task role
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
+  role="$(trosa_agent_role)"
+  branch="$(git -C "$top" symbolic-ref --short -q HEAD || printf 'detached')"
+  task="$(task_of_branch "$branch")"
+  case "$role" in
+    dev|development|review|readonly|read-only)
+      if [[ "$top" == "$MAIN_ROOT" ]]; then
+        fail "开发/审查角色（$role）不得在主工作区开始任务：主工作区只做集成/验收/发布。请在 $MAIN_ROOT 运行 create（已有在途改动则用 adopt）进入 agent/<id> 隔离区后再改代码，避免先把主工作区写脏。"
+      fi
+      if [[ -z "$task" ]]; then
+        fail "开发/审查角色（$role）当前不在 agent/<id> 任务隔离区（目录 $top，分支 $branch）。请回到主工作区 $MAIN_ROOT 用 create/adopt 建立任务。"
+      fi
+      printf 'guard：可以开始任务\n  角色：%s\n  任务：%s\n  目录：%s\n  分支：%s\n' \
+        "$role" "$task" "$top" "$branch"
+      ;;
+    *)
+      printf 'guard：可以继续\n  角色：%s（未限制角色，集成/发布场景不受影响）\n  目录：%s\n  分支：%s\n' \
+        "$role" "$top" "$branch"
+      ;;
+  esac
 }
 
 cmd_preflight() {
@@ -1071,6 +1118,7 @@ shift
 install_git_hooks
 case "$command" in
   status) cmd_status "$@" ;;
+  guard) cmd_guard "$@" ;;
   preflight) cmd_preflight "$@" ;;
   create) cmd_create "$@" ;;
   adopt) cmd_adopt "$@" ;;

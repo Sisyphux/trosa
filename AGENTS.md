@@ -9,10 +9,10 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 ## 多 Agent 并行开发（强制）
 
 - 主工作区只做集成、验收和发布，禁止直接写业务代码或堆积来源不明的未提交改动。每个任务在独立 worktree + `agent/<id>` 分支中完成，完整流程见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md)。
-- 会话开始先运行 `deploy/cloud/agent-worktree.sh status` 判断当前环境，再运行 `preflight` 看主工作区与迁移编号冲突。新任务用 `create --task <id> --owner ... --goal ... --scope ...`。
+- 会话开始先运行 `deploy/cloud/agent-worktree.sh guard` 判断“现在能否开始任务”，再运行 `status` 看环境、`preflight` 看主工作区与迁移编号冲突。新任务用 `create --task <id> --owner ... --goal ... --scope ...`。
 - 发现主工作区有无法归属的在途改动时，用 `adopt --task <id>` 搬进隔离区，不要直接 commit、覆盖或删除；adopt 会保留 stash 备份。
 - 每个 commit 以 `[<id>]` 开头且只承载一个任务的改动；发布用 `agent-worktree.sh publish --task <id>`（底层是 commit 驱动入口），只接受 commit / branch。
-- **角色边界**：开发/审查 Agent 会话必须 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；只有发布角色（`release`，也是未设置时的默认）能执行 `publish`。发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 600），开发 worktree 不携带它；仓库内旧位置仅兼容读取并提示迁移。`agent-worktree.sh` 会把版本化的 git 护栏安装到共享 git 目录：`pre-commit` 拒绝 dev/review 在 `main` 上提交，`commit-msg` 兜底拒绝 `main` 上任何 `[<id>]` 任务提交（`create`/`adopt` 也只能在主工作区执行），普通任务不能污染主工作区。
+- **角色边界**：开发/审查 Agent 会话必须 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；只有发布角色（`release`，也是未设置时的默认）能执行 `publish`。开发/审查会话在动任何文件前先运行 `agent-worktree.sh guard`：在主工作区（或非 `agent/<id>` 目录）会被明确拒绝，要求先 create/adopt，避免主工作区先被写脏；release/人工集成与只读 status 不受影响。发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 600），开发 worktree 不携带它；仓库内旧位置仅兼容读取并提示迁移。`agent-worktree.sh` 还会把版本化的 git 护栏安装到共享 git 目录作为提交兜底：`pre-commit` 拒绝 dev/review 在 `main` 上提交，`commit-msg` 拒绝 `main` 上任何 `[<id>]` 任务提交（`create`/`adopt` 也只能在主工作区执行）。
 - **完成定义与证据**：`test --task <id>` 和 `publish --task <id>` 会把 tree commit、门禁结果和发布 release 写入共享证据 `trosa-tasks/<id>.verify.log` 并更新任务清单状态。任务完成 = `status=landed`（已发布且健康），仅有绿色门禁只是“开发完成”，不得声称已修复；用 `agent-worktree.sh evidence --task <id>` 查看。**先 sync 后 test**：`sync` 变基到最新 `origin/main` 并让旧证据失效，`publish` 只接受证据对应当前 HEAD 且 HEAD 已包含最新 main 的任务（`gate --task <id>` 可只读核对）；直接 `release-commit.sh --branch agent/<id>` 也走同一判定。
 - `migrations/` 目录是数据库迁移的唯一事实源：新增迁移先在 create/adopt 预留编号，并通过 `tools/check_migrations.py`；`sync`/`publish` 会自动调用 `tools/reconcile_migrations.py` 把并行冲突的编号改名到空号。详见 [`migrations/README.md`](migrations/README.md)。
 

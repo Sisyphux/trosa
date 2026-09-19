@@ -80,9 +80,17 @@ trosa_lock_release() {
 }
 
 # Print the next free migration number.  Scans every worktree of MAIN_ROOT plus
-# already-reserved task metadata, so two concurrent tasks that hold the
-# reservation lock can never be handed the same number.  A single Python
-# process does the scan so subshells cannot lose the running maximum.
+# already-reserved task metadata, and also honors a persistent allocation
+# counter in META_DIR (``.migration-counter``) that this function writes back
+# before returning.  A single Python process does the scan and the counter
+# update so subshells cannot lose the running maximum.
+#
+# The caller MUST hold the reservation lock (``trosa_lock_acquire``); that lock
+# serializes this function against concurrent ``create``/``adopt`` reservations
+# and against ``tools/reconcile_migrations.py``, which uses the same counter.
+# The counter guarantees uniqueness even when the worktree/meta scan alone
+# would see two tasks pick the same "first empty" slot: numbers are never
+# handed out twice and are never recycled when a task is removed.
 trosa_next_migration_number() {
   local main_root=$1 meta_dir=$2
   python3 - "$main_root" "$meta_dir" <<'PY'
@@ -128,6 +136,22 @@ if os.path.isdir(meta_dir):
         if value.isdigit():
             numbers.append(int(value))
 
-print(f"{max(numbers, default=0) + 1:04d}")
+counter_path = os.path.join(meta_dir, ".migration-counter")
+counter = 0
+try:
+    with open(counter_path, encoding="utf-8") as handle:
+        text = handle.read().strip()
+    if text.isdigit():
+        counter = int(text)
+except OSError:
+    counter = 0
+
+number = max(max(numbers, default=0), counter) + 1
+os.makedirs(meta_dir, exist_ok=True)
+tmp = f"{counter_path}.{os.getpid()}.tmp"
+with open(tmp, "w", encoding="utf-8") as handle:
+    handle.write(f"{number:04d}\n")
+os.replace(tmp, counter_path)
+print(f"{number:04d}")
 PY
 }
