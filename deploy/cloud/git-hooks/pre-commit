@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# sela/trosa 入口隔离护栏：开发/审查角色不得直接污染集成分支。
+#
+# 安装：`deploy/cloud/agent-worktree.sh hooks`（create/adopt/status 也会自动刷新）。
+# 它由 `agent-worktree.sh` 复制到共享 git 目录（$GIT_COMMON_DIR/hooks/pre-commit），
+# 因此主工作区与所有任务隔离区共享同一份护栏，且随脚本版本更新。
+#
+# 边界（同机护栏，不是加密边界）：
+#   * dev/review 角色在集成分支（默认 main）上的任何提交都被拒绝，必须改用
+#     create/adopt 在 agent/<id> 隔离区提交；
+#   * release 角色或未设置角色（人工操作）保持原有行为，不受影响。
+set -euo pipefail
+
+role="${TRADE_OS_AGENT_ROLE:-release}"
+case "$role" in
+  dev|development|review|readonly|read-only) ;;
+  *) exit 0 ;;
+esac
+
+target="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
+branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf 'detached')"
+[[ "$branch" == "$target" ]] || exit 0
+
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null || printf '?')"
+printf '提交被拒绝：%s 角色不能在集成分支 %s 上直接提交。\n' "$role" "$target" >&2
+printf '  当前目录：%s\n' "$toplevel" >&2
+printf '  请先进入任务隔离区再提交：\n' >&2
+printf '    deploy/cloud/agent-worktree.sh create --task <id> --owner <name> --goal "..." --scope "..."\n' >&2
+printf '  若主工作区已有在途改动：\n' >&2
+printf '    deploy/cloud/agent-worktree.sh adopt --task <id> --owner <name> --goal "..." --scope "..."\n' >&2
+printf '  只有 release 角色负责集成与发布，普通任务不得污染 %s。\n' "$target" >&2
+exit 1

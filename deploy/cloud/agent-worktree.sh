@@ -11,17 +11,26 @@
 #   deploy/cloud/agent-worktree.sh preflight            # 并发体检：脏主区 / 迁移编号冲突
 #   deploy/cloud/agent-worktree.sh list                 # 看所有任务隔离区
 #   deploy/cloud/agent-worktree.sh test --task <id>     # 在隔离区跑完整验证
-#   deploy/cloud/agent-worktree.sh sync --task <id>     # 变基到最新 main
+#   deploy/cloud/agent-worktree.sh gate --task <id>     # 只读检查任务是否 ready
+#   deploy/cloud/agent-worktree.sh reconcile --task <id># 消解迁移编号碰撞
+#   deploy/cloud/agent-worktree.sh hooks                # 刷新入口隔离护栏
+#   deploy/cloud/agent-worktree.sh sync --task <id>     # 消解碰撞 + 变基到最新 main
 #   deploy/cloud/agent-worktree.sh publish --task <id>  # 发布本任务的 commit
 #   deploy/cloud/agent-worktree.sh remove --task <id>   # 回收隔离区
+#
+# 入口隔离（硬护栏）：
+# - 版本化 pre-commit（deploy/cloud/git-hooks/pre-commit）安装到共享 git 目录，
+#   dev/review 角色在集成分支（main）上的提交会被拒绝，必须先进入 agent/<id> 隔离区；
+#   release 角色与未设置角色（人工）不受影响。
+# - create/adopt 只能在主工作区执行；不能在任务隔离区里再建任务。
 #
 # 任务边界：
 # - create 会在共享 git 目录写一份任务清单（trosa-tasks/<id>.json：负责人、目标、
 #   修改范围、预留迁移编号），status 据此告诉 Agent“当前目录是不是我的任务”。
 # - 主工作区保持集成/验收/发布角色；一旦出现无法归属的在途改动，用 adopt 整体
 #   搬进任务隔离区，而不是继续在主工作区堆叠。
-# - 新迁移编号在 create 时统一预留（跨主工作区与所有隔离区取下一个空号），并由
-#   tools/check_migrations.py 在每棵树、每次发布前校验唯一且连续。
+# - 新迁移编号在 create 时统一预留（跨主工作区与所有隔离区取下一个空号），
+#   sync/publish 再用 tools/reconcile_migrations.py 自动消解并行编号碰撞。
 #
 # 隔离保证：
 # - 工作区：worktree 目录在仓库之外（默认与仓库同级的 trosa-worktrees/），
@@ -32,7 +41,8 @@
 #   不重装；workbench.env 从不复制进 worktree（密钥不跨区）。
 #
 # 发布保证（没有放宽任何门禁）：
-# - publish 只接受：任务 worktree 完全干净（改动必须先 commit 到 agent/<id>）。
+# - publish 只接受真正 ready 的任务：任务 worktree 完全干净、门禁证据对应当前 HEAD、
+#   HEAD 已包含最新 origin/main；否则先 sync + test。
 # - 主工作区不参与发布，也不再需要干净：publish 委托 release-commit.sh --branch
 #   agent/<id>，在基于 origin/main 的临时 release worktree 里 cherry-pick 本任务
 #   的 commit，跑完整门禁后再推送并发布。任何在途改动、脏 index、未跟踪文件都
@@ -94,7 +104,10 @@ Usage:
   agent-worktree.sh list
   agent-worktree.sh test --task <id> [--quick]
   agent-worktree.sh evidence --task <id>
-  agent-worktree.sh sync --task <id> [--fetch-base]
+  agent-worktree.sh gate --task <id>
+  agent-worktree.sh reconcile --task <id>
+  agent-worktree.sh hooks
+  agent-worktree.sh sync --task <id> [--offline]
   agent-worktree.sh publish --task <id> [--message "仅记录用的说明"]
   agent-worktree.sh remove --task <id> [--force] [--delete-branch]
 
@@ -104,15 +117,23 @@ TRADE_OS_WORKTREE_ROOT 覆盖）。
 
 status    在任意工作树里运行，报告当前环境、任务归属、未提交改动与预留迁移号。
 preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。
-create    建隔离区，写任务清单并预留下一个迁移编号。
+create    建隔离区，写任务清单并预留下一个迁移编号；只能在主工作区执行。
 adopt     把主工作区的在途改动（默认全部；可用 --path 限定）整体搬进新任务区，
-          原始改动会保留为 stash 备份，主工作区恢复干净。路径按主工作区根解析。
-test      委托 release-test.sh，与发布候选使用同一份门禁。
-publish   只要求任务区干净（先把改动 commit 到 agent/<id>），随后委托
-          release-commit.sh --branch agent/<id>：在基于 origin/main 的临时 release
-          worktree 里 cherry-pick 本任务的 commit、跑完整门禁、推送并发布。调用者
-          工作区（含主工作区的在途改动）不参与发布，也不会被修改。发布说明应写在
-          commit message 里；--message 仅用于终端记录。
+          原始改动会保留为 stash 备份，主工作区恢复干净。路径按主工作区根解析；
+          只能在主工作区执行。
+test      委托 release-test.sh，与发布候选使用同一份门禁；完整门禁要求任务已同步
+          到最新 <main>，否则只对旧基线成立。
+evidence  查看任务清单状态与最近一次完成证据。
+gate      只读检查任务是否 ready（门禁证据对应当前 HEAD 且已包含最新 main）；
+          publish 内部使用同一判定。
+reconcile 把本任务新增且与最新 main/其它任务冲突的迁移改名到下一个空号并提交。
+hooks     刷新共享 git 目录里的入口隔离护栏（pre-commit + commit-msg）。
+sync      先消除迁移编号碰撞，再变基到最新 origin/<main>（--offline 用本地基线）；
+          变基后旧门禁证据失效，必须重新 test。
+publish   只接受真正 ready 的任务：任务区干净、门禁证据对应当前 HEAD、HEAD 已包含
+          最新 origin/<main>。随后委托 release-commit.sh --branch agent/<id>，在
+          基于 origin/main 的临时 release worktree 里 cherry-pick、跑完整门禁、
+          推送并发布。调用者工作区（含主工作区的在途改动）不参与发布。
 EOF
 }
 
@@ -295,6 +316,8 @@ print_task_meta() {
   fi
   python3 - "$meta" <<'PY'
 import json
+import os
+import subprocess
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
@@ -306,6 +329,7 @@ for key, label in (
     ("reserved_migration", "预留迁移编号"),
     ("base", "基线"),
     ("created_at", "创建时间"),
+    ("synced_at", "最近同步"),
     ("verified_commit", "验证 commit"),
     ("verify_result", "最近门禁"),
     ("landed_commit", "落地 commit"),
@@ -316,15 +340,30 @@ for key, label in (
     if value:
         print(f"  {label}：{value}")
 
+head = ""
+path = doc.get("path")
+if path and os.path.isdir(path):
+    proc = subprocess.run(
+        ["git", "-C", path, "rev-parse", "HEAD"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode == 0:
+        head = proc.stdout.strip()
+verified = doc.get("verified_commit") or ""
+
 status = doc.get("status") or "active"
 if status == "landed":
     print(f"  完成判定：已发布（release={doc.get('landed_release') or '未知'}）")
 elif status == "abandoned":
     print("  完成判定：已废弃")
+elif doc.get("verify_result") == "ok" and head and verified != head:
+    print("  完成判定：门禁证据已过期（对应当前 HEAD 之外的 commit），必须重新验证")
 elif doc.get("verify_result") == "ok":
     print("  完成判定：开发完成并通过门禁，尚未发布")
 elif doc.get("verify_result") == "failed":
     print("  完成判定：最近一次门禁未通过，不可发布")
+elif doc.get("verify_result") == "stale":
+    print("  完成判定：已同步到新基线，需重新验证后才能发布")
 else:
     print("  完成判定：进行中（尚无验证证据）")
 PY
@@ -355,6 +394,117 @@ require_clean() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# 入口隔离：普通任务不得直接污染集成分支
+# ---------------------------------------------------------------------------
+
+# 版本化的 git 护栏（deploy/cloud/git-hooks/）复制到共享 git 目录。pre-commit 在
+# dev/review 角色试图在集成分支提交时拒绝；commit-msg 兜底拒绝集成分支上的
+# `[<id>]` 任务提交（未设置角色也不会误落）。人工作业与 release 角色不受影响。
+# 每次调用 agent-worktree.sh 都刷新，保证护栏随脚本版本更新。
+install_git_hooks() {
+  local name src dest
+  for name in pre-commit commit-msg; do
+    src="$SCRIPT_DIR/git-hooks/$name"
+    [[ -r "$src" ]] || continue
+    [[ -d "$GIT_COMMON_DIR/hooks" ]] || mkdir -p "$GIT_COMMON_DIR/hooks" || return 0
+    dest="$GIT_COMMON_DIR/hooks/$name"
+    if [[ -f "$dest" ]] && ! grep -q 'sela/trosa 入口隔离' "$dest" 2>/dev/null; then
+      printf '警告：已存在非本流程的 %s（%s），未覆盖。\n' "$name" "$dest" >&2
+      continue
+    fi
+    if ! cmp -s "$src" "$dest"; then
+      cp "$src" "$dest" && chmod 0755 "$dest" || return 0
+    fi
+  done
+  return 0
+}
+
+# create/adopt 是“进入隔离区”的入口：只能在主工作区执行，不能在某个任务隔离区
+# 里再建任务（那会让任务边界失去唯一归属）。
+require_main_workspace() {
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
+  [[ "$top" == "$MAIN_ROOT" ]] \
+    || fail "create/adopt 必须在主工作区（$MAIN_ROOT）执行，不能在任务隔离区 $top 中创建任务"
+}
+
+# 任务同步/门禁校验用的基线：优先最新 origin/<main>，否则本地 <main>。
+task_base_ref() {
+  if git -C "$MAIN_ROOT" rev-parse --verify --quiet "refs/remotes/origin/$TARGET_BRANCH" >/dev/null 2>&1; then
+    printf 'refs/remotes/origin/%s' "$TARGET_BRANCH"
+  else
+    printf '%s' "$TARGET_BRANCH"
+  fi
+}
+
+head_contains() { git -C "$1" merge-base --is-ancestor "$2" HEAD; }
+
+# 迁移编号校正：把本任务新增且与最新 main / 其它 worktree / 他人预留冲突的迁移
+# 自动改名到下一个空号，并提交改名。无冲突时不做任何改动。
+reconcile_task_migrations() {
+  local task=$1 wt=$2 base out
+  base="$(task_base_ref)"
+  out="$(python3 "$MAIN_ROOT/tools/reconcile_migrations.py" \
+    --task-dir "$wt" --target-ref "$base" \
+    --meta-dir "$TASK_META_DIR" --task "$task" --apply 2>&1)" || {
+    printf '%s\n' "$out" >&2
+    fail "任务 $task 迁移编号校正失败"
+  }
+  printf '%s\n' "$out"
+  if [[ -n "$(git -C "$wt" status --porcelain)" ]]; then
+    git -C "$wt" commit -q -m "[$task] renumber migrations to avoid parallel collision" \
+      || fail "任务 $task 迁移改名提交失败"
+    printf '已提交迁移改名：%s\n' "$(git -C "$wt" rev-parse --short HEAD)"
+  fi
+}
+
+# 任务毕业门：发布只接受真正 ready 的任务。要求任务清单存在、未废弃、门禁证据
+# 对应当前 HEAD、且 HEAD 已包含最新 main。返回 0 = ready。
+check_task_ready() {
+  local task=$1 wt=$2 meta head base status verify verified problems=0
+  meta="$(task_meta_path "$task")"
+  if [[ ! -r "$meta" ]]; then
+    printf '任务 %s 缺少任务清单（未通过 create/adopt），不能发布。\n' "$task" >&2
+    return 1
+  fi
+  head="$(git -C "$wt" rev-parse HEAD)"
+  read -r status verify verified < <(python3 - "$meta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+print(doc.get("status") or "active", doc.get("verify_result") or "", doc.get("verified_commit") or "")
+PY
+)
+  if [[ "$status" == "abandoned" ]]; then
+    printf '任务 %s 已废弃，不能发布。\n' "$task" >&2
+    problems=1
+  fi
+  if [[ "$verify" != "ok" ]]; then
+    printf '任务 %s 没有有效门禁证据（verify_result=%s）；先 sync 到最新 %s 再 test --task %s。\n' \
+      "$task" "${verify:-无}" "$TARGET_BRANCH" "$task" >&2
+    problems=1
+  elif [[ "$verified" != "$head" ]]; then
+    printf '任务 %s 的门禁证据对应 commit %s，与当前 HEAD %s 不一致；必须重新 test。\n' \
+      "$task" "${verified:0:9}" "${head:0:9}" >&2
+    problems=1
+  fi
+  base="$(task_base_ref)"
+  if git -C "$wt" rev-parse --verify --quiet "$base" >/dev/null 2>&1; then
+    if ! head_contains "$wt" "$base"; then
+      printf '任务 %s 未基于最新 %s（HEAD 不包含 %s）；先 sync --task %s 并重新 test。\n' \
+        "$task" "$TARGET_BRANCH" "$base" "$task" >&2
+      problems=1
+    fi
+  else
+    printf '警告：找不到基线 %s，跳过基线包含检查（先 fetch origin/%s）。\n' "$base" "$TARGET_BRANCH" >&2
+  fi
+  return "$problems"
+}
+
 cmd_create() {
   local task="" base="$TARGET_BRANCH" fetch_base=0 owner="" goal="" scope="" reserve=1
   while [[ $# -gt 0 ]]; do
@@ -371,6 +521,7 @@ cmd_create() {
   done
   [[ -n "$task" ]] || fail 'create 需要 --task <id>'
   validate_task_id "$task"
+  require_main_workspace
   git -C "$MAIN_ROOT" worktree prune
   git -C "$MAIN_ROOT" rev-parse --verify --quiet "refs/heads/$(branch_of "$task")" >/dev/null \
     && fail "分支 $(branch_of "$task") 已存在（换 id，或用 sync/remove 处理旧任务）"
@@ -482,6 +633,17 @@ cmd_test() {
   local wt args=() gate
   wt="$(find_task_path "$task")"
   [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
+  # 完整门禁必须基于最新 main：否则“绿”只对旧基线成立。快速语法检查不受限。
+  if [[ "$quick" != 1 ]]; then
+    local base_ref
+    base_ref="$(task_base_ref)"
+    if git -C "$wt" rev-parse --verify --quiet "$base_ref" >/dev/null 2>&1; then
+      head_contains "$wt" "$base_ref" \
+        || fail "任务 $task 尚未同步到最新 $TARGET_BRANCH（HEAD 不包含 $base_ref）；先 sync --task $task 再 test"
+    else
+      printf '警告：找不到基线 %s，跳过基线包含检查（先 fetch origin/%s）。\n' "$base_ref" "$TARGET_BRANCH" >&2
+    fi
+  fi
   # If the task branch already contains the gate, test that exact version;
   # otherwise use the repository's committed gate while bootstrapping it.
   gate="$wt/deploy/cloud/release-test.sh"
@@ -539,27 +701,87 @@ cmd_evidence() {
   fi
 }
 
-cmd_sync() {
-  local task="" fetch_base=0
+cmd_gate() {
+  local task=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
-      --fetch-base) fetch_base=1; shift ;;
+      *) fail "gate 未知参数：$1" ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'gate 需要 --task <id>'
+  validate_task_id "$task"
+  local wt
+  wt="$(find_task_path "$task")"
+  [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
+  printf '任务 %s 发布条件检查（HEAD %s）\n' "$task" "$(git -C "$wt" rev-parse --short HEAD)"
+  if check_task_ready "$task" "$wt"; then
+    printf '结论：ready（可作为发布输入）\n'
+  else
+    printf '结论：not_ready（见上）\n' >&2
+    return 1
+  fi
+}
+
+cmd_reconcile() {
+  local task=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
+      *) fail "reconcile 未知参数：$1" ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'reconcile 需要 --task <id>'
+  validate_task_id "$task"
+  local wt
+  wt="$(find_task_path "$task")"
+  require_clean "$wt" "任务 $task"
+  reconcile_task_migrations "$task" "$wt"
+}
+
+cmd_hooks() {
+  local name
+  printf '入口隔离护栏目录：%s/hooks\n' "$GIT_COMMON_DIR"
+  for name in pre-commit commit-msg; do
+    [[ -r "$SCRIPT_DIR/git-hooks/$name" ]] || continue
+    if [[ -x "$GIT_COMMON_DIR/hooks/$name" ]]; then
+      printf '  %s：已安装\n' "$name"
+    else
+      printf '  %s：缺失（源 %s/git-hooks/%s）\n' "$name" "$SCRIPT_DIR" "$name"
+    fi
+  done
+}
+
+cmd_sync() {
+  local task="" offline=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
+      --fetch-base) shift ;;  # 兼容旧参数：sync 现在默认拉取最新基线
+      --offline) offline=1; shift ;;
       *) fail "sync 未知参数：$1" ;;
     esac
   done
   [[ -n "$task" ]] || fail 'sync 需要 --task <id>'
   validate_task_id "$task"
-  local wt
+  local wt base iso
   wt="$(find_task_path "$task")"
   require_clean "$wt" "任务 $task"
-  local base="$TARGET_BRANCH"
-  if [[ "$fetch_base" == 1 ]]; then
-    git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" || fail 'fetch 失败'
-    base="origin/$TARGET_BRANCH"
+  if [[ "$offline" != 1 ]]; then
+    git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" \
+      || fail "fetch origin/$TARGET_BRANCH 失败（离线时用 --offline 基于本地 $TARGET_BRANCH 同步）"
   fi
+  base="$(task_base_ref)"
+  # 先消除并行迁移编号碰撞，再变基；改名会作为本任务的一个 commit 保留。
+  reconcile_task_migrations "$task" "$wt"
+  require_clean "$wt" "任务 $task（迁移改名未提交）"
   if git -C "$wt" rebase "$base"; then
-    printf '任务 %s 已变基到 %s。\n' "$task" "$base"
+    iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # 变基后旧的门禁证据不再对应当前 HEAD，必须重跑完整门禁才能发布。
+    merge_task_meta "$task" \
+      "verify_result=stale" "verified_commit=" "verified_at=" "synced_at=$iso"
+    printf '任务 %s 已变基到 %s；原验证证据已失效，发布前必须重新 test --task %s。\n' \
+      "$task" "$base" "$task"
   else
     git -C "$wt" rebase --abort || true
     fail "变基冲突，已回退；请进 $wt 手工解决后再 sync"
@@ -583,6 +805,13 @@ cmd_publish() {
   wt="$(find_task_path "$task")"
   branch="$(branch_of "$task")"
   require_clean "$wt" "任务 $task（改动先 commit 到 $branch）"
+  # 发布只接受真正 ready 的任务：基线要最新，门禁证据要对应当前 HEAD。
+  git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" \
+    || fail "publish 需要最新 origin/$TARGET_BRANCH 才能判定任务是否 ready；fetch 失败"
+  reconcile_task_migrations "$task" "$wt"
+  require_clean "$wt" "任务 $task（迁移改名未提交）"
+  check_task_ready "$task" "$wt" \
+    || fail "任务 $task 未达到发布条件；先 sync --task $task 再 test --task $task"
   head="$(git -C "$wt" rev-parse HEAD)"
   if [[ -n "$message" ]]; then
     printf '说明（仅记录用；实际 commit message 来自任务分支的 commit）：%s\n' "$message"
@@ -742,6 +971,7 @@ cmd_adopt() {
   done
   [[ -n "$task" ]] || fail 'adopt 需要 --task <id>'
   validate_task_id "$task"
+  require_main_workspace
 
   # --path 相对主工作区根解析；不给则搬运全部在途改动。
   local rel
@@ -836,6 +1066,9 @@ cmd_remove() {
 [[ $# -ge 1 ]] || { usage; exit 1; }
 command=$1
 shift
+# Every session refreshes the shared entry guard, so a dev/review role cannot
+# commit on the integration branch even before it runs create/adopt.
+install_git_hooks
 case "$command" in
   status) cmd_status "$@" ;;
   preflight) cmd_preflight "$@" ;;
@@ -844,6 +1077,9 @@ case "$command" in
   list) cmd_list "$@" ;;
   test) cmd_test "$@" ;;
   evidence) cmd_evidence "$@" ;;
+  gate) cmd_gate "$@" ;;
+  reconcile) cmd_reconcile "$@" ;;
+  hooks) cmd_hooks "$@" ;;
   sync) cmd_sync "$@" ;;
   publish) cmd_publish "$@" ;;
   remove) cmd_remove "$@" ;;

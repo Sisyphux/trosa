@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# sela/trosa 入口隔离护栏（commit-msg）：任务 commit 只能落在 agent/<id> 隔离区。
+#
+# pre-commit 依赖 TRADE_OS_AGENT_ROLE=dev/review；未设置角色的会话默认按 release
+# 处理（人工操作不变），因此一个忘记设置角色的开发会话仍可能把 `[<id>]` 任务
+# commit 直接落到集成分支。本钩子以 commit message 为准做兜底：集成分支（默认
+# main）上以 `[<id>]` 开头的提交一律拒绝，除非显式 TRADE_OS_ALLOW_MAIN_COMMIT=1。
+#
+# 发布流程不受影响：release-commit.sh 在 detached release worktree 里 cherry-pick，
+# 从不本地提交到 main 分支；FF 合并也不触发本钩子。
+set -euo pipefail
+export LC_ALL=C
+
+[[ "${TRADE_OS_ALLOW_MAIN_COMMIT:-0}" == "1" ]] && exit 0
+
+target="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
+branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf 'detached')"
+[[ "$branch" == "$target" ]] || exit 0
+
+msg_file="${1:-}"
+[[ -n "$msg_file" && -r "$msg_file" ]] || exit 0
+first="$(head -n 1 "$msg_file")"
+case "$first" in
+  \[*\]*) ;;
+  *) exit 0 ;;
+esac
+
+toplevel="$(git rev-parse --show-toplevel 2>/dev/null || printf '?')"
+printf '提交被拒绝：集成分支 %s 不能直接接收任务 commit「%s」。\n' "$target" "$first" >&2
+printf '  当前目录：%s\n' "$toplevel" >&2
+printf '  请在任务隔离区（agent/<id>）提交，再由 release 角色发布。\n' >&2
+printf '  确认这是人工集成提交时用：TRADE_OS_ALLOW_MAIN_COMMIT=1 git commit ...\n' >&2
+exit 1

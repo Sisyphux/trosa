@@ -230,6 +230,35 @@ add_commit() {
   RELEASE_COMMITS+=("$sha")
 }
 
+# 任务毕业门：发布只接受真正 ready 的任务。任务分支必须携带对应的完成证据
+# （门禁结果对应该分支 tip），且该 tip 已包含最新 origin/main。这里与
+# agent-worktree.sh publish 使用同一判定，防止绕过 publish 直接 --branch。
+enforce_agent_branch_ready() {
+  local spec=$1 branch_sha=$2 task meta status verify verified
+  [[ "$spec" == agent/* ]] || return 0
+  [[ "$DRY_RUN" == 1 ]] && return 0
+  task="${spec#agent/}"
+  meta="$GIT_COMMON_DIR/trosa-tasks/$task.json"
+  [[ -r "$meta" ]] \
+    || fail "发布被拒绝：任务 $task 缺少完成证据清单 $meta；请先 test --task $task 生成证据"
+  read -r status verify verified < <(python3 - "$meta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+print(doc.get("status") or "active", doc.get("verify_result") or "", doc.get("verified_commit") or "")
+PY
+)
+  [[ "$status" != "abandoned" ]] || fail "发布被拒绝：任务 $task 已废弃"
+  [[ "$verify" == "ok" ]] \
+    || fail "发布被拒绝：任务 $task 没有有效门禁证据（verify_result=${verify:-无}）；先 test --task $task"
+  [[ "$verified" == "$branch_sha" ]] \
+    || fail "发布被拒绝：任务 $task 的证据对应 commit ${verified:0:9}，与分支 tip ${branch_sha:0:9} 不一致；重新 test --task $task"
+  git merge-base --is-ancestor "$BASE_SHA" "$branch_sha" \
+    || fail "发布被拒绝：任务 $task 未基于最新 origin/$TARGET_BRANCH；先 sync --task $task 并重新 test"
+}
+
 if [[ ${#COMMIT_SPECS[@]} -gt 0 ]]; then
   for spec in "${COMMIT_SPECS[@]}"; do
     resolved="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
@@ -247,6 +276,7 @@ if [[ ${#BRANCH_SPECS[@]} -gt 0 ]]; then
   for spec in "${BRANCH_SPECS[@]}"; do
     branch_sha="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
     [[ -n "$branch_sha" ]] || fail "找不到分支或引用：$spec"
+    enforce_agent_branch_ready "$spec" "$branch_sha"
     branch_list="$(git rev-list --reverse "$rev_base".."$branch_sha")"
     if [[ -z "$branch_list" ]]; then
       printf '分支 %s 相对 %s 没有新 commit\n' "$spec" "${rev_base:0:9}"

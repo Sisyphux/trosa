@@ -16,6 +16,14 @@
 原则：**一个任务 = 一个 worktree = 一个 `agent/<id>` 分支 = 一个逻辑完整的 commit（或一组 commit）**。
 主工作区只承载集成结果，始终保持干净或只有明确归属的发布操作。
 
+入口隔离是硬护栏，不只是一条约定：`agent-worktree.sh` 会把版本化的 git 护栏
+（`deploy/cloud/git-hooks/`）安装到共享 git 目录，两层一起生效：
+`pre-commit` 拒绝 `dev`/`review` 角色在集成分支（默认 `main`）上的提交；
+`commit-msg` 兜底拒绝集成分支上任何 `[<id>]` 任务提交（即使会话忘记设置角色）。
+必须先 `create`/`adopt` 进入 `agent/<id>` 隔离区；`release` 角色与人工集成提交不受
+影响（人工集成可用 `TRADE_OS_ALLOW_MAIN_COMMIT=1`）。`create`/`adopt` 本身也只能在
+主工作区执行，不能在某个任务隔离区里再建任务。
+
 ### Agent 权限（`TRADE_OS_AGENT_ROLE`）
 
 | 角色 | 允许 | 不允许 |
@@ -32,7 +40,7 @@
 
 ```bash
 cd ~/Desktop/Trosa
-deploy/cloud/agent-worktree.sh status        # 先确认自己在哪个环境
+deploy/cloud/agent-worktree.sh status        # 先确认自己在哪个环境（同时刷新入口护栏）
 deploy/cloud/agent-worktree.sh preflight     # 体检：主区是否干净、迁移编号是否冲突
 deploy/cloud/agent-worktree.sh create --task <id> \
   --owner <负责人/Agent 名> \
@@ -69,14 +77,17 @@ deploy/cloud/agent-worktree.sh adopt --task <id> --owner <name> \
 # 在隔离区里
 git add <只加本任务的文件>
 git commit -m "[<id>] 说明这次完成了什么"
-deploy/cloud/agent-worktree.sh test --task <id>    # 与发布候选同一份门禁
-deploy/cloud/agent-worktree.sh sync --task <id>    # 变基到最新 main
+deploy/cloud/agent-worktree.sh sync --task <id>    # 消解迁移编号碰撞 + 变基到最新 origin/main
+deploy/cloud/agent-worktree.sh test --task <id>    # 与发布候选同一份门禁，并记录证据
 ```
 
 - commit message 以 `[<id>]` 开头，来源一眼可辨；一次 commit 只承载一个任务的改动。
+- **先同步、后门禁**：`sync` 会在变基前自动消解迁移编号碰撞，变基后旧的门禁证据
+  立即失效；`test` 只有在 HEAD 已包含最新 `origin/main` 时才通过。反过来先 test
+  再 sync 会让证据过期，必须重新 test。
 - 测试失败或任务暂停只影响本隔离区，其它任务与主工作区不受影响。
 - **完成证据**：`test` 与 `publish` 会把 tree commit、门禁结果和发布 release 写入共享文件 `trosa-tasks/<id>.verify.log`，并更新任务清单状态；用 `evidence --task <id>` 查看。
-- **完成定义**：`status=landed`（已发布且健康）才算任务完成；绿色门禁只代表“开发完成”，不能用“已修复”描述尚未发布的改动。
+- **完成定义**：`status=landed`（已发布且健康）才算任务完成；绿色门禁只代表“开发完成”，不能用“已修复”描述尚未发布的改动。`gate --task <id>` 可随时只读检查任务是否 ready（证据对应当前 HEAD 且已包含最新 main）。
 - 回收：`remove --task <id>`（默认保留分支；确认丢弃加 `--force`）。
 
 ## 5. 合并与发布
@@ -96,6 +107,10 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 
 - 发布候选在临时 release worktree 中 `cherry-pick -x`，release commit 内保留原始
   commit SHA，可反查来源。
+- **发布只接受真正 ready 的任务**：`publish` 会先校验任务区干净、门禁证据对应当前
+  HEAD、HEAD 已包含最新 `origin/main`（并在需要时先消解迁移编号碰撞），任一不满足
+  即拒绝并要求 `sync` + `test`。直接调用 `release-commit.sh --branch agent/<id>`
+  也走同一判定（`--dry-run` 除外），不能绕过。
 - 两个任务同时改同一文件：各自在隔离区提交；先发布者先进入 `origin/main`，后发布者
   `sync` + 解决冲突后再发布。冲突发生在发布候选里，不会污染任何人的工作区。
 - 本地 `main` 是否移动不影响发布（发布基线始终是 `origin/main`）。发布后按需
@@ -121,6 +136,9 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
   空档不会让运行时漏掉任何迁移）。
 - 两个任务抢到同一编号时：保留先发布者的编号，后发布者在合并前 `git mv` 到下一个空号，
   不要复制对方的 DDL。跨任务冲突用 `preflight` 可直接看出。
+- **自动消解**：`sync` 与 `publish` 会调用 `tools/reconcile_migrations.py`，把本任务新增
+  且与最新 main / 其它 worktree / 他人预留冲突的迁移改名到下一个空号并提交；无冲突时
+  不改动任何文件。也可单独运行 `agent-worktree.sh reconcile --task <id>`。
 - 迁移 **forward-only**：已应用的迁移文件不可再改内容（运行时会因 SHA-256 变化拒绝启动），
   修改必须新增前向迁移。
 
