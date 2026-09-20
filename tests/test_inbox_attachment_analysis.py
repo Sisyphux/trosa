@@ -24,6 +24,12 @@ class InboxAttachmentAnalysisTest(unittest.TestCase):
         path = self._file('notes.csv', b'company,notes\nAcme,met at trade fair\n')
         self.assertEqual(analyze_import_file(path, 'notes.csv')['status'], 'insufficient')
 
+    def test_unrelated_import_record_is_not_supported_with_citation(self):
+        path = self._file('imports.csv', b'company,product,shipment\nAcme,coffee beans,import shipment\n')
+        result = analyze_import_file(path, 'imports.csv')
+        self.assertEqual(result['status'], 'not_supported')
+        self.assertEqual(result['citations'][0]['row_or_page'], 2)
+
     def test_invalid_file_is_analysis_failed(self):
         path = self._file('broken.pdf', b'not a pdf')
         self.assertEqual(analyze_import_file(path, 'broken.pdf')['status'], 'analysis_failed')

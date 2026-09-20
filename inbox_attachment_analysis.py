@@ -56,5 +56,12 @@ def analyze_import_file(path, filename=''):
     if related:
         return {'status': 'supported', 'facts': ['发现与 PMMA/亚克力板有关的进口记录'], 'citations': citations,
                 'confidence': 'medium', 'missing': [], 'next_action': '解除调查阻塞；仅准备外联，不自动发送。'}
+    if any(_IMPORT.search(text) for _, _, text in lines):
+        citations = [{'source': source, 'row_or_page': number,
+                      'excerpt': re.sub(r'\s+', ' ', text).strip()[:500]}
+                     for source, number, text in lines if _IMPORT.search(text) and number > 1]
+        return {'status': 'not_supported', 'facts': ['发现进口记录，但产品描述与 PMMA/亚克力板不相关'],
+                'citations': citations, 'confidence': 'medium', 'missing': [],
+                'next_action': '记录调查结论并按规则降低开发优先级；不自动发送。'}
     return {'status': 'insufficient', 'facts': [], 'citations': [], 'confidence': 'low',
             'missing': ['过去 24 个月内含产品描述与进口主体的记录'], 'next_action': '保留问题，等待补充证据。'}
