@@ -272,6 +272,20 @@ class IdentityLinkTest(unittest.TestCase):
         self.assertEqual(payload['held'][0]['status'], 'conflict')
         self.assertEqual(self.inbox_row(item_id)['status'], 'open')
 
+    def test_startup_autolink_runs_outside_request_context(self):
+        customer_id = self.add_customer('Acrilicos', website='acrilicos.example')
+        item_id = self.add_capture(capture_content(thread='startup-1'), dedupe='startup-1')
+        # serve.py calls this once after loading the app, with no request and no
+        # Flask request context; undo/audit must still resolve the acting user.
+        self.module.run_startup_identity_autolink()
+        self.assertEqual(self.inbox_row(item_id)['status'], 'resolved')
+        conn = self.conn()
+        try:
+            count = conn.execute('SELECT COUNT(*) FROM follow_up_logs WHERE customer_id=?', (customer_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 1)
+
     def test_human_confirmation_persists_reusable_facts(self):
         customer_id = self.add_customer('Newco', website='newco.example')
         content = capture_content(sender='Dana <dana@newco2.example>', thread='thread-new')

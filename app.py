@@ -10400,19 +10400,23 @@ def run_startup_identity_autolink():
         return
     _IDENTITY_AUTOLINK_STARTED = True
     old_user = get_current_user()
-    for user in list(USERS):
-        try:
-            set_db_user(user)
-            result = auto_attribute_inbox_captures()
-            if result.get('resolved'):
-                logger.info('身份自动归属 [%s] 已解决 %d 条待归属沟通', user, len(result['resolved']))
-        except Exception:
-            logger.exception('身份自动归属启动任务失败：%s', user)
-        finally:
+    # Undo snapshots and audit rows resolve the acting user through Flask's
+    # ``g``; outside a request that object only exists inside an application
+    # context, so bind one around the one-shot startup reconciliation.
+    with app.app_context():
+        for user in list(USERS):
             try:
-                set_db_user(old_user)
+                set_db_user(user)
+                result = auto_attribute_inbox_captures()
+                if result.get('resolved'):
+                    logger.info('身份自动归属 [%s] 已解决 %d 条待归属沟通', user, len(result['resolved']))
             except Exception:
-                pass
+                logger.exception('身份自动归属启动任务失败：%s', user)
+            finally:
+                try:
+                    set_db_user(old_user)
+                except Exception:
+                    pass
 
 
 def _capture_customer_matches(captures, customer_rows):
