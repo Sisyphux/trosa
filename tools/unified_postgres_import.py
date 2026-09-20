@@ -1333,6 +1333,34 @@ class Importer:
                  clean(row.get("category")), clean(row.get("sha256")), clean(row.get("uploaded_by")), int(legacy_bool(row.get("is_deleted"))),
                  clean(row.get("deleted_at")), clean(row.get("created_at"))))
 
+        # ``inbox_attachment_evidence`` was introduced after the historical
+        # SQLite products.  It therefore has an explicit *no legacy source*
+        # contract: an ordinary old database contributes zero rows.  If a
+        # compatibility/export snapshot does carry rows, retain them as
+        # auditable evidence by resolving both customer and file references;
+        # never recreate binary objects or silently detach evidence.
+        for row in rows.get("inbox_attachment_evidence", []):
+            account = required_account(row, "inbox_attachment_evidence")
+            file_object_id = self.ref_target(db_name, "customer_files", row.get("file_id"))
+            if not account or not file_object_id:
+                self.issue(f"{source_name}/inbox_attachment_evidence", clean(row.get("id")),
+                           "MISSING_ATTACHMENT_REFERENCE", "Evidence requires a migrated customer and file", row)
+                continue
+            number = self.legacy_id(row.get("id"))
+            target = compat_uuid(f"inbox-attachment-evidence:{user}:{number or clean(row.get('question_key'))}:{clean(row.get('file_id'))}")
+            self.execute("""insert into trosa.inbox_attachment_evidence
+              (id,organization_id,question_key,account_id,file_object_id,purpose,analysis_status,
+               extraction_json,conclusion_json,uploaded_by,created_at,updated_at)
+              values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+              on conflict (organization_id,question_key,file_object_id) do update set
+                analysis_status=excluded.analysis_status, extraction_json=excluded.extraction_json,
+                conclusion_json=excluded.conclusion_json, updated_at=excluded.updated_at""",
+              (target, ORG_ID, clean(row.get("question_key")), account, file_object_id,
+               clean(row.get("purpose")) or "investigation", clean(row.get("analysis_status")) or "uploaded",
+               Jsonb(json_value(row.get("extraction_json")) or {}), Jsonb(json_value(row.get("conclusion_json")) or {}),
+               clean(row.get("uploaded_by")), parse_time(row.get("created_at")) or datetime.now(timezone.utc),
+               parse_time(row.get("updated_at")) or datetime.now(timezone.utc)))
+
         self.import_trosa_runtime_rows(db_name, rows)
 
     def import_trosa_runtime_rows(self, db_name: str, rows: dict[str, list[dict[str, Any]]]) -> None:
