@@ -2,9 +2,9 @@
 -- attachment service.  Binary storage remains core.file_objects.
 CREATE TABLE IF NOT EXISTS trosa.inbox_attachment_evidence (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id uuid NOT NULL REFERENCES core.organizations(id),
+  organization_id uuid NOT NULL REFERENCES identity.organizations(id),
   question_key text NOT NULL,
-  account_id uuid NOT NULL REFERENCES core.accounts(id),
+  account_id uuid NOT NULL REFERENCES trosa.accounts(id),
   file_object_id uuid NOT NULL REFERENCES core.file_objects(id),
   purpose text NOT NULL DEFAULT 'investigation',
   analysis_status text NOT NULL DEFAULT 'uploaded',
