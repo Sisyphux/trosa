@@ -27,7 +27,8 @@ def _xlsx_rows(raw):
 
 def analyze_import_file(path, filename=''):
     ext = os.path.splitext(filename or path)[1].lower()
-    raw = open(path, 'rb').read()
+    with open(path, 'rb') as handle:
+        raw = handle.read()
     citations, lines = [], []
     try:
         if ext == '.csv':
