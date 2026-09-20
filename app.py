@@ -105,6 +105,7 @@ from trosa_domain import (
     update_contact as _update_contact,
     update_outreach_message as _update_outreach_message,
     merge_open_task as _merge_open_task,
+    real_interaction_customer_ids as _real_interaction_customer_ids,
     record_external_interaction as _record_interaction,
     set_interaction_flag as _set_interaction_flag,
     set_outreach_reported as _set_outreach_reported,
@@ -2912,16 +2913,6 @@ def gmail_integration_disconnect():
 
 _SELA_OUTREACH_STATUSES = {'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED'}
 
-# A confirmed automatic outreach is the contact fact that satisfies a prospect's
-# pre-contact development task.  These markers identify the legacy/imported
-# routine development task that must not stay in Today as a human follow-up once
-# Sela has actually made contact (TROSA_MAINTENANCE.md: auto-development nodes are
-# delivery history, not human tasks).  Keep in sync with
-# migrations/0039_autoclose_routine_development_tasks.sql.
-_ROUTINE_DEVELOPMENT_TASK_MARKERS = (
-    '开发新客户', '二次开发', '开发信', '待首次联系', '官网导入', '新开发流程',
-)
-
 
 def _sela_now():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -4343,22 +4334,28 @@ def _sela_prospect_revision(conn, profile, customer=None):
     })
 
 
-def _complete_routine_development_tasks(conn, customer_id, *, completed_at):
-    """Close legacy routine development tasks once a real outreach happened.
+def _complete_prospect_stage_tasks(conn, customer_id, *, completed_at):
+    """Close open follow-ups that still belong to Sela's prospect development.
 
-    A confirmed contact satisfies the prospect's pre-contact development task
-    (make first contact), whatever synthetic due date the import gave it: the
-    old rows were dated ahead of the contact, so a due-date comparison left them
-    behind in Today.  Only routine development markers are matched, so a
-    deliberate human next step is never auto-closed; an explicitly human task is
-    not marked.  Idempotent: once closed, a later Sela refresh finds no match.
+    The Today/Sela boundary is a relationship fact, never a title keyword or
+    ``customer_type``: while a Customer has no real interaction (inbound reply
+    or explicitly recorded communication) its new-customer development and
+    unreplied development follow-ups are Sela's responsibility.  When Sela
+    reports an outreach for such a Customer, any open follow-up on it is one of
+    those development tasks and is closed so it cannot resurface in Today once
+    the Customer later engages.  A Customer that already has a real
+    relationship is left untouched.  Idempotent: a later Sela refresh finds no
+    open prospect-stage task.
     """
+    try:
+        customer_id = int(customer_id)
+    except (TypeError, ValueError):
+        return []
+    if customer_id in _real_interaction_customer_ids(conn, {customer_id}):
+        return []
     closed = []
     for task in _customer_tasks(conn, customer_id):
         if str(task.get('reminder_type') or '') != 'follow_up':
-            continue
-        text = ' '.join(str(task.get(key) or '') for key in ('title', 'content', 'reason'))
-        if not any(marker in text for marker in _ROUTINE_DEVELOPMENT_TASK_MARKERS):
             continue
         try:
             _complete_task(conn, task_id=task['id'], completed_at=completed_at)
@@ -4489,7 +4486,7 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                      json.dumps({'source_id': source_id})),
                 )
             if status != 'BOUNCED':
-                _complete_routine_development_tasks(conn, customer_id, completed_at=now)
+                _complete_prospect_stage_tasks(conn, customer_id, completed_at=now)
         return outreach_id
     existing = conn.execute(
         '''SELECT * FROM outreach_emails
@@ -4579,7 +4576,7 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                  _SELA_PROSPECT_INTEGRATION, sent_at or now),
             )
             if status != 'BOUNCED':
-                _complete_routine_development_tasks(conn, customer_id, completed_at=now)
+                _complete_prospect_stage_tasks(conn, customer_id, completed_at=now)
         return outreach_id
 
 

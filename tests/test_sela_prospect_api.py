@@ -683,19 +683,20 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
         self.assertNotIn(reminder_id, [row['id'] for row in today.get_json()])
 
-    def test_confirmed_outreach_closes_development_tasks_and_keeps_human_tasks(self):
+    def test_confirmed_outreach_closes_prospect_stage_tasks_by_relationship_fact(self):
         created = self.post_prospect(prospect())
         self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
         customer_id = created.get_json()['trosa_id']
-        human_task = self.add_reminder(
+        # Without a real interaction every open follow-up is prospect-stage
+        # development, whatever its title or due date.  The boundary is a
+        # relationship fact, never a title keyword.
+        plain_task = self.add_reminder(
             customer_id, '联系 Acrílicos S.A.', '2026-09-01', reason='人工安排的下一步',
         )
-        future_dev_task = self.add_reminder(
+        future_task = self.add_reminder(
             customer_id, '二次开发: Acrílicos S.A.', '2026-09-20', reason='计划内的二次开发',
         )
-        # Imported development tasks are often dated after the contact; the
-        # confirmed contact still satisfies the pre-contact task.
-        later_dev_task = self.add_reminder(
+        later_task = self.add_reminder(
             customer_id, '开发新客户: Acrílicos S.A.', '2026-09-25', reason='官网导入，待首次联系',
         )
 
@@ -708,9 +709,33 @@ class SelaProspectApiTest(unittest.TestCase):
         response = self.post_prospect(sent, 'sela-v2:prospect-1:sent')
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
-        self.assertEqual(self.reminder_done(human_task), 0)
-        self.assertEqual(self.reminder_done(future_dev_task), 1)
-        self.assertEqual(self.reminder_done(later_dev_task), 1)
+        self.assertEqual(self.reminder_done(plain_task), 1)
+        self.assertEqual(self.reminder_done(future_task), 1)
+        self.assertEqual(self.reminder_done(later_task), 1)
+
+    def test_today_hides_prospect_tasks_until_a_real_interaction_exists(self):
+        body = prospect('today-boundary-prospect')
+        created = self.post_prospect(body, 'sela-v2:today-boundary:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        task_id = self.add_reminder(customer_id, '联系 Acrílicos S.A.', '2026-09-05', reason='')
+
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        today = self.client.get('/api/reminders/today')
+        self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
+        self.assertNotIn(task_id, [row['id'] for row in today.get_json()])
+
+        # An explicitly recorded inbound communication is a real relationship
+        # fact, so the same task is allowed to enter Today again.
+        recorded = self.client.post(
+            f'/api/customers/{customer_id}/follow_history',
+            json={'activity_content': '客户回复询价', 'direction': 'inbound',
+                  'follow_date': '2026-09-02'},
+        )
+        self.assertEqual(recorded.status_code, 200, recorded.get_data(as_text=True))
+        today = self.client.get('/api/reminders/today')
+        self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
+        self.assertIn(task_id, [row['id'] for row in today.get_json()])
 
     def test_human_can_unblock_dnc_and_sela_cannot(self):
         body = prospect()

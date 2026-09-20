@@ -1,3 +1,15 @@
+## 2026-09-20 — Today 与 Sela 职责边界：prospect 开发待办不再进入今日跟进
+
+- 背景：prospect 阶段的新客户开发与未回复开发跟进应全部由 Sela 负责，只有产生真实互动或明确人工业务事项后，相关行动才进入 Today；旧实现靠标题关键词（“开发新客户/二次开发/开发信/待首次联系/官网导入/新开发流程”）识别并只在 Sela 确认外联后关闭，判定脆弱且把未回复的开发待办留在 Today。
+- 修复（关系事实）：新增 `trosa_domain.real_interaction_customer_ids` 与 PostgreSQL `trosa.account_has_real_interaction`，以真实关系事实判定：存在已记录沟通、入站/双向沟通、已回复外联或未处理的入站回复才视为离开 prospect 阶段。单向开发信、投递事件、内部 agent 决策都不算真实互动。判定不依赖客户是否存在于 Trosa、`customer_type` 或标题关键词。
+- 修复（Today 投影）：`trosa.today_tasks`（迁移 `0055`）与 SQLite 的 `today_tasks` 只投影有真实互动客户的 open `follow_up`；prospect 阶段的开发待办不会进入 Today。
+- 清理（存量）：迁移 `0055` 把无真实互动客户的 open `follow_up` 标记完成并写入 `auto_closed_by='prospect_stage_boundary'` 审计（保留行，不删除、不靠关键词）。Sela 对仍处 prospect 阶段的客户确认外联时，`_complete_prospect_stage_tasks` 以同一关系事实关闭其 open 跟进，避免日后回复时旧开发待办回流；已有真实关系的客户不受影响。
+- 移除：删除关键词标记 `_ROUTINE_DEVELOPMENT_TASK_MARKERS` 与 `_complete_routine_development_tasks`。
+- 测试：新增 `test_today_hides_prospect_tasks_until_a_real_interaction_exists`；`test_confirmed_outreach_closes_prospect_stage_tasks_by_relationship_fact` 覆盖“无真实互动时同一客户的任意标题 open 跟进都被视为 prospect 开发”；PostgreSQL rehearsal 断言未互动 prospect 的 open 任务不在 `trosa.today_tasks`。
+- 影响范围：`app.py`、`trosa_domain.py`、迁移 `0055`、`tests/test_sela_prospect_api.py`、`tests/test_today_dedupe_regression.py`、`tests/test_postgres_rehearsal.py`；不改 Sela prospect/exclusion/reply/needs 接口契约，不改其它 Today 语义。
+- 是否需要迁移：是。发布流程应用 `0055` 重定义 `trosa.today_tasks`、新增关系事实函数并清理历史 prospect 开发待办；无需人工操作。
+- 当前状态：本地完成。完整 SQLite 回归通过，PostgreSQL rehearsal 通过，`py_compile`、`node --check`、迁移校验通过。
+
 ## 2026-09-20 — 统一客户身份自动归属：确定性事实直接归属，Inbox 只留真正待人工判断
 
 - 背景：Gmail、Sela、Agent、浏览器采集进入 Trosa 时，只要没有命中联系人邮箱的精确匹配，就一律落到 Inbox 的「待归属」，即使系统其实已有足够确定的事实（官网域名唯一一致、历史线程已归属、来源已有客户关联、用户此前确认过的邮箱/域名）。本项新增统一的身份判定，把这些本可自动判断的问题直接解决，Inbox 语义回到“只承接系统无法自行解决、确实需要人工判断的问题”。

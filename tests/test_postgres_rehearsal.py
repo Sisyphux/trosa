@@ -1264,6 +1264,14 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             ).fetchone()['status'],
             'open',
         )
+        # A one-way prospect with no real interaction must not project into
+        # Today, even while its legacy follow-up row is still open.
+        self.assertEqual(
+            self.connection.execute(
+                'SELECT count(*) FROM trosa.today_tasks WHERE id=?', (dev_task_id,)
+            ).fetchone()[0],
+            0,
+        )
         sent_again = dict(prospect)
         sent_again['sent_at'] = '2026-09-21T10:00:00+08:00'
         confirmed_again = client.post(

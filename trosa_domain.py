@@ -82,6 +82,91 @@ def customer_contacts(conn: Any, customer_id: int, *, customer_ids=None) -> list
     return [dict(row) for row in rows]
 
 
+# Sources whose outbound-only activity never establishes a real relationship.
+# A sent development email, a delivery event or an internal agent decision is
+# one-way prospect development, so it must not move a Customer out of the
+# prospect stage.  Kept in sync with migration 0055
+# (trosa.account_has_real_interaction).
+_SYSTEM_ONLY_COMMUNICATION_SOURCES = (
+    'gmail', 'sela', 'sela_reply_engine', 'sela_agent',
+)
+
+
+def real_interaction_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
+    """Return Customers that have a real relationship, not just a one-way send.
+
+    This is the relationship-stage fact behind the Today/Sela boundary: new
+    Customers and unreplied development follow-ups belong to Sela and never to
+    Today.  The judgment is a durable business fact, never a title keyword, a
+    ``customer_type`` value or mere presence in the CRM.  A Customer enters the
+    relationship when an inbound reply, or an explicitly recorded
+    communication (a human/agent interaction, not a system one-way send),
+    exists; a sent outreach or delivery event on its own never does.
+    """
+    ids = _ids(customer_ids) if customer_ids is not None else None
+    wanted = set(ids) if ids is not None else None
+    if wanted == set():
+        return set()
+
+    def keep(customer_id) -> bool:
+        try:
+            customer_id = int(customer_id)
+        except (TypeError, ValueError):
+            return False
+        return wanted is None or customer_id in wanted
+
+    found: set[int] = set()
+    if postgres_mode():
+        marks = ''
+        params: list[Any] = []
+        if wanted is not None:
+            marks = ' AND ar.legacy_customer_id IN (' + ','.join('?' for _ in wanted) + ')'
+            params.extend(sorted(wanted))
+        rows = conn.execute(
+            '''SELECT DISTINCT ar.legacy_customer_id AS customer_id
+                 FROM trosa.account_legacy_refs ar
+                WHERE ar.organization_id=trosa.compat_org_id()
+                  AND ar.legacy_user_id=trosa.compat_current_user()
+                  AND trosa.account_has_real_interaction(ar.account_id)''' + marks,
+            params,
+        ).fetchall()
+        for row in rows:
+            found.add(int(row['customer_id']))
+        return found
+
+    where, params = '', []
+    if wanted is not None:
+        where = ' AND customer_id IN (' + ','.join('?' for _ in wanted) + ')'
+        params = sorted(wanted)
+    for row in conn.execute(
+        '''SELECT customer_id, direction, activity_type, source FROM follow_up_logs
+            WHERE (is_deleted=0 OR is_deleted IS NULL)''' + where,
+        params,
+    ).fetchall():
+        source = str(row['source'] or '').strip().lower()
+        direction = str(row['direction'] or '').strip().lower()
+        activity_type = str(row['activity_type'] or '').strip().lower()
+        if (direction in ('inbound', 'two_way') or activity_type == 'customer_reply'
+                or source not in _SYSTEM_ONLY_COMMUNICATION_SOURCES):
+            if keep(row['customer_id']):
+                found.add(int(row['customer_id']))
+    for row in conn.execute(
+        "SELECT DISTINCT customer_id FROM outreach_emails WHERE lower(COALESCE(reply_status,''))='replied'"
+        + where,
+        params,
+    ).fetchall():
+        if keep(row['customer_id']):
+            found.add(int(row['customer_id']))
+    for row in conn.execute(
+        "SELECT DISTINCT customer_id FROM inbox_items WHERE status='open' "
+        "AND item_type='customer_reply' AND customer_id IS NOT NULL" + where,
+        params,
+    ).fetchall():
+        if keep(row['customer_id']):
+            found.add(int(row['customer_id']))
+    return found
+
+
 def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -> list[dict]:
     """The one Today work view.  It is a projection of open Tasks, never a second queue.
 
@@ -91,6 +176,12 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
     when legacy data still holds duplicates.  The canonical task id is the
     first key because one account can still have multiple legacy customer
     aliases; a view fan-out must never turn one task into multiple Today cards.
+
+    Prospect-stage Customers are filtered out: their new-customer development
+    and unreplied development follow-ups are Sela's responsibility.  In
+    PostgreSQL the ``trosa.today_tasks`` view enforces the same relationship
+    fact; the SQLite adapter filters here so isolated development/recovery
+    reads agree.
     """
     if postgres_mode():
         query = '''SELECT id, customer_id, title, content, reason, due_date AS remind_date,
@@ -108,6 +199,9 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
                     ORDER BY r.remind_date, r.manual_order, r.id'''
     params: list[Any] = [due_on_or_before]
     rows = [dict(row) for row in conn.execute(query, params).fetchall()]
+    if not postgres_mode() and rows:
+        engaged = real_interaction_customer_ids(conn, {int(row['customer_id']) for row in rows})
+        rows = [row for row in rows if int(row['customer_id']) in engaged]
     seen_task_ids: set[Any] = set()
     seen_customer_days: set[tuple[Any, str]] = set()
     collapsed: list[dict] = []

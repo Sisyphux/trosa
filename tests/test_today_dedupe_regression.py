@@ -116,6 +116,14 @@ class TodayDuplicateRegressionTest(unittest.TestCase):
 
     def test_legacy_duplicates_are_hidden_and_healed(self):
         client, customer_id = self._client_with_customer()
+        # A real interaction is required before a Customer's follow-ups belong
+        # in Today; this test is about the same-day dedupe projection.
+        recorded = client.post(
+            f"/api/customers/{customer_id}/follow_history",
+            json={"activity_content": "客户回复", "direction": "inbound",
+                  "follow_date": "2026-09-01"},
+        )
+        self.assertEqual(recorded.status_code, 200, recorded.get_json())
         connection = sqlite3.connect(db.get_user_db_path("hamid"))
         try:
             connection.execute("DROP INDEX IF EXISTS idx_reminders_one_open_follow_up_per_day")
