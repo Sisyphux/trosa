@@ -31,6 +31,15 @@ def _load_flask_app():
         raise RuntimeError(f'无法加载应用入口：{entrypoint}')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    # Deterministic Inbox identity auto-attribution is a one-shot startup
+    # reconciliation: after this capability ships, captures with unique,
+    # conflict-free evidence are resolved instead of lingering as "待归属".
+    startup_autolink = getattr(module, 'run_startup_identity_autolink', None)
+    if callable(startup_autolink):
+        try:
+            startup_autolink()
+        except Exception:
+            logger.exception('启动身份自动归属失败，Inbox 保持原状')
     return module.app
 
 

@@ -1543,6 +1543,33 @@ async function refreshInboxManually() {
   showToast('Inbox 已更新', 'success');
 }
 
+// 统一身份自动归属：只处理有唯一、无冲突确定性证据的待归属沟通。
+// 返回的每条都带 undo_token，撤销即恢复时间线与 Inbox 条目。
+async function autoAttributeInbox() {
+  var button = document.querySelector('.inbox-auto-attribute');
+  if (button) button.disabled = true;
+  try {
+    var data = await api('/api/inbox/auto-attribute', { method: 'POST', body: JSON.stringify({}) });
+    var resolved = data.resolved || [];
+    var held = data.held || [];
+    await loadInbox();
+    if (!resolved.length) {
+      showToast(held.length ? '没有可自动确定的归属，仍需人工判断' : '没有待归属沟通', 'info');
+      return;
+    }
+    var tokens = resolved.map(function(entry) { return entry.undo_token; }).filter(Boolean);
+    showToastAction('已自动归属 ' + resolved.length + ' 条，Inbox 只剩需人工判断的项目', 'success', '撤销', async function() {
+      for (var i = tokens.length - 1; i >= 0; i--) {
+        try { await api('/api/undo/' + encodeURIComponent(tokens[i]), { method: 'POST', body: JSON.stringify({}) }); } catch (e) {}
+      }
+      showToast('已撤销自动归属', 'success');
+      loadInbox();
+    });
+  } catch (e) {
+    if (button) button.disabled = false;
+  }
+}
+
 async function refreshInboxBadge() {
   try {
     var data = await api('/api/inbox/counts');
@@ -1612,7 +1639,9 @@ function renderInbox(counts) {
   if (navCount) navCount.textContent = counts.all || inboxQuestions.length || '';
   var overview = document.getElementById('inboxOverview');
   if (overview) {
+    var identityCount = inboxQuestions.filter(function(question) { return question.kind === 'identity'; }).length;
     overview.innerHTML = '<strong>' + (counts.all || inboxQuestions.length || 0) + '</strong><span>个问题需要判断</span>' +
+      (identityCount ? '<button class="btn btn-sm inbox-auto-attribute" type="button" onclick="autoAttributeInbox()">自动归属可确定项</button>' : '') +
       '<p>系统能自行处理的噪声、退信、技术冲突和重复证据不会出现在这里；这里只留下必须由你决定的问题。</p>';
   }
   var filtersEl = document.getElementById('inboxFilters');

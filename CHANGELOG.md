@@ -1,3 +1,15 @@
+## 2026-09-20 — 统一客户身份自动归属：确定性事实直接归属，Inbox 只留真正待人工判断
+
+- 背景：Gmail、Sela、Agent、浏览器采集进入 Trosa 时，只要没有命中联系人邮箱的精确匹配，就一律落到 Inbox 的「待归属」，即使系统其实已有足够确定的事实（官网域名唯一一致、历史线程已归属、来源已有客户关联、用户此前确认过的邮箱/域名）。本项新增统一的身份判定，把这些本可自动判断的问题直接解决，Inbox 语义回到“只承接系统无法自行解决、确实需要人工判断的问题”。
+- 判定器：新增 `identity_link.py`。只接受确定性证据——联系人邮箱精确一致、邮箱域名与客户官网唯一一致（排除公共邮箱域）、历史邮件线程已有明确归属、已确认的邮箱/域名/线程事实、来源（`external_source`/`external_id` 或 `agent_prospect_profiles`）已有可信客户关联。多个客户同时成立、证据互相冲突或证据不足时返回 `conflict`/`unmatched`，仍进入 Inbox 请求人工判断；公司名相似、签名识别等弱证据不参与自动归属，只保留为候选建议。
+- 可复用事实：新增 `trosa.identity_link_facts`（SQLite 同步建表，迁移 `0054`）。用户人工确认或纠正归属后，该次沟通的发件邮箱、邮箱域名与邮件线程会写入事实表；后续同类事实直接命中，不再重复询问。事实按 `(用户, 类型, 标识)` 唯一，纠正会更新同一行；`record_identity_fact`/`revoke_identity_facts` 支持审计与撤销。本能力不会因无法匹配而自动创建正式客户。
+- 写入路径：`gmail_sync` 的消息判定改为先精确邮箱、再确定性解析器（域名/线程/事实/来源），命中即作为正常沟通记录进时间线并把判断依据写入活动结果；`record_customer_communication` 关闭 Inbox 时把人工确认的标识沉淀为事实；`POST /api/inbox/auto-attribute` 与启动时 `run_startup_identity_autolink` 重新处理存量待归属，能确定的直接归属并保留 `undo_token`。
+- 撤销与审计：自动归属复用共享沟通事务，归属、时间线记录与 Inbox 关闭是一个可撤销单元；解析依据同时写入自动归属原因与操作日志。自动归属标记 `resolution_source='auto'`，与人工处理区分。
+- 前端：Inbox 概览新增「自动归属可确定项」按钮，一次处理全部确定性归属，并在结果提示中提供「撤销」。
+- 影响范围：新增 `identity_link.py` 与 `migrations/0054_identity_link_facts.sql`；改动 `app.py`、`gmail_sync.py`、`db.py`、`serve.py`、`tools/unified_postgres_import.py`、`app/static/app.js`、`CHANGELOG.md` 与新增 `tests/test_identity_link.py`。不改动客户/联系人/时间线/待办的数据语义，不恢复冻结功能。
+- 是否需要迁移：是。发布流程会应用 `0054`；SQLite 由 `db.py` 建表，无需人工操作。
+- 当前状态：本地 SQLite 回归通过（含新增 `tests/test_identity_link.py`）；PostgreSQL rehearsal 与发布状态待发布角色确认。
+
 ## 2026-09-19 — 修复进入页面即显示“正在保存…”：状态条 hidden 属性失效
 
 - 现象：线上进入工作台后，未经任何操作就持续显示底部“正在保存…”转圈胶囊（以及潜在的同款“正在连接…”）。

@@ -1124,6 +1124,44 @@ class Importer:
                 ),
             )
 
+        # Reusable identity facts bind an explicit external identifier to one
+        # Customer.  They are projected last so the owning account and the
+        # optional source Inbox item already exist.
+        for row in rows.get("identity_link_facts", []):
+            identifier_type = clean(row.get("identifier_type"))
+            identifier_value = clean(row.get("identifier_value"))
+            account = account_id(row)
+            if (identifier_type not in {"email", "domain", "thread", "source"}
+                    or not identifier_value or not account):
+                self.issue(
+                    f"{source_name}/identity_link_facts",
+                    clean(row.get("id")) or identifier_value or "unknown",
+                    "INVALID_IDENTITY_FACT",
+                    "Identity fact is missing a supported type, value, or customer; raw row remains archived",
+                    row,
+                )
+                continue
+            target = compat_uuid(
+                f"identity-fact:{ORG_ID}:{user}:{identifier_type}:{identifier_value}")
+            self.execute(
+                """insert into trosa.identity_link_facts
+                   (id,organization_id,legacy_user_id,account_id,identifier_type,identifier_value,
+                    origin,method,resolution,source_inbox_item_id,created_by,revoked_at,created_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (id) do update set account_id=excluded.account_id,
+                    identifier_type=excluded.identifier_type,
+                    identifier_value=excluded.identifier_value,origin=excluded.origin,
+                    method=excluded.method,resolution=excluded.resolution,
+                    source_inbox_item_id=excluded.source_inbox_item_id,
+                    created_by=excluded.created_by,revoked_at=excluded.revoked_at""",
+                (target, ORG_ID, user, account, identifier_type, identifier_value,
+                 clean(row.get("origin")) or "human_confirmed", clean(row.get("method")),
+                 clean(row.get("resolution")),
+                 self.ref_target(db_name, "inbox_items", row.get("source_inbox_item_id")),
+                 clean(row.get("created_by")), parse_time(row.get("revoked_at")),
+                 parse_time(row.get("created_at")) or datetime.now(timezone.utc)),
+            )
+
         # Research and customer AI state use the normalized module tables.
         for row in rows.get("research_reports", []):
             account = required_account(row, "research_reports")
@@ -2595,6 +2633,7 @@ class Importer:
                     'trosa.email_verifications','trosa.email_verification_jobs',
                     'trosa.email_domain_probes','trosa.email_logs',
                     'trosa.agent_prospect_profiles','trosa.business_exclusions',
+                    'trosa.identity_link_facts',
                 ):
                     self.report['target'][table]=cur.execute(f'select count(*) from {table}').fetchone()[0]
                 self.report['sources'] = {

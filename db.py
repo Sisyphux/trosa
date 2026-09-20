@@ -1468,6 +1468,28 @@ USER_TABLE_SQL = [
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     )
     ''',
+    # Reusable, deterministic identity facts.  One active row maps an explicit
+    # external identifier (email address, website domain, provider thread id or
+    # source identity) to exactly one Customer.  A human confirmation or
+    # correction is stored here so the same fact never asks twice.
+    '''
+    CREATE TABLE IF NOT EXISTS identity_link_facts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        identifier_type TEXT NOT NULL
+            CHECK(identifier_type IN ('email', 'domain', 'thread', 'source')),
+        identifier_value TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'human_confirmed'
+            CHECK(origin IN ('human_confirmed', 'auto', 'imported')),
+        method TEXT DEFAULT '',
+        resolution TEXT DEFAULT '',
+        source_inbox_item_id INTEGER,
+        revoked_at TEXT DEFAULT '',
+        created_by TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    )
+    ''',
     # 邮件发送记录（保留但不再前台展示）
     '''
     CREATE TABLE IF NOT EXISTS email_logs (
@@ -1973,6 +1995,11 @@ def init_user_tables(user):
                      ON inbox_items(status, item_type, customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_inbox_open_question_key
                      ON inbox_items(question_key) WHERE status='open' ''')
+        c.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_identity_link_facts_active
+                     ON identity_link_facts(identifier_type, identifier_value)
+                     WHERE revoked_at IS NULL OR revoked_at = '' ''')
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_identity_link_facts_customer
+                     ON identity_link_facts(customer_id, identifier_type)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_proposals_pending
                      ON agent_proposals(status, customer_id, created_at DESC)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_agent_gateway_idempotency_key

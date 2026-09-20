@@ -40,6 +40,7 @@ from trosa_domain import (
     record_external_interaction,
 )
 import inbox_questions as _inbox_questions
+import identity_link
 
 
 logger = logging.getLogger(__name__)
@@ -648,12 +649,46 @@ def _matches_for_emails(cursor, emails):
     }
 
 
+def _match_message(cursor, message):
+    """Return the identity decision for one message.
+
+    Exact Contact-email matching stays the primary rule.  When it cannot
+    decide, deterministic reusable facts, a unique website domain or prior
+    thread attribution may still auto-attribute the message.  Weak signals
+    (company-name similarity, signatures) never qualify here; they only remain
+    Inbox candidates for a human.
+    """
+    match = _matches_for_emails(cursor, message.get('external_emails') or [])
+    if match.get('status') in ('matched', 'ignored'):
+        return match
+    conn = getattr(cursor, 'connection', cursor)
+    try:
+        decision = identity_link.resolve_identity(conn, {
+            'emails': list(message.get('external_emails') or []),
+            'thread_id': message.get('thread_id') or '',
+        })
+    except Exception as error:  # pragma: no cover - resolution must never break sync
+        logger.warning('identity resolution failed for %s: %s', message.get('message_id'), error)
+        return match
+    if decision.get('status') == 'matched':
+        return {
+            'status': 'matched', 'customer_id': decision['customer_id'],
+            'contact_id': decision.get('contact_id'), 'customer': {}, 'contact': {},
+            'identity_reason': decision.get('reason', ''),
+        }
+    if decision.get('status') == 'conflict' or match.get('status') == 'ambiguous':
+        match = dict(match)
+        match['status'] = 'ambiguous'
+        match['identity_reason'] = decision.get('reason', '') if decision.get('status') == 'conflict' else ''
+    return match
+
+
 def _find_match(user, message):
     old_user = get_current_user()
     set_db_user(user)
     conn = get_db()
     try:
-        return _matches_for_emails(conn.cursor(), message.get('external_emails') or [])
+        return _match_message(conn, message)
     finally:
         conn.close()
         set_db_user(old_user)
@@ -1052,7 +1087,7 @@ def _store_message(user, account, message, summary):
         if processed:
             conn.rollback()
             return {'state': 'duplicate'}
-        match = _matches_for_emails(c, message.get('external_emails') or [])
+        match = _match_message(conn, message)
         noise = gmail_noise_role(message)
         if noise['delivery_notice'] or noise['noise']:
             # 退信与系统 no-reply 邮件不是客户沟通：不建 Inbox 条目、不进时间线。
@@ -1065,12 +1100,14 @@ def _store_message(user, account, message, summary):
         now = _now_text()
         if match['status'] == 'matched':
             escaped_summary = html.escape(str(summary or _fallback_summary(message)), quote=False)
+            identity_reason = str(match.get('identity_reason') or '').strip()
             activity_id = record_external_interaction(
                 conn, customer_id=match['customer_id'], content=escaped_summary,
                 occurred_on=message.get('date') or now[:10],
                 direction=message.get('direction', 'unknown'), source='gmail',
                 activity_type='email', source_reference=message.get('message_id', ''),
                 contact_id=match.get('contact_id'),
+                result=f'自动归属依据：{identity_reason}' if identity_reason else '',
             )
             _insert_source(c, activity_id, account, message)
             _store_state(c, message, match, activity_id=activity_id)

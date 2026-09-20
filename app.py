@@ -113,6 +113,7 @@ from trosa_domain import (
     today_tasks as _today_tasks,
     weekly_interactions as _weekly_interactions,
 )
+import identity_link
 
 # ========== 配置 ==========
 logging.basicConfig(
@@ -10258,6 +10259,162 @@ def _website_domain(value):
     return ''
 
 
+def _capture_item_source(item_type):
+    return 'gmail' if item_type == 'gmail_capture' else 'browser_extension'
+
+
+def _open_capture_items(conn):
+    """Read open, still-unassigned communication captures for auto-attribution."""
+    if postgres_mode():
+        return [dict(row) for row in _modern_inbox_rows(
+            conn, status='open', item_type=tuple(sorted(_CAPTURE_INBOX_TYPES)))]
+    return [dict(row) for row in conn.execute(
+        """SELECT * FROM inbox_items
+            WHERE status='open' AND item_type IN ('browser_capture','gmail_capture')
+            ORDER BY created_at ASC, id ASC""").fetchall()]
+
+
+def _persist_confirmed_capture_identity(conn, inbox_item, customer_id, created_by=''):
+    """Persist the explicit identifiers of a human-confirmed capture as facts.
+
+    This is the "confirmation becomes reusable" contract: once a human decides
+    a sender email/domain/thread belongs to a customer, later facts carrying the
+    same identifier are deterministic instead of asking again.
+    """
+    if not inbox_item or inbox_item.get('item_type') not in _CAPTURE_INBOX_TYPES:
+        return []
+    evidence = identity_link.evidence_from_capture(
+        inbox_item.get('content'), source=_capture_item_source(inbox_item.get('item_type')))
+    stored = []
+    domains = []
+    for email in evidence.get('emails') or []:
+        if identity_link.record_identity_fact(
+                conn, identifier_type='email', identifier_value=email, customer_id=customer_id,
+                origin='human_confirmed', resolution='Inbox 人工确认归属',
+                source_inbox_item_id=inbox_item.get('id'), created_by=created_by):
+            stored.append(('email', email))
+        domain = identity_link.email_domain(email)
+        if domain and domain not in identity_link.PUBLIC_EMAIL_DOMAINS:
+            domains.append(domain)
+    for domain in dict.fromkeys(domains):
+        if identity_link.record_identity_fact(
+                conn, identifier_type='domain', identifier_value=domain, customer_id=customer_id,
+                origin='human_confirmed', resolution='Inbox 人工确认归属',
+                source_inbox_item_id=inbox_item.get('id'), created_by=created_by):
+            stored.append(('domain', domain))
+    thread_id = (evidence.get('thread_id') or '').strip()
+    if thread_id and identity_link.record_identity_fact(
+            conn, identifier_type='thread', identifier_value=thread_id, customer_id=customer_id,
+            origin='human_confirmed', resolution='Inbox 人工确认归属',
+            source_inbox_item_id=inbox_item.get('id'), created_by=created_by):
+        stored.append(('thread', thread_id))
+    return stored
+
+
+def auto_attribute_inbox_captures(limit=None, apply=True):
+    """Re-process open captures that have unique, conflict-free evidence.
+
+    Only ``matched`` decisions are applied; ``conflict``/``unmatched`` captures
+    stay in Inbox for a human.  Applying reuses the shared communication
+    transaction, so attribution, timeline recording and Inbox resolution stay
+    one undoable unit (``undo_token`` is returned per item).
+    """
+    conn = get_db()
+    try:
+        items = _open_capture_items(conn)
+    finally:
+        conn.close()
+    resolved, held = [], []
+    for item in items:
+        if item.get('customer_id'):
+            continue
+        capture = _inbox_capture_context(item.get('content'), item.get('created_at'))
+        evidence = identity_link.evidence_from_capture(
+            item.get('content'), source=_capture_item_source(item.get('item_type')))
+        conn = get_db()
+        try:
+            decision = identity_link.resolve_identity(conn, evidence)
+        finally:
+            conn.close()
+        if decision.get('status') != 'matched':
+            held.append({
+                'item_id': item['id'], 'status': decision.get('status'),
+                'reason': decision.get('reason') or '证据不足，仍需人工判断',
+                'candidate_count': len(decision.get('candidates') or []),
+            })
+            continue
+        if not (capture.get('content') or '').strip():
+            held.append({'item_id': item['id'], 'status': 'unmatched',
+                         'reason': '没有可记录的沟通内容', 'candidate_count': 0})
+            continue
+        if not apply:
+            resolved.append({
+                'item_id': item['id'], 'customer_id': decision['customer_id'],
+                'reason': decision['reason'], 'methods': decision['methods'],
+            })
+            continue
+        try:
+            result = record_customer_communication(decision['customer_id'], {
+                'activity_content': capture['content'],
+                'activity_result': f"自动归属：{decision['reason']}",
+                'activity_type': capture.get('activity_type') or 'follow_up',
+                'direction': capture.get('direction') or 'unknown',
+                'follow_date': capture.get('date') or _calendar_today().isoformat(),
+                'source': _capture_item_source(item.get('item_type')),
+                'inbox_item_id': item['id'],
+                'resolution_source': 'auto',
+            })
+        except CrmWriteError as error:
+            held.append({'item_id': item['id'], 'status': 'error',
+                         'reason': error.message, 'candidate_count': 1})
+            continue
+        except Exception as error:  # pragma: no cover - defensive
+            logger.error('auto_attribute_inbox_captures error: %s', error, exc_info=True)
+            held.append({'item_id': item['id'], 'status': 'error',
+                         'reason': '自动归属失败，未写入任何记录', 'candidate_count': 1})
+            continue
+        resolved.append({
+            'item_id': item['id'], 'customer_id': decision['customer_id'],
+            'reason': decision['reason'], 'methods': decision['methods'],
+            'activity_id': result.get('id'), 'undo_token': result.get('undo_token'),
+        })
+        log_operation('AUTO_LINK_INBOX', 'inbox_item', item['id'],
+                      f"自动归属客户 {decision['customer_id']}：{decision['reason']}")
+        if limit and len(resolved) >= int(limit):
+            break
+    return {'resolved': resolved, 'held': held}
+
+
+_IDENTITY_AUTOLINK_STARTED = False
+
+
+def run_startup_identity_autolink():
+    """One-shot deterministic Inbox auto-attribution after a deploy or restart.
+
+    This is what makes the "Inbox only holds real human questions" contract hold
+    for captures that became decidable after this capability shipped.  It is
+    idempotent, bounded to open unassigned captures, and safe to skip on error.
+    """
+    global _IDENTITY_AUTOLINK_STARTED
+    if _IDENTITY_AUTOLINK_STARTED:
+        return
+    _IDENTITY_AUTOLINK_STARTED = True
+    old_user = get_current_user()
+    for user in list(USERS):
+        try:
+            set_db_user(user)
+            result = auto_attribute_inbox_captures()
+            if result.get('resolved'):
+                logger.info('身份自动归属 [%s] 已解决 %d 条待归属沟通', user, len(result['resolved']))
+        except Exception:
+            logger.exception('身份自动归属启动任务失败：%s', user)
+        finally:
+            try:
+                set_db_user(old_user)
+            except Exception:
+                pass
+
+
 def _capture_customer_matches(captures, customer_rows):
     """Rank one deterministic sender→customer suggestion per open capture.
 
@@ -10352,6 +10509,26 @@ def inbox_capture_matches():
     matches = _capture_customer_matches(raw_rows, customers)
     matches.sort(key=lambda entry: (-entry['score'], entry['item_id']))
     return jsonify({'matches': matches})
+
+
+@app.route('/api/inbox/auto-attribute', methods=['POST'])
+@login_required
+def auto_attribute_inbox():
+    """Resolve every open 待归属 capture whose identity evidence is deterministic.
+
+    Anything with conflicting or insufficient evidence stays in Inbox, keeping
+    the queue limited to real human decisions.
+    """
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        data = {}
+    limit = data.get('limit')
+    try:
+        result = auto_attribute_inbox_captures(limit=limit, apply=True)
+    except Exception as error:
+        logger.error('auto_attribute_inbox error: %s', error, exc_info=True)
+        return jsonify({'error': '自动归属失败，未写入任何记录'}), 500
+    return jsonify(result)
 
 
 @app.route('/api/inbox/archive', methods=['POST'])
@@ -12278,6 +12455,7 @@ def record_customer_communication(customer_id, data, before_commit=None):
     )
     inbox_item_id = _normalize_positive_id(data.get('inbox_item_id'), 'Inbox 条目')
     contact_id = _normalize_positive_id(data.get('contact_id'), '联系人')
+    resolution_source = str(data.get('resolution_source') or 'human').strip() or 'human'
 
     def operation(conn, c):
         customer = _customer_record(conn, customer_id) if postgres_mode() else c.execute(
@@ -12375,9 +12553,14 @@ def record_customer_communication(customer_id, data, before_commit=None):
         if inbox_item_id:
             if inbox_item['item_type'] in _CAPTURE_INBOX_TYPES and inbox_item['customer_id'] is None:
                 _assign_inbox_customer(conn, inbox_item_id=inbox_item_id, customer_id=customer_id)
-            _resolve_inbox_question_group(conn, inbox_item_id, resolved_at=now,
-                                          reason='recorded', resolution_source='human',
-                                          resolved_by=getattr(g, 'current_user', ''))
+            _resolve_inbox_question_group(
+                conn, inbox_item_id, resolved_at=now,
+                reason='recorded' if resolution_source != 'auto' else 'identity_auto_link',
+                resolution_source=resolution_source,
+                resolved_by='' if resolution_source == 'auto' else getattr(g, 'current_user', ''))
+            if resolution_source == 'human' and inbox_item['item_type'] in _CAPTURE_INBOX_TYPES:
+                _persist_confirmed_capture_identity(
+                    conn, inbox_item, customer_id, created_by=get_current_user() or '')
         if postgres_mode():
             activity = next((item for item in _customer_interactions(conn, customer_id)
                              if int(item.get('id') or 0) == int(activity_id)), None) or {}
@@ -12743,6 +12926,8 @@ def assign_customer_inbox_item(inbox_item_id, customer_id, data=None, before_com
         if not customer:
             raise CrmWriteError('客户不存在', 404)
         _assign_inbox_customer(conn, inbox_item_id=inbox_item_id, customer_id=customer_id)
+        _persist_confirmed_capture_identity(
+            conn, before, customer_id, created_by=get_current_user() or '')
         after = _snapshot_entity(conn, 'inbox_items', inbox_item_id)
         undo_token = _create_undo_action(conn, 'ASSIGN_INBOX_CUSTOMER', 'inbox_item', inbox_item_id,
             [_undo_entity('inbox_items', inbox_item_id, before, after)], '撤销 Inbox 客户归属')
