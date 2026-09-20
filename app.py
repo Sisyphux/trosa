@@ -10075,8 +10075,12 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
         return {'fields': [{'key': 'conclusion', 'label': '调查结论', 'input_type': 'investigation_conclusion',
                             'required': False, 'validation': {'options': ['supported', 'not_supported', 'insufficient']},
                             'help': '文件充分时系统会自动形成结论；也可人工填写。'}], 'attachments': attachments}
-    return {'fields': [{'key': 'answer', 'label': '请提供所需事实', 'input_type': 'textarea',
-                        'required': True, 'validation': {}, 'help': ''}], 'attachments': attachments}
+    return {'fields': [{'key': 'contact_id', 'label': '联系人', 'input_type': 'customer_picker',
+                        'required': False, 'validation': {}, 'help': '如需更正邮箱，请选择联系人。'},
+                       {'key': 'confirmed_email', 'label': '确认可联系的邮箱', 'input_type': 'email',
+                        'required': False, 'validation': {}, 'help': '旧邮箱与历史投递事实会保留。'},
+                       {'key': 'answer', 'label': '请提供所需事实', 'input_type': 'textarea',
+                        'required': False, 'validation': {}, 'help': ''}], 'attachments': attachments}
 
 
 def _inbox_question_revision(members):
@@ -10892,6 +10896,12 @@ def decide_inbox_question(item_id):
         return jsonify({'error': error.message}), error.status
     conn = get_db()
     try:
+        request_hash = hashlib.sha256(json.dumps({'revision': revision, 'answer': answer, 'attachment_ids': attachment_ids}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+        receipt = _agent_gateway_receipt_read(conn, 'inbox_response', idempotency_key)
+        if receipt:
+            if receipt.get('request_sha256') != request_hash:
+                return jsonify({'error': '幂等键已用于不同回答'}), 409
+            return jsonify(json.loads(receipt.get('response_json') or '{}'))
         row, item_ids = _inbox_group_item_ids(conn, item_id)
         if not row:
             return jsonify({'error': '该 Inbox 条目已处理或不存在'}), 404
@@ -10955,7 +10965,21 @@ def analyze_inbox_question_attachment(item_id, file_id):
         question_key = str(row.get('question_key') or row.get('dedupe_key') or item_id)
         result = _analyze_inbox_import_file(path, file_row.get('original_name', ''))
         now = _calendar_now_text()
-        if not postgres_mode():
+        if postgres_mode():
+            account = conn.execute('''SELECT account_id FROM trosa.account_legacy_refs
+                                      WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
+                                        AND legacy_customer_id=?''', (customer_id,)).fetchone()
+            conn.execute('''INSERT INTO trosa.inbox_attachment_evidence
+                            (organization_id, question_key, account_id, file_object_id, analysis_status,
+                             extraction_json, conclusion_json, uploaded_by)
+                         VALUES (trosa.compat_org_id(), ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
+                         ON CONFLICT (organization_id, question_key, file_object_id) DO UPDATE SET
+                           analysis_status=excluded.analysis_status, extraction_json=excluded.extraction_json,
+                           conclusion_json=excluded.conclusion_json, updated_at=now()''',
+                         (question_key, account['account_id'], file_row['file_object_id'], result.get('status'),
+                          json.dumps({'citations': result.get('citations', [])}, ensure_ascii=False),
+                          json.dumps(result, ensure_ascii=False), get_current_user()))
+        else:
             conn.execute('''INSERT INTO inbox_attachment_evidence
                          (question_key, customer_id, file_id, analysis_status, extraction_json, conclusion_json, uploaded_by, created_at, updated_at)
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -11022,14 +11046,38 @@ def respond_to_inbox_question(item_id):
             if not customer_id:
                 return jsonify({'error': '请选择具体客户'}), 400
             decision = 'assign'
-        elif kind == _inbox_questions.QUESTION_FACT_REQUEST and not note:
-            return jsonify({'error': '请填写所需事实'}), 400
+        elif kind == _inbox_questions.QUESTION_FACT_REQUEST:
+            email = str(answer.get('confirmed_email') or '').strip()
+            if email:
+                try:
+                    email = validate_email_address(email, check_deliverability=False).normalized
+                except EmailNotValidError:
+                    return jsonify({'error': '请输入有效邮箱'}), 400
+                contact_id = _normalize_positive_id(answer.get('contact_id'), '联系人编号', allow_empty=False)
+                before = _snapshot_entity(conn, 'contacts', contact_id)
+                if not before:
+                    return jsonify({'error': '联系人不存在'}), 404
+                values = dict(before); values['email'] = email
+                _update_contact(conn, contact_id=contact_id, values=values)
+                after = _snapshot_entity(conn, 'contacts', contact_id)
+                undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
+                    [_undo_entity('contacts', contact_id, before, after)], '撤销 Inbox 邮箱更正')
+                note = (note + '\n' if note else '') + '人工确认邮箱：' + email
+            elif not note:
+                return jsonify({'error': '请填写所需事实或可联系邮箱'}), 400
         now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
         if customer_id:
             customer_id = _normalize_positive_id(customer_id, '客户编号')
             _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
         _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason=decision or 'answered',
                                       note=note, resolution_source='human', resolved_by=actor)
+        response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
+                    'resolved_item_ids': item_ids, 'effects': ['已记录人工回答并关闭相关证据。'],
+                    'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
+                    'undo_token': locals().get('undo_token', ''),
+                    'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
+        _agent_gateway_receipt_write(conn, 'inbox_response', idempotency_key, request_hash, None,
+                                    json.dumps(response, ensure_ascii=False), now)
         conn.commit()
     except CrmWriteError as error:
         conn.rollback()
@@ -11042,10 +11090,7 @@ def respond_to_inbox_question(item_id):
         conn.close()
     with _INBOX_CACHE_LOCK:
         _INBOX_CACHE.clear()
-    return jsonify({'success': True, 'resolved_question_id': str(item_id), 'resolved_item_ids': item_ids,
-                    'effects': ['已记录人工回答并关闭相关证据。'],
-                    'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
-                    'undo_token': '', 'counts': {}})
+    return jsonify(response)
 
 
 @app.route('/api/inbox/<int:item_id>/record-reply', methods=['POST'])
