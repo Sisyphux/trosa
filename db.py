@@ -1582,6 +1582,24 @@ USER_TABLE_SQL = [
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     )
     ''',
+    '''
+    CREATE TABLE IF NOT EXISTS inbox_attachment_evidence (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_key TEXT NOT NULL,
+        customer_id INTEGER NOT NULL,
+        file_id INTEGER NOT NULL,
+        purpose TEXT DEFAULT 'investigation',
+        analysis_status TEXT DEFAULT 'uploaded',
+        extraction_json TEXT DEFAULT '{}',
+        conclusion_json TEXT DEFAULT '{}',
+        uploaded_by TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(question_key, file_id),
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (file_id) REFERENCES customer_files(id) ON DELETE CASCADE
+    )
+    ''',
 ]
 
 # 用户数据库迁移：为旧库加新列

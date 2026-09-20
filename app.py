@@ -75,6 +75,7 @@ from gmail_sync import (
     start_gmail_sync,
 )
 import inbox_questions as _inbox_questions
+from inbox_attachment_analysis import analyze_import_file as _analyze_inbox_import_file
 from inbox_reconcile import reconcile_current_user as _reconcile_inbox_current_user
 from trosa_domain import (
     active_customers as _active_customers,
@@ -10929,6 +10930,52 @@ def decide_inbox_question(item_id):
         conn.close()
     log_operation('INBOX_DECISION', 'inbox_item', item_id, f'决定: {decision}')
     return jsonify({'success': True, 'decided': decision, 'resolved_item_ids': item_ids})
+
+
+@app.route('/api/inbox/questions/<int:item_id>/attachments/<int:file_id>/analyze', methods=['POST'])
+@login_required
+def analyze_inbox_question_attachment(item_id, file_id):
+    """Attach an existing audited customer file to a question and extract facts."""
+    conn = get_db()
+    try:
+        row, _ = _inbox_group_item_ids(conn, item_id)
+        if not row:
+            return jsonify({'error': '该问题已由其他操作处理'}), 409
+        customer_id = int(row.get('customer_id') or 0)
+        if not customer_id:
+            return jsonify({'error': '请先为该问题指定客户，才能保存附件证据'}), 400
+        if postgres_mode():
+            file_row = next(iter(_modern_file_rows(conn, customer_id, include_deleted=False, file_id=file_id)), None)
+        else:
+            file_row = conn.execute('SELECT * FROM customer_files WHERE id=? AND customer_id=? AND is_deleted=0', (file_id, customer_id)).fetchone()
+        if not file_row:
+            return jsonify({'error': '附件不存在或不属于该客户'}), 404
+        file_row = dict(file_row)
+        path = os.path.join(DB_DIR, file_row['file_path']) if not os.path.isabs(file_row['file_path']) else file_row['file_path']
+        question_key = str(row.get('question_key') or row.get('dedupe_key') or item_id)
+        result = _analyze_inbox_import_file(path, file_row.get('original_name', ''))
+        now = _calendar_now_text()
+        if not postgres_mode():
+            conn.execute('''INSERT INTO inbox_attachment_evidence
+                         (question_key, customer_id, file_id, analysis_status, extraction_json, conclusion_json, uploaded_by, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         ON CONFLICT(question_key,file_id) DO UPDATE SET analysis_status=excluded.analysis_status, extraction_json=excluded.extraction_json, conclusion_json=excluded.conclusion_json, updated_at=excluded.updated_at''',
+                         (question_key, customer_id, file_id, result.get('status'), json.dumps({'citations': result.get('citations', [])}, ensure_ascii=False), json.dumps(result, ensure_ascii=False), get_current_user(), now, now))
+        # Evidence can close only an explicit investigation question and only
+        # for a supported/not-supported conclusion.  It never sends outreach.
+        closed = False
+        if result.get('status') in ('supported', 'not_supported') and str(row.get('question_kind')) == _inbox_questions.QUESTION_INVESTIGATION:
+            _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason='investigation_' + result['status'],
+                                          note='附件分析：' + result['status'], resolution_source='analysis', resolved_by='system')
+            closed = True
+        conn.commit()
+    except Exception:
+        conn.rollback(); logger.exception('Inbox attachment analysis failed')
+        return jsonify({'error': '附件分析失败；附件已保留，可重试'}), 500
+    finally:
+        conn.close()
+    return jsonify({'success': True, 'file_id': file_id, 'analysis': result, 'resolved': closed,
+                    'next_system_step': result.get('next_action', ''), 'counts': {}})
 
 
 @app.route('/api/inbox/questions/<int:item_id>/respond', methods=['POST'])
