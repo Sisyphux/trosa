@@ -10896,12 +10896,6 @@ def decide_inbox_question(item_id):
         return jsonify({'error': error.message}), error.status
     conn = get_db()
     try:
-        request_hash = hashlib.sha256(json.dumps({'revision': revision, 'answer': answer, 'attachment_ids': attachment_ids}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
-        receipt = _agent_gateway_receipt_read(conn, 'inbox_response', idempotency_key)
-        if receipt:
-            if receipt.get('request_sha256') != request_hash:
-                return jsonify({'error': '幂等键已用于不同回答'}), 409
-            return jsonify(json.loads(receipt.get('response_json') or '{}'))
         row, item_ids = _inbox_group_item_ids(conn, item_id)
         if not row:
             return jsonify({'error': '该 Inbox 条目已处理或不存在'}), 404
@@ -11022,6 +11016,12 @@ def respond_to_inbox_question(item_id):
         return jsonify({'error': '附件数量无效'}), 400
     conn = get_db()
     try:
+        request_hash = hashlib.sha256(json.dumps({'revision': revision, 'answer': answer, 'attachment_ids': attachment_ids}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+        receipt = _agent_gateway_receipt_read(conn, 'inbox_response', idempotency_key)
+        if receipt:
+            if receipt.get('request_sha256') != request_hash:
+                return jsonify({'error': '幂等键已用于不同回答'}), 409
+            return jsonify(json.loads(receipt.get('response_json') or '{}'))
         row, item_ids = _inbox_group_item_ids(conn, item_id)
         if not row:
             return jsonify({'error': '该问题已由其他操作处理'}), 409
