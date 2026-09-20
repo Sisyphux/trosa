@@ -1,3 +1,13 @@
+## 2026-09-20 — 收紧 prospect 边界：只有真实双向互动才进入 Today
+
+- 现象：上线 `0055` 后，未来几天仍有“联系 PFG Group / Flag Banner Australia”等常规开发待办留在今日跟进；这些客户实际只是被导入/记录过单向外联，并未产生任何回复。
+- 根因：`0055` 的关系事实把“任何非系统来源的已记录沟通”都当作离开 prospect 阶段，于是带有一条导入/历史单向记录（outbound/unknown、source 为 import/excel/manual 等）的客户被误判为已建立关系，其开发待办得以留在 Today。
+- 修复：把关系事实收紧为“对方真正有回应”——入站/双向沟通、外联已被回复、或未处理的入站回复；我方单向发送、导入/记录的单向说明、投递事件、内部 agent 决策都不再算真实互动。这类客户交由 Sela 按周期自动跟进。
+- 存量：迁移 `0056` 替换 `trosa.account_has_real_interaction` 函数（Today 视图动态调用它）并以同一审计标记关闭仍处 prospect 阶段的 open `follow_up`（保留行，不删除）。
+- 影响范围：`trosa_domain.py`、迁移 `0056`、`tests/test_sela_prospect_api.py`、`CHANGELOG.md`；不改接口契约与其它 Today 语义。
+- 是否需要迁移：是。发布流程应用 `0056`。
+- 当前状态：本地修复，回归与 PostgreSQL rehearsal 待重跑。
+
 ## 2026-09-20 — Today 与 Sela 职责边界：prospect 开发待办不再进入今日跟进
 
 - 背景：prospect 阶段的新客户开发与未回复开发跟进应全部由 Sela 负责，只有产生真实互动或明确人工业务事项后，相关行动才进入 Today；旧实现靠标题关键词（“开发新客户/二次开发/开发信/待首次联系/官网导入/新开发流程”）识别并只在 Sela 确认外联后关闭，判定脆弱且把未回复的开发待办留在 Today。

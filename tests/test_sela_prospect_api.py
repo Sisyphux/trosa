@@ -725,6 +725,18 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
         self.assertNotIn(task_id, [row['id'] for row in today.get_json()])
 
+        # A logged one-way contact (our sent note, an imported history row) is
+        # still unreplied development and must not bring the task into Today.
+        outbound = self.client.post(
+            f'/api/customers/{customer_id}/follow_history',
+            json={'activity_content': '已发开发信', 'direction': 'outbound',
+                  'follow_date': '2026-09-01'},
+        )
+        self.assertEqual(outbound.status_code, 200, outbound.get_data(as_text=True))
+        today = self.client.get('/api/reminders/today')
+        self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
+        self.assertNotIn(task_id, [row['id'] for row in today.get_json()])
+
         # An explicitly recorded inbound communication is a real relationship
         # fact, so the same task is allowed to enter Today again.
         recorded = self.client.post(

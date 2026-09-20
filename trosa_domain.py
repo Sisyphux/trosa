@@ -82,26 +82,20 @@ def customer_contacts(conn: Any, customer_id: int, *, customer_ids=None) -> list
     return [dict(row) for row in rows]
 
 
-# Sources whose outbound-only activity never establishes a real relationship.
-# A sent development email, a delivery event or an internal agent decision is
-# one-way prospect development, so it must not move a Customer out of the
-# prospect stage.  Kept in sync with migration 0055
-# (trosa.account_has_real_interaction).
-_SYSTEM_ONLY_COMMUNICATION_SOURCES = (
-    'gmail', 'sela', 'sela_reply_engine', 'sela_agent',
-)
-
-
 def real_interaction_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
-    """Return Customers that have a real relationship, not just a one-way send.
+    """Return Customers that have a real two-way relationship.
 
     This is the relationship-stage fact behind the Today/Sela boundary: new
     Customers and unreplied development follow-ups belong to Sela and never to
     Today.  The judgment is a durable business fact, never a title keyword, a
-    ``customer_type`` value or mere presence in the CRM.  A Customer enters the
-    relationship when an inbound reply, or an explicitly recorded
-    communication (a human/agent interaction, not a system one-way send),
-    exists; a sent outreach or delivery event on its own never does.
+    ``customer_type`` value or mere presence in the CRM.  A Customer leaves the
+    prospect stage only when the other side actually engaged: an inbound or
+    two-way communication, an inbound reply to an outreach, or an unprocessed
+    inbound reply.  A one-way record — our sent development email, an imported
+    or logged outbound note, a delivery event or an internal agent decision —
+    never qualifies, so those Customers are left to Sela's periodic cadence.
+    Kept in sync with migration 0056
+    (trosa.account_has_real_interaction).
     """
     ids = _ids(customer_ids) if customer_ids is not None else None
     wanted = set(ids) if ids is not None else None
@@ -139,15 +133,13 @@ def real_interaction_customer_ids(conn: Any, customer_ids: Iterable[int] | None 
         where = ' AND customer_id IN (' + ','.join('?' for _ in wanted) + ')'
         params = sorted(wanted)
     for row in conn.execute(
-        '''SELECT customer_id, direction, activity_type, source FROM follow_up_logs
+        '''SELECT customer_id, direction, activity_type FROM follow_up_logs
             WHERE (is_deleted=0 OR is_deleted IS NULL)''' + where,
         params,
     ).fetchall():
-        source = str(row['source'] or '').strip().lower()
         direction = str(row['direction'] or '').strip().lower()
         activity_type = str(row['activity_type'] or '').strip().lower()
-        if (direction in ('inbound', 'two_way') or activity_type == 'customer_reply'
-                or source not in _SYSTEM_ONLY_COMMUNICATION_SOURCES):
+        if direction in ('inbound', 'two_way') or activity_type == 'customer_reply':
             if keep(row['customer_id']):
                 found.add(int(row['customer_id']))
     for row in conn.execute(
