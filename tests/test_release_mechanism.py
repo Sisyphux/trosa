@@ -12,6 +12,7 @@ Covers the new formal release system without touching production:
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -317,7 +318,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",
                      "auto-publish.sh", "release-commit.sh", "release-test.sh",
                      "release-env.sh", "agent-worktree.sh", "run-workbench-command.sh",
-                     "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh"):
+                     "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh",
+                     "lib-release-gate.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")
 
@@ -441,6 +443,402 @@ class AgentWorktreeContractTests(unittest.TestCase):
     def test_unknown_command_fails(self):
         proc = run(["bash", "deploy/cloud/agent-worktree.sh", "definitely-not-a-command"])
         self.assertNotEqual(proc.returncode, 0)
+
+
+# --------------------------------------------------------------------------- #
+# 门禁对象身份复用与并行门禁（release-gate-reuse）
+# --------------------------------------------------------------------------- #
+
+LIB_RELEASE_GATE = ROOT / "deploy" / "cloud" / "lib-release-gate.sh"
+RELEASE_COMMIT = ROOT / "deploy" / "cloud" / "release-commit.sh"
+RELEASE_TEST = ROOT / "deploy" / "cloud" / "release-test.sh"
+AGENT_WORKTREE = ROOT / "deploy" / "cloud" / "agent-worktree.sh"
+BROWSER_ACCEPTANCE = ROOT / "tools" / "browser_acceptance.sh"
+
+
+def _git(repo, *args, check=True):
+    proc = subprocess.run(["git", "-C", str(repo), *args],
+                          capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed: {proc.stderr}")
+    return proc
+
+
+def _init_repo(repo):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Tester")
+
+
+def _commit(repo, message="c"):
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", message)
+    return _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+class ReleaseGateIdentityTests(unittest.TestCase):
+    """复用成立的四项锚定：tree / gate_impl / external / base。
+
+    候选树是一个独立的 detached worktree（模拟 release 候选），门禁实现来自主仓
+    （模拟“门禁定义来自正在运行的入口本身，而不是被测候选代码”）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.repo = base / "repo"
+        _init_repo(self.repo)
+        (self.repo / "deploy" / "cloud").mkdir(parents=True)
+        (self.repo / "tools").mkdir()
+        (self.repo / "migrations").mkdir()
+        (self.repo / "deploy" / "cloud" / "release-test.sh").write_text("v1\n", encoding="utf-8")
+        (self.repo / "tools" / "x.py").write_text("t1\n", encoding="utf-8")
+        (self.repo / "migrations" / "0001_a.sql").write_text("select 1;\n", encoding="utf-8")
+        self.base = _commit(self.repo, "init")
+        self.cand = base / "cand"
+        _git(self.repo, "worktree", "add", "--detach", "-q", str(self.cand), self.base)
+
+    def _identity_fields(self, base=None):
+        base = base or self.base
+        proc = subprocess.run(
+            ["bash", "-c",
+             f'source "{LIB_RELEASE_GATE}"; release_gate_identity "$1" "$2" "$3"',
+             "_", str(self.cand), str(self.repo), base],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        key, tree, gate_impl, external, b = proc.stdout.strip().split("\t")
+        return {"key": key, "tree": tree, "gate_impl": gate_impl,
+                "external": external, "base": b}
+
+    def _identity_line(self, fields):
+        return "\t".join(fields[k] for k in ("key", "tree", "gate_impl", "external", "base"))
+
+    def _register(self, fields, task="t"):
+        proc = subprocess.run(
+            ["bash", "-c",
+             f'source "{LIB_RELEASE_GATE}"; release_gate_register "$1" "$2" "$3"',
+             "_", str(self.repo / ".git"), self._identity_line(fields), task],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def _lookup(self, fields):
+        proc = subprocess.run(
+            ["bash", "-c",
+             f'source "{LIB_RELEASE_GATE}"; release_gate_lookup "$1" "$2"',
+             "_", str(self.repo / ".git"), self._identity_line(fields)],
+            capture_output=True, text=True,
+        )
+        return proc.returncode == 0, proc.stdout
+
+    def test_same_tree_and_base_hits(self):
+        ident = self._identity_fields()
+        self._register(ident)
+        hit, line = self._lookup(ident)
+        self.assertTrue(hit, "同一棵树 + 同一基线应命中已验收账本")
+        self.assertIn("tree=", line)
+
+    def test_base_advance_misses_even_when_tree_is_unchanged(self):
+        ident = self._identity_fields()
+        self._register(ident)
+        _git(self.repo, "commit", "--allow-empty", "-qm", "base advances")
+        advanced = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(advanced, self.base)
+        moved = self._identity_fields(advanced)
+        self.assertEqual(moved["tree"], ident["tree"], "树未变，只有基线前进")
+        hit, _ = self._lookup(moved)
+        self.assertFalse(hit, "基线前进必须回到全量")
+
+    def test_gate_implementation_change_misses(self):
+        ident = self._identity_fields()
+        self._register(ident)
+        # 改门禁实现（主仓 deploy/cloud）并提交，但候选树与基线参数保持不变。
+        (self.repo / "deploy" / "cloud" / "release-test.sh").write_text("v2\n", encoding="utf-8")
+        _commit(self.repo, "gate implementation changes")
+        changed = self._identity_fields(self.base)
+        self.assertEqual(changed["tree"], ident["tree"], "候选树未变")
+        self.assertNotEqual(changed["gate_impl"], ident["gate_impl"], "门禁实现哈希必须变化")
+        hit, _ = self._lookup(changed)
+        self.assertFalse(hit, "门禁实现改动必须回到全量")
+
+    def test_external_input_change_misses(self):
+        ident = self._identity_fields()
+        self._register(ident)
+        # 迁移目录是显式外部输入：新增一个未跟踪迁移文件即改变 external 锚定。
+        (self.cand / "migrations" / "0002_x.sql").write_text("select 2;\n", encoding="utf-8")
+        changed = self._identity_fields(self.base)
+        self.assertEqual(changed["tree"], ident["tree"], "未提交文件不影响 tree hash")
+        self.assertNotEqual(changed["external"], ident["external"], "外部输入哈希必须变化")
+        hit, _ = self._lookup(changed)
+        self.assertFalse(hit, "外部输入变化必须回到全量")
+
+    def test_missing_ledger_is_a_miss(self):
+        hit, _ = self._lookup(self._identity_fields())
+        self.assertFalse(hit, "没有账本记录时必须 miss（fail closed）")
+
+
+class VerifiedTreeRegistrationTests(unittest.TestCase):
+    """test --task 只在干净工作树上登记可复用证据；脏工作树不产生可复用证据。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.repo = base / "repo"
+        self.worktrees = base / "worktrees"
+        self.worktrees.mkdir()
+        _init_repo(self.repo)
+        (self.repo / "README.md").write_text("repo\n", encoding="utf-8")
+        cloud = self.repo / "deploy" / "cloud"
+        cloud.mkdir(parents=True)
+        for name in ("agent-worktree.sh", "release-env.sh",
+                     "lib-release-lock.sh", "lib-release-gate.sh"):
+            shutil.copy2(ROOT / "deploy" / "cloud" / name, cloud / name)
+        hooks = cloud / "git-hooks"
+        hooks.mkdir()
+        for name in ("pre-commit", "commit-msg"):
+            shutil.copy2(ROOT / "deploy" / "cloud" / "git-hooks" / name, hooks / name)
+        (cloud / "release-test.sh").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        _commit(self.repo, "init")
+        self.base = _git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        _git(self.repo, "worktree", "add", "-q", "-b", "agent/task",
+             str(self.worktrees / "task"), "main")
+        self.wt = self.worktrees / "task"
+        self.meta_dir = self.repo / ".git" / "trosa-tasks"
+        self.meta_dir.mkdir()
+        (self.meta_dir / "task.json").write_text(json.dumps({
+            "task": "task", "branch": "agent/task", "path": str(self.wt),
+            "status": "active",
+        }), encoding="utf-8")
+
+    def _run_test(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+        env["TRADE_OS_AGENT_ROLE"] = "release"
+        env["TRADE_OS_WORKTREE_ROOT"] = str(self.worktrees)
+        return subprocess.run(
+            ["bash", str(self.repo / "deploy" / "cloud" / "agent-worktree.sh"),
+             "test", "--task", "task"],
+            capture_output=True, text=True, env=env, cwd=str(self.repo), timeout=60,
+        )
+
+    def _meta(self):
+        return json.loads((self.meta_dir / "task.json").read_text(encoding="utf-8"))
+
+    def _ledger_lines(self):
+        ledger = self.meta_dir / ".verified-trees"
+        if not ledger.exists():
+            return []
+        return [line for line in ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def test_clean_gate_registers_tree_and_release_side_lookup_hits(self):
+        proc = self._run_test()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        head_tree = _git(self.wt, "rev-parse", "HEAD^{tree}").stdout.strip()
+        meta = self._meta()
+        self.assertEqual(meta.get("reusable_tree"), "1")
+        self.assertEqual(meta.get("verified_tree"), head_tree)
+        lines = self._ledger_lines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(f"tree={head_tree}", lines[0])
+        # release 侧：候选=任务树，门禁实现=主仓 deploy/cloud，base=main，应命中。
+        ident = subprocess.run(
+            ["bash", "-c",
+             f'source "{LIB_RELEASE_GATE}"; release_gate_identity "$1" "$2" "$3"',
+             "_", str(self.wt), str(self.repo), self.base],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(ident.returncode, 0, ident.stderr)
+        hit = subprocess.run(
+            ["bash", "-c",
+             f'source "{LIB_RELEASE_GATE}"; release_gate_lookup "$1" "$2"',
+             "_", str(self.repo / ".git"), ident.stdout.strip()],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(hit.returncode, 0, hit.stdout + hit.stderr)
+
+    def test_dirty_worktree_is_not_reusable(self):
+        self.assertEqual(self._run_test().returncode, 0)
+        before = len(self._ledger_lines())
+        (self.wt / "scratch-untracked.txt").write_text("dirty\n", encoding="utf-8")
+        proc = self._run_test()
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        meta = self._meta()
+        self.assertEqual(meta.get("reusable_tree"), "0")
+        self.assertEqual(meta.get("verified_tree"), "")
+        self.assertEqual(len(self._ledger_lines()), before,
+                         "脏工作树不得新增已验收树记录")
+
+
+class ReleaseGateParallelRunnerTests(unittest.TestCase):
+    """并行门禁：输出按分支分组、任一失败仍等待另一支并向上返回失败。"""
+
+    def _run(self, fail_second):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        second = "exit 7" if fail_second else "echo B-end"
+        script = f'''
+set -euo pipefail
+source "{LIB_RELEASE_GATE}"
+a() {{ echo A-start; sleep 0.2; echo A-end; }}
+b() {{ echo B-start; {second}; }}
+rc=0
+release_gate_run_parallel "$1" a b || rc=$?
+echo "RC=$rc"
+'''
+        return subprocess.run(["bash", "-c", script, "_", tmp.name],
+                              capture_output=True, text=True, timeout=30)
+
+    def test_both_branches_run_and_succeed(self):
+        proc = self._run(False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("RC=0", proc.stdout)
+        # 输出分组：A 分支完整结束后才打印 B 分支，不交错。
+        self.assertLess(proc.stdout.index("A-end"), proc.stdout.index("分支 b 输出"))
+
+    def test_failure_waits_for_the_other_branch_and_reports_failure(self):
+        proc = self._run(True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("RC=1", proc.stdout)
+        self.assertIn("A-end", proc.stdout, "失败时仍应等待另一支结束，不遗留后台进程")
+
+
+class CommitGateEnforcementTests(unittest.TestCase):
+    """release-commit.sh --commit 与 --branch 使用同一完成证据判定。"""
+
+    HARNESS = r"""
+set -euo pipefail
+export LC_ALL=C
+fail() { printf '发布被拒绝：%s\n' "$*" >&2; exit 1; }
+GIT_COMMON_DIR="__COMMON__"
+BASE_SHA="$1"
+TARGET_BRANCH=main
+DRY_RUN="$4"
+__FUNCTION__
+enforce_agent_commit_ready "$2" "$3"
+echo ALLOW
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = Path(self.tmp.name) / "repo"
+        _init_repo(self.repo)
+        (self.repo / "f.txt").write_text("base\n", encoding="utf-8")
+        self.base = _commit(self.repo, "init")
+        _git(self.repo, "checkout", "-q", "-b", "agent/task")
+        (self.repo / "f.txt").write_text("task\n", encoding="utf-8")
+        self.tip = _commit(self.repo, "task work")
+        self.meta_dir = self.repo / ".git" / "trosa-tasks"
+        self.meta_dir.mkdir()
+        self._write_meta(status="active", verify="ok", verified=self.tip)
+
+    def _write_meta(self, status, verify, verified):
+        (self.meta_dir / "task.json").write_text(
+            json.dumps({"task": "task", "status": status,
+                        "verify_result": verify, "verified_commit": verified}),
+            encoding="utf-8",
+        )
+
+    def _run(self, sha=None, dry_run=0):
+        script = RELEASE_COMMIT.read_text(encoding="utf-8")
+        start = script.index("enforce_agent_commit_ready() {")
+        end = script.index("\n}\n", start) + len("\n}\n")
+        program = (
+            self.HARNESS
+            .replace("__COMMON__", str(self.repo / ".git"))
+            .replace("__FUNCTION__", script[start:end])
+        )
+        return subprocess.run(
+            ["bash", "-c", program, "_", self.base, "deadbeef", sha or self.tip, str(dry_run)],
+            capture_output=True, text=True, cwd=str(self.repo),
+        )
+
+    def test_ready_commit_allows(self):
+        proc = self._run()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ALLOW", proc.stdout)
+
+    def test_missing_evidence_is_refused(self):
+        (self.meta_dir / "task.json").unlink()
+        proc = self._run()
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("找不到对应的完成证据", proc.stderr)
+
+    def test_failed_gate_is_refused(self):
+        self._write_meta(status="active", verify="failed", verified=self.tip)
+        self.assertNotEqual(self._run().returncode, 0)
+
+    def test_commit_behind_base_is_refused(self):
+        _git(self.repo, "checkout", "-q", "main")
+        (self.repo / "new.txt").write_text("move\n", encoding="utf-8")
+        new_base = _commit(self.repo, "main moves")
+        _git(self.repo, "checkout", "-q", "agent/task")
+        # 用新的 base 重新运行 harness：task tip 不再包含最新 main。
+        script = RELEASE_COMMIT.read_text(encoding="utf-8")
+        start = script.index("enforce_agent_commit_ready() {")
+        end = script.index("\n}\n", start) + len("\n}\n")
+        program = (self.HARNESS
+                   .replace("__COMMON__", str(self.repo / ".git"))
+                   .replace("__FUNCTION__", script[start:end]))
+        proc = subprocess.run(
+            ["bash", "-c", program, "_", new_base, "deadbeef", self.tip, "0"],
+            capture_output=True, text=True, cwd=str(self.repo),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("未基于最新", proc.stderr)
+
+    def test_dry_run_does_not_enforce(self):
+        self._write_meta(status="active", verify="", verified="")
+        proc = self._run(dry_run=1)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+class ReleaseGateReuseContractTests(unittest.TestCase):
+    """门禁执行结构、复用锚定与 fail-closed 入口必须保持接线。"""
+
+    def test_release_test_runs_independent_branches_in_parallel(self):
+        text = RELEASE_TEST.read_text(encoding="utf-8")
+        for token in (
+            "release_gate_run_parallel",
+            "run_python_regression_branch",
+            "run_rehearsal_browser_branch",
+            "run_extension_branch",
+            "RELEASE_GATE_PARALLEL_PIDS",
+            "TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1",
+            "REHEARSAL_GATE_PORT",
+        ):
+            self.assertIn(token, text, token)
+
+    def test_browser_acceptance_reuses_gate_owned_rehearsal(self):
+        text = BROWSER_ACCEPTANCE.read_text(encoding="utf-8")
+        for token in ("TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL",
+                      "STOP_REHEARSAL_ON_EXIT",
+                      "不会把浏览器验收标记为 SKIP"):
+            self.assertIn(token, text, token)
+
+    def test_release_commit_reuses_verified_tree_and_keeps_quick_check(self):
+        text = RELEASE_COMMIT.read_text(encoding="utf-8")
+        for token in ("release_gate_lookup", "gate reused for tree=",
+                      'release-test.sh" --quick --dir', "enforce_agent_commit_ready",
+                      "release_gate_identity"):
+            self.assertIn(token, text, token)
+
+    def test_shared_lib_exposes_identity_ledger_and_runner(self):
+        text = LIB_RELEASE_GATE.read_text(encoding="utf-8")
+        for token in ("release_gate_identity", "release_gate_impl_hash",
+                      "release_gate_external_hash", "release_gate_register",
+                      "release_gate_lookup", "release_gate_run_parallel",
+                      ".verified-trees"):
+            self.assertIn(token, text, token)
+
+    def test_agent_worktree_only_registers_clean_trees(self):
+        text = AGENT_WORKTREE.read_text(encoding="utf-8")
+        self.assertIn("register_verified_tree", text)
+        self.assertIn("--untracked-files=all", text)
+        self.assertIn("reusable_tree=1", text)
+        self.assertIn("reusable_tree=0", text)
 
 
 if __name__ == "__main__":

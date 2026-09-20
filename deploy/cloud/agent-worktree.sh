@@ -71,6 +71,9 @@ source "$SCRIPT_DIR/release-env.sh"
 # 可移植锁与原子迁移编号预留。
 # shellcheck source=lib-release-lock.sh
 source "$SCRIPT_DIR/lib-release-lock.sh"
+# 发布门禁对象身份与已验收树账本（release 侧按 tree hash 复用，不读任务目录）。
+# shellcheck source=lib-release-gate.sh
+source "$SCRIPT_DIR/lib-release-gate.sh"
 
 fail() {
   printf '任务隔离未完成：%s\n' "$*" >&2
@@ -522,6 +525,58 @@ PY
   return "$problems"
 }
 
+# 门禁通过后登记“已验收树”，供 release 角色按对象身份复用（候选 tree hash +
+# 门禁实现 + 外部输入 + 基线全部一致才命中）。只有工作树完全干净（含未跟踪的
+# 非忽略文件）时，验收内容才等于 HEAD 的 git tree；否则标记为不可复用：
+# verify_result 仍可为 ok，但 release 不会命中。
+register_verified_tree() {
+  local task=$1 wt=$2 gate_tree=$3
+  local evid
+  evid="$(task_evidence_path "$task")"
+  if [[ -n "$(git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null)" ]]; then
+    printf '任务 %s 存在未提交改动：本次门禁仅对工作区成立，不作为可复用证据（未登记已验收树）。\n' "$task"
+    merge_task_meta "$task" "verified_tree=" "reusable_tree=0"
+    printf '# reusable_tree: 0（工作树有未提交改动）\n' >>"$evid" 2>/dev/null || true
+    return 0
+  fi
+  local base_ref base identity key tree gate_impl external b
+  base_ref="$(task_base_ref)"
+  base="$(git -C "$wt" rev-parse --verify --quiet "$base_ref" 2>/dev/null || true)"
+  if [[ -z "$base" ]]; then
+    printf '任务 %s 基线 %s 无法解析：不登记可复用证据（fail closed）。\n' "$task" "$base_ref" >&2
+    merge_task_meta "$task" "verified_tree=" "reusable_tree=0"
+    printf '# reusable_tree: 0（基线无法解析：%s）\n' "$base_ref" >>"$evid" 2>/dev/null || true
+    return 0
+  fi
+  identity="$(release_gate_identity "$wt" "$gate_tree" "$base" 2>/dev/null || true)"
+  if [[ -z "$identity" ]]; then
+    printf '任务 %s 无法计算门禁对象身份：不登记可复用证据（fail closed）。\n' "$task" >&2
+    merge_task_meta "$task" "verified_tree=" "reusable_tree=0"
+    printf '# reusable_tree: 0（无法计算门禁对象身份）\n' >>"$evid" 2>/dev/null || true
+    return 0
+  fi
+  IFS=$'\t' read -r key tree gate_impl external b <<<"$identity"
+  if ! release_gate_register "$GIT_COMMON_DIR" "$identity" "$task"; then
+    printf '任务 %s 登记已验收树失败：不产生可复用证据。\n' "$task" >&2
+    merge_task_meta "$task" "verified_tree=" "reusable_tree=0"
+    printf '# reusable_tree: 0（登记已验收树失败）\n' >>"$evid" 2>/dev/null || true
+    return 0
+  fi
+  merge_task_meta "$task" \
+    "verified_tree=$tree" "reusable_tree=1" \
+    "verified_tree_key=$key" "verified_gate_impl=$gate_impl" \
+    "verified_external=$external" "verified_base=$b"
+  {
+    printf '# reusable_tree: 1\n'
+    printf '# verified_tree: %s\n' "$tree"
+    printf '# verified_base: %s\n' "$b"
+    printf '# verified_gate_impl: %s\n' "$gate_impl"
+    printf '# verified_external: %s\n' "$external"
+  } >>"$evid" 2>/dev/null || true
+  printf '已登记可复用门禁结论：tree=%s base=%s（release 候选命中时跳过全量门禁）\n' \
+    "$tree" "${b:0:9}"
+}
+
 cmd_create() {
   local task="" base="$TARGET_BRANCH" fetch_base=0 owner="" goal="" scope="" reserve=1
   while [[ $# -gt 0 ]]; do
@@ -647,7 +702,7 @@ cmd_test() {
   done
   [[ -n "$task" ]] || fail 'test 需要 --task <id>'
   validate_task_id "$task"
-  local wt args=() gate
+  local wt args=() gate gate_tree
   wt="$(find_task_path "$task")"
   [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
   # 完整门禁必须基于最新 main：否则“绿”只对旧基线成立。快速语法检查不受限。
@@ -666,6 +721,10 @@ cmd_test() {
   gate="$wt/deploy/cloud/release-test.sh"
   [[ -r "$gate" ]] || gate="$MAIN_ROOT/deploy/cloud/release-test.sh"
   [[ -r "$gate" ]] || fail "找不到发布门禁 $MAIN_ROOT/deploy/cloud/release-test.sh"
+  # 实际执行门禁的那棵树（登记已验收树时锚定门禁实现）：通常是本任务树，
+  # 引导期回退到主仓时则是主仓。
+  gate_tree="$(git -C "$(dirname "$gate")" rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$gate_tree" ]] || gate_tree="$MAIN_ROOT"
   args=(--dir "$wt")
   if [[ "$quick" == 1 ]]; then args+=(--quick); fi
   local head iso log kind
@@ -683,6 +742,7 @@ cmd_test() {
     else
       merge_task_meta "$task" \
         "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+      register_verified_tree "$task" "$wt" "$gate_tree"
       printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
       printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
     fi
@@ -692,7 +752,8 @@ cmd_test() {
       fail "任务 $task 快速门禁失败（仅语法，未改动完成判定）：$log"
     fi
     merge_task_meta "$task" \
-      "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+      "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log" \
+      "reusable_tree=0"
     fail "任务 $task 门禁未通过，不可发布（证据：$log，退出码 $status）"
   fi
 }

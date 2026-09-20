@@ -138,6 +138,66 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
   重新 `publish`。这个规则保证后上线者包含先前所有已上线改动，任何一方都不会被静默
   覆盖；无法证明安全的比较一律 fail closed。
 
+### 门禁执行结构与已验收树复用（对象身份）
+
+一次完整发布门禁仍只有一份实现 `deploy/cloud/release-test.sh`，dev 任务区、release
+候选与正式发布共用它。为了不把同一棵树重算一遍，门禁现在按下面的结构执行，并在
+“候选与已验收对象逐字节相同”时复用结论；任何一项不匹配立即回到全量，绝不削弱保障。
+
+**执行结构（一次完整门禁）**
+
+- 快速检查（Python/JS 语法、`tools/check_migrations.py` 迁移完整性）先跑，失败即停。
+- 之后三条互不依赖的分支并行，输出各自落盘后按分支顺序打印，不交错：
+  - 分支 A：隔离 SQLite 的 Python 回归（失败重跑一次，两次都失败才红）；
+  - 分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收；
+  - 分支 C：浏览器扩展回归（`browser-extension` 的 `npm test`）。
+- 任一支失败都让整道门禁失败：运行器会等待其余分支结束再返回非 0，`trap` 统一回收
+  临时数据目录、日志目录与 PostgreSQL rehearsal 服务，不留后台进程。
+- PostgreSQL rehearsal 在一条门禁里只起停一次：`release-test.sh` 选定唯一端口并
+  拥有服务生命周期；`tools/browser_acceptance.sh` 被门禁调用时以
+  `TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1` 复用同一服务/连接，只重载确定性
+  fixture（集成测试会改动 rehearsal 数据），不再停-起服务。该脚本仍可独立运行
+  （不设该变量时行为不变）。
+
+**复用成立的三项锚定（外加基线）**
+
+`test --task` 通过完整门禁后，只有在工作树完全干净（含未跟踪的非忽略文件）时，才把
+验收对象登记进共享账本 `trosa-tasks/.verified-trees`（在共享 git 目录里，只登记
+`result=ok` 且 key 完整的记录）。记录的身份由四项组成：
+
+- `tree`：候选树的 git tree hash（`HEAD^{tree}`，逐字节内容身份）；
+- `gate_impl`：实际执行门禁的实现哈希——运行门禁那份 `deploy/cloud/` 加上候选树
+  `tools/`（`browser_acceptance`、`postgres_rehearsal` 等）的路径 + blob 哈希；
+- `external`：候选树 `migrations/` 目录（文件名 + 内容）与门禁固定测试环境占位；
+- `base`：`origin/main` 的 commit sha。
+
+`release-commit.sh` 在 cherry-pick 之后计算候选身份，命中账本且四项全部一致时跳过
+全量门禁，但仍执行一次快速语法/迁移完整性检查，并显式打印
+`gate reused for tree=<hash>`；未命中走原全量门禁。判定失败（解析不到身份、账本缺失、
+读不到 `origin/main`）一律 fail closed，回到全量。
+
+**什么时候必然回到全量**
+
+- 候选树内容变了（任何被跟踪文件不同，包括任务新增的迁移）；
+- 门禁实现变了（`deploy/cloud/` 或候选树 `tools/` 任一文件不同，例如本任务自己
+  改发布基础设施时就必然回到全量）；
+- 外部输入变了（`migrations/` 目录不同）；
+- 基线前进了（`origin/main` 不再是验收时的 commit），即使树巧合相同；
+- 任何一项无法计算或账本读不到。
+
+**为什么仍然安全**
+
+- 复用按对象身份，不按任务目录：release 侧只比较 tree/实现/外部输入/基线哈希，
+  不读取、也不信任任何任务工作区路径；候选树来自 cherry-pick 后的不可变 commit。
+- 复用不绕过健康检查与发布安全：快速语法/迁移完整性检查照跑，production 基线门、
+  切换前已校验备份、ECS 深度健康检查、`--force-with-lease` 推送全部不变。
+- 被验收的内容必须等于 HEAD 的 tree：`test --task` 遇到脏工作树只标记
+  `reusable_tree=0`（`verify_result` 仍可为 ok），不产生可复用证据；发布本身仍要求
+  任务区完全干净。
+- 批量发布同样安全：`--commit` 输入与 `--branch` 使用同一完成证据判定
+  （`verify_result=ok`、证据对应该 commit、且已包含最新 `origin/main`），找不到
+  对应证据即拒绝；多个 ready 任务一次 cherry-pick 成同一候选树，门禁只付一次。
+
 ## 6. 迁移（数据库结构）并行规则
 
 - **唯一事实源是 `migrations/` 目录**：运行时（`db.py`）与演练工具

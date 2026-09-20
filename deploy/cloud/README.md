@@ -178,6 +178,34 @@ checkout 落后（例如历史 worktree 里残留旧脚本）或脚本被改动�
   返回 `refused` 且 production 不变。这样两个从同一旧版本开发的并行任务不会互相覆盖：
   先发布者上线，后发布者必须 `sync` 到最新 `main` 重建，最终 production 同时包含两者。
 
+### 门禁执行结构与已验收树复用
+
+一次完整发布门禁只有一份实现 `deploy/cloud/release-test.sh`（任务区、release 候选、
+正式发布共用）。它现在：
+
+- 先做快速检查（Python/JS 语法、`tools/check_migrations.py` 迁移完整性）；
+- 然后并行三条互不依赖的分支——分支 A：隔离 SQLite 的 Python 回归（失败重跑一次）；
+  分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收；分支 C：浏览器扩展回归。
+  输出按分支分组打印，任一支失败都让整道门禁失败；`trap` 统一回收临时资源与
+  rehearsal 服务。
+- 一条门禁只起停一次 PostgreSQL rehearsal：`release-test.sh` 选定唯一端口并拥有
+  服务生命周期，`tools/browser_acceptance.sh` 被门禁调用时以
+  `TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1` 复用同一服务/连接，只重载确定性
+  fixture（集成测试会改动数据）；该脚本仍可独立运行。
+
+`agent-worktree.sh test --task` 在完整门禁通过且工作树完全干净时，把验收对象登记进
+共享账本 `trosa-tasks/.verified-trees`（共享 git 目录，只登记 `result=ok` 且 key
+完整的记录），并记录 `verified_tree = HEAD^{tree}`。身份由四项锚定：候选树 tree
+hash、门禁实现哈希（运行门禁那份 `deploy/cloud/` + 候选树 `tools/`）、外部输入哈希
+（`migrations/` 目录 + 门禁固定测试环境）、基线（`origin/main` sha）。
+
+`release-commit.sh` cherry-pick 后计算候选身份：命中且四项一致时跳过全量门禁，但仍做
+快速语法/迁移完整性检查，并打印 `gate reused for tree=<hash>`；未命中走原全量门禁。
+树内容、门禁实现、外部输入或基线任一变化（含解析失败/账本缺失/读不到 `origin/main`）
+都 fail closed 回到全量。复用按对象身份而非任务目录，release 侧不读取任务工作区路径。
+批量发布时每个 `--commit` 输入与 `--branch` 使用同一完成证据判定（`verify_result=ok`、
+证据对应该 commit、且已包含最新 `origin/main`），找不到证据即拒绝。
+
 ECS 发布锁保证同一时间只有一个 release 在执行；同一 release 重复执行是
 幂等的（已是生产版本且健康时直接返回 success）。release id 与 commit 一一绑定，
 append-only `.release-ledger.jsonl` 记录每个终端结果；state / result / manifest /

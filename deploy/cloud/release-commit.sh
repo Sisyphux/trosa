@@ -225,6 +225,8 @@ MAIN_ROOT="$(cd "$GIT_COMMON_DIR/.." 2>/dev/null && pwd || true)"
 
 # shellcheck source=release-env.sh
 source "$SCRIPT_DIR/release-env.sh"
+# shellcheck source=lib-release-gate.sh
+source "$SCRIPT_DIR/lib-release-gate.sh"
 
 # 发布角色边界：dry-run 只构建候选 + 跑门禁，不改 production，任何角色可用；
 # 真正发布会推送 origin/main 并切换 ECS，必须由 release 角色执行。
@@ -312,10 +314,46 @@ PY
     || fail "发布被拒绝：任务 $task 未基于最新 origin/$TARGET_BRANCH；先 sync --task $task 并重新 test"
 }
 
+# 批量发布：每个 --commit 输入都与 --branch 使用同一完成证据判定。将被发布的
+# commit 必须能对应到一个 verify_result=ok、verified_commit 等于它、且已包含最新
+# origin/main 的任务清单；找不到对应证据即拒绝（fail closed），不因为“输入是 sha
+# 而不是分支”就降低要求。
+enforce_agent_commit_ready() {
+  local spec=$1 sha=$2 meta found=0 status verify verified
+  [[ "$DRY_RUN" == 1 ]] && return 0
+  for meta in "$GIT_COMMON_DIR"/trosa-tasks/*.json; do
+    [[ -r "$meta" ]] || continue
+    read -r status verify verified < <(python3 - "$meta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+print(doc.get("status") or "active", doc.get("verify_result") or "", doc.get("verified_commit") or "")
+PY
+)
+    [[ "$verified" == "$sha" ]] || continue
+    found=1
+    [[ "$status" != "abandoned" ]] || fail "发布被拒绝：commit ${sha:0:9} 所属任务已废弃"
+    [[ "$verify" == "ok" ]] \
+      || fail "发布被拒绝：commit ${sha:0:9} 没有有效门禁证据（verify_result=${verify:-无}）；先 test --task"
+    git merge-base --is-ancestor "$BASE_SHA" "$sha" \
+      || fail "发布被拒绝：commit ${sha:0:9} 未基于最新 origin/$TARGET_BRANCH；先 sync 并重新 test"
+    break
+  done
+  [[ "$found" == 1 ]] \
+    || fail "发布被拒绝：commit ${sha:0:9} 找不到对应的完成证据（没有任务的 verified_commit 等于它）；批量发布只接受已 test 的 ready 任务 commit，其余请用 --branch 发布任务分支"
+}
+
 if [[ ${#COMMIT_SPECS[@]} -gt 0 ]]; then
   for spec in "${COMMIT_SPECS[@]}"; do
     resolved="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
     [[ -n "$resolved" ]] || fail "本地仓库找不到 commit：$spec（先在任务区完成 commit）"
+    # 已包含在 origin/main 的输入会被 add_commit 跳过，无需证据；其余输入必须
+    # 与 --branch 一样对应到 ready 任务的完成证据。
+    if ! git merge-base --is-ancestor "$resolved" "$BASE_SHA"; then
+      enforce_agent_commit_ready "$spec" "$resolved"
+    fi
     add_commit "$resolved"
   done
 fi
@@ -455,7 +493,34 @@ fi
 
 # 门禁定义来自正在运行的入口本身，而不是被测的候选代码：候选不可自证合格。
 [[ -r "$SCRIPT_DIR/release-test.sh" ]] || fail "找不到发布门禁 $SCRIPT_DIR/release-test.sh"
-run_step '完整本地回归（干净 release worktree）' bash "$SCRIPT_DIR/release-test.sh" --dir "$REL_DIR"
+
+# 按对象身份复用已验收结论：候选树（tree hash）、门禁实现（deploy/cloud + tools）、
+# 外部输入（migrations/ 与门禁测试环境）、基线（origin/main）四项全部一致，且这棵
+# 树已被完整门禁验收过，才跳过全量门禁；否则一律走全量。判定失败 fail closed。
+GATE_REUSE=0
+GATE_TREE="$(git -C "$REL_DIR" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null || true)"
+GATE_IDENTITY="$(release_gate_identity "$REL_DIR" "$SOURCE_DIR" "$BASE_SHA" 2>/dev/null || true)"
+if [[ -n "$GATE_TREE" && -n "$GATE_IDENTITY" ]]; then
+  if GATE_HIT="$(release_gate_lookup "$GIT_COMMON_DIR" "$GATE_IDENTITY" 2>/dev/null)"; then
+    GATE_REUSE=1
+    GATE_TASK="$(printf '%s\n' "$GATE_HIT" | sed -n 's/.* task=\([^ ]*\).*/\1/p')"
+    printf '\n==> 门禁复用判定\n'
+    printf 'gate reused for tree=%s（已验收任务=%s；门禁实现、外部输入与基线均一致）\n' \
+      "$GATE_TREE" "${GATE_TASK:-未知}"
+  else
+    printf '\n==> 门禁复用判定：候选 tree=%s 未命中已验收账本，执行全量门禁。\n' "$GATE_TREE"
+  fi
+else
+  printf '\n==> 门禁复用判定：无法计算候选对象身份，执行全量门禁（fail closed）。\n' >&2
+fi
+
+if [[ "$GATE_REUSE" == 1 ]]; then
+  # 复用只跳过“重算同一棵树”，不跳过健康检查：仍做一次快速语法/迁移完整性检查。
+  run_step '快速语法/迁移完整性检查（已复用已验收树的全量结论）' \
+    bash "$SCRIPT_DIR/release-test.sh" --quick --dir "$REL_DIR"
+else
+  run_step '完整本地回归（干净 release worktree）' bash "$SCRIPT_DIR/release-test.sh" --dir "$REL_DIR"
+fi
 
 check_cloud_status() {
   local output

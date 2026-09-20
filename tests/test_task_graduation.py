@@ -428,7 +428,8 @@ class GateIntegrationTests(unittest.TestCase):
         # Ship the workflow scripts into the temp repo so the entrypoint runs.
         cloud = self.repo / "deploy" / "cloud"
         cloud.mkdir(parents=True)
-        for name in ("agent-worktree.sh", "release-env.sh", "lib-release-lock.sh"):
+        for name in ("agent-worktree.sh", "release-env.sh", "lib-release-lock.sh",
+                     "lib-release-gate.sh"):
             (cloud / name).write_text(
                 (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8"),
                 encoding="utf-8",
@@ -501,7 +502,8 @@ class GateIntegrationTests(unittest.TestCase):
 def copy_workflow(repo: Path) -> None:
     cloud = repo / "deploy" / "cloud"
     cloud.mkdir(parents=True, exist_ok=True)
-    for name in ("agent-worktree.sh", "release-env.sh", "lib-release-lock.sh"):
+    for name in ("agent-worktree.sh", "release-env.sh", "lib-release-lock.sh",
+                 "lib-release-gate.sh"):
         (cloud / name).write_text(
             (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8"),
             encoding="utf-8",

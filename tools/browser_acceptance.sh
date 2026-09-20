@@ -16,6 +16,10 @@ REHEARSAL_PORT="${TROSA_BROWSER_REHEARSAL_PORT:-}"
 TASK="${TROSA_BROWSER_ACCEPTANCE_TASK:-trosa-browser-acceptance}"
 REQUEST_ID="${TROSA_BROWSER_ACCEPTANCE_REQUEST_ID:-acceptance-core-workflow}"
 TABBIT_CLI="${TROSA_TABBIT_CLI:-}"
+# 门禁（release-test.sh）已经准备并拥有 PostgreSQL rehearsal 服务时置 1：
+# 复用同一服务/连接，不在退出时把它停掉，避免同一条门禁里停-起一次。
+REUSE_REHEARSAL="${TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL:-0}"
+STOP_REHEARSAL_ON_EXIT=1
 SERVICE_LOG=""
 SERVICE_PID=""
 
@@ -34,7 +38,10 @@ cleanup() {
   if [[ -n "$SERVICE_LOG" && -f "$SERVICE_LOG" ]]; then
     rm -f -- "$SERVICE_LOG"
   fi
-  "$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" stop >/dev/null 2>&1 || true
+  # 复用模式下 PostgreSQL 由门禁拥有并统一回收，这里不动它。
+  if [[ "$STOP_REHEARSAL_ON_EXIT" == 1 ]]; then
+    "$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" stop >/dev/null 2>&1 || true
+  fi
   exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -55,8 +62,19 @@ if [[ -z "$TABBIT_CLI" && -x "${HOME:-}/.local/bin/tabbit-cli" ]]; then
 fi
 [[ -x "$TABBIT_CLI" ]] || fail '找不到 Tabbit Chromium 浏览器控制器（需要 ~/.local/bin/tabbit-cli）；不会把浏览器验收标记为 SKIP'
 
-eval "$("$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" env)"
-CRM_ENV=rehearsal "$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" fixture >/dev/null
+if [[ "$REUSE_REHEARSAL" == 1 ]]; then
+  # 门禁（release-test.sh）已在同一 TROSA_REHEARSAL_PORT 上启动并迁移了 rehearsal
+  # 服务，环境变量也已通过 shell 传入。这里只重载确定性 fixture，不重启服务：
+  # postgres_rehearsal.py test 里的集成测试会改动 rehearsal 数据，浏览器验收需要
+  # 一份确定的起始数据，所以必须重建 fixture；但服务/连接刻意复用。
+  [[ -n "${TRADE_OS_DATABASE_URL:-}" ]] \
+    || fail '复用模式需要门禁先准备 rehearsal 环境（TRADE_OS_DATABASE_URL 为空）'
+  CRM_ENV=rehearsal "$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" fixture >/dev/null
+  STOP_REHEARSAL_ON_EXIT=0
+else
+  eval "$("$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" env)"
+  CRM_ENV=rehearsal "$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" fixture >/dev/null
+fi
 
 SERVICE_LOG="$(mktemp "${TMPDIR:-/tmp}/trosa-browser-acceptance.XXXXXX")"
 (
