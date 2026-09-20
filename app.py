@@ -11076,6 +11076,8 @@ def respond_to_inbox_question(item_id):
                     'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
                     'undo_token': locals().get('undo_token', ''),
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
+        remaining_items = _load_open_inbox_items(conn)
+        response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}), remaining_items)
         _agent_gateway_receipt_write(conn, 'inbox_response', idempotency_key, request_hash, None,
                                     json.dumps(response, ensure_ascii=False), now)
         conn.commit()
