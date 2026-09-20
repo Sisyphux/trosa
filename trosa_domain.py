@@ -1590,6 +1590,79 @@ def customer_interactions(
     return items
 
 
+def recent_interactions(
+    conn: Any, *, kind: str | None = None, limit: int | None = None,
+    offset: int = 0, customer_ids=None,
+) -> list[dict]:
+    """Return interactions ordered by newest first, optionally for a set of customers.
+
+    Unlike :func:`customer_interactions` this does not require a single customer
+    and does not load every row when a limit is supplied, so global history and
+    search surfaces no longer issue one query per customer.
+    """
+    if postgres_mode():
+        params: list[Any] = []
+        where = []
+        if customer_ids is not None:
+            ids = _ids(customer_ids)
+            if not ids:
+                return []
+            where.append('customer_id IN (' + ','.join('?' for _ in ids) + ')')
+            params.extend(ids)
+        if kind is not None:
+            where.append('kind=?')
+            params.append(kind)
+        clause = (' WHERE ' + ' AND '.join(where)) if where else ''
+        query = f'''SELECT id, customer_id, kind, occurred_on, activity_type, direction,
+                           content, result, next_plan, source, is_reported,
+                           delivery_status, reply_date, created_at
+                      FROM trosa.customer_interactions{clause}
+                     ORDER BY occurred_on DESC, created_at DESC, id DESC'''
+        if limit is not None:
+            query += ' LIMIT ? OFFSET ?'
+            params.extend([max(1, int(limit)), max(0, int(offset))])
+        items = [dict(row) for row in conn.execute(query, params).fetchall()]
+        _add_compatibility_aliases(items)
+        return items
+    params = []
+    where = []
+    if customer_ids is not None:
+        ids = _ids(customer_ids)
+        if not ids:
+            return []
+        where.append('customer_id IN (' + ','.join('?' for _ in ids) + ')')
+        params.extend(ids)
+    if kind is not None:
+        where.append('kind=?')
+        params.append(kind)
+    clause = (' WHERE ' + ' AND '.join(where)) if where else ''
+    query = f'''SELECT * FROM (
+                   SELECT 'communication' AS kind, f.id, f.customer_id,
+                          f.follow_date AS occurred_on, f.created_at,
+                          f.activity_type, f.direction, f.content, f.result,
+                          f.next_plan, f.source, COALESCE(f.is_reported, 0) AS is_reported,
+                          '' AS delivery_status, '' AS reply_date
+                     FROM follow_up_logs f
+                  UNION ALL
+                   SELECT 'email' AS kind, o.id, o.customer_id,
+                          o.sent_date AS occurred_on, o.created_at,
+                          'outreach_email' AS activity_type, 'outbound' AS direction,
+                          o.subject AS content, o.reply_content AS result,
+                          '' AS next_plan, 'gmail_delivery' AS source,
+                          COALESCE(o.is_reported, 0) AS is_reported,
+                          COALESCE(o.reply_status, '') AS delivery_status,
+                          COALESCE(o.reply_date, '') AS reply_date
+                     FROM outreach_emails o
+               ) interactions{clause}
+              ORDER BY occurred_on DESC, created_at DESC, id DESC'''
+    if limit is not None:
+        query += ' LIMIT ? OFFSET ?'
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+    items = [dict(row) for row in conn.execute(query, params).fetchall()]
+    _add_compatibility_aliases(items)
+    return items
+
+
 def _add_compatibility_aliases(items: list[dict]) -> None:
     """Keep response contracts stable while callers move to Interaction."""
     for item in items:
@@ -1633,34 +1706,91 @@ def customer_facts(conn: Any, customer_ids: Iterable[int]) -> dict[int, dict]:
         return facts
 
     if postgres_mode():
-        interactions_by_customer = {customer_id: [] for customer_id in ids}
-        tasks_by_customer = {customer_id: [] for customer_id in ids}
-        for item in customer_interactions(conn, None, customer_ids=ids):
-            interactions_by_customer[item['customer_id']].append(item)
-        for item in customer_tasks(conn, None, customer_ids=ids):
-            tasks_by_customer[item['customer_id']].append(item)
+        marks = ','.join('?' for _ in ids)
+        # One statement returns the newest communication and newest email per
+        # customer together with the durable relationship signal, so the fact
+        # projection stays two set-based queries (this + open tasks) instead of
+        # one query per customer or loading full history into Python.
+        rows = conn.execute(
+            f'''SELECT ranked.customer_id, ranked.id, ranked.kind, ranked.occurred_on,
+                       ranked.activity_type, ranked.direction, ranked.content, ranked.result,
+                       ranked.next_plan, ranked.source, ranked.is_reported,
+                       ranked.delivery_status, ranked.reply_date, ranked.created_at,
+                       (signal.customer_id IS NOT NULL) AS has_contact
+                  FROM (
+                      SELECT customer_id, id, kind, occurred_on, activity_type, direction,
+                             content, result, next_plan, source, is_reported,
+                             delivery_status, reply_date, created_at,
+                             ROW_NUMBER() OVER (
+                                 PARTITION BY customer_id, kind
+                                 ORDER BY occurred_on DESC, created_at DESC, id DESC
+                             ) AS rn
+                        FROM trosa.customer_interactions
+                       WHERE customer_id IN ({marks})
+                  ) ranked
+                  LEFT JOIN (
+                      SELECT DISTINCT customer_id FROM trosa.customer_interactions
+                       WHERE customer_id IN ({marks}) AND (
+                           (kind='communication' AND (direction IN ('inbound','two_way')
+                                OR activity_type='customer_reply'))
+                           OR (kind='email' AND delivery_status='replied'))
+                  ) signal ON signal.customer_id = ranked.customer_id
+                 WHERE ranked.rn=1''',
+            ids + ids,
+        ).fetchall()
+        latest: dict[int, dict[str, dict]] = {}
+        for row in rows:
+            item = dict(row)
+            _add_compatibility_aliases([item])
+            latest.setdefault(int(item['customer_id']), {})[item['kind']] = item
+
+        def _sort_key(item: dict) -> tuple:
+            return (str(item.get('occurred_on') or ''), str(item.get('created_at') or ''),
+                    int(item.get('id') or 0))
+
+        tasks_by_customer: dict[int, dict] = {}
+        for row in conn.execute(
+            f'''SELECT customer_id, id, title, content, reason, due_date AS remind_date,
+                       task_type AS reminder_type, source_activity_legacy_id AS source_activity_id
+                  FROM (
+                      SELECT customer_id, id, title, content, reason, due_date, task_type,
+                             source_activity_legacy_id, manual_order,
+                             ROW_NUMBER() OVER (
+                                 PARTITION BY customer_id
+                                 ORDER BY due_date ASC, manual_order ASC, id ASC
+                             ) AS rn
+                        FROM trosa.customer_tasks
+                       WHERE customer_id IN ({marks}) AND status='open'
+                  ) ranked WHERE rn=1''',
+            ids,
+        ).fetchall():
+            tasks_by_customer[int(row['customer_id'])] = dict(row)
+
         for customer_id in ids:
             fact = facts[customer_id]
-            for item in interactions_by_customer[customer_id]:
-                if item['kind'] == 'communication':
-                    if not fact['latest_communication_date']:
-                        fact['latest_communication_date'] = item.get('occurred_on') or ''
-                        fact['latest_activity'] = item
-                    if item.get('direction') in ('inbound', 'two_way') or item.get('activity_type') == 'customer_reply':
-                        fact['has_contact'] = True
-                elif item.get('delivery_status') == 'replied':
-                    fact['has_contact'] = True
-                if item['kind'] == 'email' and fact['latest_activity'] is None:
-                    fact['latest_activity'] = item
-                    fact['waiting_reply'] = item.get('delivery_status') in ('pending', 'no_reply')
-                if item['kind'] == 'email' and not fact['latest_email_date']:
-                    fact['latest_email_date'] = item.get('occurred_on') or ''
-                    fact['latest_email_status'] = item.get('delivery_status') or ''
-            tasks = tasks_by_customer[customer_id]
-            if tasks:
-                fact['next_task'] = tasks[0]
-                fact['next_task_date'] = tasks[0].get('remind_date') or ''
-                fact['next_task_title'] = tasks[0].get('title') or tasks[0].get('content') or ''
+            by_kind = latest.get(customer_id, {})
+            communication = by_kind.get('communication')
+            email = by_kind.get('email')
+            if communication:
+                fact['latest_communication_date'] = communication.get('occurred_on') or ''
+                fact['latest_activity'] = communication
+            if email:
+                fact['latest_email_date'] = email.get('occurred_on') or ''
+                fact['latest_email_status'] = email.get('delivery_status') or ''
+                # The newest interaction overall decides "waiting for reply";
+                # an older pending email behind a newer real communication is
+                # not waiting.
+                if communication is None or _sort_key(email) > _sort_key(communication):
+                    fact['waiting_reply'] = email.get('delivery_status') in ('pending', 'no_reply')
+                if fact['latest_activity'] is None:
+                    fact['latest_activity'] = email
+            if any(item.get('has_contact') for item in by_kind.values()):
+                fact['has_contact'] = True
+            task = tasks_by_customer.get(customer_id)
+            if task:
+                fact['next_task'] = task
+                fact['next_task_date'] = task.get('remind_date') or ''
+                fact['next_task_title'] = task.get('title') or task.get('content') or ''
             fact['contact_state'] = 'contacted' if fact['has_contact'] else 'uncontacted'
         return facts
 

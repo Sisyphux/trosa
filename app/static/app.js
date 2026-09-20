@@ -133,15 +133,33 @@ function applyIconButtons(root) {
 function initIconButtons() {
   applyIconButtons(document);
   applyHoverLabels(document);
+  // Coalesce DOM work from bursts of insertions (large list rebuilds) into a
+  // single frame instead of running selector scans synchronously per mutation.
+  var pendingNodes = [];
+  var flushScheduled = false;
+  function flushIconWork() {
+    flushScheduled = false;
+    var nodes = pendingNodes;
+    pendingNodes = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      if (!node || !node.isConnected) continue;
+      if (node.matches && node.matches('button')) applyIconButtons({ querySelectorAll: function() { return [node]; } });
+      if (node.querySelector && node.querySelector('button')) applyIconButtons(node);
+      applyHoverLabels(node);
+    }
+  }
   var observer = new MutationObserver(function(mutations) {
     mutations.forEach(function(mutation) {
       mutation.addedNodes.forEach(function(node) {
         if (node.nodeType !== 1) return;
-        if (node.matches && node.matches('button')) applyIconButtons({ querySelectorAll: function() { return [node]; } });
-        if (node.querySelector && node.querySelector('button')) applyIconButtons(node);
-        applyHoverLabels(node);
+        pendingNodes.push(node);
       });
     });
+    if (pendingNodes.length && !flushScheduled) {
+      flushScheduled = true;
+      requestAnimationFrame(flushIconWork);
+    }
   });
   observer.observe(document.body, { childList: true, subtree: true });
 }
@@ -625,114 +643,6 @@ function showToastAction(message, type, label, action) {
 }
 
 // ========== Page Navigation ==========
-var GLOBAL_PAGE_ACTIONS = {
-  dashboard: {
-    title: '今天的操作', symbol: '＋',
-    actions: [
-      ['记录沟通', function() { openTodayPrimaryAction(); }, 'message'],
-      ['添加客户', function() { openAddCustomerModal(); }, 'open'],
-      ['批量记录', function() { batchCompleteToday(); }, 'check']
-    ]
-  },
-  inbox: {
-    title: 'Inbox 操作', symbol: '□',
-    actions: [
-      ['记录客户回复', function() { openInboxReplyModal(); }, 'message'],
-      ['刷新 Inbox', function() { refreshInboxManually(); }, 'refresh']
-    ]
-  },
-  customers: {
-    title: '客户操作', symbol: '◎',
-    actions: [
-      ['添加客户', function() { openAddCustomerModal(); }, 'open'],
-      ['批量添加', function() { openBatchAddModal(); }, 'list'],
-      ['导出联系人', function() { exportAllContacts(); }, 'export']
-    ]
-  },
-  overview: {
-    title: '本周工作'
-  },
-  calendar: {
-    title: '日历操作', symbol: '◷',
-    actions: [
-      ['同步 Apple 日历', function() { openCalendarSync(); }, 'calendar'],
-      ['回到今天', function() { switchPage('dashboard'); }, 'left']
-    ]
-  },
-  newpool: {
-    title: '新客户操作', symbol: '＋',
-    actions: [
-      ['添加客户', function() { openAddCustomerModal(); }, 'open'],
-      ['批量添加', function() { openBatchAddModal(); }, 'list'],
-      ['刷新列表', function() { loadNewPool(); }, 'refresh']
-    ]
-  },
-  history: {
-    title: '记录操作', symbol: '□',
-    actions: [
-      ['记录沟通', function() { openTodayPrimaryAction(); }, 'message'],
-      ['查看客户', function() { switchPage('customers'); }, 'open']
-    ]
-  },
-  settings: {
-    title: '设置操作', symbol: '◇',
-    actions: [
-      ['保存设置', function() { savePersonalSettings(); }, 'check'],
-      ['返回今天', function() { switchPage('dashboard'); }, 'left']
-    ]
-  }
-};
-
-var GLOBAL_PAGE_ACTION_ICONS = {
-  dashboard: 'plus',
-  inbox: 'mail',
-  customers: 'users',
-  overview: 'list',
-  calendar: 'calendar',
-  newpool: 'plus',
-  history: 'message',
-  settings: 'settings'
-};
-
-function syncGlobalPageTools(page) {
-  var config = GLOBAL_PAGE_ACTIONS[page] || GLOBAL_PAGE_ACTIONS.dashboard;
-  var symbol = document.getElementById('pageActionSymbol');
-  var menu = document.getElementById('pageActionMenu');
-  var switcher = document.getElementById('pageActionSwitcher');
-  var trigger = switcher && switcher.querySelector('.page-action-trigger');
-  if (!symbol || !menu) return;
-  // 本周工作是跨成员的只读周会视图，没有与页面语境匹配的快捷写入操作。
-  // 保留搜索，但不显示容易让人误以为会修改他人数据的全局操作栏。
-  if (switcher) switcher.hidden = page === 'overview';
-  if (page === 'overview') {
-    menu.innerHTML = '';
-    return;
-  }
-  if (switcher) switcher.hidden = false;
-  if (switcher) switcher.classList.remove('is-open');
-  if (trigger) trigger.setAttribute('aria-expanded', 'false');
-  symbol.textContent = '';
-  symbol.className = 'page-action-symbol ui-icon ui-icon-' + (GLOBAL_PAGE_ACTION_ICONS[page] || 'plus');
-  if (trigger) {
-    trigger.setAttribute('aria-label', config.title);
-    trigger.setAttribute('title', config.title);
-  }
-  menu.innerHTML = '';
-  config.actions.forEach(function(action) {
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.setAttribute('role', 'menuitem');
-    button.setAttribute('aria-label', action[0]);
-    button.setAttribute('title', action[0]);
-    button.innerHTML = uiIcon(action[2] || 'open');
-    button.addEventListener('click', function() {
-      if (switcher) switcher.classList.remove('is-open');
-      action[1]();
-    });
-    menu.appendChild(button);
-  });
-}
-
 var _globalSearchResults = [];
 var _customerSearchResultById = {};
 var _globalSearchActiveIndex = 0;
@@ -984,7 +894,6 @@ function initGlobalPageTools() {
     var form = document.querySelector('.global-page-search');
     if (form && !form.contains(event.target)) hideGlobalSearchPreview();
   });
-  syncGlobalPageTools(currentPage);
 }
 
 function switchPage(page) {
@@ -1001,7 +910,6 @@ function switchPage(page) {
     document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
     var activeNav = document.querySelector('.nav-item[data-page="' + nextPage + '"]');
     if (activeNav) activeNav.classList.add('active');
-    syncGlobalPageTools(nextPage);
     closeSidebar();
     window.scrollTo({ top: 0, behavior: 'auto' });
   };
@@ -1379,7 +1287,10 @@ async function apiOnce(url, options) {
     if (result === undefined) throw new Error('服务没有返回有效数据');
     var hadNetworkFailure = _networkFailureCount > 0;
     _networkFailureCount = 0;
-    if (method !== 'GET' && url.indexOf('/api/auth/') !== 0 && !options.skipGlobalSync) scheduleGlobalSync();
+    if (method !== 'GET' && url.indexOf('/api/auth/') !== 0) {
+      _lastMutationAt = Date.now();
+      if (!options.skipGlobalSync) scheduleGlobalSync();
+    }
     if ((hadNetworkFailure || hadTransientFailure) && _connectionState === 'offline') setConnectionStatus('restored');
     return result;
   } catch (e) {
@@ -1421,10 +1332,15 @@ function localDateString(date) {
 
 var _globalSyncTimer = null;
 var _inboxAutoRefreshTimer = null;
+var _lastMutationAt = 0;
+var _pageDataLoadedAt = 0;
 function scheduleGlobalSync() {
   clearTimeout(_globalSyncTimer);
   _globalSyncTimer = setTimeout(function() {
     refreshInboxBadge();
+    // A mutation handler that already reloaded the active page makes this
+    // refetch redundant; only resync when the visible page predates the change.
+    if (_pageDataLoadedAt >= _lastMutationAt) return;
     if (currentPage === 'inbox') loadInbox();
     else if (currentPage === 'dashboard') loadDashboard();
     else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
@@ -1474,6 +1390,7 @@ function setListPending(element, pending) {
 }
 
 async function loadInbox() {
+  _pageDataLoadedAt = Date.now();
   var token = ++_inboxLoadToken;
   var list = document.getElementById('inboxList');
   setListPending(list, true);
@@ -2626,6 +2543,7 @@ function arrangeOverdueReminders(button) {
 }
 
 async function loadDashboard() {
+  _pageDataLoadedAt = Date.now();
   var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
@@ -4057,6 +3975,7 @@ function renderCustomerActiveFilters(filters) {
 }
 
 async function loadCustomers(options) {
+  _pageDataLoadedAt = Date.now();
   options = options || {};
   var loadToken = ++_customerLoadToken;
   var requestedView = customerView;
@@ -7756,6 +7675,7 @@ async function submitBatchAdd() {
 
 // ========== CALENDAR ==========
 async function loadCalendar() {
+  _pageDataLoadedAt = Date.now();
   try {
     var results = await Promise.all([api('/api/reminders/today'), api('/api/reminders/upcoming')]);
     var reminders = results[0];
@@ -7937,6 +7857,7 @@ function showCustomModal(title, bodyHtml) {
 
 // ========== FOLLOW-UP HISTORY ==========
 async function loadHistory() {
+  _pageDataLoadedAt = Date.now();
   try {
     var history = await api('/api/follow-history');
     var el = document.getElementById('historyTimeline');
@@ -9422,6 +9343,7 @@ async function loadMoreWeeklyMembers(uid) {
 }
 
 async function loadOverview() {
+  _pageDataLoadedAt = Date.now();
   var loadToken = ++OV._weeklyLoadToken;
   OV._weeklyMembers = {};
   OV._weeklyFilter = '';

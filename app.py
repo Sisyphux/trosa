@@ -84,6 +84,7 @@ from trosa_domain import (
     customer_interactions as _customer_interactions,
     customer_record as _customer_record,
     customer_tasks as _customer_tasks,
+    recent_interactions as _recent_interactions,
     complete_task as _complete_task,
     complete_open_follow_up_tasks as _complete_open_follow_up_tasks,
     create_contact as _create_contact,
@@ -2210,18 +2211,30 @@ def _enrich_reminders(conn, reminders):
         if postgres_mode():
             # Today is a Task projection with Interaction context.  Do not
             # reopen the legacy follow-up/outreach split after the formal
-            # domain boundary has supplied the task rows.
-            for customer_id in customer_ids:
-                interactions = _customer_interactions(conn, customer_id, limit=1)
-                if not interactions:
-                    continue
-                item = interactions[0]
+            # domain boundary has supplied the task rows.  One window query
+            # returns the newest interaction per customer instead of issuing
+            # one query per customer.
+            placeholders = ','.join('?' for _ in customer_ids)
+            rows = cursor.execute(f'''SELECT customer_id, kind, occurred_on, content, result,
+                                              activity_type, delivery_status, source
+                                         FROM (
+                                             SELECT customer_id, kind, occurred_on, content, result,
+                                                    activity_type, delivery_status, source,
+                                                    ROW_NUMBER() OVER (
+                                                        PARTITION BY customer_id
+                                                        ORDER BY occurred_on DESC, created_at DESC, id DESC
+                                                    ) AS row_number
+                                               FROM trosa.customer_interactions
+                                              WHERE customer_id IN ({placeholders})
+                                         ) WHERE row_number=1''', customer_ids).fetchall()
+            for item in rows:
+                customer_id = item['customer_id']
                 target = follow_by_customer if item['kind'] == 'communication' else outreach_by_customer
                 target[customer_id] = {
                     'follow_date': item.get('occurred_on') or '',
                     'sent_date': item.get('occurred_on') or '',
                     'content': item.get('content') or '', 'result': item.get('result') or '',
-                    'subject': item.get('subject') or item.get('content') or '',
+                    'subject': item.get('content') or '',
                     'activity_type': item.get('activity_type') or '',
                     'reply_status': item.get('delivery_status') or '',
                 }
@@ -6578,6 +6591,29 @@ def _reliable_customer_contact(cursor, customer_id):
     return None
 
 
+def _reliable_contacts_by_customer(cursor, customer_ids):
+    """Batched form of :func:`_reliable_customer_contact` for a page of items.
+
+    Inbox used to issue one contact query per item; this loads the page's
+    contacts once and applies the same "exactly one primary, or the sole
+    contact" rule.
+    """
+    result = {}
+    ids = list(dict.fromkeys(int(value) for value in customer_ids if value))
+    if not ids:
+        return result
+    grouped = {}
+    for row in _customer_contacts(cursor, None, customer_ids=ids):
+        grouped.setdefault(int(row['customer_id']), []).append(dict(row))
+    for customer_id, rows in grouped.items():
+        primary = [row for row in rows if int(row.get('is_primary') or 0) == 1]
+        if len(primary) == 1:
+            result[customer_id] = primary[0]
+        elif len(rows) == 1:
+            result[customer_id] = rows[0]
+    return result
+
+
 def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
     """Find one bounded, explainable match per customer for the global search."""
     if not customer_ids or not search_tokens:
@@ -6831,18 +6867,19 @@ def _search_match_level(value, token):
     return 0
 
 
-def _customer_search_rank_data(cursor, customers, search_tokens):
+def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None):
     """Return deterministic scores and bounded explanations for customer rows."""
     if not customers or not search_tokens:
         return {}
 
-    customer_ids = [customer['id'] for customer in customers]
-    # The context helper uses one IN clause per query.  Keep each batch below
-    # SQLite's usual bind-variable limit when a user's customer list is large.
-    contexts = {}
-    for start in range(0, len(customer_ids), 250):
-        batch_ids = customer_ids[start:start + 250]
-        contexts.update(_customer_search_match_contexts(cursor, batch_ids, search_tokens))
+    if contexts is None:
+        customer_ids = [customer['id'] for customer in customers]
+        # The context helper uses one IN clause per query.  Keep each batch below
+        # SQLite's usual bind-variable limit when a user's customer list is large.
+        contexts = {}
+        for start in range(0, len(customer_ids), 250):
+            batch_ids = customer_ids[start:start + 250]
+            contexts.update(_customer_search_match_contexts(cursor, batch_ids, search_tokens))
 
     ranked = {}
     for customer in customers:
@@ -7010,16 +7047,38 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         return {'customers': [], 'total': 0, 'page': page, 'per_page': per_page,
                 'pages': 1, 'interpreted_filters': list(dict.fromkeys(interpreted_filters))}
 
-    customer_ids = [item['id'] for item in customers]
-    facts = _customer_business_facts(conn, customer_ids)
-    contacts_by_customer = {customer_id: [] for customer_id in customer_ids}
-    for item in _customer_contacts(conn, None, customer_ids=customer_ids):
-        contacts_by_customer[item['customer_id']].append(item)
+    allowed_sorts = {'name': 'name', 'company': 'company', 'country': 'country', 'level': 'level',
+                     'business_stage': 'business_stage', 'created_at': 'created_at', 'updated_at': 'updated_at',
+                     'last_contact': 'last_contact', 'next_follow_up': 'next_follow_up'}
+    sort_key = allowed_sorts.get(sort, 'next_follow_up')
+    reverse = order == 'desc'
+    fact_dependent_view = view in ('waiting', 'uncontacted', 'communicated', 'silent', 'no_next', 'data_quality')
+    fact_dependent_filter = bool(days_min or days_max or last_from or last_to or next_state)
+    # Cross-customer duplicate detection must see the whole set, so count it
+    # before any page slice.
     duplicate_counts = {}
     for item in customers:
         company_key = _search_normalize(item.get('company'))
         if company_key:
             duplicate_counts[company_key] = duplicate_counts.get(company_key, 0) + 1
+    prepaginated = (bool(page_value) and not cleaned_search and not fact_dependent_view
+                    and not fact_dependent_filter and sort_key not in ('last_contact', 'next_follow_up'))
+    if prepaginated:
+        # The common list sort (name/company/updated_at/…) does not depend on
+        # relationship facts, so select one page before the heavier
+        # per-customer enrichment instead of enriching every customer.
+        customers.sort(key=lambda item: (str(item.get(sort_key) or ''), item['id']), reverse=reverse)
+        customers.sort(key=lambda item: (0 if item.get('is_pinned') else 1,
+                                         item.get('pinned_order') or 0))
+        total = len(customers)
+        start = (page - 1) * per_page
+        customers = customers[start:start + per_page]
+
+    customer_ids = [item['id'] for item in customers]
+    facts = _customer_business_facts(conn, customer_ids)
+    contacts_by_customer = {customer_id: [] for customer_id in customer_ids}
+    for item in _customer_contacts(conn, None, customer_ids=customer_ids):
+        contacts_by_customer[item['customer_id']].append(item)
     today = _calendar_today().isoformat()
     now_date = datetime.now().date()
     for customer in customers:
@@ -7061,33 +7120,34 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
             customer['days_since_contact'] = None
         customer['silent_threshold'] = silent_days if customer.get('level') in ('A', 'B', 'C+') else regular_days
 
-    if view == 'waiting':
-        customers = [item for item in customers if item.get('waiting_reply')]
-    elif view == 'uncontacted':
-        customers = [item for item in customers if not item.get('has_contact')]
-    elif view == 'communicated':
-        customers = [item for item in customers if item.get('has_contact')]
-    elif view == 'silent':
-        customers = [item for item in customers if item.get('days_since_contact') is not None
-                     and item['days_since_contact'] >= item.get('silent_threshold', regular_days)]
-    elif view == 'no_next':
-        customers = [item for item in customers if not item.get('next_task_date')]
-    elif view == 'data_quality':
-        customers = [item for item in customers if item.get('data_quality_issues')]
-    if days_min:
-        customers = [item for item in customers if item.get('days_since_contact') is not None and item['days_since_contact'] >= days_min]
-    if days_max:
-        customers = [item for item in customers if item.get('days_since_contact') is not None and item['days_since_contact'] <= days_max]
-    if last_from:
-        customers = [item for item in customers if (item.get('last_contact') or item.get('latest_outreach_date') or '')[:10] >= last_from]
-    if last_to:
-        customers = [item for item in customers if (item.get('last_contact') or item.get('latest_outreach_date') or '')[:10] <= last_to]
-    if next_state == 'scheduled':
-        customers = [item for item in customers if item.get('next_task_date')]
-    elif next_state == 'none':
-        customers = [item for item in customers if not item.get('next_task_date')]
-    elif next_state == 'overdue':
-        customers = [item for item in customers if item.get('next_task_date') and item['next_task_date'][:10] < today]
+    if not prepaginated:
+        if view == 'waiting':
+            customers = [item for item in customers if item.get('waiting_reply')]
+        elif view == 'uncontacted':
+            customers = [item for item in customers if not item.get('has_contact')]
+        elif view == 'communicated':
+            customers = [item for item in customers if item.get('has_contact')]
+        elif view == 'silent':
+            customers = [item for item in customers if item.get('days_since_contact') is not None
+                         and item['days_since_contact'] >= item.get('silent_threshold', regular_days)]
+        elif view == 'no_next':
+            customers = [item for item in customers if not item.get('next_task_date')]
+        elif view == 'data_quality':
+            customers = [item for item in customers if item.get('data_quality_issues')]
+        if days_min:
+            customers = [item for item in customers if item.get('days_since_contact') is not None and item['days_since_contact'] >= days_min]
+        if days_max:
+            customers = [item for item in customers if item.get('days_since_contact') is not None and item['days_since_contact'] <= days_max]
+        if last_from:
+            customers = [item for item in customers if (item.get('last_contact') or item.get('latest_outreach_date') or '')[:10] >= last_from]
+        if last_to:
+            customers = [item for item in customers if (item.get('last_contact') or item.get('latest_outreach_date') or '')[:10] <= last_to]
+        if next_state == 'scheduled':
+            customers = [item for item in customers if item.get('next_task_date')]
+        elif next_state == 'none':
+            customers = [item for item in customers if not item.get('next_task_date')]
+        elif next_state == 'overdue':
+            customers = [item for item in customers if item.get('next_task_date') and item['next_task_date'][:10] < today]
 
     if days_min:
         interpreted_filters.append(f'{days_min}天以上未联系')
@@ -7098,13 +7158,8 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
     if next_state:
         interpreted_filters.append({'scheduled': '已有下一步', 'none': '尚无下一步', 'overdue': '下一步已逾期'}.get(next_state, next_state))
 
-    allowed_sorts = {'name': 'name', 'company': 'company', 'country': 'country', 'level': 'level',
-                     'business_stage': 'business_stage', 'created_at': 'created_at', 'updated_at': 'updated_at',
-                     'last_contact': 'last_contact', 'next_follow_up': 'next_follow_up'}
-    sort_key = allowed_sorts.get(sort, 'next_follow_up')
-    reverse = order == 'desc'
     if cleaned_search:
-        ranks = _customer_search_rank_data(conn, customers, search_tokens)
+        ranks = _customer_search_rank_data(conn, customers, search_tokens, contexts=contexts)
         for item in customers:
             rank = ranks.get(item['id'], {})
             item['search_matches'] = rank.get('matches', [])
@@ -7124,17 +7179,19 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         # Marked customers always lead the list in pinned_order.  The requested
         # sort (and its direction) applies inside each group, so ``desc`` may
         # never push highlighted customers below unmarked ones.
-        customers.sort(key=lambda item: (str(item.get(sort_key) or ''), item['id']), reverse=reverse)
-        customers.sort(key=lambda item: (0 if item.get('is_pinned') else 1,
-                                         item.get('pinned_order') or 0))
+        if not prepaginated:
+            customers.sort(key=lambda item: (str(item.get(sort_key) or ''), item['id']), reverse=reverse)
+            customers.sort(key=lambda item: (0 if item.get('is_pinned') else 1,
+                                             item.get('pinned_order') or 0))
         for item in customers:
             item['match_reasons'] = list(dict.fromkeys(interpreted_filters))
             item['search_matches'] = []
             item['match_context'] = None
-    total = len(customers)
-    if page_value:
-        start = (page - 1) * per_page
-        customers = customers[start:start + per_page]
+    if not prepaginated:
+        total = len(customers)
+        if page_value:
+            start = (page - 1) * per_page
+            customers = customers[start:start + per_page]
     return {'customers': customers, 'total': total, 'page': page, 'per_page': per_page,
             'pages': max(1, (total + per_page - 1) // per_page),
             'interpreted_filters': list(dict.fromkeys(interpreted_filters))}
@@ -9818,6 +9875,11 @@ def _load_open_inbox_items(conn):
                                   WHERE i.status='open'
                                   ORDER BY i.created_at DESC''').fetchall()
     items = []
+    # One contact query for the whole open Inbox instead of one query per item.
+    reliable_contacts = (
+        _reliable_contacts_by_customer(conn, [raw.get('customer_id') for raw in raw_rows])
+        if postgres_mode() else {}
+    )
     for raw in raw_rows:
         item = dict(raw)
         if str(item.get('item_type') or '') in _inbox_questions.RETIRED_ITEM_TYPES:
@@ -9831,9 +9893,10 @@ def _load_open_inbox_items(conn):
                 'is_pinned': 1 if (customer or {}).get('is_pinned') else 0,
                 'virtual': False,
             })
+            reliable_contact = reliable_contacts.get(int(item['customer_id'])) if item.get('customer_id') else None
         else:
             item['virtual'] = False
-        reliable_contact = _reliable_customer_contact(conn, item.get('customer_id')) if item.get('customer_id') else None
+            reliable_contact = _reliable_customer_contact(conn, item.get('customer_id')) if item.get('customer_id') else None
         item['primary_contact_id'] = item['contact_id'] = (reliable_contact or {}).get('id')
         item['primary_contact_name'] = item['contact_name'] = (reliable_contact or {}).get('name', '')
         item['source'] = (
@@ -10906,8 +10969,16 @@ def get_agent_today_brief():
                 break
         end_date = (_calendar_today() + timedelta(days=7)).isoformat()
         upcoming = []
+        if customers:
+            # One task query for every customer in the brief rather than one
+            # query per customer.
+            tasks_by_customer: dict[int, list] = {}
+            for task in _customer_tasks(conn, None, customer_ids=list(customers.keys())):
+                tasks_by_customer.setdefault(int(task['customer_id']), []).append(task)
+        else:
+            tasks_by_customer = {}
         for customer_id, customer in customers.items():
-            for row in _customer_tasks(conn, customer_id):
+            for row in tasks_by_customer.get(customer_id, ()):
                 due_on = str(row.get('remind_date') or '')[:10]
                 if not (today < due_on <= end_date):
                     continue
@@ -11094,8 +11165,14 @@ def search_agent_messages():
             if customer_id is not None:
                 customers = {customer_id: customers[customer_id]} if customer_id in customers else {}
             items = []
+            # One interaction query for the whole candidate set instead of one
+            # query per customer; the per-customer detail is regrouped here.
+            interactions_by_customer: dict[int, list] = {}
+            if customers:
+                for interaction in _customer_interactions(conn, None, customer_ids=list(customers.keys())):
+                    interactions_by_customer.setdefault(int(interaction['customer_id']), []).append(interaction)
             for current_id, customer in customers.items():
-                for item in _customer_interactions(conn, current_id):
+                for item in interactions_by_customer.get(current_id, ()):
                     event_date = str(item.get('occurred_on') or '')[:10]
                     if from_date and event_date < from_date:
                         continue
@@ -12036,8 +12113,12 @@ def get_upcoming_reminders():
     if postgres_mode():
         customers = {int(row['id']): row for row in _active_customers(conn)}
         reminders = []
+        tasks_by_customer: dict[int, list] = {}
+        if customers:
+            for task in _customer_tasks(conn, None, customer_ids=list(customers.keys())):
+                tasks_by_customer.setdefault(int(task['customer_id']), []).append(task)
         for customer_id, customer in customers.items():
-            for task in _customer_tasks(conn, customer_id):
+            for task in tasks_by_customer.get(customer_id, ()):
                 if str(task.get('remind_date') or '')[:10] <= today:
                     continue
                 reminders.append({
@@ -13584,15 +13665,22 @@ def extension_save_unassigned():
 def get_all_follow_history():
     conn = get_db()
     if postgres_mode():
+        # One newest-first query for the whole history, then attach the small
+        # set of customer labels actually returned.  The old shape issued one
+        # interaction query per customer, which grew with the customer base.
+        items = _recent_interactions(conn, kind='communication', limit=50)
         history = []
-        customers = _active_customers(conn)
-        for customer in customers:
-            for item in _customer_interactions(conn, int(customer['id'])):
-                if item.get('kind') != 'communication':
-                    continue
-                history.append({**item, 'customer_name': customer.get('name') or customer.get('company') or ''})
-        history.sort(key=lambda row: (str(row.get('occurred_on') or ''), str(row.get('created_at') or ''), int(row.get('id') or 0)), reverse=True)
-        history = history[:50]
+        if items:
+            ids = [int(item['customer_id']) for item in items]
+            marks = ','.join('?' for _ in ids)
+            names = {
+                int(row['id']): (row.get('name') or row.get('company') or '')
+                for row in conn.execute(
+                    f'SELECT id, name, company FROM trosa.customer_records WHERE id IN ({marks})',
+                    ids,
+                ).fetchall()
+            }
+            history = [{**item, 'customer_name': names.get(int(item['customer_id']), '')} for item in items]
     else:
         c = conn.cursor()
         c.execute('SELECT f.*, c.name as customer_name FROM follow_up_logs f JOIN customers c ON f.customer_id = c.id WHERE (f.is_deleted = 0 OR f.is_deleted IS NULL) ORDER BY f.follow_date DESC, f.created_at DESC LIMIT 50')
@@ -14724,7 +14812,10 @@ name、country、type（只能是中间商、终端或空；销售/进口/分销
 def get_stats():
     conn = get_db()
     today = datetime.now().strftime('%Y-%m-%d')
-    customers = _active_customers(conn)
+    # One customer projection serves both the active counts and the archived
+    # count; the old shape scanned the full record view twice per request.
+    all_customers = _active_customers(conn, include_deleted=True)
+    customers = [row for row in all_customers if not row.get('deleted_at')]
     active_customer_ids = [row['id'] for row in customers]
     facts = _customer_business_facts(conn, active_customer_ids)
     total = len(active_customer_ids)
@@ -14739,7 +14830,7 @@ def get_stats():
         level = customer.get('level') or ''
         level_counts[level] = level_counts.get(level, 0) + 1
     contacted = sum(1 for fact in facts.values() if fact['has_contact'])
-    deleted_count = len(_active_customers(conn, include_deleted=True)) - total
+    deleted_count = len(all_customers) - total
     
     conn.close()
     return jsonify({

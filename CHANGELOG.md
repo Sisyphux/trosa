@@ -1,3 +1,18 @@
+## 2026-09-20 — 高频读取路径性能审计与清理：消除按客户展开的 N+1 与重复全表读取
+
+- 背景：真实 PostgreSQL（2000 客户 / 4.8 万沟通 / 6000 待办 / 4000 Inbox 条目）基线显示多个高频端点随数据量近似线性恶化：跟进历史 5.0s、今日 3.2s、Agent 简报 2.7s、近期待办 1.3s、统计 2.1s、状态搜索 2.7s、客户列表 2.7s（均为本地单轮 min）。
+- 根因（N+1）：`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`、`/api/agent/brief/today`、`/api/agent/messages/search`、`/api/inbox` 对每个客户各发一条交互/任务/联系人查询。2000 客户时单次请求产生约 608 条 SQL。
+- 根因（全表读取）：`customer_facts` 把每个客户的全部沟通与待办拉进 Python 再取最新一条；`/api/inbox/counts` 加载全部 Inbox 行只为按类型计数；`/api/stats` 两次扫描整份客户投影；全局客户搜索把同一批匹配上下文计算了两遍。
+- 修复：新增 `trosa_domain.recent_interactions`（支持按客户集合/类型/上限一次取回）；`customer_facts` 改用 SQL 窗口函数按客户取最新沟通/邮件与最早开放待办，并以集合查询判定 `has_contact`；Today/upcoming/history/brief/search 改为集合批量查询；Inbox 打开时的联系人补全改用批量 `_reliable_contacts_by_customer`（合并入主线后的 `_load_open_inbox_items`）；stats 复用一次客户投影；搜索上下文只计算一次并复用。客户列表默认视图（按 `updated_at` 排序）在分页后再做逐客户富化，避免为 30 行富化全部客户。
+- 前端：`scheduleGlobalSync` 不再在写入处理函数已显式刷新当前页时重复拉取整页（保留无处理函数刷新时的自动同步）；MutationObserver 图标处理改为按帧合并，避免大列表重建时在每个插入上同步扫描；补回缺失的 `<meta name="app-version">`，使版本检查真正生效；删除已失效的 `GLOBAL_PAGE_ACTIONS`/`syncGlobalPageTools` 死代码（每次切页空调用）。
+- 迁移：新增 `migrations/0063_performance_indexes.sql`，补齐此前缺失的 `tasks(account_id,status,due_at)`、`outreach_messages(account_id,sent_at)`、`outreach_messages(provider_message_id)`、`inbox_items(status,created_at)`、`inbox_items(account_id)`、`email_delivery_events(outreach_message_id)`、`contact_legacy_refs(account_id)` 索引。
+- 效果（在本任务基线 `07e2883` 上、同一 PostgreSQL 数据集、前后各重启真实服务、单轮 min）：今日 3.2s→0.80s、近期待办 1.3s→0.13s、跟进历史 5.0s→0.64s、Agent 简报 2.7s→0.24s、状态搜索 2.7s→1.47s、客户列表 2.7s→0.21s、统计 2.1s→1.09s；N+1 端点 SQL 条数由约 608 降至 8–12。真实 Chromium 中 `/api/customers` 214ms，写入已刷新场景客户列表请求由 2 次降为 1 次。
+- 合并说明：变基到最新 main 后，主线新增的客户关系分类（`trosa_domain.human_owned_customer_ids` 会把相关客户的时间线/邮件/Inbox 正文全量取回再按内容判桶）成为 Today/统计/Agent 简报 的新主要成本；它在一次工作台首屏里被 `today`、`stats`、`upcoming` 各算一次。该成本来自并行任务引入的关系边界判断，不在本次性能改动范围内，已在审计结论中列为下一项待优化（不改变本次已合入的 N+1 与重复全表读取修复）。
+- 兼容性：20 个高频端点在改动前后的响应体逐字节一致（`before-api.json`/`after-api.json` 全量 SAME），`tests/support/*.cjs` 前端回归、后端回归与 PostgreSQL rehearsal 全部通过。
+- 影响范围：`app.py`、`trosa_domain.py`、`app/static/app.js`、`app/static/index.html`、`migrations/0063`。不改接口契约、数据模型与写入语义。
+- 是否需要迁移：是（新增仅索引迁移 `0063`，由发布流程自动应用）。
+- 当前状态：本地完成，已变基到最新 main 并解决与 Today/Inbox 关系边界改动的合并，等待发布门禁。
+
 ## 2026-09-20 — 客户关系边界改为内容判断并投射进 Today / Sela 分工
 
 - 背景：`0055/0056` 用“是否双向互动”这一单一事实决定 Today 归属，既会漏掉“客户其实已参与询价/报价/样品/会议、但记录方向不是 inbound”的真实往来，也把“客户有回复但还没形成确认往来”的情况一刀切。经与用户逐案校准，确定按业务内容判断客户关系。
