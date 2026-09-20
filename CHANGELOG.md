@@ -32,6 +32,25 @@
 - 是否需要迁移：是。发布流程会应用 `0054`；SQLite 由 `db.py` 建表，无需人工操作。
 - 当前状态：本地 SQLite 回归通过（含新增 `tests/test_identity_link.py`）；PostgreSQL rehearsal 与发布状态待发布角色确认。
 
+## 2026-09-20 — 前端响应式与导航可用性修复（徽标 / 窄窗侧栏 / 弹层 / 移动端）
+
+- 现象与根因（浏览器实测）：
+  - Inbox 未读徽标仅在 `.nav-item.active` 有 `position:relative`，而 821–1100px 媒体查询把 `.nav-count` 设为绝对定位，非 Inbox 页时徽标会跑到侧栏左上角。
+  - `@media (max-width:820px)` 让 `.main-content{margin-left:0}`，但侧栏收成抽屉的位移只写在粗指针媒体查询里；桌面窄窗 769–820px 下侧栏固定可见、正文却未让位，标题/筛选/表格首列被遮。
+  - Inbox“记录沟通”弹层的内容区在短屏下滚动高度不足，`沟通日期` 等末尾字段紧贴并被页脚裁切。
+  - 手机宽度下 Inbox 的主操作（记录回复）被固定在头部顶端的图标，落在固定搜索条后面，实际不可见。
+  - `#todayDashboardError` 带 `hidden` 属性，但 `.today-dashboard-error{display:flex}` 覆盖了 UA 的 `[hidden]{display:none}`，Today 顶部出现空的红色错误条。
+  - 收起后的图标导航与“更多工具”弹层缺少无障碍名称；移动端抽屉打开时无遮罩、背景仍可点击，Esc 也未纳入统一关闭路径。
+- 修复：
+  - `.nav-item` 恒定为定位上下文；`.today-dashboard-error[hidden]` 显式 `display:none`。
+  - ≤820px（细指针）统一为离屏抽屉：侧栏只作为抽屉出现，`.main-content` 不再被遮挡；新增 `.sidebar-scrim` 遮罩，打开时对 `.main-content` 置 `inert`，点遮罩 / Esc / 再次点按钮均可关闭。
+  - ≤820px 把页面唯一写入动作改为底部带文字的操作项（记录回复 / 记录沟通 / 添加客户），不再被固定搜索条遮挡。
+  - Inbox 记录弹层提高可用高度并给内容区留出底部间距，末尾字段在短屏下也能完整滚动可见。
+  - 侧栏导航项补齐 `aria-label`/`title`/`role=button` 与 Enter/Space 键盘激活；“更多工具”摘要补 `aria-label`。
+- 影响范围：仅 `app/static/index.html`、`app/static/app.js`、`app/static/visual-v2.css` 的前端样式与交互；不改接口、数据模型与业务写入语义。
+- 是否需要迁移：否。
+- 当前状态：本地隔离库真实浏览器验证通过（390/768/800/820/974/1440px；侧栏开合、遮罩、Inbox、Today、记录弹层）。
+
 ## 2026-09-19 — 修复进入页面即显示“正在保存…”：状态条 hidden 属性失效
 
 - 现象：线上进入工作台后，未经任何操作就持续显示底部“正在保存…”转圈胶囊（以及潜在的同款“正在连接…”）。

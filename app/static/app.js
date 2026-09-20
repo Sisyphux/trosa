@@ -1002,7 +1002,7 @@ function switchPage(page) {
     var activeNav = document.querySelector('.nav-item[data-page="' + nextPage + '"]');
     if (activeNav) activeNav.classList.add('active');
     syncGlobalPageTools(nextPage);
-    document.getElementById('sidebar').classList.remove('open');
+    closeSidebar();
     window.scrollTo({ top: 0, behavior: 'auto' });
   };
   if (nextPage === currentPage) updatePageState();
@@ -1024,11 +1024,23 @@ function switchPage(page) {
   }, 80);
 }
 
-function toggleSidebar() {
+function setSidebarOpen(isOpen) {
   var sidebar = document.getElementById('sidebar');
   var toggle = document.getElementById('sidebarToggle');
+  var scrim = document.getElementById('sidebarScrim');
+  var main = document.querySelector('.main-content');
   if (!sidebar) return;
-  var isOpen = sidebar.classList.toggle('open');
+  sidebar.classList.toggle('open', isOpen);
+  if (scrim) {
+    scrim.hidden = !isOpen;
+    scrim.classList.toggle('show', isOpen);
+  }
+  // A drawer is a navigation surface: while it is open the page behind it must
+  // not receive clicks or keyboard focus, so it can never be edited by mistake.
+  if (main) {
+    if (isOpen) main.setAttribute('inert', '');
+    else main.removeAttribute('inert');
+  }
   if (toggle) {
     toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     var label = isOpen ? '关闭导航' : '打开导航';
@@ -1036,6 +1048,29 @@ function toggleSidebar() {
     toggle.setAttribute('title', label);
   }
 }
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
+function toggleSidebar() {
+  var sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  setSidebarOpen(!sidebar.classList.contains('open'));
+}
+
+(function bindSidebarScrim() {
+  var scrim = document.getElementById('sidebarScrim');
+  if (scrim) scrim.addEventListener('click', closeSidebar);
+})();
+
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  var item = e.target && e.target.closest ? e.target.closest('.nav-item[role="button"]') : null;
+  if (!item) return;
+  e.preventDefault();
+  item.click();
+});
 
 function openGlobalSearch() {
   var input = document.getElementById('globalPageSearch');
@@ -8778,14 +8813,9 @@ document.addEventListener('keydown', function(e) {
   }
   var sidebar = document.getElementById('sidebar');
   if (sidebar && sidebar.classList.contains('open')) {
-    sidebar.classList.remove('open');
+    closeSidebar();
     var toggle = document.getElementById('sidebarToggle');
-    if (toggle) {
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.setAttribute('aria-label', '打开导航');
-      toggle.setAttribute('title', '打开导航');
-      toggle.focus({ preventScroll: true });
-    }
+    if (toggle) toggle.focus({ preventScroll: true });
   }
 });
 window.addEventListener('beforeunload', function(e) {

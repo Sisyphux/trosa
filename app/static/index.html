@@ -63,6 +63,7 @@
 <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" title="打开导航" aria-expanded="false" aria-controls="sidebar">
   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
 </button>
+<div class="sidebar-scrim" id="sidebarScrim" hidden aria-hidden="true"></div>
 
 <div class="app-layout" id="appLayout">
   <!-- Sidebar -->
@@ -74,28 +75,28 @@
     <nav class="sidebar-nav">
       <div class="nav-personal">
         <div class="nav-section">工作空间</div>
-        <div class="nav-item active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')">
+        <div class="nav-item active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')" role="button" tabindex="0" aria-label="今天" title="今天">
           <span class="nav-icon"><span class="ui-icon ui-icon-clock" aria-hidden="true"></span></span><span>今天</span>
         </div>
-        <div class="nav-item" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')">
+        <div class="nav-item" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
           <span class="nav-icon"><span class="ui-icon ui-icon-mail" aria-hidden="true"></span></span><span>Inbox</span><span class="nav-count" id="inboxNavCount"></span>
         </div>
-        <div class="nav-item" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')">
+        <div class="nav-item" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
           <span class="nav-icon"><span class="ui-icon ui-icon-users" aria-hidden="true"></span></span><span>客户</span>
         </div>
-        <div class="nav-item" data-page="overview" data-nav-page="overview" data-module="weekly_overview" onclick="switchPage('overview')">
+        <div class="nav-item" data-page="overview" data-nav-page="overview" data-module="weekly_overview" onclick="switchPage('overview')" role="button" tabindex="0" aria-label="本周工作" title="本周工作">
           <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
         </div>
       </div>
       <div class="nav-overview" style="display:none;">
         <div class="nav-section">总览</div>
-        <div class="nav-item active" data-page="overview" onclick="switchPage('overview')">
+        <div class="nav-item active" data-page="overview" onclick="switchPage('overview')" role="button" tabindex="0" aria-label="本周工作" title="本周工作">
           <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
         </div>
       </div>
     </nav>
     <details class="sidebar-tools">
-      <summary><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
+      <summary aria-label="更多工具" title="更多工具"><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
         <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">未建立真实沟通</span></button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
@@ -104,10 +105,10 @@
       </div>
     </details>
     <div class="account-section">
-      <div class="nav-item account-item" onclick="switchPage('settings')">
+      <div class="nav-item account-item" onclick="switchPage('settings')" role="button" tabindex="0" aria-label="设置" title="设置">
         <span class="nav-icon"><span class="ui-icon ui-icon-settings" aria-hidden="true"></span></span><span>设置</span>
       </div>
-      <div class="nav-item account-item" onclick="showLogin()">
+      <div class="nav-item account-item" onclick="showLogin()" role="button" tabindex="0" aria-label="切换账号" title="切换账号">
         <span class="nav-icon"><span class="ui-icon ui-icon-sign-out" aria-hidden="true"></span></span><span>切换账号</span>
       </div>
       <div class="sidebar-identity" id="sidebarIdentity">
