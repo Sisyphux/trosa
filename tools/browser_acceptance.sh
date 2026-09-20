@@ -47,6 +47,12 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 [[ -x "$PYTHON_BIN" ]] || fail "找不到项目 Python：$PYTHON_BIN"
+# 启动前回收上一次中断遗留的孤儿演练服务，避免端口/CPU 逐日累积。
+# 只清理父进程已消失的进程；并发运行的其它门禁服务仍持有活父进程，不会被触碰。
+if [[ -f "$ROOT/tools/rehearsal_hygiene.py" ]]; then
+  "$PYTHON_BIN" "$ROOT/tools/rehearsal_hygiene.py" clean --apply --orphans-only \
+    --min-process-age 30 >/dev/null 2>&1 || true
+fi
 if [[ -z "$PORT" ]]; then
   PORT="$("$PYTHON_BIN" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 fi
@@ -77,9 +83,14 @@ else
 fi
 
 SERVICE_LOG="$(mktemp "${TMPDIR:-/tmp}/trosa-browser-acceptance.XXXXXX")"
+# ``exec`` replaces the subshell with the Python server, so ``SERVICE_PID`` is
+# the real process.  Without it the subshell forks the server as a child, and
+# killing ``SERVICE_PID`` orphaned the server instead of stopping it -- that is
+# how dozens of ``serve_rehearsal.py`` processes leaked onto developer machines
+# (see tools/rehearsal_hygiene.py).
 (
   cd "$ROOT"
-  env \
+  exec env \
     CRM_ENV=rehearsal \
     TROSA_REHEARSAL=1 \
     TRADE_OS_DATA_BACKEND=postgres \
