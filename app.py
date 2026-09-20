@@ -10049,6 +10049,40 @@ def _question_options(kind, primary, suggested, sela_review):
     return [{'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '无需处理'}]
 
 
+def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
+    """The UI renders these fields; it must never infer a form from item_type."""
+    attachments = {'allowed': kind == _inbox_questions.QUESTION_INVESTIGATION,
+                   'required': False,
+                   'accept': ['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg'],
+                   'max_files': 5}
+    if kind == _inbox_questions.QUESTION_IDENTITY:
+        return {'fields': [{'key': 'customer_id', 'label': '选择客户', 'input_type': 'customer_picker',
+                            'required': True, 'validation': {}, 'help': '请明确选择归属客户。'}],
+                'attachments': attachments}
+    if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+        return {'fields': [{'key': 'decision', 'label': '判断结果', 'input_type': 'choice', 'required': True,
+                            'validation': {'options': ['same', 'different']}, 'help': ''},
+                           {'key': 'customer_id', 'label': '同一主体对应的客户', 'input_type': 'customer_picker',
+                            'required': False, 'validation': {'required_when': {'decision': 'same'}},
+                            'help': '选择“是同一主体”时必须指定目标客户。'}], 'attachments': attachments}
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return {'fields': [{'key': 'decision', 'label': '处理决定', 'input_type': 'choice', 'required': True,
+                            'validation': {'options': ['approve', 'skip']}, 'help': ''},
+                           {'key': 'note', 'label': '处理结果', 'input_type': 'textarea', 'required': True,
+                            'validation': {}, 'help': '批准前必须说明处理结果。'}], 'attachments': attachments}
+    if kind == _inbox_questions.QUESTION_INVESTIGATION:
+        return {'fields': [{'key': 'conclusion', 'label': '调查结论', 'input_type': 'investigation_conclusion',
+                            'required': False, 'validation': {'options': ['supported', 'not_supported', 'insufficient']},
+                            'help': '文件充分时系统会自动形成结论；也可人工填写。'}], 'attachments': attachments}
+    return {'fields': [{'key': 'answer', 'label': '请提供所需事实', 'input_type': 'textarea',
+                        'required': True, 'validation': {}, 'help': ''}], 'attachments': attachments}
+
+
+def _inbox_question_revision(members):
+    value = '|'.join('%s:%s:%s' % (item.get('id'), item.get('created_at'), item.get('content')) for item in members)
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()[:16]
+
+
 def _build_inbox_questions(items, matches_by_item):
     """把多条证据收敛成用户真正需要决定的问题。"""
     groups = {}
@@ -10092,16 +10126,26 @@ def _build_inbox_questions(items, matches_by_item):
         if customer:
             known.append('已归属客户')
         questions.append({
+            'id': str(primary.get('id')),
             'key': key,
+            'question_key': key,
+            'revision': _inbox_question_revision(members),
             'kind': kind,
             'kind_label': _inbox_questions.question_label(kind),
             'question': _inbox_questions.question_text(kind),
             'headline': _question_headline(kind, primary, suggested, customer),
             'why': _question_why(kind, primary),
+            'summary': _question_headline(kind, primary, suggested, customer),
+            'why_human': _question_why(kind, primary),
+            'subject': {'customer_id': (customer or {}).get('id'), 'company': (customer or {}).get('company') or (customer or {}).get('name') or ''},
             'customer': customer,
             'suggested_customer': suggested,
             'known_facts': known,
             'evidence': [_question_evidence(member) for member in members],
+            'evidence_count': len(members),
+            'response_schema': _inbox_response_schema(kind, primary, suggested, sela_review),
+            'completion_effects': ['记录人工回答并关闭这组证据。'],
+            'will_not_do': ['不会自动发送邮件、报价或作出价格、交期承诺。'],
             'options': _question_options(kind, primary, suggested, sela_review),
             'sela_review': sela_review,
             'primary_item_id': primary.get('id'),
@@ -10109,6 +10153,7 @@ def _build_inbox_questions(items, matches_by_item):
             'source_type': primary.get('source_type') or '',
             'source_label': primary.get('source_label') or '',
             'created_at': primary.get('created_at') or '',
+            'updated_at': members[-1].get('created_at') or primary.get('created_at') or '',
         })
     questions.sort(key=lambda row: (row.get('created_at') or ''))
     return questions
@@ -10884,6 +10929,76 @@ def decide_inbox_question(item_id):
         conn.close()
     log_operation('INBOX_DECISION', 'inbox_item', item_id, f'决定: {decision}')
     return jsonify({'success': True, 'decided': decision, 'resolved_item_ids': item_ids})
+
+
+@app.route('/api/inbox/questions/<int:item_id>/respond', methods=['POST'])
+@login_required
+def respond_to_inbox_question(item_id):
+    """One optimistic-concurrency response entry point for every Inbox question.
+
+    Attachments are deliberately accepted as ids only: creation/storage remains
+    owned by the existing audited customer-file endpoint rather than a second,
+    ungoverned upload store.
+    """
+    data = request.get_json(silent=True) or {}
+    answer = data.get('answer') if isinstance(data.get('answer'), dict) else {}
+    revision = str(data.get('revision') or '').strip()
+    idempotency_key = str(data.get('idempotency_key') or '').strip()
+    if not revision or not idempotency_key:
+        return jsonify({'error': '回答必须包含问题版本和幂等键'}), 400
+    attachment_ids = data.get('attachment_ids') or []
+    if not isinstance(attachment_ids, list) or len(attachment_ids) > 5:
+        return jsonify({'error': '附件数量无效'}), 400
+    conn = get_db()
+    try:
+        row, item_ids = _inbox_group_item_ids(conn, item_id)
+        if not row:
+            return jsonify({'error': '该问题已由其他操作处理'}), 409
+        open_items = _load_open_inbox_items(conn)
+        members = [item for item in open_items if int(item.get('id') or 0) in set(item_ids)]
+        if revision != _inbox_question_revision(members):
+            return jsonify({'error': '该问题已由其他操作处理'}), 409
+        kind = str(row.get('question_kind') or '') or _inbox_questions.question_kind_for(row.get('item_type'))
+        schema = _inbox_response_schema(kind, row)
+        decision = str(answer.get('decision') or '').strip().lower()
+        note = str(answer.get('note') or answer.get('answer') or data.get('note') or '').strip()[:4000]
+        customer_id = answer.get('customer_id')
+        if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+            if decision not in ('same', 'different'):
+                return jsonify({'error': '请选择身份判断结果'}), 400
+            if decision == 'same' and not customer_id:
+                return jsonify({'error': '确认同一主体时必须选择具体客户'}), 400
+        elif kind == _inbox_questions.QUESTION_APPROVAL:
+            if decision not in ('approve', 'skip') or (decision == 'approve' and not note):
+                return jsonify({'error': '批准前必须填写处理结果'}), 400
+        elif kind == _inbox_questions.QUESTION_IDENTITY:
+            if not customer_id:
+                return jsonify({'error': '请选择具体客户'}), 400
+            decision = 'assign'
+        elif kind == _inbox_questions.QUESTION_FACT_REQUEST and not note:
+            return jsonify({'error': '请填写所需事实'}), 400
+        now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
+        if customer_id:
+            customer_id = _normalize_positive_id(customer_id, '客户编号')
+            _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
+        _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason=decision or 'answered',
+                                      note=note, resolution_source='human', resolved_by=actor)
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'error': error.message}), error.status
+    except Exception:
+        conn.rollback()
+        logger.exception('Inbox unified response failed: %s', item_id)
+        return jsonify({'error': '回答未保存'}), 500
+    finally:
+        conn.close()
+    with _INBOX_CACHE_LOCK:
+        _INBOX_CACHE.clear()
+    return jsonify({'success': True, 'resolved_question_id': str(item_id), 'resolved_item_ids': item_ids,
+                    'effects': ['已记录人工回答并关闭相关证据。'],
+                    'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
+                    'undo_token': '', 'counts': {}})
 
 
 @app.route('/api/inbox/<int:item_id>/record-reply', methods=['POST'])

@@ -16,14 +16,18 @@ QUESTION_IDENTITY = 'identity'
 QUESTION_IDENTITY_REVIEW = 'identity_review'
 QUESTION_APPROVAL = 'approval'
 QUESTION_REPLY = 'reply'
+QUESTION_FACT_REQUEST = 'fact_request'
+QUESTION_INVESTIGATION = 'investigation_request'
 
-QUESTION_ORDER = (QUESTION_IDENTITY, QUESTION_REPLY, QUESTION_APPROVAL, QUESTION_IDENTITY_REVIEW)
+QUESTION_ORDER = (QUESTION_IDENTITY, QUESTION_REPLY, QUESTION_FACT_REQUEST, QUESTION_INVESTIGATION, QUESTION_APPROVAL, QUESTION_IDENTITY_REVIEW)
 
 QUESTION_LABELS = {
     QUESTION_IDENTITY: '待归属',
     QUESTION_REPLY: '客户回复',
     QUESTION_APPROVAL: '待批准',
     QUESTION_IDENTITY_REVIEW: '身份待确认',
+    QUESTION_FACT_REQUEST: '补充资料',
+    QUESTION_INVESTIGATION: '提交调查',
 }
 
 QUESTION_QUESTIONS = {
@@ -31,6 +35,8 @@ QUESTION_QUESTIONS = {
     QUESTION_REPLY: '这次客户回复说明了什么，下一步是什么？',
     QUESTION_APPROVAL: '这个对外动作是否可以执行？',
     QUESTION_IDENTITY_REVIEW: '这两条身份记录是不是同一个业务主体？',
+    QUESTION_FACT_REQUEST: '请补充系统无法安全推断的事实。',
+    QUESTION_INVESTIGATION: '请提交调查结论或支持性证据。',
 }
 
 ITEM_TYPE_QUESTION = {
@@ -65,7 +71,10 @@ RETIRED_ITEM_TYPES = frozenset(('new_customer', 'ai_suggestion', 'uncontacted_fo
 
 
 def question_kind_for(item_type):
-    return ITEM_TYPE_QUESTION.get(str(item_type or '').strip(), QUESTION_IDENTITY)
+    # An unrecognised transport type is evidence, not an identity assertion.
+    # Failing closed here prevents a new integration from quietly presenting an
+    # unsafe "assign customer" action to a human.
+    return ITEM_TYPE_QUESTION.get(str(item_type or '').strip(), QUESTION_FACT_REQUEST)
 
 
 def source_type_for(item_type):

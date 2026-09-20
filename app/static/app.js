@@ -182,6 +182,7 @@ let dashboardReminders = [];
 let todayScheduleData = {};
 let inboxItems = [];
 let inboxQuestions = [];
+var _inboxQuestionsContractLoaded = false;
 let inboxFilter = 'all';
 let userPreferences = null;
 let customerFilters = {};
@@ -1400,6 +1401,7 @@ async function loadInbox() {
     if (token !== _inboxLoadToken) return;
     inboxItems = data.items || [];
     inboxQuestions = data.questions || [];
+    _inboxQuestionsContractLoaded = Array.isArray(data.questions);
     _captureMatches = {};
     // 服务端问题模型已带归属建议，直接种入行内一键归属，无需二次请求。
     inboxQuestions.forEach(function(question) {
@@ -1578,6 +1580,7 @@ var INBOX_QUESTION_FILTER_LABELS = {
 var INBOX_QUESTION_FILTER_ORDER = ['all', 'identity', 'reply', 'approval', 'identity_review'];
 
 var _inboxExpanded = new Set();
+var inboxState = { questions: [], counts: {}, activeFilter: 'all', expandedQuestionId: '', draftResponses: {}, pendingQuestionId: '', uploadStates: {}, analysisStates: {}, inlineErrors: {} };
 
 function toggleInboxItem(key) {
   if (_inboxExpanded.has(key)) _inboxExpanded.delete(key);
@@ -1586,6 +1589,7 @@ function toggleInboxItem(key) {
 }
 
 function renderInbox(counts) {
+  if (_inboxQuestionsContractLoaded) return renderInboxQuestionWorkspace(counts || {});
   counts = counts || {};
   var navCount = document.getElementById('inboxNavCount');
   if (navCount) navCount.textContent = counts.all || inboxQuestions.length || '';
@@ -1622,6 +1626,34 @@ function renderInbox(counts) {
   }
   list.innerHTML = questions.map(renderInboxQuestionHtml).join('');
 }
+
+function inboxQuestionFilter(kind) {
+  return ({ identity: '确认归属', reply: '处理回复', fact_request: '补充资料', investigation_request: '提交调查', approval: '批准动作', identity_review: '确认主体' })[kind] || '补充资料';
+}
+function renderInboxQuestionWorkspace(counts) {
+  inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
+  var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = counts.all || inboxState.questions.length || '';
+  var overview = document.getElementById('inboxOverview');
+  if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>个需要你判断的问题</span><p>新证据会先由系统自动匹配、去重、分析和归类；只有无法安全继续的事项才会出现在这里。</p>';
+  var kinds = ['all'].concat(Array.from(new Set(inboxState.questions.map(function(q) { return q.kind; }))));
+  var filters = document.getElementById('inboxFilters');
+  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? inboxState.questions.length : inboxState.questions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + '<span class="inbox-filter-count">' + n + '</span></button>'; }).join('');
+  var list = document.getElementById('inboxList'); if (!list) return;
+  var questions = inboxState.questions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
+  if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>新证据会先由系统自动匹配、去重、分析和归类；只有无法安全继续的事项才会出现在这里。</span></div>'; return; }
+  list.innerHTML = '<div class="inbox-workspace">' + questions.map(renderInboxQuestionCard).join('') + '</div>';
+}
+function setInboxQuestionFilter(kind) { inboxState.activeFilter = kind; renderInboxQuestionWorkspace(inboxState.counts); }
+function renderInboxQuestionCard(q) {
+  var open = inboxState.expandedQuestionId === q.id, subject = (q.subject && q.subject.company) || '待确认主体';
+  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + ' · 查看详情</small></button></article>';
+  var evidence = (q.evidence || []).map(function(e, i) { return '<li><b>' + String(i + 1).padStart(2, '0') + '</b><span>' + escapeHtml(e.detail || '原始证据') + '</span><small>' + escapeHtml(e.source_label || '来源') + '</small></li>'; }).join('');
+  var fields = ((q.response_schema || {}).fields || []).map(function(f) { var type = f.input_type === 'textarea' || f.input_type === 'investigation_conclusion' ? 'textarea' : 'input'; var control = type === 'textarea' ? '<textarea data-inbox-field="' + escapeHtml(f.key) + '" placeholder="' + escapeHtml(f.help || '') + '"></textarea>' : '<input data-inbox-field="' + escapeHtml(f.key) + '" type="' + (f.input_type === 'email' ? 'email' : 'text') + '" placeholder="' + escapeHtml(f.label) + '">'; return '<label>' + escapeHtml(f.label) + (f.required ? ' <em>*</em>' : '') + control + '</label>'; }).join('');
+  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + fields + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button></section></article>';
+}
+function openInboxQuestion(id) { inboxState.expandedQuestionId = String(id); renderInboxQuestionWorkspace(inboxState.counts); }
+function closeInboxQuestion() { inboxState.expandedQuestionId = ''; renderInboxQuestionWorkspace(inboxState.counts); }
+async function submitInboxQuestion(id) { var q = inboxState.questions.find(function(x) { return String(x.id) === String(id); }), card = document.getElementById('inbox-question-' + id); if (!q || !card || inboxState.pendingQuestionId) return; var answer = {}; card.querySelectorAll('[data-inbox-field]').forEach(function(el) { answer[el.dataset.inboxField] = el.value.trim(); }); inboxState.pendingQuestionId = id; card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = true; }); try { await api('/api/inbox/questions/' + encodeURIComponent(id) + '/respond', { method: 'POST', body: JSON.stringify({ revision: q.revision, answer: answer, attachment_ids: [], idempotency_key: 'inbox-' + id + '-' + q.revision }) }); inboxState.questions = inboxState.questions.filter(function(x) { return String(x.id) !== String(id); }); inboxQuestions = inboxState.questions; inboxState.expandedQuestionId = ''; inboxState.pendingQuestionId = ''; renderInboxQuestionWorkspace({ all: inboxState.questions.length }); refreshInboxBadge(); setTimeout(loadInbox, 250); showToast('回答已保存；系统将继续准备后续工作。', 'success'); } catch (e) { inboxState.pendingQuestionId = ''; card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = false; }); var error = card.querySelector('.inbox-inline-error'); if (error) error.textContent = e && e.message ? e.message : '提交失败，草稿已保留。'; } }
 
 function inboxQuestionCustomerName(question) {
   var customer = question.customer || null;

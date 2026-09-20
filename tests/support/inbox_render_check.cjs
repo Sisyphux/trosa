@@ -96,40 +96,31 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.equal(doc.querySelector('[data-inbox-filter="all"] .inbox-filter-count').textContent, '2');
   assert.equal(doc.querySelector('[data-inbox-filter="identity"] .inbox-filter-count').textContent, '1');
 
-  // 问题卡片以“我需要决定什么”为标题，而不是技术来源
+  // 队列以“我需要决定什么”为标题，而不是技术来源
   const headline = doc.getElementById('inboxList').textContent;
   assert.ok(headline.includes('这可能属于 TEXFIRE'), headline);
   assert.ok(headline.includes('确认这是否是同一个业务主体'), headline);
 
-  // 未归属问题显示发件人身份，不显示系统标题
-  const identityCard = doc.querySelector('article.inbox-identity');
-  assert.ok(identityCard, 'identity 问题卡片应渲染');
-  assert.ok(identityCard.textContent.includes('chris@texfireco.com'), identityCard.textContent);
-  assert.ok(!identityCard.querySelector('.inbox-item-name').textContent.includes('待归属'),
-    `系统标题不应作为主名称: ${identityCard.querySelector('.inbox-item-name').textContent}`);
-
-  // 展开后显示完整上下文与选项
-  win.toggleInboxItem('identity:chris@texfireco.com');
-  const detail = doc.querySelector('article.inbox-identity .inbox-item-detail');
-  assert.ok(detail, '展开后应有详情');
-  assert.ok(detail.textContent.includes('为什么需要你'), detail.textContent);
-  assert.ok(detail.textContent.includes('系统已知'), detail.textContent);
-  assert.ok(detail.textContent.includes('2.8mm clear acrylic sheets'), detail.textContent);
-  const optionLabels = Array.from(detail.querySelectorAll('.inbox-actions button')).map((b) => b.textContent);
-  assert.ok(optionLabels.includes('归到 TEXFIRE'), optionLabels.join(','));
-  win.toggleInboxItem('identity:chris@texfireco.com');
+  // 展开后形成队列、连续证据、前置回答三个真实文档区域。
+  win.openInboxQuestion(String(questions[0].primary_item_id));
+  const detail = doc.querySelector('.inbox-question-active');
+  assert.ok(detail, '展开后应有问题工作台');
+  assert.ok(detail.querySelector('.inbox-question-queue').textContent.includes('为什么需要你'));
+  assert.ok(detail.querySelector('.inbox-question-evidence').textContent.includes('2.8mm clear acrylic sheets'));
+  assert.ok(detail.querySelector('.inbox-question-decision'), '回答区域应前置');
+  win.closeInboxQuestion();
 
   // 按问题类别过滤
-  win.setInboxFilter('identity_review');
+  win.setInboxQuestionFilter('identity_review');
   const filtered = doc.getElementById('inboxList').textContent;
-  assert.ok(filtered.includes('身份待确认'), filtered);
+  assert.ok(filtered.includes('确认这是否是同一个业务主体'), filtered);
   assert.ok(!filtered.includes('TEXFIRE'), filtered);
-  win.setInboxFilter('all');
+  win.setInboxQuestionFilter('all');
 
   // 空列表显示明确空状态而不是“没有数据”
   setInboxPayload({ items: [], questions: [], counts: { all: 0, questions: 0 } });
   await win.loadInbox();
-  assert.ok(doc.getElementById('inboxList').textContent.includes('Inbox 已清空'));
+  assert.ok(doc.getElementById('inboxList').textContent.includes('当前没有需要你判断的问题'));
 
   console.log('inbox render regression: OK');
 })().catch((error) => {
