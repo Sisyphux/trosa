@@ -134,6 +134,21 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def add_follow_log(self, customer_id, content, *, direction='outbound', source='manual',
+                       activity_type='follow_up', follow_date='2026-09-01'):
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                '''INSERT INTO follow_up_logs
+                   (customer_id, content, follow_date, result, next_plan, activity_type,
+                    direction, source, is_reported, created_at)
+                   VALUES (?, ?, ?, '', '', ?, ?, ?, 0, '2026-09-01 10:00:00')''',
+                (customer_id, content, follow_date, activity_type, direction, source),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def reminder_done(self, reminder_id):
         conn = self.hamid_db()
         try:
@@ -748,6 +763,28 @@ class SelaProspectApiTest(unittest.TestCase):
         today = self.client.get('/api/reminders/today')
         self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
         self.assertIn(task_id, [row['id'] for row in today.get_json()])
+
+    def test_today_boundary_judges_content_not_a_single_field(self):
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        # One-way imported record (our letter mentioning a quote/catalogue) -> Sela.
+        one_way = self.add_customer('One Way Import Co')
+        one_way_task = self.add_reminder(one_way, '联系 One Way', '2026-09-05')
+        self.add_follow_log(one_way, '7.10发送开发信，附报价目录和产品册', direction='outbound')
+        # Customer-side inquiry, even logged as outbound source -> human reminder.
+        inquiry = self.add_customer('Inquiry Co')
+        inquiry_task = self.add_reminder(inquiry, '联系 Inquiry', '2026-09-05')
+        self.add_follow_log(inquiry, '客户询问价格和规格', direction='outbound')
+        # Confirmed exchange (real quote given) -> engaged.
+        quoted = self.add_customer('Quoted Co')
+        quoted_task = self.add_reminder(quoted, '联系 Quoted', '2026-09-05')
+        self.add_follow_log(quoted, '7.30询问价格 7.31报价2.68、2.80', direction='outbound')
+
+        today = self.client.get('/api/reminders/today')
+        self.assertEqual(today.status_code, 200, today.get_data(as_text=True))
+        ids = [row['id'] for row in today.get_json()]
+        self.assertNotIn(one_way_task, ids)
+        self.assertIn(inquiry_task, ids)
+        self.assertIn(quoted_task, ids)
 
     def test_human_can_unblock_dnc_and_sela_cannot(self):
         body = prospect()

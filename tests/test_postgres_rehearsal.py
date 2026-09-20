@@ -1264,14 +1264,11 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             ).fetchone()['status'],
             'open',
         )
-        # A one-way prospect with no real interaction must not project into
+        # A one-way prospect with no customer-side signal must not project into
         # Today, even while its legacy follow-up row is still open.
-        self.assertEqual(
-            self.connection.execute(
-                'SELECT count(*) FROM trosa.today_tasks WHERE id=?', (dev_task_id,)
-            ).fetchone()[0],
-            0,
-        )
+        import trosa_domain as _trosa_domain
+        visible = _trosa_domain.today_tasks(self.connection, due_on_or_before='2031-12-31')
+        self.assertFalse(any(row['id'] == dev_task_id for row in visible))
         sent_again = dict(prospect)
         sent_again['sent_at'] = '2026-09-21T10:00:00+08:00'
         confirmed_again = client.post(

@@ -1,3 +1,17 @@
+## 2026-09-20 — 客户关系边界改为内容判断并投射进 Today / Sela 分工
+
+- 背景：`0055/0056` 用“是否双向互动”这一单一事实决定 Today 归属，既会漏掉“客户其实已参与询价/报价/样品/会议、但记录方向不是 inbound”的真实往来，也把“客户有回复但还没形成确认往来”的情况一刀切。经与用户逐案校准，确定按业务内容判断客户关系。
+- 规则（4 类）：
+  - **engaged（进 Today，人工维护）**：确认过的往来——订单/付款/合同/PI、真实报价（报价前必有沟通）、价格反馈（太贵/目标价/高出）、带规格的样品往来、实质会面/来访，以及客户明确拒绝但真实回复（A）。
+  - **human_reminder（提醒人工跟进）**：客户有回复/表达具体需求但尚未形成确认往来；展会备注有需求、拿了样品/色号兴趣、给了采购联系人/转内部、第三方转介（D–F/G）。
+  - **needs_info**：自动回复/休假/工单等被标成 inbound，需补充或标记（B）。
+  - **auto_follow（交 Sela）**：只有我方单向动作（开发信/目录/问候/展会邀请/降价群发/投递/自动开发节点/批量设为今天）、只要目录且无规格数量（C）、退信/死邮箱。
+- 实现：`trosa_domain._relationship_bucket` + `human_owned_customer_ids` 按内容（时间线正文、邮件回复正文、备注、Inbox）分类；`today_tasks` 只投影 human-owned 客户（engaged/human_reminder/needs_info）的 open `follow_up`；`_complete_prospect_stage_tasks` 只关闭 auto_follow 客户的待办。判断不依赖单一字段（direction/source/event_type）。
+- 迁移 `0059`：`trosa.today_tasks` 视图恢复为“所有 open 非 outreach 任务”，过滤改由应用层内容判断负责；`trosa.account_has_real_interaction` 保留（回滚到 0056 代码仍需它，forward-only 不误伤旧版本）。
+- 影响范围：`trosa_domain.py`、`app.py`、迁移 `0059`、`tests/test_sela_prospect_api.py`、`tests/test_today_dedupe_regression.py`、`tests/test_postgres_rehearsal.py`；不改 Sela prospect/exclusion/reply/needs 接口契约。
+- 是否需要迁移：是。发布流程应用 `0059`。
+- 当前状态：本地完成。SQLite 回归 425 项通过（1 skip），PostgreSQL rehearsal 31 项通过。
+
 ## 2026-09-20 — 收紧 prospect 边界：只有真实双向互动才进入 Today
 
 - 现象：上线 `0055` 后，未来几天仍有“联系 PFG Group / Flag Banner Australia”等常规开发待办留在今日跟进；这些客户实际只是被导入/记录过单向外联，并未产生任何回复。

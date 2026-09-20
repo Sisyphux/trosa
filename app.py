@@ -105,7 +105,7 @@ from trosa_domain import (
     update_contact as _update_contact,
     update_outreach_message as _update_outreach_message,
     merge_open_task as _merge_open_task,
-    real_interaction_customer_ids as _real_interaction_customer_ids,
+    human_owned_customer_ids as _human_owned_customer_ids,
     record_external_interaction as _record_interaction,
     set_interaction_flag as _set_interaction_flag,
     set_outreach_reported as _set_outreach_reported,
@@ -4337,21 +4337,18 @@ def _sela_prospect_revision(conn, profile, customer=None):
 def _complete_prospect_stage_tasks(conn, customer_id, *, completed_at):
     """Close open follow-ups that still belong to Sela's prospect development.
 
-    The Today/Sela boundary is a relationship fact, never a title keyword or
-    ``customer_type``: while a Customer has no real interaction (inbound reply
-    or explicitly recorded communication) its new-customer development and
-    unreplied development follow-ups are Sela's responsibility.  When Sela
-    reports an outreach for such a Customer, any open follow-up on it is one of
-    those development tasks and is closed so it cannot resurface in Today once
-    the Customer later engages.  A Customer that already has a real
-    relationship is left untouched.  Idempotent: a later Sela refresh finds no
-    open prospect-stage task.
+    The Today/Sela boundary is a content-based relationship fact, never a title
+    keyword or ``customer_type``: a Customer with no customer-side signal at all
+    (only our one-way development) is Sela's, so its open follow-ups are closed
+    when Sela reports an outreach.  A Customer that is human-owned (engaged,
+    human_reminder or needs_info) is left untouched.  Idempotent: a later Sela
+    refresh finds no open prospect-stage task.
     """
     try:
         customer_id = int(customer_id)
     except (TypeError, ValueError):
         return []
-    if customer_id in _real_interaction_customer_ids(conn, {customer_id}):
+    if customer_id in _human_owned_customer_ids(conn, {customer_id}):
         return []
     closed = []
     for task in _customer_tasks(conn, customer_id):

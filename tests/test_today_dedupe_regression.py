@@ -160,22 +160,39 @@ class TodayDuplicateRegressionTest(unittest.TestCase):
             connection.close()
 
     def test_canonical_task_id_collapses_legacy_alias_fanout(self):
+        tasks = [
+            {
+                "id": 2121, "customer_id": 18,
+                "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
+            },
+            {
+                "id": 2121, "customer_id": 87,
+                "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
+            },
+        ]
+
         class FakeResult:
+            def __init__(self, rows):
+                self._rows = rows
+
             def fetchall(self):
-                return [
-                    {
-                        "id": 2121, "customer_id": 18,
-                        "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
-                    },
-                    {
-                        "id": 2121, "customer_id": 87,
-                        "remind_date": "2026-09-14", "title": "物流价格降低稳定时跟进",
-                    },
-                ]
+                return self._rows
 
         class FakeConnection:
             def execute(self, query, params):
-                return FakeResult()
+                if "trosa.today_tasks" in query:
+                    return FakeResult(tasks)
+                if "account_legacy_refs" in query:
+                    return FakeResult([
+                        {"customer_id": 18, "account_id": "a18"},
+                        {"customer_id": 87, "account_id": "a87"},
+                    ])
+                if "timeline_events" in query:
+                    return FakeResult([
+                        {"account_id": "a18", "content": "客户回复询价", "result": "", "next_plan": "",
+                         "direction": "inbound", "activity_type": "customer_reply"},
+                    ])
+                return FakeResult([])
 
         with mock.patch.object(trosa_domain, "postgres_mode", return_value=True):
             rows = trosa_domain.today_tasks(

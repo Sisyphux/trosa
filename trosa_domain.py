@@ -17,6 +17,7 @@ business implementations.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Iterable
 
@@ -82,81 +83,193 @@ def customer_contacts(conn: Any, customer_id: int, *, customer_ids=None) -> list
     return [dict(row) for row in rows]
 
 
-def real_interaction_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
-    """Return Customers that have a real two-way relationship.
+# --- Content-based relationship boundary (engaged / human_reminder / auto_follow)
+#
+# The Today/Sela boundary is a business-context judgment, never a single field
+# (direction, source, event_type).  A Customer is human-owned when their real
+# history shows they participated in a business exchange (inquiry, quote,
+# price feedback, sample, order, payment, meeting) or at least expressed a
+# concrete need / reply that a human should follow up.  Only pure one-way
+# development (our letters, catalogues, greetings, show invitations, price
+# blasts, delivery, auto-development nodes, bounces) stays with Sela.
+_RE_STRONG_ORDER = re.compile(r"(订单|合同|付款|预付款|货款|水单|swift|定金|付款证明|签订|每年采购|万美元|采购计划|proforma|purchase order|invoice)", re.I)
+_RE_WEAK_ORDER = re.compile(r"(下单|试单|首单|采购量|整柜|一柜|一个柜|吨)")
+_RE_QUOTE = re.compile(r"(报价|价格反馈|反馈价格|目标价|太贵|贵了|价格太高|价格高|高出|价格优势|价格不错|价格可以|价格更低|单价|每公斤|每张价格|议价|价格对比)")
+_RE_QUOTE_STRONG = re.compile(r"(报价反馈|价格反馈|反馈价格|目标价|太贵|贵了|价格太高|价格高|高出|价格优势|价格不错|价格可以|价格更低|单价|每公斤|每张价格|议价|价格对比|报价[：:0-9])")
+_RE_NEG_QUOTE = re.compile(r"(是否|要不要|需不需要|想不想要|有没有|询问|问|寻求|想要|可|可以).{0,6}(要|需要|更新)?报价")
+_RE_CUST = re.compile(r"((?<!历史)客户[\w\u4e00-\u9fff\.\-\s]{0,20}(回复|表示|问|要求|询问|确认|同意|拒绝|接受|反馈|说|称|发来|提供|给出|想要|需要|感兴趣|决定|下单|付款|采购|明确|告知|抱怨)|对方(回复|表示|问|要求)|回复[:：])")
+_RE_SAMPLE_CUST = re.compile(r"(要.{0,6}样品|需要.{0,6}样品|索取.{0,6}样品|寄.{0,4}样|寄送.{0,4}样|样品(寄|到|收|测|反馈|已|确认)|已寄样|拿了.{0,6}样品|样品.{0,4}测试|测试.{0,4}样品|样品.{0,4}反馈)")
+_RE_NEG_SAMPLE = re.compile(r"(是否|要不要|需不需要|有没有|询问|问|想要|可|可以).{0,6}(要|需要)?寄?样")
+_RE_MEET = re.compile(r"(见面|会面|来访|参观|拜访|工厂参观|到访|来访工厂|会议上|面谈|约见)")
+_RE_MEET_ONEWAY = re.compile(r"(展会邀请|邀请参展|是否.{0,4}去.{0,4}展会|是否参加.{0,4}展会|展会确认|参加本次展会|告知参与本次展会|询问.{0,6}展会)")
+_RE_REJECT = re.compile(r"(暂时没有需求|没有需求|暂无需求|无需求|目前没有需求|忠于|保留.{0,6}信息|不匹配|not matching|不感兴趣|不需要|已转告采购|转告.{0,4}采购部门|等有需求|有需求会通知)")
+_RE_AUTO = re.compile(r"(自动回复|automatic reply|auto[- ]?reply|auto[- ]?response|out of office|vacation|休假|放假|holiday|closed for|abwesenheit|automatisch|fuera de oficina|vacaciones|ha sido recibido|recibido correctamente|vacances|ferie|assenza|ausência|ausencia|工单|request number|ticket|no[- ]?reply|noreply)", re.I)
+_RE_BOUNCE = re.compile(r"(退信|未递送|undeliverable|550|451|no such user|mailbox full|address not found|delivery status|delivery status notification)", re.I)
+_RE_ONEWAY = re.compile(r"(开发信|二次开发|价格更新|价格跟进|价格通知|降价通知|市场波动|问候|祝福|展会邀请|邀请参展|已发送|投递|新客户开发第|开发节点|inbox 批量设为今天|批量完成|询问.{0,8}需求|问.{0,4}是否需要.{0,6}(报价|样品)|是否要.{0,4}(报价|样品))")
+_RE_EXPO_PROFILE = re.compile(r"(现场备注|推荐日期|扫描APP|名片\+扫描|ISA Sign Expo|ISA2025|ISA2026|来源：.*Expo|来源：.*ISA)")
+_RE_SYNC_LABEL = re.compile(r"(Gmail 同步|SYSTEM_FALLBACK|CODEX_REVIEW|本地 Gmail API|Gmail exact-thread|Gmail DSN|Gmail connector|历史 sela 外联)")
+_RE_HR_CONTACT = re.compile(r"(给了.{0,8}采购.{0,4}(联系方式|邮箱|电话)|转告.{0,4}采购|给到.{0,4}部门|转给|forwarded|转内部|给.{0,6}采购的.{0,4}(邮箱|联系方式)|给.{0,6}采购.{0,4}(邮箱|联系方式|电话)|抄送.{0,12}(采购|buyer)|负责采购)")
+_RE_HR_REFERRAL = re.compile(r"(转发给我|转介|推荐给|介绍给|带转发|飞姐)")
+_RE_HR_SAMPLE_TAKEN = re.compile(r"(拿了.{0,8}样品|拿.{0,4}样品|对.{0,8}色号感兴趣|拿了.{0,8}名片|对.{0,10}(镜面|金色|马卡龙|色串|特殊板|抗冲击|7328|425|538|1777).{0,4}感兴趣)")
+_RE_BOOTH_NEED = re.compile(r"(需要|需求|感兴趣|想要|有意向|意向|要.{0,4}样品)")
+_RE_HR_INTENT = re.compile(r"(询问.{0,12}(价格|报价|样品|目录|规格|数量|厚度|颜色|认证|证书|ACM|PC板|PVC|铝合板|聚碳酸酯)|问.{0,6}(价格|报价|样品|目录|catalog|catalogue|price|sample)|要.{0,6}(价格|报价|样品|目录|catalog|认证|证书|规格)|需要.{0,6}(样品|报价|价格|目录|规格|数量)|确认.{0,6}(规格|数量|地址|需求)|要求.{0,20}(证书|认证|报价|价格|目录|样品|规格)|发来.{0,10}(规格|数量|截图|表格|需求|图片)|提供.{0,6}(规格|数量|地址|需求|目录|价格|报价|证书)|给了.{0,6}(地址|规格|数量)|指出.{0,10}感兴趣|拿.{0,6}(产品册|样品|名片)|负责采购|询问.{0,12}(ACM|PC板|PVC|铝合板|聚碳酸酯))")
+_RE_NEG_HR = re.compile(r"(是否|要不要|需不需要|有没有|询问客户|问客户|询问其|询问一下).{0,8}(要|需要)?(样品|报价|价格|目录)")
 
-    This is the relationship-stage fact behind the Today/Sela boundary: new
-    Customers and unreplied development follow-ups belong to Sela and never to
-    Today.  The judgment is a durable business fact, never a title keyword, a
-    ``customer_type`` value or mere presence in the CRM.  A Customer leaves the
-    prospect stage only when the other side actually engaged: an inbound or
-    two-way communication, an inbound reply to an outreach, or an unprocessed
-    inbound reply.  A one-way record — our sent development email, an imported
-    or logged outbound note, a delivery event or an internal agent decision —
-    never qualifies, so those Customers are left to Sela's periodic cadence.
-    Kept in sync with migration 0056
-    (trosa.account_has_real_interaction).
+
+def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sysnotes: str, impsrc: str) -> str:
+    """Classify one Customer from content.  Never a single field."""
+    note_blob = f"{notes} {sysnotes}"
+    reply_text = " ".join(str(m.get('reply_content') or '') for m in mails if m.get('reply_content'))
+    event_text = " ".join(" ".join(str(x) for x in (e.get('content'), e.get('result'), e.get('next_plan')) if x) for e in events)
+    inbox_text = " ".join(f"{i.get('title')} {i.get('content')}" for i in inbox)
+    all_mail_text = " ".join(str(x) for m in mails for x in (m.get('subject'), m.get('body'), m.get('reply_content')) if x)
+
+    auto_hit = bool(_RE_AUTO.search(reply_text) or _RE_AUTO.search(event_text)
+                    or _RE_AUTO.search(note_blob) or _RE_AUTO.search(inbox_text))
+    bounce = bool(_RE_BOUNCE.search(all_mail_text) or _RE_BOUNCE.search(event_text))
+
+    docs = []
+    if not _RE_EXPO_PROFILE.search(note_blob) and not _RE_AUTO.search(note_blob):
+        docs.append(note_blob)
+    inbound_dir = False
+    for e in events:
+        txt = " ".join(str(x) for x in (e.get('content'), e.get('result'), e.get('next_plan')) if x)
+        if not txt:
+            continue
+        if _RE_AUTO.search(txt) or _RE_SYNC_LABEL.search(txt):
+            continue  # auto-reply or a sync provenance label; real text lives elsewhere
+        if not _RE_CUST.search(txt) and _RE_ONEWAY.search(txt) and not (
+                _RE_REJECT.search(txt) or _RE_STRONG_ORDER.search(txt)
+                or (_RE_HR_INTENT.search(txt) and not _RE_NEG_HR.search(txt))):
+            continue
+        if str(e.get('direction') or '').lower() in ('inbound', 'two_way') or str(e.get('activity_type') or '').lower() == 'customer_reply':
+            inbound_dir = True
+        docs.append(txt)
+    replied_real = False
+    for m in mails:
+        rc = str(m.get('reply_content') or '')
+        if not rc or _RE_AUTO.search(rc) or _RE_BOUNCE.search(rc):
+            continue
+        if _RE_SYNC_LABEL.search(rc) and len(rc) < 220:
+            continue
+        docs.append(rc)
+        if str(m.get('reply_status') or '').lower() == 'replied':
+            replied_real = True
+    clean_inbox = [i for i in inbox if not _RE_AUTO.search(str(i.get('content') or '')) and not _RE_BOUNCE.search(str(i.get('content') or ''))]
+    if clean_inbox:
+        docs.append(" ".join(f"{i.get('title')} {i.get('content')}" for i in clean_inbox))
+    trusted = " ".join(docs)
+
+    order_strong = _RE_STRONG_ORDER.search(trusted)
+    order_weak = _RE_WEAK_ORDER.search(trusted)
+    cust_ctx = _RE_CUST.search(trusted)
+    quote = _RE_QUOTE.search(trusted)
+    if quote and _RE_NEG_QUOTE.search(trusted) and not _RE_QUOTE_STRONG.search(trusted):
+        quote = None
+    sample_cust = _RE_SAMPLE_CUST.search(trusted)
+    if sample_cust and _RE_NEG_SAMPLE.search(trusted) and not re.search(r"(样品(寄|到|收|测|反馈|已|确认)|已寄样|拿了.{0,6}样品|寄送.{0,4}样|寄出|送达)", trusted):
+        sample_cust = None
+    meet = _RE_MEET.search(trusted)
+    reject = _RE_REJECT.search(trusted)
+    genuine = bool(cust_ctx or replied_real or inbound_dir)
+
+    engaged = bool(order_strong or (order_weak and cust_ctx) or quote or sample_cust
+                   or (meet and not _RE_MEET_ONEWAY.search(trusted)) or reject)
+    if engaged:
+        return "engaged"
+    referral_only = bool(_RE_HR_REFERRAL.search(trusted)) and not bool(cust_ctx or order_strong or reject or sample_cust or replied_real)
+    if referral_only:
+        return "human_reminder"
+    strong_hr = bool(_RE_HR_CONTACT.search(trusted) or _RE_HR_REFERRAL.search(trusted) or _RE_HR_SAMPLE_TAKEN.search(trusted)
+                     or ((_RE_EXPO_PROFILE.search(note_blob) or impsrc in ("manual", "daily_recommendation")) and _RE_BOOTH_NEED.search(note_blob)))
+    hr = bool(strong_hr or genuine or (_RE_HR_INTENT.search(trusted) and not _RE_NEG_HR.search(trusted)))
+    if hr and not (auto_hit and not strong_hr and not (_RE_HR_INTENT.search(trusted) and not _RE_NEG_HR.search(trusted))):
+        return "human_reminder"
+    if auto_hit and not bounce:
+        return "needs_info"
+    return "auto_follow"
+
+
+def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
+    """Return Customers whose follow-ups belong to a human (not Sela).
+
+    Human-owned = engaged, human_reminder or needs_info, decided from content
+    (see :func:`_relationship_bucket`).  Pure one-way development (auto_follow)
+    is Sela's and must not enter Today.
     """
     ids = _ids(customer_ids) if customer_ids is not None else None
     wanted = set(ids) if ids is not None else None
     if wanted == set():
         return set()
+    where_ids = sorted(wanted) if wanted is not None else None
 
-    def keep(customer_id) -> bool:
-        try:
-            customer_id = int(customer_id)
-        except (TypeError, ValueError):
-            return False
-        return wanted is None or customer_id in wanted
+    def marks(column: str) -> tuple[str, list]:
+        if where_ids is None:
+            return '', []
+        return ' AND ' + column + ' IN (' + ','.join('?' for _ in where_ids) + ')', list(where_ids)
 
-    found: set[int] = set()
+    def gather(events, mails, inbox, details) -> dict:
+        per = {}
+        for e in events:
+            per.setdefault(int(e['customer_id']), {"events": [], "mails": [], "inbox": [], "notes": "", "sysnotes": "", "impsrc": ""})["events"].append(dict(e))
+        for m in mails:
+            per.setdefault(int(m['customer_id']), {"events": [], "mails": [], "inbox": [], "notes": "", "sysnotes": "", "impsrc": ""})["mails"].append(dict(m))
+        for i in inbox:
+            per.setdefault(int(i['customer_id']), {"events": [], "mails": [], "inbox": [], "notes": "", "sysnotes": "", "impsrc": ""})["inbox"].append(dict(i))
+        for d in details:
+            dd = dict(d)
+            entry = per.setdefault(int(dd['customer_id']), {"events": [], "mails": [], "inbox": [], "notes": "", "sysnotes": "", "impsrc": ""})
+            entry["notes"] = dd.get('notes') or ''
+            entry["sysnotes"] = dd.get('system_notes') or ''
+            entry["impsrc"] = str(dd.get('import_source') or '')
+        return per
+
+    per = {}
     if postgres_mode():
-        marks = ''
-        params: list[Any] = []
-        if wanted is not None:
-            marks = ' AND ar.legacy_customer_id IN (' + ','.join('?' for _ in wanted) + ')'
-            params.extend(sorted(wanted))
-        rows = conn.execute(
-            '''SELECT DISTINCT ar.legacy_customer_id AS customer_id
+        clause, params = marks('ar.legacy_customer_id')
+        account_to_customer = {}
+        for row in conn.execute(
+            '''SELECT ar.legacy_customer_id AS customer_id, ar.account_id
                  FROM trosa.account_legacy_refs ar
                 WHERE ar.organization_id=trosa.compat_org_id()
-                  AND ar.legacy_user_id=trosa.compat_current_user()
-                  AND trosa.account_has_real_interaction(ar.account_id)''' + marks,
+                  AND ar.legacy_user_id=trosa.compat_current_user()''' + clause,
             params,
-        ).fetchall()
-        for row in rows:
-            found.add(int(row['customer_id']))
-        return found
+        ).fetchall():
+            account_to_customer.setdefault(row['account_id'], int(row['customer_id']))
+        accounts = sorted(account_to_customer)
+        if not accounts:
+            return set()
+        amarks = ' IN (' + ','.join('?' for _ in accounts) + ')'
+        events = conn.execute('''SELECT account_id, content, result, next_plan, direction, event_type AS activity_type
+                                   FROM trosa.timeline_events WHERE account_id''' + amarks, accounts).fetchall()
+        mails = conn.execute('''SELECT account_id, reply_status, subject, body, reply_content FROM trosa.outreach_messages WHERE account_id''' + amarks, accounts).fetchall()
+        inbox = conn.execute('''SELECT account_id, title, content FROM trosa.inbox_items WHERE account_id''' + amarks, accounts).fetchall()
+        details = conn.execute('''SELECT account_id, notes, system_notes, import_source FROM trosa.customer_details WHERE account_id''' + amarks, accounts).fetchall()
+        per = gather(
+            [{'customer_id': account_to_customer.get(e['account_id'], -1), **{k: e[k] for k in ('content', 'result', 'next_plan', 'direction', 'activity_type')}} for e in events],
+            [{'customer_id': account_to_customer.get(m['account_id'], -1), **{k: m[k] for k in ('reply_status', 'subject', 'body', 'reply_content')}} for m in mails],
+            [{'customer_id': account_to_customer.get(i['account_id'], -1), **{k: i[k] for k in ('title', 'content')}} for i in inbox],
+            [{'customer_id': account_to_customer.get(d['account_id'], -1), **{k: d[k] for k in ('notes', 'system_notes', 'import_source')}} for d in details],
+        )
+    else:
+        clause, params = marks('customer_id')
+        events = conn.execute('''SELECT customer_id, content, result, next_plan, direction, activity_type FROM follow_up_logs
+                                  WHERE (is_deleted=0 OR is_deleted IS NULL)''' + clause, params).fetchall()
+        mails = conn.execute('''SELECT customer_id, reply_status, subject, content AS body, reply_content
+                                 FROM outreach_emails WHERE 1=1''' + clause, params).fetchall()
+        inbox = conn.execute('''SELECT customer_id, title, content FROM inbox_items WHERE customer_id IS NOT NULL''' + clause, params).fetchall()
+        details = conn.execute('''SELECT id AS customer_id, notes, system_notes, import_source FROM customers WHERE 1=1''' + clause, params).fetchall()
+        per = gather(events, mails, inbox, details)
 
-    where, params = '', []
-    if wanted is not None:
-        where = ' AND customer_id IN (' + ','.join('?' for _ in wanted) + ')'
-        params = sorted(wanted)
-    for row in conn.execute(
-        '''SELECT customer_id, direction, activity_type FROM follow_up_logs
-            WHERE (is_deleted=0 OR is_deleted IS NULL)''' + where,
-        params,
-    ).fetchall():
-        direction = str(row['direction'] or '').strip().lower()
-        activity_type = str(row['activity_type'] or '').strip().lower()
-        if direction in ('inbound', 'two_way') or activity_type == 'customer_reply':
-            if keep(row['customer_id']):
-                found.add(int(row['customer_id']))
-    for row in conn.execute(
-        "SELECT DISTINCT customer_id FROM outreach_emails WHERE lower(COALESCE(reply_status,''))='replied'"
-        + where,
-        params,
-    ).fetchall():
-        if keep(row['customer_id']):
-            found.add(int(row['customer_id']))
-    for row in conn.execute(
-        "SELECT DISTINCT customer_id FROM inbox_items WHERE status='open' "
-        "AND item_type='customer_reply' AND customer_id IS NOT NULL" + where,
-        params,
-    ).fetchall():
-        if keep(row['customer_id']):
-            found.add(int(row['customer_id']))
+    found: set[int] = set()
+    for cid, entry in per.items():
+        bucket = _relationship_bucket(entry["events"], entry["mails"], entry["inbox"], entry["notes"], entry["sysnotes"], entry["impsrc"])
+        if bucket != "auto_follow":
+            found.add(cid)
     return found
+
+
+
 
 
 def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -> list[dict]:
@@ -191,9 +304,9 @@ def today_tasks(conn: Any, *, due_on_or_before: str, limit: int | None = None) -
                     ORDER BY r.remind_date, r.manual_order, r.id'''
     params: list[Any] = [due_on_or_before]
     rows = [dict(row) for row in conn.execute(query, params).fetchall()]
-    if not postgres_mode() and rows:
-        engaged = real_interaction_customer_ids(conn, {int(row['customer_id']) for row in rows})
-        rows = [row for row in rows if int(row['customer_id']) in engaged]
+    if rows:
+        owned = human_owned_customer_ids(conn, {int(row['customer_id']) for row in rows})
+        rows = [row for row in rows if int(row['customer_id']) in owned]
     seen_task_ids: set[Any] = set()
     seen_customer_days: set[tuple[Any, str]] = set()
     collapsed: list[dict] = []
