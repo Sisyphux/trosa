@@ -88,7 +88,7 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 - `GET /api/integrations/sela/health`：轻量健康检查和契约版本；
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
-- `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；
+- `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；读取由业务事实派生的 `lifecycle_stage` 与 `customer_linked`，不把 `trosa_id`/`customer_type` 当身份；
 - `POST /api/integrations/sela/reply`：记录已确认的真实外联结果；
 - `POST /api/integrations/sela/follow-up`：提交需要人工核对的跟进提案。
 

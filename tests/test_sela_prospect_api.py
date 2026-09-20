@@ -881,6 +881,136 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _publish(self, source_id, **fields):
+        body = prospect(source_id)
+        body['company'] = f'{source_id} Co'
+        body['website'] = f'https://{source_id}.example/'
+        body['contact'] = {'name': 'Buyer', 'email': f'buyer@{source_id}.example'}
+        body.update(fields)
+        return self.post_prospect(body, f'sela-v2:{source_id}:one')
+
+    def _post_reply(self, source_id, event, intent='UNKNOWN'):
+        reply = {
+            'candidate_id': source_id,
+            'reply': {
+                'message_id': f'reply-{source_id}', 'subject': 'Re: Acrylic sheet supply',
+                'received_at': '2026-09-09 11:00:00', 'body': 'Please send your price list.',
+            },
+            'action': {'name': 'REPLIED', 'route': 'HUMAN', 'event': event, 'intent': intent},
+            'idempotency_key': f'sela-reply:{source_id}',
+        }
+        response = self.client.post(
+            '/api/integrations/sela/reply', json=reply,
+            headers=self.headers(reply['idempotency_key']),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+    def test_lifecycle_stage_and_customer_linked_come_from_business_facts(self):
+        """Four real cases must agree with the Sela fact layer, without ids."""
+        # 1. Never-replied prospect: a trosa_id exists but is not a relationship.
+        cold = self._publish('cold-1').get_json()
+        self.assertIsNotNone(cold['trosa_id'])
+
+        # 4. Won customer: explicit human business_stage=成交.
+        won_id = self._publish('won-1').get_json()['trosa_id']
+        conn = self.hamid_db()
+        try:
+            conn.execute("UPDATE customers SET business_stage='成交' WHERE id=?", (won_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 2. Replied lead: a neutral real reply is an engaged lead.
+        self._publish('lead-1')
+        self._post_reply('lead-1', 'REPLIED')
+        # 3. Clear opportunity: a commercially interested reply.
+        self._publish('opp-1')
+        self._post_reply('opp-1', 'INTERESTED', intent='INTERESTED')
+
+        listed = self.client.get('/api/integrations/sela/prospects', headers=self.headers())
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        by_id = {row['id']: row for row in listed.get_json()['prospects']}
+        self.assertEqual(by_id['cold-1']['lifecycle_stage'], 'cold_prospect')
+        self.assertFalse(by_id['cold-1']['customer_linked'])
+        self.assertEqual(by_id['lead-1']['lifecycle_stage'], 'engaged_lead')
+        self.assertTrue(by_id['lead-1']['customer_linked'])
+        self.assertEqual(by_id['opp-1']['lifecycle_stage'], 'qualified_opportunity')
+        self.assertTrue(by_id['opp-1']['customer_linked'])
+        self.assertEqual(by_id['won-1']['lifecycle_stage'], 'customer')
+        self.assertTrue(by_id['won-1']['customer_linked'])
+
+    def test_customer_row_alone_is_not_a_customer_or_opportunity(self):
+        """A synced customer row plus ids must never imply a relationship."""
+        created = self._publish('id-only-1').get_json()
+        self.assertIsNotNone(created['trosa_id'])
+        conn = self.hamid_db()
+        try:
+            customer = conn.execute(
+                'SELECT business_stage, type FROM customers WHERE id=?', (created['trosa_id'],)
+            ).fetchone()
+            # The row exists and carries an import classification, yet it is a
+            # cold prospect because no real interaction happened.
+            self.assertEqual(customer['business_stage'], '')
+            conn.execute(
+                "UPDATE customers SET customer_type='existing' WHERE id=?", (created['trosa_id'],)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        rows = self.client.get('/api/integrations/sela/prospects', headers=self.headers()).get_json()['prospects']
+        row = next(item for item in rows if item['id'] == 'id-only-1')
+        self.assertEqual(row['lifecycle_stage'], 'cold_prospect')
+        self.assertFalse(row['customer_linked'])
+
+    def test_agent_request_preserves_structured_fact_fields(self):
+        customer_id = self.post_prospect(prospect()).get_json()['trosa_id']
+        key = 'sela:agent-request:prospect-1:email-1'
+        request_body = {
+            'request': {
+                'candidate_id': 'prospect-1', 'customer_id': customer_id,
+                'company': 'Acrílicos S.A.', 'kind': 'FACT_GAP', 'severity': 'AMBER',
+                'need': '缺少关键邮箱', 'context': '官网没有公开邮箱，无法首次触达。',
+                'proposal': '板材',
+                'missing_facts': [{'field': 'contact_email', 'label': '关键邮箱',
+                                   'why': '官网无公开邮箱', 'blocking': True}],
+                'decision': {'question': '优先哪个产品线？', 'options': ['板材', '展示架'],
+                             'recommended': '板材'},
+                'evidence': [{'source': '官网', 'quote': '联系我们'}],
+                'resume': '补充邮箱后继续首次开发',
+                'dedupe_key': key,
+            },
+            'idempotency_key': key,
+        }
+        response = self.client.post(
+            '/api/integrations/sela/needs', json=request_body, headers=self.headers(key),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        item = response.get_json()['item']
+        self.assertEqual(item['kind'], 'FACT_GAP')
+        self.assertEqual(item['severity'], 'AMBER')
+        self.assertEqual(item['missing_facts'][0]['field'], 'contact_email')
+        self.assertEqual(item['decision']['options'], ['板材', '展示架'])
+        self.assertEqual(item['evidence'][0]['source'], '官网')
+        self.assertEqual(item['resume'], '补充邮箱后继续首次开发')
+
+        # The structure is persisted as a field, not only rendered into prose.
+        conn = self.hamid_db()
+        try:
+            stored = conn.execute(
+                'SELECT request_json FROM inbox_items WHERE id=?', (item['trosa_inbox_id'],)
+            ).fetchone()['request_json']
+        finally:
+            conn.close()
+        self.assertTrue(stored)
+        self.assertEqual(json.loads(stored)['kind'], 'FACT_GAP')
+
+        listed = self.client.get(
+            '/api/integrations/sela/needs?status=open', headers=self.headers(),
+        ).get_json()['needs']
+        returned = next(need for need in listed if need['trosa_inbox_id'] == item['trosa_inbox_id'])
+        self.assertEqual(returned['missing_facts'][0]['field'], 'contact_email')
+        self.assertEqual(returned['resume'], '补充邮箱后继续首次开发')
+
 
 if __name__ == '__main__':
     unittest.main()

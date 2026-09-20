@@ -3402,6 +3402,82 @@ def _sela_prospect_agent_state(value):
     return state
 
 
+# ---------------------------------------------------------------------------
+# Sela relationship facts
+# ---------------------------------------------------------------------------
+# Sela and Trosa must judge the same prospect identically.  A row in the Trosa
+# ``customers`` relation is NOT a relationship: every synced prospect gets one,
+# so ``trosa_id``/``customer_id``/``customer_type`` are deliberately never read
+# here.  The stage is derived only from real business evidence, using the same
+# vocabulary the Sela fact layer understands:
+#   customer             <- explicit won / CRM customer state
+#   qualified_opportunity<- structured commercial interest (RFQ / quote / sample)
+#   engaged_lead         <- a real inbound reply
+#   cold_prospect        <- a discovered record with no real interaction
+# The endpoint returns the stage plus a coarse ``customer_linked`` boolean
+# (stage != cold_prospect) so Sela can consume Trosa's judgment instead of
+# guessing identity from an id.
+_SELA_LEAD_STAGES = ('cold_prospect', 'engaged_lead', 'qualified_opportunity', 'customer')
+_SELA_WON_TOKENS = {
+    '成交', 'WON', 'CLOSED_WON', 'CLOSED-WON', 'PURCHASED', 'PURCHASE_CONFIRMED',
+    'CUSTOMER', 'EXISTING_CUSTOMER', 'ACTIVE_CUSTOMER', 'REPEAT_CUSTOMER',
+}
+_SELA_OPPORTUNITY_TOKENS = {
+    'RFQ', 'QUOTE', 'QUOTATION', 'SAMPLE', 'SAMPLE_REQUEST', 'SAMPLE REQUEST',
+    'PURCHASE', 'PURCHASE_INTENT', 'PURCHASE INTENT', 'NEGOTIATION', 'PROPOSAL',
+    'OPPORTUNITY', 'OPPORTUNITY_IDENTIFIED', 'INTERESTED', 'QUALIFIED', 'MEETING',
+    'MEETING_BOOKED',
+}
+_SELA_REJECTED_TOKENS = {
+    'NOT_INTERESTED', 'NOT INTERESTED', 'REJECTED', 'DECLINED', 'UNSUBSCRIBED',
+    'UNSUBSCRIBE', 'OPT_OUT', 'DO_NOT_CONTACT', 'DNC',
+}
+_SELA_INBOUND_FIELDS = (
+    'last_inbound_at', 'last_reply_received_at', 'last_reply_at', 'replied_at', 'reply_at',
+)
+_SELA_INBOUND_FLAGS = ('valid_reply', 'replied', 'has_reply', 'engaged')
+
+
+def _sela_prospect_lifecycle_facts(value):
+    """Derive one lead's stage from real business evidence only.
+
+    Returns ``stage``, a ``rejected`` flag and the signals used.  Ids and the
+    import classification (``customer_type``) are intentionally excluded.
+    """
+    record = value if isinstance(value, dict) else {}
+    tokens = set()
+    for field in ('business_stage', 'crm_status', 'customer_status', 'outcome', 'status'):
+        text = _sela_prospect_text(record.get(field), 120).upper()
+        if text:
+            tokens.add(text)
+    reply_event = _sela_prospect_text(record.get('reply_event'), 120).upper()
+    if reply_event:
+        tokens.add(reply_event)
+    signals = []
+    rejected = bool(tokens & _SELA_REJECTED_TOKENS)
+    if rejected:
+        signals.append('rejected')
+    if tokens & _SELA_WON_TOKENS:
+        signals.append('won')
+        return {'stage': 'customer', 'rejected': rejected, 'signals': signals}
+    if tokens & _SELA_OPPORTUNITY_TOKENS:
+        signals.append('opportunity')
+        return {'stage': 'qualified_opportunity', 'rejected': rejected, 'signals': signals}
+    inbound = bool(
+        _sela_prospect_text(record.get('last_inbound_at'), 120)
+        or _sela_prospect_text(record.get('last_reply_received_at'), 120)
+        or _sela_prospect_text(record.get('last_reply_body'), 8000)
+        or any(_sela_prospect_text(record.get(field), 120) for field in _SELA_INBOUND_FIELDS)
+        or any(record.get(field) is True for field in _SELA_INBOUND_FLAGS)
+    )
+    if inbound:
+        signals.append('inbound')
+        return {'stage': 'engaged_lead', 'rejected': rejected, 'signals': signals}
+    if _sela_prospect_text(record.get('sent_at') or record.get('gmail_message_id'), 120):
+        signals.append('contacted')
+    return {'stage': 'cold_prospect', 'rejected': rejected, 'signals': signals}
+
+
 def _sela_prospect_research(value):
     """Project only agent-native research facts into Trosa's profile relation."""
     evidence = []
@@ -3949,6 +4025,60 @@ def _sela_agent_request_source_id(value):
     return match.group(1) if match else ''
 
 
+def _sela_request_structured(value):
+    """Keep Sela's structured fact/decision fields instead of only free text.
+
+    Sela sends more than a title: ``missing_facts`` / ``decision`` /
+    ``evidence`` / ``resume`` say what the human must supply and what happens
+    next.  They are rendered into the human ``context`` text for the Inbox UI
+    and also stored verbatim so the Sela API can return the same structure
+    instead of re-parsing prose.
+    """
+    value = value if isinstance(value, dict) else {}
+    missing_facts = []
+    raw_missing = value.get('missing_facts')
+    if isinstance(raw_missing, list):
+        for item in raw_missing[:20]:
+            if not isinstance(item, dict):
+                continue
+            field = _sela_prospect_text(item.get('field'), 80)
+            if not field:
+                continue
+            missing_facts.append({
+                'field': field,
+                'label': _sela_prospect_text(item.get('label'), 120),
+                'why': _sela_prospect_text(item.get('why'), 1000),
+                'blocking': bool(item.get('blocking', True)),
+            })
+    decision = {}
+    raw_decision = value.get('decision')
+    if isinstance(raw_decision, dict):
+        options = [ _sela_prospect_text(item, 500)
+                    for item in (raw_decision.get('options') if isinstance(raw_decision.get('options'), list) else [])[:20]
+                    if _sela_prospect_text(item, 500) ]
+        decision = {
+            'question': _sela_prospect_text(raw_decision.get('question'), 2000),
+            'options': options,
+            'recommended': _sela_prospect_text(raw_decision.get('recommended'), 1000),
+        }
+    evidence = []
+    raw_evidence = value.get('evidence')
+    if isinstance(raw_evidence, list):
+        for item in raw_evidence[:20]:
+            if not isinstance(item, dict):
+                continue
+            source = _sela_prospect_text(item.get('source'), 300)
+            quote = _sela_prospect_text(item.get('quote'), 2000)
+            if source and quote:
+                evidence.append({'source': source, 'quote': quote})
+    return {
+        'missing_facts': missing_facts,
+        'decision': decision,
+        'evidence': evidence,
+        'resume': _sela_prospect_text(value.get('resume'), 2000),
+    }
+
+
 def _sela_agent_request_payload(value):
     """Validate one human decision request without creating a Sela queue."""
     if not isinstance(value, dict):
@@ -3958,7 +4088,9 @@ def _sela_agent_request_payload(value):
         raise CrmWriteError('Agent 请求 source_id 格式无效')
     title = _sela_prospect_text(value.get('need') or value.get('title'), 500)
     context = _sela_prospect_text(value.get('context') or value.get('content'), 12000)
-    proposal = _sela_prospect_text(value.get('proposal'), 4000)
+    structured = _sela_request_structured(value)
+    proposal = _sela_prospect_text(value.get('proposal'), 4000) or \
+        structured['decision'].get('recommended') or structured['resume']
     company = _sela_prospect_text(value.get('company'), 500)
     kind = _sela_prospect_text(value.get('kind'), 80).upper() or 'DECISION'
     severity = _sela_prospect_text(value.get('severity'), 30).upper() or 'AMBER'
@@ -3993,6 +4125,14 @@ def _sela_agent_request_payload(value):
             raise CrmWriteError('Agent 请求 customer_id 无效') from None
         if customer_id <= 0:
             raise CrmWriteError('Agent 请求 customer_id 无效')
+    request_json = json.dumps({
+        'kind': kind,
+        'severity': severity,
+        'proposal': proposal,
+        'source_id': source_id,
+        'company': company,
+        **structured,
+    }, ensure_ascii=False)[:20000]
     return {
         'source_id': source_id,
         'customer_id': customer_id,
@@ -4002,7 +4142,35 @@ def _sela_agent_request_payload(value):
         'company': company,
         'severity': severity,
         'kind': kind,
+        'request_json': request_json,
     }
+
+
+def _sela_agent_request_structured(row):
+    """Read the structured Sela request stored with an Inbox item.
+
+    New items carry ``request_json`` as a real column (SQLite) or inside the
+    canonical ``legacy_payload`` (PostgreSQL).  Older items fall back to the
+    metadata lines in ``content`` so the contract stays backward compatible.
+    """
+    raw = row.get('request_json') if isinstance(row, dict) else ''
+    if not raw:
+        payload = row.get('legacy_payload') if isinstance(row, dict) else None
+        if isinstance(payload, dict):
+            raw = payload.get('sela_request_json') or ''
+        elif isinstance(payload, str):
+            try:
+                parsed = json.loads(payload)
+            except (TypeError, ValueError):
+                parsed = {}
+            raw = parsed.get('sela_request_json') if isinstance(parsed, dict) else ''
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _sela_agent_request_view(conn, row):
@@ -4012,6 +4180,7 @@ def _sela_agent_request_view(conn, row):
     customer = _sela_profile_customer(conn, int(customer_id)) if customer_id else None
     customer = dict(customer) if customer else {}
     source_id = _sela_agent_request_source_id(row.get('dedupe_key'))
+    structured = _sela_agent_request_structured(row)
     content = str(row.get('content') or '')
     metadata = {}
     for label, key in (('公司', 'company'), ('类型', 'kind'), ('优先级', 'severity')):
@@ -4024,18 +4193,23 @@ def _sela_agent_request_view(conn, row):
     if marker in content:
         content, proposal = content.rsplit(marker, 1)
     status = str(row.get('status') or 'open').lower()
+    decision = structured.get('decision') if isinstance(structured.get('decision'), dict) else {}
     return {
         'id': f'trosa-agent-{int(row["id"])}',
         'trosa_inbox_id': int(row['id']),
         'source': 'TROSA',
-        'kind': str(metadata.get('kind') or row.get('kind') or 'DECISION'),
-        'severity': str(metadata.get('severity') or row.get('severity') or 'AMBER'),
-        'company': str(customer.get('company') or customer.get('name') or metadata.get('company') or row.get('title') or '未关联客户'),
+        'kind': str(structured.get('kind') or metadata.get('kind') or row.get('kind') or 'DECISION'),
+        'severity': str(structured.get('severity') or metadata.get('severity') or row.get('severity') or 'AMBER'),
+        'company': str(structured.get('company') or customer.get('company') or customer.get('name') or metadata.get('company') or row.get('title') or '未关联客户'),
         'customer_id': int(customer_id) if customer_id else None,
         'candidate_id': source_id,
         'context': content,
         'need': str(row.get('title') or ''),
-        'proposal': proposal,
+        'proposal': str(structured.get('proposal') or proposal),
+        'missing_facts': structured.get('missing_facts') if isinstance(structured.get('missing_facts'), list) else [],
+        'decision': decision,
+        'evidence': structured.get('evidence') if isinstance(structured.get('evidence'), list) else [],
+        'resume': str(structured.get('resume') or ''),
         'status': 'OPEN' if status == 'open' else 'RESOLVED' if status == 'resolved' else 'SKIPPED',
         'resolution': str(row.get('resolution_note') or ''),
         'resolved_at': str(row.get('resolved_at') or ''),
@@ -4811,9 +4985,25 @@ def _sela_prospect_view(conn, profile):
         outreach_status, outcome = 'CONTACT_NEEDED', ''
     else:
         outreach_status, outcome = 'EMAIL_VERIFY', ''
+    # Relationship stage comes from the same business facts Sela reads, never
+    # from the presence of the customer row.  A cold prospect keeps
+    # ``customer_linked=false`` even though every synced lead has a trosa_id.
+    lead_stage = _sela_prospect_lifecycle_facts({
+        'business_stage': str(customer.get('business_stage') or ''),
+        'status': str(customer.get('status') or ''),
+        'outcome': outcome,
+        'reply_event': stored_event,
+        'sent_at': outreach.get('sent_date') or '',
+        'last_inbound_at': reply_received_at,
+        'last_reply_body': outreach.get('reply_content') or '',
+    })
     view = {
         'id': str(profile['source_id']),
         'trosa_id': int(customer['id']),
+        'customer_linked': lead_stage['stage'] != 'cold_prospect',
+        'lifecycle_stage': lead_stage['stage'],
+        'lifecycle_rejected': lead_stage['rejected'],
+        'lifecycle_signals': lead_stage['signals'],
         'company': str(customer.get('company') or customer.get('name') or ''),
         'normalized_name': _sync_name_key(customer.get('company') or customer.get('name')),
         'website': str(customer.get('website') or ''),
@@ -5455,6 +5645,7 @@ def sela_integration_create_agent_need():
                 title=item['title'], content=item['content'], dedupe_key=item['dedupe_key'],
                 status='open', created_at=_sela_now(),
                 **_inbox_question_meta(_SELA_AGENT_REQUEST_TYPE, item['dedupe_key'], item.get('source_id') or ''),
+                request_json=item.get('request_json', ''),
             )
             if postgres_mode():
                 existing = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)

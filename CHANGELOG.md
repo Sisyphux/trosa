@@ -64,6 +64,14 @@
 - 影响范围：仅 `app/static/index.html`、`app/static/app.js`、`app/static/visual-v2.css` 的前端样式与交互；不改接口、数据模型与业务写入语义。
 - 是否需要迁移：否。
 - 当前状态：本地隔离库真实浏览器验证通过（390/768/800/820/974/1440px；侧栏开合、遮罩、Inbox、Today、记录弹层）。
+## 2026-09-20 — Sela 关系事实契约补全：/prospects 派生 lifecycle_stage 与 customer_linked
+
+- 背景：Sela 文档约定 `/api/integrations/sela/prospects` 返回 `customer_linked` 与 `lifecycle_stage`，但接口从未返回；Sela 只能按零散字段猜身份，且历史上把 `trosa_id` / `customer_type` 误当客户。另：`needs_human` 的结构化字段（missing_facts/decision/evidence/resume）此前只渲染进自由文本。
+- 修改（关系事实）：`_sela_prospect_view` 新增 `lifecycle_stage`（`cold_prospect / engaged_lead / qualified_opportunity / customer`）、`customer_linked`（= `lifecycle_stage != cold_prospect`）与 `lifecycle_rejected`，由**已有业务事实**推导：成交/CRM 状态 → customer；RFQ/报价/索样/INTERESTED/QUALIFIED 等结构化商业兴趣 → qualified_opportunity；真实 inbound 回复 → engaged_lead；否则 cold_prospect。**不读取 `trosa_id`/`customer_id`/`customer_type` 是否存在**——存在 customers 行本身不构成客户身份。
+- 修改（Inbox 结构化）：`_sela_agent_request_payload` 校验并保存 Sela 的 `kind`/`severity`/`proposal`/`missing_facts`/`decision`/`evidence`/`resume`；SQLite 新增 `inbox_items.request_json` 列，PostgreSQL 存入 `trosa.inbox_items.legacy_payload`；`/api/integrations/sela/needs` 原样返回这些字段，人文文本不变，Inbox UI 无需改动。
+- 影响范围：`app.py`（Sela 集成读取与 Agent 请求）、`trosa_domain.py`（`create_inbox_item` 可选结构化载荷）、`db.py`（SQLite 列迁移）；不改 customers/prospect 数据模型，不新增迁移文件，不改其它接口。
+- 是否需要迁移：SQLite 既有库由 `USER_MIGRATIONS` 自动补列；PostgreSQL 复用现有 `legacy_payload`，无需新迁移。
+- 测试：`test_sela_prospect_api` 新增四类阶段/`customer_linked`、customer 行不等于客户、结构化 Inbox 保留用例；`test_postgres_rehearsal` 新增 PostgreSQL 下的阶段与结构化载荷用例。SQLite 23 项、PostgreSQL rehearsal 32 项、Sela 97 项通过；本地真实 HTTP 联调四类对象两端判断一致。
 
 ## 2026-09-19 — 修复进入页面即显示“正在保存…”：状态条 hidden 属性失效
 

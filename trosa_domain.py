@@ -900,6 +900,7 @@ def create_inbox_item(
     resolution_reason: str = '', resolution_note: str = '',
     question_kind: str = '', question_key: str = '', source_type: str = '',
     resolution_source: str = '', resolved_by: str = '', evidence: str = '',
+    request_json: str = '',
 ) -> int:
     """Create or refresh a canonical Inbox item and return its stable API id.
 
@@ -909,7 +910,10 @@ def create_inbox_item(
 
     ``legacy_row_refs`` and the namespaced raw dedupe key are transport
     adapters only.  Inbox content and status are held by ``trosa.inbox_items``.
+    ``request_json`` optionally carries a structured Agent request so the Sela
+    API can return the same facts instead of re-parsing the human text.
     """
+    request_json = str(request_json or '')[:20000]
     if not postgres_mode():
         existing = None
         if dedupe_key:
@@ -921,23 +925,25 @@ def create_inbox_item(
                        question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
                        question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
                        source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
-                       evidence=CASE WHEN ?<>'' THEN ? ELSE evidence END
+                       evidence=CASE WHEN ?<>'' THEN ? ELSE evidence END,
+                       request_json=?
                      WHERE id=?''',
                 (customer_id, item_type, title, content, status, resolved_at, resolution_reason,
                  resolution_note, question_kind, question_kind, question_key, question_key,
-                 source_type, source_type, evidence, evidence, existing['id']),
+                 source_type, source_type, evidence, evidence, request_json, existing['id']),
             )
             return int(existing['id'])
         cursor = conn.execute(
             '''INSERT INTO inbox_items
                (item_type, customer_id, title, content, dedupe_key, status, created_at,
                 resolved_at, resolution_reason, resolution_note,
-                question_kind, question_key, source_type, resolution_source, resolved_by, evidence)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                question_kind, question_key, source_type, resolution_source, resolved_by, evidence,
+                request_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (item_type, customer_id, title, content, dedupe_key, status, created_at,
              resolved_at, resolution_reason, resolution_note,
              question_kind, question_key, source_type, resolution_source, resolved_by,
-             evidence or '[]'),
+             evidence or '[]', request_json),
         )
         return int(cursor.lastrowid)
 
@@ -976,16 +982,20 @@ def create_inbox_item(
     existing = _find_existing() if dedupe_key else None
     if existing:
         conn.execute(
-            '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
-                   resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
-                   question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
-                   question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
-                   source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
-                   evidence=COALESCE(NULLIF(?, '')::jsonb, evidence)
-                 WHERE id=?''',
+            '''UPDATE trosa.inbox_items
+                  SET account_id=?, item_type=?, title=?, content=?, status=?,
+                      resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
+                      question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
+                      question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
+                      source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
+                      evidence=COALESCE(NULLIF(?, '')::jsonb, evidence),
+                      legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                          || CASE WHEN ?::text='' THEN '{}'::jsonb
+                                  ELSE jsonb_build_object('sela_request_json', ?::text) END
+                WHERE id=?''',
             (account_id, item_type, title, content, status, resolved_at, resolution_reason,
              resolution_note, question_kind, question_kind, question_key, question_key,
-             source_type, source_type, evidence, existing['id']),
+             source_type, source_type, evidence, request_json, request_json, existing['id']),
         )
         return int(existing['legacy_id'])
     legacy_id = conn.execute(
@@ -995,7 +1005,12 @@ def create_inbox_item(
         "SELECT trosa.compat_uuid('inbox:' || trosa.compat_current_user() || ':' || ?::text)",
         (legacy_id,),
     ).fetchone()[0]
-    payload = json.dumps({'compat_dedupe_key': dedupe_key}) if dedupe_key else '{}'
+    payload_map = {}
+    if dedupe_key:
+        payload_map['compat_dedupe_key'] = dedupe_key
+    if request_json:
+        payload_map['sela_request_json'] = request_json
+    payload = json.dumps(payload_map)
     inserted = conn.execute(
         '''INSERT INTO trosa.inbox_items
            (id, account_id, item_type, title, content, dedupe_key, status, created_at,
@@ -1016,16 +1031,20 @@ def create_inbox_item(
         existing = _find_existing()
         if existing:
             conn.execute(
-                '''UPDATE trosa.inbox_items SET account_id=?, item_type=?, title=?, content=?, status=?,
-                       resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
-                       question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
-                       question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
-                       source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
-                       evidence=COALESCE(NULLIF(?, '')::jsonb, evidence)
-                     WHERE id=?''',
+                '''UPDATE trosa.inbox_items
+                      SET account_id=?, item_type=?, title=?, content=?, status=?,
+                          resolved_at=trosa.compat_time(?), resolution_reason=?, resolution_note=?,
+                          question_kind=CASE WHEN ?<>'' THEN ? ELSE question_kind END,
+                          question_key=CASE WHEN ?<>'' THEN ? ELSE question_key END,
+                          source_type=CASE WHEN ?<>'' THEN ? ELSE source_type END,
+                          evidence=COALESCE(NULLIF(?, '')::jsonb, evidence),
+                          legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
+                              || CASE WHEN ?::text='' THEN '{}'::jsonb
+                                      ELSE jsonb_build_object('sela_request_json', ?::text) END
+                    WHERE id=?''',
                 (account_id, item_type, title, content, status, resolved_at, resolution_reason,
                  resolution_note, question_kind, question_kind, question_key, question_key,
-                 source_type, source_type, evidence, existing['id']),
+                 source_type, source_type, evidence, request_json, request_json, existing['id']),
             )
             return int(existing['legacy_id'])
         # Never fabricate a legacy ref that points at a row we did not insert.

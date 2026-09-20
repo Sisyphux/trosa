@@ -1659,6 +1659,10 @@ USER_MIGRATIONS = {
         'resolution_source': "TEXT DEFAULT ''",
         'resolved_by': "TEXT DEFAULT ''",
         'evidence': "TEXT DEFAULT '[]'",
+        # Structured Sela fact/decision request retained alongside the human
+        # content text so the API can round-trip kind/severity/proposal/
+        # missing_facts/decision/evidence/resume without re-parsing prose.
+        'request_json': "TEXT DEFAULT ''",
     },
     'import_unmatched_customers': {
         'unmatched_hash': "TEXT DEFAULT ''",

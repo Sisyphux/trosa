@@ -1496,6 +1496,72 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertTrue(any(item['source_id'] == 'pg-sela-exclusion-1'
                             for item in exclusions.get_json()['records']))
 
+    def test_sela_lifecycle_and_structured_request_are_canonical_in_postgres(self):
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        def publish(source_id):
+            body = {
+                'source_id': source_id, 'company': f'{source_id} Co',
+                'website': f'https://{source_id}.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+                'contact': {'name': 'Buyer', 'email': f'buyer@{source_id}.example'},
+                'subject': 'Intro', 'email_draft': 'Hello.',
+            }
+            return client.post(
+                '/api/integrations/sela/prospects',
+                headers={'X-Idempotency-Key': f'pg-live:{source_id}'},
+                json={'prospect': body},
+            )
+
+        cold = publish('pg-cold-1').get_json()
+        won = publish('pg-won-1').get_json()
+        module._set_customer_stage(self.connection, customer_ids=[won['trosa_id']], stage='成交')
+        self.connection.commit()
+
+        rows = {
+            row['id']: row
+            for row in client.get('/api/integrations/sela/prospects?limit=100').get_json()['prospects']
+        }
+        self.assertEqual(rows['pg-cold-1']['lifecycle_stage'], 'cold_prospect')
+        self.assertFalse(rows['pg-cold-1']['customer_linked'])
+        self.assertEqual(rows['pg-won-1']['lifecycle_stage'], 'customer')
+        self.assertTrue(rows['pg-won-1']['customer_linked'])
+
+        key = 'pg-live:agent-request:1'
+        request_body = {'request': {
+            'candidate_id': 'pg-cold-1', 'customer_id': cold['trosa_id'], 'company': 'pg-cold-1 Co',
+            'kind': 'FACT_GAP', 'severity': 'AMBER', 'need': '缺少关键邮箱',
+            'context': '官网无公开邮箱。',
+            'missing_facts': [{'field': 'contact_email', 'label': '关键邮箱',
+                               'why': '无公开邮箱', 'blocking': True}],
+            'decision': {'question': '优先产品线？', 'options': ['板材'], 'recommended': '板材'},
+            'evidence': [{'source': '官网', 'quote': '联系我们'}],
+            'resume': '补充后继续', 'dedupe_key': key,
+        }, 'idempotency_key': key}
+        created_need = client.post(
+            '/api/integrations/sela/needs', json=request_body,
+            headers={'X-Idempotency-Key': key},
+        )
+        self.assertEqual(created_need.status_code, 200, created_need.get_json())
+        item = created_need.get_json()['item']
+        self.assertEqual(item['kind'], 'FACT_GAP')
+        self.assertEqual(item['missing_facts'][0]['field'], 'contact_email')
+        self.assertEqual(item['decision']['options'], ['板材'])
+        self.assertEqual(item['resume'], '补充后继续')
+        stored = self.connection.execute(
+            '''SELECT item.legacy_payload->>'sela_request_json' AS raw
+                 FROM trosa.inbox_items item
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=item.id
+                WHERE ref.table_name='inbox_items' AND ref.legacy_id=?''',
+            (item['trosa_inbox_id'],),
+        ).fetchone()['raw']
+        self.assertTrue(stored)
+        listed = client.get('/api/integrations/sela/needs?status=open').get_json()['needs']
+        returned = next(n for n in listed if n['trosa_inbox_id'] == item['trosa_inbox_id'])
+        self.assertEqual(returned['missing_facts'][0]['field'], 'contact_email')
+
     def test_z_agent_gateway_undo_and_operation_audit_boundary(self):
         """Agent/audit writes stay canonical while old integer views remain projections."""
         from tools.postgres_rehearsal import load_fixture
