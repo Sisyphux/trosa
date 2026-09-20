@@ -37,6 +37,20 @@ def run(cmd, **kwargs):
                           cwd=str(ROOT), **kwargs)
 
 
+def clean_env(**extra):
+    """Build a child environment free of ambient release/role state.
+
+    A dev/review session exports ``TRADE_OS_AGENT_ROLE=dev`` (or ``review``).
+    If these transport/state-machine tests inherited it, ``trosa-release
+    publish`` would (correctly) refuse at the role guard before exercising the
+    behaviour under test, producing a false failure. The child only sees the
+    ``TRADE_OS_*`` variables the test passes explicitly.
+    """
+    base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+    base.update(extra)
+    return base
+
+
 def write_script(path: Path, body: str) -> str:
     path.write_text("#!/bin/bash\n" + body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
@@ -147,11 +161,11 @@ class RunCloudAssistantSimulationTests(unittest.TestCase):
             "{'run': run_stub, 'get': get_stub}[op]()\n",
             encoding="utf-8")
         client.chmod(client.stat().st_mode | stat.S_IEXEC)
-        env = {**os.environ,
-               "TRADE_OS_CLOUD_ASSISTANT_CLIENT": str(client),
-               "TRADE_OS_CLOUD_ASSISTANT_TIMEOUT": "10",
-               "TRADE_OS_CLOUD_ASSISTANT_POLL_GRACE": "2",
-               **(extra_env or {})}
+        env = clean_env(
+            TRADE_OS_CLOUD_ASSISTANT_CLIENT=str(client),
+            TRADE_OS_CLOUD_ASSISTANT_TIMEOUT="10",
+            TRADE_OS_CLOUD_ASSISTANT_POLL_GRACE="2",
+            **(extra_env or {}))
         return run(["bash", "deploy/cloud/run-cloud-assistant-command.sh",
                     "i-1", "cn-x", "echo hi"], env=env)
 
@@ -217,11 +231,11 @@ class ReleaseClientStateTests(unittest.TestCase):
         transport = write_script(
             Path(tempfile.mkdtemp(prefix="trosa-release-tr-")) / "transport.sh",
             transport_body)
-        env = {**os.environ,
-               "TRADE_OS_WORKBENCH_ENV": self.env_file,
-               "TRADE_OS_CLOUD_ASSISTANT_TRANSPORT": transport,
-               "TRADE_OS_RELEASE_POLL_INTERVAL": "1",
-               "TRADE_OS_RELEASE_POLL_TIMEOUT": "30"}
+        env = clean_env(
+            TRADE_OS_WORKBENCH_ENV=self.env_file,
+            TRADE_OS_CLOUD_ASSISTANT_TRANSPORT=transport,
+            TRADE_OS_RELEASE_POLL_INTERVAL="1",
+            TRADE_OS_RELEASE_POLL_TIMEOUT="30")
         return run(["bash", "deploy/cloud/trosa-release", *args], env=env)
 
     def test_launch_unknown_is_not_reported_as_release_failure(self):
@@ -339,6 +353,49 @@ class ReleaseClientStateTests(unittest.TestCase):
                                 transport_body=body)
             out = json.loads(proc.stdout)
             self.assertEqual(out["state"], "failed", status)
+
+
+class AgentRoleIsolationTests(unittest.TestCase):
+    """The gate neutralizes ambient role, but the boundary still refuses dev.
+
+    The regression these protect against: a dev/review session exports
+    ``TRADE_OS_AGENT_ROLE``, the normal release regressions inherit it and the
+    role guard rejects their stubbed publish calls, so the suite fails for the
+    wrong reason. Isolation must not silently drop the boundary itself.
+    """
+
+    def test_gate_drops_agent_role_for_python_regression(self):
+        text = (ROOT / "deploy" / "cloud" / "release-test.sh").read_text(
+            encoding="utf-8")
+        self.assertIn("-u TRADE_OS_AGENT_ROLE", text)
+
+    def test_clean_env_does_not_inherit_agent_role(self):
+        original = os.environ.get("TRADE_OS_AGENT_ROLE")
+        os.environ["TRADE_OS_AGENT_ROLE"] = "dev"
+        try:
+            self.assertNotIn("TRADE_OS_AGENT_ROLE", clean_env())
+        finally:
+            if original is None:
+                os.environ.pop("TRADE_OS_AGENT_ROLE", None)
+            else:
+                os.environ["TRADE_OS_AGENT_ROLE"] = original
+
+    def test_publish_still_refused_under_explicit_dev_role(self):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix="-workbench.env", delete=False, encoding="utf-8")
+        handle.write("TRADE_OS_ECS_REGION=test-region\n")
+        handle.write("TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n")
+        handle.close()
+        self.addCleanup(os.remove, handle.name)
+        env = clean_env(
+            TRADE_OS_WORKBENCH_ENV=handle.name,
+            TRADE_OS_AGENT_ROLE="dev")
+        proc = run(["bash", "deploy/cloud/trosa-release", "publish",
+                    "--commit", "a" * 40, "--release-id", "rel-dev-refused"],
+                   env=env)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("发布被拒绝", proc.stderr)
+        self.assertIn("TRADE_OS_AGENT_ROLE=dev", proc.stderr)
 
 
 if __name__ == "__main__":

@@ -124,7 +124,15 @@ run_python_regression() {
   # Never inherit a developer's formal PostgreSQL settings or rehearsal DSN.
   # The default gate is an isolated SQLite regression; PostgreSQL acceptance is
   # an explicit, separate rehearsal command.
+  #
+  # Also drop the caller's agent role (TRADE_OS_AGENT_ROLE). The gate is the
+  # neutral verification environment: when a dev/review session runs it, the
+  # source-level release tests must not inherit that role and have the release
+  # boundaries reject their own stubbed publish calls. The role guard itself is
+  # still covered explicitly by tests/test_release_boundaries.py, which sets the
+  # role per subprocess instead of relying on ambient state.
   env \
+    -u TRADE_OS_AGENT_ROLE \
     -u TRADE_OS_DATABASE_URL \
     -u PGPASSFILE \
     -u TROSA_REHEARSAL \

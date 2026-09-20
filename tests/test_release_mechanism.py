@@ -30,6 +30,19 @@ def run(cmd, **kwargs):
                           cwd=str(ROOT), **kwargs)
 
 
+def clean_env(**extra):
+    """Child process environment without the caller's release/agent-role state.
+
+    These entrypoint tests exercise ``trosa-release`` (including the publish
+    argument checks) and must not inherit ``TRADE_OS_AGENT_ROLE`` from a
+    dev/review session, or the role guard would reject the call before the
+    behaviour under test is reached.
+    """
+    base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+    base.update(extra)
+    return base
+
+
 class ReleaseIdTests(unittest.TestCase):
     def test_valid_ids(self):
         for value in ("rel-20260916090000-abcdef1", "rollback-20260916",
@@ -249,7 +262,7 @@ class UnifiedEntrypointTests(unittest.TestCase):
 
     def release(self, *args):
         return run(["bash", "deploy/cloud/trosa-release", *args],
-                   env={**os.environ, "TRADE_OS_WORKBENCH_ENV": self.env_file})
+                   env=clean_env(TRADE_OS_WORKBENCH_ENV=self.env_file))
 
     def test_help_lists_single_entry_commands(self):
         proc = self.release("--help")
