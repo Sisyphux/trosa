@@ -11060,8 +11060,7 @@ def respond_to_inbox_question(item_id):
                 values = dict(before); values['email'] = email
                 _update_contact(conn, contact_id=contact_id, values=values)
                 after = _snapshot_entity(conn, 'contacts', contact_id)
-                undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
-                    [_undo_entity('contacts', contact_id, before, after)], '撤销 Inbox 邮箱更正')
+                undo_pending = (contact_id, before, after)
                 note = (note + '\n' if note else '') + '人工确认邮箱：' + email
             elif not note:
                 return jsonify({'error': '请填写所需事实或可联系邮箱'}), 400
@@ -11071,6 +11070,18 @@ def respond_to_inbox_question(item_id):
             _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
         _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason=decision or 'answered',
                                       note=note, resolution_source='human', resolved_by=actor)
+        if locals().get('undo_pending'):
+            contact_id, before, after = undo_pending
+            inbox_entities = []
+            for undo_item_id in item_ids:
+                current = _snapshot_entity(conn, 'inbox_items', undo_item_id)
+                if current:
+                    restored = dict(current); restored['status'] = 'open'; restored['resolved_at'] = None
+                    restored['resolution_reason'] = ''; restored['resolution_note'] = ''
+                    restored['resolution_source'] = ''; restored['resolved_by'] = ''
+                    inbox_entities.append(_undo_entity('inbox_items', undo_item_id, restored, current))
+            undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
+                [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, '撤销 Inbox 邮箱更正')
         response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
                     'resolved_item_ids': item_ids, 'effects': ['已记录人工回答并关闭相关证据。'],
                     'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
