@@ -1,3 +1,15 @@
+## 2026-09-21 — 客户来源：可查看、可修改、可按来源筛选的客户事实
+
+- 需求：每个客户增加「来源」字段与可选补充说明，默认选项为展会、海关数据、LinkedIn、Google / 官网搜索、Sela、客户转介绍、老客户 / 已有资源、Excel / 历史导入、其他；新建时可选、非必填，详情页可查看和修改，客户列表可按来源筛选。
+- 数据：来源是客户事实，PostgreSQL 正式数据长期保存在 `trosa.customer_details.source` / `source_detail`；与 notes/import_source 相同，用户自己的编辑随 `account_legacy_refs.legacy_payload` 按用户隔离，共享同一公司 Account 的另一个用户不会静默覆盖，读取优先本人 payload、否则回退共享规范列。SQLite 开发边界同步新增 `source` / `source_detail` 列。
+- 不猜测、不回填：已有客户没有可靠来源时保持为空，不做推断或批量改写；仅新记录的来源被写入。
+- Sela：Sela 自动创建的客户默认明确标记为「Sela」，仅当 prospect 携带可精确识别的渠道（如 linkedin / 海关数据 / 展会别名）时才采用该具体来源，否则不猜测。
+- 导入：Excel / 历史导入新建的客户标记为「Excel / 历史导入」；导入匹配到的已有客户不改写来源。
+- 界面：新建客户（含官网识别流程）、客户详情「基础资料」增加来源下拉与补充说明；客户列表「更多筛选」增加按来源筛选，并显示为已应用筛选条件。未新增工作流、阶段或配置。
+- 影响范围：`app.py`、`db.py`、`trosa_domain.py`、`postgres_schema_contract.py`、`migrations/0069_customer_source.sql`、`app/static/index.html`、`app/static/app.js`、`tests`。API 为增量字段，保持兼容。
+- 是否需要迁移：是（`0069_customer_source.sql`，由发布流程自动应用）。
+- 当前状态：本地完成，SQLite 回归与 PostgreSQL rehearsal 待重跑。
+
 ## 2026-09-20 — 高频读取路径性能审计与清理：消除按客户展开的 N+1 与重复全表读取
 
 - 背景：真实 PostgreSQL（2000 客户 / 4.8 万沟通 / 6000 待办 / 4000 Inbox 条目）基线显示多个高频端点随数据量近似线性恶化：跟进历史 5.0s、今日 3.2s、Agent 简报 2.7s、近期待办 1.3s、统计 2.1s、状态搜索 2.7s、客户列表 2.7s（均为本地单轮 min）。

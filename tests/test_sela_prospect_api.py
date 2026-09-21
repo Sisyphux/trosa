@@ -183,6 +183,15 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertTrue(result['created'])
         self.assertTrue(result['trosa_id'])
 
+        conn = self.hamid_db()
+        try:
+            created = conn.execute(
+                'SELECT source FROM customers WHERE id=?', (result['trosa_id'],),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(created['source'], 'Sela')
+
         repeat = self.post_prospect(body)
         self.assertEqual(repeat.status_code, 200)
         self.assertEqual(repeat.get_json(), result)

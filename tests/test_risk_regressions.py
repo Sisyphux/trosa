@@ -2372,7 +2372,7 @@ class PostgresCompatibilityRegressionTest(unittest.TestCase):
                 empty_conn, cleaned_search='', search_tokens=[], business_stage='', level='',
                 sort='updated_at', order='desc', include_deleted='0', view='all',
                 country_filter='', business_role='', field_filter='', judgment_filter='',
-                next_state='', last_from='', last_to='', tag_filter='',
+                next_state='', source_filter='', last_from='', last_to='', tag_filter='',
                 days_min=0, days_max=0, page_value='', page=1, per_page=30,
                 interpreted_filters=[], silent_days=45, regular_days=75)
         ordered = [item['id'] for item in payload['customers']]
@@ -2414,7 +2414,7 @@ class PostgresCompatibilityRegressionTest(unittest.TestCase):
                 empty_conn, cleaned_search='alpha', search_tokens=['alpha'], business_stage='', level='',
                 sort='updated_at', order='desc', include_deleted='0', view='all',
                 country_filter='', business_role='', field_filter='', judgment_filter='',
-                next_state='', last_from='', last_to='', tag_filter='',
+                next_state='', source_filter='', last_from='', last_to='', tag_filter='',
                 days_min=0, days_max=0, page_value='', page=1, per_page=30,
                 interpreted_filters=[], silent_days=45, regular_days=75)
         ordered = [item['id'] for item in payload['customers']]

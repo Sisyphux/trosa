@@ -2656,6 +2656,40 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(after['external_id'], source_id)
         self.assertEqual(after['last_interaction_on'], '2026-09-16')
 
+    def test_customer_source_is_a_durable_canonical_fact(self):
+        """Source persists in PostgreSQL and is projected by every read surface."""
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        record = trosa_domain.customer_record(self.connection, customer_id)
+        self.assertEqual(record.get('source'), '')
+        self.assertEqual(record.get('source_detail'), '')
+
+        trosa_domain.update_customer(self.connection, customer_id=customer_id, values={
+            'source': '展会', 'source_detail': 'SIGN CHINA 2026',
+        })
+        self.connection.commit()
+        record = trosa_domain.customer_record(self.connection, customer_id)
+        self.assertEqual(record['source'], '展会')
+        self.assertEqual(record['source_detail'], 'SIGN CHINA 2026')
+
+        # An unrelated partial update must not blank a recorded source.
+        trosa_domain.update_customer(self.connection, customer_id=customer_id, values={'notes': 'probe'})
+        self.connection.commit()
+        self.assertEqual(trosa_domain.customer_record(self.connection, customer_id)['source'], '展会')
+
+        # The compatibility adapter also exposes the appended columns.
+        columns = {
+            row[0] for row in self.connection.execute(
+                """SELECT column_name FROM information_schema.columns
+                    WHERE table_schema='trade_os_compat' AND table_name='customers'
+                      AND column_name IN ('source', 'source_detail')""",
+            ).fetchall()
+        }
+        self.assertEqual(columns, {'source', 'source_detail'})
+
     def test_compat_time_is_business_timezone_independent_of_session(self):
         """Naive compatibility timestamps mean Trosa business time on every server.
 

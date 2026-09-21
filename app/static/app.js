@@ -3972,7 +3972,8 @@ function getCustomerFilterValues() {
   var mapping = {
     country: 'filterCountry', business_role: 'filterBusinessRole', field: 'filterField', level: 'filterLevel',
     has_judgment: 'filterJudgment', next_state: 'filterNextState', days_min: 'filterDaysMin',
-    days_max: 'filterDaysMax', last_from: 'filterLastFrom', last_to: 'filterLastTo', tag: 'filterTag'
+    days_max: 'filterDaysMax', last_from: 'filterLastFrom', last_to: 'filterLastTo', tag: 'filterTag',
+    source: 'filterSource'
   };
   var filters = {};
   Object.keys(mapping).forEach(function(key) {
@@ -3987,7 +3988,8 @@ function setCustomerFilterInputs(filters) {
   var mapping = {
     country: 'filterCountry', business_role: 'filterBusinessRole', field: 'filterField', level: 'filterLevel',
     has_judgment: 'filterJudgment', next_state: 'filterNextState', days_min: 'filterDaysMin',
-    days_max: 'filterDaysMax', last_from: 'filterLastFrom', last_to: 'filterLastTo', tag: 'filterTag'
+    days_max: 'filterDaysMax', last_from: 'filterLastFrom', last_to: 'filterLastTo', tag: 'filterTag',
+    source: 'filterSource'
   };
   Object.keys(mapping).forEach(function(key) {
     var element = document.getElementById(mapping[key]);
@@ -5077,6 +5079,8 @@ async function openEditModal(id) {
     document.getElementById('editBusinessRole').value = c.business_role || '';
     document.getElementById('editField').value = c.field || '';
     document.getElementById('editBusinessStage').value = c.business_stage || '';
+    document.getElementById('editSource').value = c.source || '';
+    document.getElementById('editSourceDetail').value = c.source_detail || '';
     document.getElementById('editNextFollowUp').value = (c.next_follow_up || '').substring(0, 10);
     document.getElementById('editWebsite').value = c.website || '';
     document.getElementById('editTags').value = c.tags || '';
@@ -5381,7 +5385,7 @@ function renderCustomerFactsBrief(customer) {
       '<section class="customer-fact-section customer-fact-identity"><div class="customer-fact-section-head"><span class="customer-fact-label">客户身份</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabBasic\')">资料</button></div>' +
         '<strong class="customer-fact-company">' + escapeHtml(customer.company || customer.name || '未记录公司名称') + '</strong>' +
         (customer.name && customer.company && customer.name !== customer.company ? '<span class="customer-fact-subline">客户名称：' + escapeHtml(customer.name) + '</span>' : '') +
-        '<div class="customer-fact-values"><span><b>国家/地区</b>' + escapeHtml(customer.country || '未记录') + '</span><span><b>行业/领域</b>' + escapeHtml(customer.industry || customer.field || '未记录') + '</span><label class="customer-level-quick" title="点击等级即可直接输入修改"><b>等级</b><span class="customer-level-quick-control"><input class="customer-level-quick-input" type="text" inputmode="text" autocapitalize="characters" aria-label="客户等级，输入 A/B/C/D，可选加号或减号" value="' + escapeHtml(customerLevel) + '" data-current-level="' + escapeHtml(customerLevel) + '" onchange="quickUpdateCustomerLevel(this)"><span class="customer-level-quick-affordance" aria-hidden="true"><span class="ui-icon ui-icon-edit"></span></span><span class="customer-level-quick-feedback" aria-live="polite"></span></span></label><span class="customer-fact-website"><b>网站</b>' + (websiteUrl ? '<a href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener">' + escapeHtml(websiteHost) + '</a>' : '未记录') + '</span></div>' +
+        '<div class="customer-fact-values"><span><b>国家/地区</b>' + escapeHtml(customer.country || '未记录') + '</span><span><b>行业/领域</b>' + escapeHtml(customer.industry || customer.field || '未记录') + '</span><span><b>来源</b>' + escapeHtml([customer.source, customer.source_detail].filter(Boolean).join(' · ') || '未记录') + '</span><label class="customer-level-quick" title="点击等级即可直接输入修改"><b>等级</b><span class="customer-level-quick-control"><input class="customer-level-quick-input" type="text" inputmode="text" autocapitalize="characters" aria-label="客户等级，输入 A/B/C/D，可选加号或减号" value="' + escapeHtml(customerLevel) + '" data-current-level="' + escapeHtml(customerLevel) + '" onchange="quickUpdateCustomerLevel(this)"><span class="customer-level-quick-affordance" aria-hidden="true"><span class="ui-icon ui-icon-edit"></span></span><span class="customer-level-quick-feedback" aria-live="polite"></span></span></label><span class="customer-fact-website"><b>网站</b>' + (websiteUrl ? '<a href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener">' + escapeHtml(websiteHost) + '</a>' : '未记录') + '</span></div>' +
       '</section>' +
       '<section class="customer-fact-section customer-fact-contact"><div class="customer-fact-section-head"><span class="customer-fact-label">沟通对象</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabContacts\')">' + (primaryContact ? '查看' : '添加') + '</button></div>' + contactHtml + '</section>' +
       '<section class="customer-fact-section customer-fact-status"><div class="customer-fact-section-head"><span class="customer-fact-label">客户状态</span><button type="button" class="text-action" onclick="editCustomerWaiting()">编辑等待</button></div><div class="customer-fact-status-grid"><div><span>关系状态</span><strong>' + escapeHtml(currentStatus.label || '未记录') + '</strong></div><div><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong></div><div><span>下一步</span><strong>' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time>' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : '') + '</div></div></section>' +
@@ -5843,6 +5847,8 @@ async function saveCustomer() {
     business_role: document.getElementById('editBusinessRole').value,
     field: document.getElementById('editField').value.trim(),
     business_stage: businessStage,
+    source: document.getElementById('editSource').value,
+    source_detail: document.getElementById('editSourceDetail').value.trim(),
     next_follow_up: document.getElementById('editNextFollowUp').value,
     website: document.getElementById('editWebsite').value.trim(),
     tags: document.getElementById('editTags').value.trim(),
@@ -7459,6 +7465,8 @@ function openAddCustomerModal() {
   document.getElementById('addExistType').value = '';
   document.getElementById('addExistField').value = '';
   document.getElementById('addExistBusinessStage').value = '';
+  document.getElementById('addExistSource').value = '';
+  document.getElementById('addExistSourceDetail').value = '';
   document.getElementById('addExistNextFollow').value = '';
   document.getElementById('addExistProfile').value = '';
   document.getElementById('addExistNotes').value = '';
@@ -7613,6 +7621,8 @@ async function submitExistCustomer(copyEmails) {
       business_role: document.getElementById('addExistType').value,
       field: document.getElementById('addExistField').value.trim(),
       business_stage: document.getElementById('addExistBusinessStage').value,
+      source: document.getElementById('addExistSource').value,
+      source_detail: document.getElementById('addExistSourceDetail').value.trim(),
       next_follow_up: document.getElementById('addExistNextFollow').value,
       website: document.getElementById('addExistWebsite').value.trim(),
       tags: document.getElementById('addExistTags').value.trim(),
@@ -7641,6 +7651,8 @@ function openAddNewCustomerModal() {
   document.getElementById('newCustomerCountry').value = '';
   document.getElementById('newCustomerField').value = '';
   document.getElementById('newCustomerType').value = '';
+  document.getElementById('newCustomerSource').value = '';
+  document.getElementById('newCustomerSourceDetail').value = '';
   document.getElementById('newCustomerWebsite').value = '';
   document.getElementById('newCustomerProfile').value = '';
   document.getElementById('newCustomerNotes').value = '';
@@ -7667,6 +7679,8 @@ async function submitNewCustomer() {
       country: document.getElementById('newCustomerCountry').value.trim(),
       type: document.getElementById('newCustomerType').value,
       field: document.getElementById('newCustomerField').value.trim(),
+      source: document.getElementById('newCustomerSource').value,
+      source_detail: document.getElementById('newCustomerSourceDetail').value.trim(),
       website: document.getElementById('newCustomerWebsite').value.trim(),
       profile: document.getElementById('newCustomerProfile').value.trim(),
       notes: document.getElementById('newCustomerNotes').value.trim(),

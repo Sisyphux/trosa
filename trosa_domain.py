@@ -1401,7 +1401,8 @@ def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> N
         ('status', ('status',)), ('notes', ('notes',)), ('system_notes', ('system_notes',)),
         ('import_source', ('import_source',)), ('external_source', ('external_source',)),
         ('external_id', ('external_id',)), ('last_contact', ('last_contact',)),
-        ('next_follow_up', ('next_follow_up',)),
+        ('next_follow_up', ('next_follow_up',)), ('source', ('source',)),
+        ('source_detail', ('source_detail',)),
     )
     customer_payload: dict[str, Any] = {}
     for target, sources in payload_fields:
@@ -1467,11 +1468,12 @@ def create_customer(conn: Any, *, values: dict[str, Any]) -> int:
     conn.execute(
         '''INSERT INTO trosa.customer_details
            (account_id, notes, system_notes, import_source, external_source, external_id,
-            manual_next_task)
-           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            source, source_detail, manual_next_task)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (account_id, values.get('notes', ''), values.get('system_notes', ''),
          values.get('import_source', 'manual'), values.get('external_source', ''),
-         values.get('external_id', ''), bool(values.get('manual_next_follow'))),
+         values.get('external_id', ''), values.get('source', ''),
+         values.get('source_detail', ''), bool(values.get('manual_next_follow'))),
     )
     conn.execute(
         '''INSERT INTO trosa.customer_states

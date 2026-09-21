@@ -203,6 +203,32 @@ _SELA_INTEGRATION = 'sela'
 _SELA_SCHEMA_VERSION = 1
 _SELA_PROSPECT_INTEGRATION = 'sela-v2'
 _SELA_PROSPECT_SOURCE = 'sela'
+
+# Customer source is a user-authored fact recorded once when the customer first
+# enters Trosa.  The list is deliberately short and stable: it stays a plain
+# classification, not a new workflow, stage, or configuration surface.  Existing
+# customers keep an empty source unless a person records one; nothing infers or
+# backfills it.
+CUSTOMER_SOURCE_OPTIONS = (
+    '展会', '海关数据', 'LinkedIn', 'Google / 官网搜索', 'Sela',
+    '客户转介绍', '老客户 / 已有资源', 'Excel / 历史导入', '其他',
+)
+CUSTOMER_SOURCE_OPTION_SET = frozenset(CUSTOMER_SOURCE_OPTIONS)
+# Sela knows the concrete acquisition channel for some prospects.  Map only
+# unambiguous aliases to a canonical option; anything else stays "Sela" rather
+# than guessing a specific source.
+CUSTOMER_SOURCE_ALIASES = {
+    'exhibition': '展会', 'expo': '展会', 'trade show': '展会', 'fair': '展会',
+    'customs': '海关数据', 'customs data': '海关数据', 'importgenius': '海关数据',
+    'linkedin': 'LinkedIn', 'linked in': 'LinkedIn',
+    'google': 'Google / 官网搜索', 'website': 'Google / 官网搜索',
+    'search': 'Google / 官网搜索', 'google / 官网搜索': 'Google / 官网搜索',
+    'referral': '客户转介绍', 'introduction': '客户转介绍',
+    'existing': '老客户 / 已有资源', 'existing customer': '老客户 / 已有资源',
+    'excel': 'Excel / 历史导入', 'import': 'Excel / 历史导入', 'history': 'Excel / 历史导入',
+    'other': '其他',
+}
+_MAX_CUSTOMER_SOURCE_DETAIL = 200
 _AGENT_GATEWAY_TOKEN_PREFIX = 'agent_gateway_token:'
 _AGENT_GATEWAY_SCOPES = frozenset(('crm:read', 'crm:propose', 'crm:write'))
 
@@ -4837,6 +4863,19 @@ def _sela_upsert_prospect(conn, prospect):
         else:
             website = normalize_website(prospect.get('website') or prospect.get('domain'))
             country = normalize_country(prospect.get('country'))
+            # Sela-created customers are explicitly marked as coming from Sela.
+            # Only an unambiguous, recognized acquisition channel in the
+            # prospect payload replaces that; nothing is guessed from free text.
+            sela_source = ''
+            for raw_source in (prospect.get('source'), prospect.get('source_channel'), prospect.get('channel')):
+                if not str(raw_source or '').strip():
+                    continue
+                try:
+                    sela_source = _normalize_customer_source(raw_source)
+                except CrmWriteError:
+                    sela_source = ''
+                if sela_source:
+                    break
             creation_values = {
                 'name': company, 'company': company, 'country': country, 'level': 'C',
                 'website': website,
@@ -4847,6 +4886,10 @@ def _sela_upsert_prospect(conn, prospect):
                 'import_source': _SELA_PROSPECT_INTEGRATION,
                 'external_source': _SELA_PROSPECT_SOURCE,
                 'external_id': source_id,
+                'source': sela_source or 'Sela',
+                'source_detail': _normalize_customer_source_detail(
+                    prospect.get('campaign') or prospect.get('source_run')
+                ),
             }
             if postgres_mode():
                 customer_id = _create_customer_record(conn, values=creation_values)
@@ -4855,11 +4898,12 @@ def _sela_upsert_prospect(conn, prospect):
                     '''INSERT INTO customers
                        (name, company, country, level, website, profile, field,
                         notes, industry, import_source, external_source,
-                        external_id, created_at, updated_at)
-                       VALUES (?, ?, ?, 'C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        external_id, source, source_detail, created_at, updated_at)
+                       VALUES (?, ?, ?, 'C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (company, company, country, website, creation_values['profile'],
                      'PMMA / Acrylic', creation_values['notes'], creation_values['industry'],
-                     _SELA_PROSPECT_INTEGRATION, _SELA_PROSPECT_SOURCE, source_id, now, now),
+                     _SELA_PROSPECT_INTEGRATION, _SELA_PROSPECT_SOURCE, source_id,
+                     creation_values['source'], creation_values['source_detail'], now, now),
                 )
                 customer_id = int(cursor.lastrowid)
             created = True
@@ -6984,6 +7028,7 @@ def _deduplicate_customer_search_results(customers):
 def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_stage, level,
                             sort, order, include_deleted, view, country_filter,
                             business_role, field_filter, judgment_filter, next_state,
+                            source_filter,
                             last_from, last_to, tag_filter, days_min, days_max,
                             page_value, page, per_page, interpreted_filters,
                             silent_days, regular_days):
@@ -7024,6 +7069,8 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
             continue
         if tag_filter and tag_filter.casefold() not in str(customer.get('tags') or '').casefold():
             continue
+        if source_filter and str(customer.get('source') or '') != source_filter:
+            continue
         if view == 'priority' and not customer.get('is_pinned'):
             continue
         customers.append(customer)
@@ -7035,6 +7082,7 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                 customer.get('name'), customer.get('company'), customer.get('country'),
                 customer.get('field'), customer.get('industry'), customer.get('type'),
                 customer.get('tags'), customer.get('notes'), customer.get('profile'),
+                customer.get('source'), customer.get('source_detail'),
             )
             field_hit = any(token and token in ' '.join(str(value or '') for value in values).casefold()
                             for token in normalized_tokens)
@@ -7158,6 +7206,8 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         interpreted_filters.append('联系日期：' + (last_from or '不限') + ' 至 ' + (last_to or '不限'))
     if next_state:
         interpreted_filters.append({'scheduled': '已有下一步', 'none': '尚无下一步', 'overdue': '下一步已逾期'}.get(next_state, next_state))
+    if source_filter:
+        interpreted_filters.append('来源：' + source_filter)
 
     if cleaned_search:
         ranks = _customer_search_rank_data(conn, customers, search_tokens, contexts=contexts)
@@ -7213,6 +7263,7 @@ def get_customers():
     field_filter = request.args.get('field', '').strip()
     judgment_filter = request.args.get('has_judgment', '').strip()
     next_state = request.args.get('next_state', '').strip()
+    source_filter = request.args.get('source', '').strip()
     last_from = request.args.get('last_from', '').strip()[:10]
     last_to = request.args.get('last_to', '').strip()[:10]
     tag_filter = request.args.get('tag', '').strip()
@@ -7291,6 +7342,7 @@ def get_customers():
             include_deleted=include_deleted, view=view, country_filter=country_filter,
             business_role=business_role, field_filter=field_filter,
             judgment_filter=judgment_filter, next_state=next_state,
+            source_filter=source_filter,
             last_from=last_from, last_to=last_to, tag_filter=tag_filter,
             days_min=days_min, days_max=days_max, page_value=page_value,
             page=page, per_page=per_page, interpreted_filters=interpreted_filters,
@@ -7355,6 +7407,10 @@ def get_customers():
         query += ' AND tags LIKE ?'
         params.append(f'%{tag_filter}%')
         interpreted_filters.append('标签：' + tag_filter)
+    if source_filter:
+        query += " AND trim(COALESCE(source, '')) = ?"
+        params.append(source_filter)
+        interpreted_filters.append('来源：' + source_filter)
 
     if view == 'priority':
         query += ' AND COALESCE(is_pinned, 0) = 1'
@@ -7684,7 +7740,7 @@ def get_customer_summary(customer_id):
         return jsonify(customer)
     row = conn.execute('''SELECT id, name, company, country, website, field, industry, business_stage, business_role, level,
                                  tags, profile, notes, last_contact, next_follow_up, customer_judgment,
-                                 import_source,
+                                 import_source, source, source_detail,
                                  created_at, updated_at
                           FROM customers
                           WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
@@ -7834,6 +7890,10 @@ def _customer_context_markdown(customer, contacts, follow_history, outreach_emai
              f'- 国家：{customer.get("country") or "待确认"}',
              f'- 官网：{customer.get("website") or "待确认"}',
              f'- 业务/简介：{customer.get("profile") or customer.get("field") or "待确认"}']
+    source_text = ' / '.join(part for part in (str(customer.get('source') or '').strip(),
+                                               str(customer.get('source_detail') or '').strip()) if part)
+    if source_text:
+        lines.append(f'- 来源：{source_text}')
     if contacts:
         lines.append('- 联系人：')
         for contact in contacts:
@@ -8837,6 +8897,8 @@ def create_customer():
     try:
         last_contact = _normalize_optional_date(data.get('last_contact'), '上次联系日期')
         next_follow_up = _normalize_optional_date(data.get('next_follow_up'), '下次跟进日期')
+        customer_source = _normalize_customer_source(data.get('source'))
+        customer_source_detail = _normalize_customer_source_detail(data.get('source_detail'))
     except CrmWriteError as error:
         return jsonify({'error': error.message}), error.status
     conn = get_db()
@@ -8906,19 +8968,21 @@ def create_customer():
         'next_follow_up': next_follow_up, 'manual_next_follow': bool(next_follow_up),
         'industry': data.get('industry', ''), 'company_size': data.get('company_size', ''),
         'annual_revenue': data.get('annual_revenue', ''), 'tags': data.get('tags', ''),
-        'import_source': 'manual',
+        'import_source': 'manual', 'source': customer_source,
+        'source_detail': customer_source_detail,
     }
     if postgres_mode():
         customer_id = _create_customer_record(conn, values=creation_values)
     else:
         c.execute('''
-            INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, source, source_detail, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (data.get('name', ''), data.get('company', ''), country, customer_level,
               '', business_role, business_stage, creation_values['customer_judgment'],
               creation_values['website'], data.get('profile', ''), data.get('field', ''), data.get('notes', ''),
               data.get('system_notes', ''), last_contact, next_follow_up, data.get('industry', ''),
-              data.get('company_size', ''), data.get('annual_revenue', ''), data.get('tags', ''), 'manual', now, now))
+              data.get('company_size', ''), data.get('annual_revenue', ''), data.get('tags', ''), 'manual',
+              customer_source, customer_source_detail, now, now))
         customer_id = c.lastrowid
     for index, contact in enumerate(contacts):
         if not any((contact.get(key) or '').strip() for key in ('name', 'email', 'phone', 'whatsapp', 'linkedin')):
@@ -8997,6 +9061,15 @@ def update_customer(customer_id):
             conn.close()
             return jsonify({'error': error.message}), error.status
         is_manual_date = 1 if (new_next_follow and new_next_follow != old_date) else old_manual
+        source_update = 'source' in data or 'source_detail' in data
+        try:
+            customer_source = (_normalize_customer_source(data.get('source', existing.get('source', '')))
+                               if source_update else (existing.get('source', '') or ''))
+            customer_source_detail = (_normalize_customer_source_detail(data.get('source_detail', existing.get('source_detail', '')))
+                                      if source_update else (existing.get('source_detail', '') or ''))
+        except CrmWriteError as error:
+            conn.close()
+            return jsonify({'error': error.message}), error.status
         business_stage = data.get('business_stage', existing.get('business_stage', ''))
         if business_stage not in ('', '成交', '流失'):
             conn.close()
@@ -9026,6 +9099,9 @@ def update_customer(customer_id):
             'tags': data.get('tags', existing.get('tags', '')),
             'import_source': existing.get('import_source', ''),
         }
+        if source_update:
+            updated_values['source'] = customer_source
+            updated_values['source_detail'] = customer_source_detail
         # ``last_interaction_on`` is derived from communications; only an
         # explicit request may set it.  Writing the (empty) modern column name
         # under the legacy ``last_contact`` key would otherwise blank it on
@@ -9037,12 +9113,12 @@ def update_customer(customer_id):
         else:
             c.execute('''
                 UPDATE customers SET name=?, company=?, country=?, level=?, type=?, business_role=?, business_stage=?, customer_judgment=?, website=?, profile=?, field=?, notes=?, system_notes=?,
-                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, updated_at=? WHERE id=?
+                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, source=?, source_detail=?, updated_at=? WHERE id=?
             ''', (updated_values['name'], updated_values['company'], updated_values['country'], customer_level,
                   existing.get('type', ''), business_role, business_stage, customer_judgment, updated_values['website'],
                   updated_values['profile'], updated_values['field'], updated_values['notes'], updated_values['system_notes'],
                   last_contact, new_next_follow, is_manual_date, updated_values['industry'], updated_values['company_size'],
-                  updated_values['annual_revenue'], updated_values['tags'], now, customer_id))
+                  updated_values['annual_revenue'], updated_values['tags'], customer_source, customer_source_detail, now, customer_id))
         new_date = new_next_follow if 'next_follow_up' in data else ''
         if new_date and new_date != old_date:
             _complete_open_follow_up_tasks(conn, customer_ids=[customer_id], completed_at=now)
@@ -12520,6 +12596,29 @@ class CrmWriteError(Exception):
         self.status = status
 
 
+def _normalize_customer_source(value):
+    """Return a canonical customer-source option, or '' when none is recorded.
+
+    Only the fixed option list is accepted.  An unrecognized value is rejected
+    rather than being silently stored, so filtering stays meaningful and an
+    existing customer is never rewritten with a guessed source.
+    """
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    if raw in CUSTOMER_SOURCE_OPTION_SET:
+        return raw
+    alias = CUSTOMER_SOURCE_ALIASES.get(raw.casefold())
+    if alias:
+        return alias
+    raise CrmWriteError('客户来源不在可选范围内')
+
+
+def _normalize_customer_source_detail(value):
+    """Trim an optional short clarification that accompanies a source."""
+    return str(value or '').strip()[:_MAX_CUSTOMER_SOURCE_DETAIL]
+
+
 def _normalize_optional_date(value, label='日期'):
     """Normalize a legacy date field before it reaches a typed database column."""
     raw = str(value or '').strip()
@@ -15501,9 +15600,10 @@ def recover_excel_activities(paths=None):
                         profile = _excel_text(row[profile_col]) if 0 <= profile_col < len(row) else ''
                         c.execute('''INSERT INTO customers
                                      (name, company, country, level, type, business_role, website, profile, field, notes,
-                                      import_source, created_at, updated_at)
-                                     VALUES (?, ?, ?, 'C', '', '', ?, ?, '', '', 'excel', ?, ?)''',
-                                  (customer_name[:200], customer_name[:200], country, website, profile, now, now))
+                                      import_source, source, source_detail, created_at, updated_at)
+                                     VALUES (?, ?, ?, 'C', '', '', ?, ?, '', '', 'excel', ?, '', ?, ?)''',
+                                  (customer_name[:200], customer_name[:200], country, website, profile,
+                                   'Excel / 历史导入', now, now))
                         customer_id = c.lastrowid
                         customer_lookup[customer_key] = customer_id
                         created_customers += 1
@@ -15730,9 +15830,9 @@ def sync_from_excel(excel_path=None):
             cust_id = existing['id']
             updated_count += 1
         else:
-            c.execute('''INSERT INTO customers (name, company, country, level, type, business_role, website, profile, field, business_stage, notes, import_source, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                      (name, company, country, level, cust_type, cust_type, website, profile, field, business_stage, notes, 'excel', now, now))
+            c.execute('''INSERT INTO customers (name, company, country, level, type, business_role, website, profile, field, business_stage, notes, import_source, source, source_detail, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)''',
+                      (name, company, country, level, cust_type, cust_type, website, profile, field, business_stage, notes, 'excel', 'Excel / 历史导入', now, now))
             cust_id = c.lastrowid
             new_count += 1
 
@@ -16599,7 +16699,7 @@ def overview_customer_detail(user, customer_id):
                     key: row.get(key) for key in (
                         'id', 'name', 'company', 'country', 'website', 'industry',
                         'field', 'business_role', 'business_stage', 'import_source',
-                        'created_at',
+                        'source', 'source_detail', 'created_at',
                     )
                 }
                 tasks = _customer_tasks(conn, customer_id)
@@ -16663,7 +16763,8 @@ def overview_customer_detail(user, customer_id):
         # never become a back door for contacts, AI material, audit data, or
         # other customer-editing fields.
         row = conn.execute('''SELECT id, name, company, country, website, industry,
-                                     field, business_role, business_stage, import_source, created_at,
+                                     field, business_role, business_stage, import_source,
+                                     source, source_detail, created_at,
                                      last_contact, next_follow_up
                               FROM customers
                               WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''',

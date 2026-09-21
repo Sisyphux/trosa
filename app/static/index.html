@@ -265,6 +265,7 @@
             <label>联系日期从<input type="date" id="filterLastFrom"></label>
             <label>联系日期到<input type="date" id="filterLastTo"></label>
             <label>标签<input type="text" id="filterTag" placeholder="例如：展会客户"></label>
+            <label>客户来源<select id="filterSource"><option value="">全部</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></label>
           </div>
           <div class="advanced-filter-actions"><button class="btn btn-sm" onclick="clearCustomerFilters()">清空</button><button class="btn btn-sm btn-primary" onclick="applyCustomerFilters()">应用筛选</button></div>
         </div>
@@ -679,6 +680,7 @@
             <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
             <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
             <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="editSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="editSourceDetail" placeholder="可选，例如：SIGN CHINA 2026 / ImportGenius"></div></div>
             <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
             <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
             <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
@@ -809,6 +811,7 @@
         <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="newCustomerType"><option value="">待识别</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
       </div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">行业领域</label><input type="text" class="form-control" id="newCustomerField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
+      <div class="form-row add-customer-advanced new-customer-advanced"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="newCustomerSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="newCustomerSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div></div>
       <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button class="btn btn-sm btn-primary" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="btn btn-sm add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加另一位</button></div>
@@ -861,6 +864,10 @@
       <div class="form-row add-customer-advanced exist-customer-advanced">
         <div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="addExistField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
         <div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="addExistBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
+      </div>
+      <div class="form-row add-customer-advanced exist-customer-advanced">
+        <div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="addExistSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div>
+        <div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="addExistSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div>
       </div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴邮箱后自动检查并生成联系人</span></div></div>
