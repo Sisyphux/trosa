@@ -4,12 +4,16 @@
 // browser-owned runtime (which intentionally does not inherit shell env).
 const origin = '__TROSA_INBOX_BROWSER_URL__';
 const samples = '__TROSA_INBOX_BROWSER_SAMPLES__';
+const fixtureContactId = '__TROSA_INBOX_BROWSER_CONTACT_ID__';
 await page.setViewportSize({width: 1440, height: 900});
 await page.goto('about:blank', {waitUntil: 'domcontentloaded'});
 await page.goto(origin, {waitUntil: 'domcontentloaded'});
 await page.evaluate(async () => { localStorage.clear(); sessionStorage.clear(); if (navigator.serviceWorker) await Promise.all((await navigator.serviceWorker.getRegistrations()).map(r => r.unregister())); });
 await page.reload({waitUntil: 'domcontentloaded'});
-if (await page.locator('#loginOverlay').isVisible()) await page.locator('#loginUsers [data-user-id="hamid"]').click();
+if (await page.locator('#loginOverlay').isVisible()) {
+  await page.waitForFunction(() => !document.querySelector('#loginOverlay') || getComputedStyle(document.querySelector('#loginOverlay')).display === 'none' || !!document.querySelector('#loginUsers [data-user-id="hamid"]'), null, {timeout:15000});
+  if (await page.locator('#loginUsers [data-user-id="hamid"]').count()) await page.locator('#loginUsers [data-user-id="hamid"]').click();
+}
 await page.locator('[data-page="inbox"]').first().click();
 await page.locator('#page-inbox.active').waitFor();
 const apiKinds = await page.evaluate(() => fetch('/api/inbox').then(r => r.json()).then(x => x.questions.filter(q => q.headline === '调查证据 CSV').map(q => [q.kind, q.response_schema.attachments.allowed])));
@@ -23,11 +27,22 @@ await list.locator('.inbox-question-open').first().click();
 const field = page.locator('[data-inbox-field="answer"]').first(); await field.fill('draft survives rerender');
 await page.getByText('返回队列', {exact:true}).click(); await list.locator('.inbox-question-open').first().click();
 if (await field.inputValue() !== 'draft survives rerender') throw new Error('draft lost');
+// An invalid optional email is a controlled server-side rejection.  Its text
+// answer must remain editable, and the normal retry must then resolve.
+await page.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId);
+await page.locator('[data-inbox-field="confirmed_email"]').fill('not-an-email');
+await page.getByRole('button', {name:'提交回答', exact:true}).click();
+await page.locator('.inbox-inline-error').getByText('请输入有效邮箱').waitFor({timeout:15000});
+if (await field.inputValue() !== 'draft survives rerender') throw new Error('draft lost after rejected request');
+await page.locator('[data-inbox-field="confirmed_email"]').fill('');
+const firstCardId = await page.locator('.inbox-question-active').getAttribute('id');
+await page.getByRole('button', {name:'提交回答', exact:true}).click();
+await page.locator('#' + firstCardId).waitFor({state:'detached', timeout:15000});
 // Correct the deliberately stale rehearsal email through the normal answer
 // form, then use the visible Undo action returned by the same response.
 await page.getByText('返回队列', {exact:true}).click();
 await list.locator('.inbox-question-open').filter({hasText:'更正失效邮箱'}).click();
-await page.locator('[data-inbox-field="contact_id"]').fill('1');
+await page.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId);
 await page.locator('[data-inbox-field="confirmed_email"]').fill('buyer-fixed@rehearsal.example');
 await page.getByRole('button', {name:'提交回答', exact:true}).click();
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('更正失效邮箱') || document.querySelector('.inbox-inline-error')?.textContent, null, {timeout:15000});
@@ -44,10 +59,26 @@ for (const [name, expected] of uploads) {
   if (!await input.count()) throw new Error('Inbox upload input missing for ' + name + ': ' + (await list.innerText()));
   await input.setInputFiles(samples + '/' + name);
   await page.locator('.inbox-upload-status').getByText(/证据已分析|失败/).waitFor({timeout:30000});
-  observed.push({name, expected, text: await page.locator('#page-inbox').innerText()});
+  const text = await page.locator('#page-inbox').innerText();
+  if (name === 'not_supported.xlsx' && (!text.includes('Trade rows') || !text.includes('2'))) throw new Error('XLSX citation missing');
+  if (name === 'insufficient.pdf' && (!text.includes('PDF') || !text.includes('1'))) throw new Error('PDF page citation missing');
+  observed.push({name, expected, text});
 }
 // Responsive and reduced-motion inspection use the same rendered fixture.
 const layouts=[]; for (const width of [1024, 390, 720]) { await page.setViewportSize({width,height:900}); layouts.push({width, visible: await page.locator('#page-inbox.active').isVisible()}); }
+await page.setViewportSize({width:1440,height:900});
+await page.evaluate(() => { document.body.style.zoom = '2'; });
+layouts.push({width:'200%', visible: await page.locator('#page-inbox.active').isVisible()});
+await page.evaluate(() => { document.body.style.zoom = ''; });
+// Keyboard can activate an Inbox card; status surfaces are polite live regions.
+await page.getByText('返回队列', {exact:true}).click().catch(()=>{});
+const keyboardCard = list.locator('.inbox-question-open').first(); await keyboardCard.focus(); await keyboardCard.press('Enter');
+if (!await page.locator('.inbox-question-active').count()) throw new Error('keyboard did not open Inbox card');
+if (await page.locator('.inbox-inline-error').getAttribute('aria-live') !== 'polite') throw new Error('Inbox error live region missing');
+await page.getByText('返回队列', {exact:true}).click();
+await list.locator('.inbox-question-open').filter({hasText:'图片'}).click();
+if (await page.locator('.inbox-upload-status').getAttribute('aria-live') !== 'polite') throw new Error('Inbox upload live region missing');
+await page.getByText('返回队列', {exact:true}).click();
 await page.emulateMedia({reducedMotion:'reduce'});
 // Finish every remaining fixture card through its rendered controls. The email
 // card was restored by Undo, so this second correction deliberately completes it.
@@ -59,7 +90,7 @@ while (await list.locator('.inbox-question-open').count()) {
   // Fact questions expose optional correction fields.  Only the explicit
   // email-correction card should exercise that write path; ordinary text
   // answers must stay ordinary text answers.
-  if (headline === '更正失效邮箱' && await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill('1'); await email.fill('buyer-final@rehearsal.example'); }
+  if (headline === '更正失效邮箱' && await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId); await email.fill('buyer-final@rehearsal.example'); }
   const decision = card.locator('[data-inbox-field="decision"]'); if (await decision.count()) await decision.fill('skip');
   const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
   const conclusion = card.locator('[data-inbox-field="conclusion"]'); if (await conclusion.count()) await conclusion.fill('insufficient');
@@ -68,4 +99,4 @@ while (await list.locator('.inbox-question-open').count()) {
   await page.locator('#' + activeId).waitFor({state:'detached', timeout:15000});
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
-return {cards: 8, draft:true, empty:true, uploads:observed.map(x=>({name:x.name, expected:x.expected, seen:x.text.includes(x.expected)})), layouts};
+return {cards: 8, draft:true, retry:true, keyboard:true, ariaLive:true, empty:true, uploads:observed.map(x=>({name:x.name, expected:x.expected, seen:x.text.includes(x.expected)})), layouts};

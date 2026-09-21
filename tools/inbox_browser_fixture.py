@@ -56,6 +56,27 @@ def load():
                 created_at=f'2026-09-21 09:00:0{index}', question_kind=kind,
                 question_key=f'{KEY}:{index}', source_type='system')
             result[title] = item_id
+        # Response receipts are durable by design.  Remove only receipts whose
+        # keys address this namespaced fixture's current rows, so a fixture
+        # reset remains repeatable instead of colliding with a prior browser
+        # run's idempotency receipt.
+        receipt_scope = (KEY + ':%',)
+        conn.execute(
+            '''DELETE FROM audit.agent_gateway_idempotency receipt
+                 WHERE receipt.action='inbox_response'
+                   AND EXISTS (
+                       SELECT 1 FROM trade_os_compat.inbox_items item
+                        WHERE item.dedupe_key LIKE ?
+                          AND receipt.idempotency_key LIKE ('inbox-' || item.id::text || '-%')
+                   )''', receipt_scope)
+        conn.execute(
+            '''DELETE FROM trade_os_compat.agent_gateway_rows receipt
+                 WHERE receipt.action='inbox_response'
+                   AND EXISTS (
+                       SELECT 1 FROM trade_os_compat.inbox_items item
+                        WHERE item.dedupe_key LIKE ?
+                          AND receipt.idempotency_key LIKE ('inbox-' || item.id::text || '-%')
+                   )''', receipt_scope)
         conn.commit()
         result.update(ids)
         return result
