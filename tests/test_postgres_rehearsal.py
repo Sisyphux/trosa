@@ -230,6 +230,19 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                 "notes": "updated contact",
             },
         )
+        # A correction may be undone and later reapplied with another address.
+        # Historic contact methods stay auditable, so a second correction must
+        # receive a distinct canonical method id instead of colliding with the
+        # first one for this contact.
+        updated_contact = dict(trosa_domain.customer_contacts(self.connection, customer_id)[0])
+        updated_contact["email"] = "buyer-second@rehearsal.example"
+        trosa_domain.update_contact(
+            self.connection, contact_id=contact_id, values=updated_contact,
+        )
+        self.assertEqual(
+            trosa_domain.customer_contacts(self.connection, customer_id)[0]["email"],
+            "buyer-second@rehearsal.example",
+        )
         trosa_domain.update_interaction(
             self.connection,
             interaction_id=interaction_id,

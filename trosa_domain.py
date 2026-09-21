@@ -1226,9 +1226,13 @@ def update_contact(conn: Any, *, contact_id: int, values: dict[str, Any]) -> Non
         ).fetchone()
         method_id = existing_method['id'] if existing_method else None
     if email and not method_id:
+        # A contact can retain historic email methods for audit/undo.  The
+        # canonical identifier must therefore include the normalized address,
+        # rather than colliding with the previous method every time the same
+        # contact is corrected a second time.
         method_id = conn.execute(
-            "SELECT trosa.compat_uuid('contact-method:' || trosa.compat_current_user() || ':' || ?::text)",
-            (contact_id,),
+            "SELECT trosa.compat_uuid('contact-method:' || trosa.compat_current_user() || ':' || ?::text || ':' || lower(?))",
+            (contact_id, email),
         ).fetchone()[0]
         conn.execute(
             '''INSERT INTO core.contact_methods

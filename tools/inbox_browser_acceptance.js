@@ -54,8 +54,12 @@ await page.emulateMedia({reducedMotion:'reduce'});
 while (await list.locator('.inbox-question-open').count()) {
   await list.locator('.inbox-question-open').first().click();
   const card = page.locator('.inbox-question-active');
+  const headline = (await card.locator('h3').innerText()).trim();
   const email = card.locator('[data-inbox-field="confirmed_email"]');
-  if (await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill('1'); await email.fill('buyer-final@rehearsal.example'); }
+  // Fact questions expose optional correction fields.  Only the explicit
+  // email-correction card should exercise that write path; ordinary text
+  // answers must stay ordinary text answers.
+  if (headline === '更正失效邮箱' && await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill('1'); await email.fill('buyer-final@rehearsal.example'); }
   const decision = card.locator('[data-inbox-field="decision"]'); if (await decision.count()) await decision.fill('skip');
   const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
   const conclusion = card.locator('[data-inbox-field="conclusion"]'); if (await conclusion.count()) await conclusion.fill('insufficient');
