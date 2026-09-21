@@ -59,8 +59,9 @@ while (await list.locator('.inbox-question-open').count()) {
   const decision = card.locator('[data-inbox-field="decision"]'); if (await decision.count()) await decision.fill('skip');
   const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
   const conclusion = card.locator('[data-inbox-field="conclusion"]'); if (await conclusion.count()) await conclusion.fill('insufficient');
+  const activeId = await card.getAttribute('id');
   await card.getByRole('button', {name:'提交回答', exact:true}).click();
-  await page.waitForTimeout(80);
+  await page.locator('#' + activeId).waitFor({state:'detached', timeout:15000});
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
 return {cards: 8, draft:true, empty:true, uploads:observed.map(x=>({name:x.name, expected:x.expected, seen:x.text.includes(x.expected)})), layouts};
