@@ -10,6 +10,17 @@
 - 是否需要迁移：是（`0069_customer_source.sql`，由发布流程自动应用）。
 - 当前状态：本地完成，SQLite 回归与 PostgreSQL rehearsal 待重跑。
 
+## 2026-09-21 — Inbox 问题卡可自解释：真实选项、结构化证据、诚实的批准影响与联系人邮箱更正入口
+
+- 现象：用户在 Inbox 详情卡上“看不懂要干嘛”。批准类卡片（如 “CW Plastic 联系邮箱错误，需人工修正”）右侧只给一个空白文本框“处理决定”和一个“处理结果”文本框；用户无法判断批准是否会替自己改邮箱，把 Sela 的整段请求正文当作“相关证据”直接铺开，重点难以辨认。
+- 根因：`renderInboxQuestionCard` 只按 `textarea` / 其它两分支渲染 `response_schema`，`choice` 字段（approve/skip、same/different、supported/not_supported/insufficient）被降级为文本框，要求人工手打英文枚举值；`customer_picker` 同样被当作数字输入；Sela `sela_agent_request` 的证据是元数据行 + 正文 + 建议拼成的原始文本。
+- 修复（前端）：`choice` 渲染为带中文标签的选项按钮（隐藏值输入保持表单/幂等契约不变）；`customer_picker` 渲染为按需从 `/api/customers` 与 `/api/customers/<id>/contacts` 加载的 `<select>`；Sela 请求证据拆成标签（公司/类型/优先级）+ 高亮“建议”+ 正文；提交后/不会做的说明按问题类型给出；`identity`/`reply` 卡片改为渲染其真实事务入口（记录到时间线 / 选择其他客户并记录 / 不是客户沟通 / 无需记录），不再显示与业务无关的邮箱更正表单。
+- 修复（后端）：`_inbox_response_schema` 为各 `choice` 字段补充 `choices` 标签，`investigation_conclusion` 也带人工结论选项；通用补充资料问题仅在确实涉及联系人/邮箱时才显示更正字段；`_question_evidence` 对 `sela_agent_request` 输出结构化字段；`_question_why`/`_question_will_not_do`/`_question_completion_effects` 明确“批准只记录判断，不会自动修改客户或联系人资料”；人工填写的调查结论会写入解决备注（此前被丢弃）。
+- 更正入口：批准类与补充资料类问题都提供可选的联系人邮箱更正字段，复用同一条 `confirmed_email` 写库路径（抽出 `_apply_inbox_email_correction`），更新联系人邮箱并保留旧值与历史投递事实，返回可撤销的 undo token。
+- 影响范围：`app.py`、`app/static/app.js`、`app/static/visual-v2.css`、`tools/inbox_browser_acceptance.js`、`tools/inbox_browser_fixture.py`、`tests/test_inbox_question_model.py`。不改接口路径、数据库模型与写入语义。
+- 是否需要迁移：否。
+- 当前状态：本地完成，等待发布门禁。
+
 ## 2026-09-20 — 高频读取路径性能审计与清理：消除按客户展开的 N+1 与重复全表读取
 
 - 背景：真实 PostgreSQL（2000 客户 / 4.8 万沟通 / 6000 待办 / 4000 Inbox 条目）基线显示多个高频端点随数据量近似线性恶化：跟进历史 5.0s、今日 3.2s、Agent 简报 2.7s、近期待办 1.3s、统计 2.1s、状态搜索 2.7s、客户列表 2.7s（均为本地单轮 min）。

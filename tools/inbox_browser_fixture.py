@@ -43,7 +43,7 @@ def load():
             ('investigation_request', '调查证据 PDF', '上传 insufficient.pdf。'),
             ('investigation_request', '调查证据图片', '上传 image_without_ocr.png。'),
             ('investigation_request', '调查证据损坏 PDF', '上传 broken.pdf。'),
-            ('approval', '最后一张卡', '输入 skip 以完成最后一张卡。'),
+            ('approval', '最后一张卡', '请在右侧选择处理决定并说明结果后提交。'),
         ]
         result = {}
         for index, (kind, title, content) in enumerate(specs, 1):

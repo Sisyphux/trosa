@@ -1642,18 +1642,124 @@ function renderInboxQuestionWorkspace(counts) {
   var questions = inboxState.questions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
   if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>新证据会先由系统自动匹配、去重、分析和归类；只有无法安全继续的事项才会出现在这里。</span></div>'; return; }
   list.innerHTML = '<div class="inbox-workspace">' + questions.map(renderInboxQuestionCard).join('') + '</div>';
+  hydrateInboxPickers();
 }
 function setInboxQuestionFilter(kind) { inboxState.activeFilter = kind; renderInboxQuestionWorkspace(inboxState.counts); }
 function renderInboxQuestionCard(q) {
   var open = inboxState.expandedQuestionId === q.id, subject = (q.subject && q.subject.company) || '待确认主体';
   if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + ' · 查看详情</small></button></article>';
-  var evidence = (q.evidence || []).map(function(e, i) { return '<li><b>' + String(i + 1).padStart(2, '0') + '</b><span>' + escapeHtml(e.detail || '原始证据') + '</span><small>' + escapeHtml(e.source_label || '来源') + '</small></li>'; }).join('');
+  var evidence = (q.evidence || []).map(function(e, i) { return inboxEvidenceHtml(e, i); }).join('');
   var draft = inboxState.draftResponses[q.id] || {}, upload = inboxState.uploadStates[q.id] || {};
-  var fields = ((q.response_schema || {}).fields || []).map(function(f) { var type = f.input_type === 'textarea' || f.input_type === 'investigation_conclusion' ? 'textarea' : 'input', value = escapeHtml(draft[f.key] || ''); var change = ' oninput="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"'; var control = type === 'textarea' ? '<textarea data-inbox-field="' + escapeHtml(f.key) + '" placeholder="' + escapeHtml(f.help || '') + '"' + change + '>' + value + '</textarea>' : '<input data-inbox-field="' + escapeHtml(f.key) + '" type="' + (f.input_type === 'email' ? 'email' : 'text') + '" value="' + value + '" placeholder="' + escapeHtml(f.label) + '"' + change + '>'; return '<label>' + escapeHtml(f.label) + (f.required ? ' <em>*</em>' : '') + control + '</label>'; }).join('');
+  var fields = ((q.response_schema || {}).fields || []).map(function(f) { return inboxResponseFieldHtml(q, f, draft); }).join('');
   var analyses = (inboxState.analysisStates[q.id] || []).map(function(a) { var citations = (a.citations || []).map(function(c) { return '<li>' + escapeHtml(c.source || '') + ' ' + escapeHtml(String(c.row_or_page || '')) + '：' + escapeHtml(c.excerpt || '') + '</li>'; }).join(''); return '<div class="inbox-analysis-result" data-analysis-status="' + escapeHtml(a.status || '') + '"><b>分析结论：' + escapeHtml(a.status || '') + '</b>' + (a.error ? '<p>' + escapeHtml(a.error) + '</p>' : '') + (citations ? '<ol>' + citations + '</ol>' : '') + '</div>'; }).join('');
   var attachment = q.response_schema && q.response_schema.attachments && q.response_schema.attachments.allowed && q.subject && q.subject.customer_id ? '<label>补充证据<input type="file" multiple accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg" onchange="uploadInboxEvidence(\'' + escapeHtml(q.id) + '\',' + Number(q.subject.customer_id) + ',this)"' + (upload.pending ? ' disabled' : '') + '></label><p class="inbox-upload-status" aria-live="polite">' + escapeHtml(upload.message || '') + (upload.error ? ' <button type="button" class="text-action" onclick="retryInboxEvidence(\'' + escapeHtml(q.id) + '\',' + Number(q.subject.customer_id) + ')">重试</button>' : '') + '</p>' + analyses : '';
-  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + fields + attachment + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button></section></article>';
+  var transactional = q.kind === 'identity' || q.kind === 'reply';
+  var optionsHtml = (q.options || []).map(function(option) {
+    var cls = 'btn btn-sm' + (option.style === 'primary' ? ' btn-primary' : (option.style === 'text' ? ' text-action' : ''));
+    return '<button class="' + cls + '" onclick="runInboxOption(' + Number(q.primary_item_id) + ',\'' + escapeHtml(option.key) + '\')">' + escapeHtml(option.label) + '</button>';
+  }).join('');
+  var decision = transactional
+    ? '<p class="inbox-field-help">选择下面一项后，系统会打开确认窗口，并把结果写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
+    : fields + attachment + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button>';
+  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
 }
+function inboxEvidenceHtml(e, index) {
+  var ordinal = '<b>' + String(index + 1).padStart(2, '0') + '</b>';
+  var source = '<small>' + escapeHtml(e.source_label || '来源') + '</small>';
+  var s = e.structured || null;
+  if (s) {
+    var tags = [s.company, s.kind, s.severity].filter(function(v) { return v; }).map(function(v) {
+      return '<span class="inbox-evidence-tag">' + escapeHtml(v) + '</span>';
+    }).join('');
+    var proposal = s.proposal ? '<p class="inbox-evidence-proposal"><span>建议</span>' + escapeHtml(s.proposal) + '</p>' : '';
+    var context = s.context ? '<p class="inbox-evidence-context">' + escapeHtml(s.context) + '</p>' : '';
+    return '<li>' + ordinal + '<div class="inbox-evidence-body">' +
+      (tags ? '<div class="inbox-evidence-tags">' + tags + '</div>' : '') + proposal + context +
+      '</div>' + source + '</li>';
+  }
+  return '<li>' + ordinal + '<span>' + escapeHtml(e.detail || '原始证据') + '</span>' + source + '</li>';
+}
+
+function inboxResponseFieldHtml(q, f, draft) {
+  var current = draft[f.key] || '';
+  var required = f.required ? ' <em>*</em>' : '';
+  var help = f.help ? '<small class="inbox-field-help">' + escapeHtml(f.help) + '</small>' : '';
+  if (f.input_type === 'choice' || f.input_type === 'investigation_conclusion') {
+    var buttons = (f.choices || []).map(function(choice) {
+      var selected = String(current) === String(choice.value);
+      return '<button type="button" class="inbox-choice' + (selected ? ' is-selected' : '') +
+        '" data-inbox-choice="' + escapeHtml(choice.value) + '" aria-pressed="' + (selected ? 'true' : 'false') +
+        '" onclick="selectInboxChoice(\'' + escapeHtml(q.id) + '\', this)">' + escapeHtml(choice.label) + '</button>';
+    }).join('');
+    return '<div class="inbox-field-block"><span class="inbox-field-label">' + escapeHtml(f.label) + required + '</span>' +
+      '<input type="hidden" data-inbox-field="' + escapeHtml(f.key) + '" value="' + escapeHtml(current) + '">' +
+      '<div class="inbox-choice-group" role="group" aria-label="' + escapeHtml(f.label) + '">' + buttons + '</div>' + help + '</div>';
+  }
+  if (f.input_type === 'customer_picker') {
+    var source = (f.validation && f.validation.options_source) || (f.key === 'contact_id' ? 'contacts' : 'customers');
+    var customerId = q.subject && q.subject.customer_id ? Number(q.subject.customer_id) : 0;
+    var placeholder = source === 'contacts' ? '加载联系人…' : '加载客户…';
+    return '<label>' + escapeHtml(f.label) + required +
+      '<select data-inbox-field="' + escapeHtml(f.key) + '" data-inbox-picker="' + escapeHtml(source) +
+      '" data-customer-id="' + customerId + '" data-inbox-value="' + escapeHtml(current) +
+      '" onchange="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"><option value="">' +
+      escapeHtml(placeholder) + '</option></select>' + help + '</label>';
+  }
+  var type = f.input_type === 'textarea' || f.input_type === 'investigation_conclusion' ? 'textarea' : 'input';
+  var value = escapeHtml(current);
+  var change = ' oninput="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"';
+  var control = type === 'textarea'
+    ? '<textarea data-inbox-field="' + escapeHtml(f.key) + '" placeholder="' + escapeHtml(f.help || '') + '"' + change + '>' + value + '</textarea>'
+    : '<input data-inbox-field="' + escapeHtml(f.key) + '" type="' + (f.input_type === 'email' ? 'email' : 'text') + '" value="' + value + '" placeholder="' + escapeHtml(f.label) + '"' + change + '>';
+  return '<label>' + escapeHtml(f.label) + required + control + help + '</label>';
+}
+
+function selectInboxChoice(id, button) {
+  var group = button.parentNode;
+  if (!group) return;
+  Array.prototype.forEach.call(group.querySelectorAll('.inbox-choice'), function(btn) {
+    btn.classList.remove('is-selected');
+    btn.setAttribute('aria-pressed', 'false');
+  });
+  button.classList.add('is-selected');
+  button.setAttribute('aria-pressed', 'true');
+  var input = group.parentNode ? group.parentNode.querySelector('input[data-inbox-field]') : null;
+  if (input) { input.value = button.getAttribute('data-inbox-choice') || ''; rememberInboxDraft(id, input); }
+}
+
+var _inboxPickerCustomers = null;
+async function hydrateInboxPickers() {
+  var selects = document.querySelectorAll('#inboxList select[data-inbox-picker]');
+  for (var i = 0; i < selects.length; i++) {
+    var select = selects[i];
+    if (select.dataset.hydrated === '1') continue;
+    select.dataset.hydrated = '1';
+    var current = select.getAttribute('data-inbox-value') || '';
+    try {
+      if (select.dataset.inboxPicker === 'contacts') {
+        var customerId = Number(select.dataset.customerId || 0);
+        if (!customerId) { select.innerHTML = '<option value="">该问题暂未关联客户</option>'; continue; }
+        var contacts = await api('/api/customers/' + customerId + '/contacts');
+        select.innerHTML = '<option value="">选择联系人</option>' + (contacts || []).map(function(c) {
+          return '<option value="' + escapeHtml(String(c.id)) + '">' +
+            escapeHtml((c.name || '未命名联系人') + (c.email ? ' · ' + c.email : '')) + '</option>';
+        }).join('');
+      } else {
+        if (!_inboxPickerCustomers) _inboxPickerCustomers = await api('/api/customers?view=all&per_page=100&sort=updated_at&order=desc');
+        var list = (_inboxPickerCustomers && _inboxPickerCustomers.customers) || [];
+        select.innerHTML = '<option value="">选择客户</option>' + list.map(function(c) {
+          return '<option value="' + escapeHtml(String(c.id)) + '">' +
+            escapeHtml(c.company || c.name || ('客户 #' + c.id)) + (c.country ? ' · ' + c.country : '') + '</option>';
+        }).join('');
+      }
+      if (current) select.value = current;
+    } catch (e) {
+      select.innerHTML = '<option value="">加载失败，请重试</option>';
+      select.dataset.hydrated = '';
+    }
+  }
+}
+
 function rememberInboxDraft(id, input) { var draft = inboxState.draftResponses[id] || (inboxState.draftResponses[id] = {}); draft[input.dataset.inboxField] = input.value; }
 function inboxResponseAttempt(id) { var key = 'trosa-inbox-response-attempt-' + id; var saved = Number(sessionStorage.getItem(key) || 0); return Math.max(Number(inboxState.responseAttempts[id] || 0), saved); }
 function advanceInboxResponseAttempt(id) { var next = inboxResponseAttempt(id) + 1; inboxState.responseAttempts[id] = next; sessionStorage.setItem('trosa-inbox-response-attempt-' + id, String(next)); }

@@ -18,6 +18,13 @@ await page.locator('[data-page="inbox"]').first().click();
 await page.locator('#page-inbox.active').waitFor();
 const apiKinds = await page.evaluate(() => fetch('/api/inbox').then(r => r.json()).then(x => x.questions.filter(q => q.headline === '调查证据 CSV').map(q => [q.kind, q.response_schema.attachments.allowed])));
 if (apiKinds.length !== 1 || apiKinds[0][0] !== 'investigation_request' || !apiKinds[0][1]) throw new Error('fixture API contract missing: ' + JSON.stringify(apiKinds));
+// Every choice field must carry human labels so the UI never asks the operator
+// to type a raw enum value such as "approve" or "insufficient".
+const choiceContracts = await page.evaluate(() => fetch('/api/inbox').then(r => r.json()).then(x => x.questions.map(q => {
+  const field = ((q.response_schema || {}).fields || []).find(f => f.input_type === 'choice' || f.input_type === 'investigation_conclusion');
+  return field ? [q.kind, (field.choices || []).map(c => c.value)] : null;
+}).filter(Boolean)));
+if (!choiceContracts.length || choiceContracts.some(c => c[1].length < 2)) throw new Error('choice label contract missing: ' + JSON.stringify(choiceContracts));
 const list = page.locator('#inboxList');
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('正在整理 Inbox'), null, {timeout: 15000});
 // A successful submit (and Undo) re-renders the workspace and closes the open
@@ -25,6 +32,18 @@ await page.waitForFunction(() => !document.querySelector('#inboxList')?.textCont
 const backToQueue = async () => {
   const back = page.getByText('返回队列', {exact: true});
   if (await back.count()) await back.first().click({timeout: 5000}).catch(() => {});
+};
+// Choice fields are now real buttons backed by a hidden value input; the
+// contact picker is a hydrated <select>.  Drive both through their visible
+// controls instead of the pre-fix "type a magic value" text inputs.
+const selectInboxContact = async (contactId) => {
+  const select = page.locator('.inbox-question-active [data-inbox-field="contact_id"]');
+  await select.waitFor({state:'visible', timeout:15000});
+  await page.waitForFunction((id) => {
+    const el = document.querySelector('.inbox-question-active [data-inbox-field="contact_id"]');
+    return !!(el && el.tagName === 'SELECT' && Array.from(el.options).some(o => o.value === String(id)));
+  }, String(contactId), {timeout:15000});
+  await select.selectOption(String(contactId));
 };
 const inboxCount = async () => Number((await page.locator('#inboxOverview strong').innerText()).trim());
 const cardCount = await list.locator('.inbox-question-open').count();
@@ -36,7 +55,7 @@ await backToQueue(); await list.locator('.inbox-question-open').first().click();
 if (await field.inputValue() !== 'draft survives rerender') throw new Error('draft lost');
 // An invalid optional email is a controlled server-side rejection.  Its text
 // answer must remain editable, and the normal retry must then resolve.
-await page.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId);
+await selectInboxContact(fixtureContactId);
 await page.locator('[data-inbox-field="confirmed_email"]').fill('not-an-email');
 await page.getByRole('button', {name:'提交回答', exact:true}).click();
 await page.locator('.inbox-inline-error').getByText('请输入有效邮箱').waitFor({timeout:15000});
@@ -50,7 +69,7 @@ if (await inboxCount() !== 7) throw new Error('Inbox count did not update immedi
 // form, then use the visible Undo action returned by the same response.
 await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'更正失效邮箱'}).click();
-await page.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId);
+await selectInboxContact(fixtureContactId);
 await page.locator('[data-inbox-field="confirmed_email"]').fill('buyer-fixed@rehearsal.example');
 await page.getByRole('button', {name:'提交回答', exact:true}).click();
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('更正失效邮箱') || document.querySelector('.inbox-inline-error')?.textContent, null, {timeout:15000});
@@ -134,10 +153,10 @@ while (await list.locator('.inbox-question-open').count()) {
   // Fact questions expose optional correction fields.  Only the explicit
   // email-correction card should exercise that write path; ordinary text
   // answers must stay ordinary text answers.
-  if (headline === '更正失效邮箱' && await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill(fixtureContactId); await email.fill('buyer-final@rehearsal.example'); }
-  const decision = card.locator('[data-inbox-field="decision"]'); if (await decision.count()) await decision.fill('skip');
+  if (headline === '更正失效邮箱' && await email.count()) { await selectInboxContact(fixtureContactId); await email.fill('buyer-final@rehearsal.example'); }
+  const skipChoice = card.getByRole('button', {name:'本轮跳过', exact:true}); if (await skipChoice.count()) await skipChoice.click();
   const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
-  const conclusion = card.locator('[data-inbox-field="conclusion"]'); if (await conclusion.count()) await conclusion.fill('insufficient');
+  const insufficientChoice = card.getByRole('button', {name:'资料不足', exact:true}); if (await insufficientChoice.count()) await insufficientChoice.click();
   const activeId = await card.getAttribute('id');
   await card.getByRole('button', {name:'提交回答', exact:true}).click();
   await page.locator('#' + activeId).waitFor({state:'detached', timeout:15000}).catch(async () => {

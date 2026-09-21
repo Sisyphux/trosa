@@ -10014,14 +10014,43 @@ def _question_customer(members):
     return None
 
 
+def _sela_request_display(content):
+    """Split a stored Sela request into labeled, human-readable parts.
+
+    ``content`` is assembled by ``_sela_agent_request_payload`` as metadata
+    lines, the context body, then an optional ``建议：`` line.  Rendering that
+    blob verbatim is what made approval cards unreadable, so expose the parts.
+    """
+    fields = {}
+    body_lines = []
+    for line in str(content or '').splitlines():
+        stripped = line.strip()
+        match = re.match(r'^(公司|类型|优先级|建议)\s*[：:]\s*(.*)$', stripped)
+        if match:
+            fields[match.group(1)] = match.group(2).strip()
+        else:
+            body_lines.append(line)
+    return {
+        'company': fields.get('公司', ''),
+        'kind': fields.get('类型', ''),
+        'severity': fields.get('优先级', ''),
+        'proposal': fields.get('建议', ''),
+        'context': '\n'.join(body_lines).strip(),
+    }
+
+
 def _question_evidence(member):
     item_type = str(member.get('item_type') or '')
     detail = ''
+    structured = None
     if item_type in _CAPTURE_INBOX_TYPES:
         detail = member.get('capture_content') or ''
     elif item_type in ('sela_identity_review', 'sela_exclusion_review'):
         review = _inbox_sela_review_payload(member)
         detail = review.get('explanation') or review.get('reason_label') or ''
+    elif item_type == 'sela_agent_request':
+        structured = _sela_request_display(member.get('content'))
+        detail = structured.get('context') or structured.get('proposal') or ''
     else:
         detail = member.get('content') or ''
     return {
@@ -10032,6 +10061,7 @@ def _question_evidence(member):
         'date': member.get('capture_date') or (member.get('created_at') or '')[:10],
         'identity': member.get('capture_identity') or '',
         'detail': detail,
+        'structured': structured,
     }
 
 
@@ -10090,7 +10120,8 @@ def _question_why(kind, primary):
     if kind == _inbox_questions.QUESTION_REPLY:
         return '沟通事实与下一步需要人工确认后才写入客户时间线和待办。'
     if kind == _inbox_questions.QUESTION_APPROVAL:
-        return '该动作超出自动执行范围；批准前系统不会执行或记录任何业务承诺。'
+        return ('批准只表示记录你的判断并关闭这组证据；系统不会自动修改客户或联系人资料，'
+                '也不会发送邮件、报价或作出价格、交期承诺。要更正资料请在右侧直接填写。')
     if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
         return '仅凭名称或来源无法安全判定是否为同一主体，需要你的业务判断。'
     return '系统缺少作出安全判断所需的信息。'
@@ -10126,6 +10157,26 @@ def _question_options(kind, primary, suggested, sela_review):
     return [{'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '无需处理'}]
 
 
+def _question_completion_effects(kind, primary=None):
+    """What actually happens when the human answer is recorded (honest, per kind)."""
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return ['记录你的判断并关闭这组证据。']
+    if kind == _inbox_questions.QUESTION_FACT_REQUEST:
+        effects = ['记录你补充的事实。']
+        if _question_needs_contact_correction(primary):
+            effects.append('若填写了可联系邮箱，会更新该联系人邮箱并保留旧值。')
+        return effects
+    if kind == _inbox_questions.QUESTION_INVESTIGATION:
+        return ['记录调查结论；资料充分时会自动关闭该问题。']
+    return ['记录人工回答并关闭这组证据。']
+
+
+def _question_will_not_do(kind):
+    if kind == _inbox_questions.QUESTION_APPROVAL:
+        return ['不会自动修改客户或联系人资料。', '不会自动发送邮件、报价或作出价格、交期承诺。']
+    return ['不会自动发送邮件、报价或作出价格、交期承诺。']
+
+
 def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
     """The UI renders these fields; it must never infer a form from item_type."""
     attachments = {'allowed': kind == _inbox_questions.QUESTION_INVESTIGATION,
@@ -10138,25 +10189,65 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
                 'attachments': attachments}
     if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
         return {'fields': [{'key': 'decision', 'label': '判断结果', 'input_type': 'choice', 'required': True,
-                            'validation': {'options': ['same', 'different']}, 'help': ''},
+                            'validation': {'options': ['same', 'different']},
+                            'choices': [{'value': 'same', 'label': '是同一主体'},
+                                        {'value': 'different', 'label': '不是同一主体'}],
+                            'help': ''},
                            {'key': 'customer_id', 'label': '同一主体对应的客户', 'input_type': 'customer_picker',
-                            'required': False, 'validation': {'required_when': {'decision': 'same'}},
+                            'required': False, 'validation': {'required_when': {'decision': 'same'}, 'options_source': 'customers'},
                             'help': '选择“是同一主体”时必须指定目标客户。'}], 'attachments': attachments}
     if kind == _inbox_questions.QUESTION_APPROVAL:
-        return {'fields': [{'key': 'decision', 'label': '处理决定', 'input_type': 'choice', 'required': True,
-                            'validation': {'options': ['approve', 'skip']}, 'help': ''},
-                           {'key': 'note', 'label': '处理结果', 'input_type': 'textarea', 'required': True,
-                            'validation': {}, 'help': '批准前必须说明处理结果。'}], 'attachments': attachments}
+        fields = [{'key': 'decision', 'label': '处理决定', 'input_type': 'choice', 'required': True,
+                   'validation': {'options': ['approve', 'skip']},
+                   'choices': [{'value': 'approve', 'label': '批准，并记录处理结果'},
+                               {'value': 'skip', 'label': '本轮跳过'}],
+                   'help': ''},
+                  {'key': 'note', 'label': '处理结果', 'input_type': 'textarea', 'required': True,
+                   'validation': {}, 'help': '批准时必填：说明你实际做了什么或决定了什么。'}]
+        if _question_needs_contact_correction(primary):
+            # Sela cannot write contacts; when its request is a data conflict about a
+            # contact email, offer the same audited correction path inline.
+            fields += [_inbox_email_correction_field('contact_id'),
+                       _inbox_email_correction_field('confirmed_email')]
+        return {'fields': fields, 'attachments': attachments}
     if kind == _inbox_questions.QUESTION_INVESTIGATION:
         return {'fields': [{'key': 'conclusion', 'label': '调查结论', 'input_type': 'investigation_conclusion',
-                            'required': False, 'validation': {'options': ['supported', 'not_supported', 'insufficient']},
-                            'help': '文件充分时系统会自动形成结论；也可人工填写。'}], 'attachments': attachments}
-    return {'fields': [{'key': 'contact_id', 'label': '联系人', 'input_type': 'customer_picker',
-                        'required': False, 'validation': {}, 'help': '如需更正邮箱，请选择联系人。'},
-                       {'key': 'confirmed_email', 'label': '确认可联系的邮箱', 'input_type': 'email',
-                        'required': False, 'validation': {}, 'help': '旧邮箱与历史投递事实会保留。'},
-                       {'key': 'answer', 'label': '请提供所需事实', 'input_type': 'textarea',
-                        'required': False, 'validation': {}, 'help': ''}], 'attachments': attachments}
+                            'required': True, 'validation': {'options': ['supported', 'not_supported', 'insufficient']},
+                            'choices': [{'value': 'supported', 'label': '资料支持'},
+                                        {'value': 'not_supported', 'label': '资料不支持'},
+                                        {'value': 'insufficient', 'label': '资料不足'}],
+                            'help': '可选择人工结论；上传文件且资料充分时系统会自动形成结论并关闭。'}], 'attachments': attachments}
+    fields = [{'key': 'answer', 'label': '请提供所需事实', 'input_type': 'textarea',
+               'required': False, 'validation': {}, 'help': ''}]
+    if _question_needs_contact_correction(primary):
+        fields = [_inbox_email_correction_field('contact_id'),
+                  _inbox_email_correction_field('confirmed_email')] + fields
+    return {'fields': fields, 'attachments': attachments}
+
+
+def _question_needs_contact_correction(primary):
+    """Whether a question is really about a contact/email data conflict.
+
+    Only then does the card offer the optional contact-email correction, so
+    ordinary approvals and generic fact requests stay uncluttered.
+    """
+    if not primary:
+        return False
+    text = str(primary.get('content') or '')
+    structured = _sela_request_display(text)
+    if str(structured.get('kind') or '').upper() in ('DATA_CONFLICT', 'CONTACT_CONFLICT', 'EMAIL_CONFLICT'):
+        return True
+    return any(token in text for token in ('邮箱', 'email', '联系人'))
+
+
+def _inbox_email_correction_field(key):
+    """Optional, human-confirmed contact email correction shared by question kinds."""
+    if key == 'contact_id':
+        return {'key': 'contact_id', 'label': '要更正的联系人', 'input_type': 'customer_picker',
+                'required': False, 'validation': {'options_source': 'contacts'},
+                'help': '如需更正邮箱，请选择该客户下的联系人。'}
+    return {'key': 'confirmed_email', 'label': '确认可联系的邮箱', 'input_type': 'email',
+            'required': False, 'validation': {}, 'help': '填写后会更新该联系人邮箱；旧邮箱与历史投递事实保留，并可撤销。'}
 
 
 def _inbox_question_revision(members):
@@ -10225,8 +10316,8 @@ def _build_inbox_questions(items, matches_by_item):
             'evidence': [_question_evidence(member) for member in members],
             'evidence_count': len(members),
             'response_schema': _inbox_response_schema(kind, primary, suggested, sela_review),
-            'completion_effects': ['记录人工回答并关闭这组证据。'],
-            'will_not_do': ['不会自动发送邮件、报价或作出价格、交期承诺。'],
+            'completion_effects': _question_completion_effects(kind, primary),
+            'will_not_do': _question_will_not_do(kind),
             'options': _question_options(kind, primary, suggested, sela_review),
             'sela_review': sela_review,
             'primary_item_id': primary.get('id'),
@@ -11072,6 +11163,30 @@ def analyze_inbox_question_attachment(item_id, file_id):
                     'next_system_step': result.get('next_action', ''), 'counts': {}})
 
 
+def _apply_inbox_email_correction(conn, answer, note):
+    """Apply one human-confirmed contact email correction and return undo material.
+
+    Shared by fact-request and approval questions so both entry points reuse the
+    same audited contact-write path instead of growing a second one.  The old
+    email and every historical delivery fact are kept; callers attach an undo.
+    """
+    email = str(answer.get('confirmed_email') or '').strip()
+    if not email:
+        return note, None
+    try:
+        email = validate_email_address(email, check_deliverability=False).normalized
+    except EmailNotValidError:
+        raise CrmWriteError('请输入有效邮箱', 400)
+    contact_id = _normalize_positive_id(answer.get('contact_id'), '联系人编号', allow_empty=False)
+    before = _snapshot_entity(conn, 'contacts', contact_id)
+    if not before:
+        raise CrmWriteError('联系人不存在', 404)
+    values = dict(before); values['email'] = email
+    _update_contact(conn, contact_id=contact_id, values=values)
+    after = _snapshot_entity(conn, 'contacts', contact_id)
+    return (note + '\n' if note else '') + '人工确认邮箱：' + email, (contact_id, before, after)
+
+
 @app.route('/api/inbox/questions/<int:item_id>/respond', methods=['POST'])
 @login_required
 def respond_to_inbox_question(item_id):
@@ -11110,6 +11225,7 @@ def respond_to_inbox_question(item_id):
         decision = str(answer.get('decision') or '').strip().lower()
         note = str(answer.get('note') or answer.get('answer') or data.get('note') or '').strip()[:4000]
         customer_id = answer.get('customer_id')
+        undo_pending = None
         if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
             if decision not in ('same', 'different'):
                 return jsonify({'error': '请选择身份判断结果'}), 400
@@ -11118,35 +11234,28 @@ def respond_to_inbox_question(item_id):
         elif kind == _inbox_questions.QUESTION_APPROVAL:
             if decision not in ('approve', 'skip') or (decision == 'approve' and not note):
                 return jsonify({'error': '批准前必须填写处理结果'}), 400
+            note, undo_pending = _apply_inbox_email_correction(conn, answer, note)
         elif kind == _inbox_questions.QUESTION_IDENTITY:
             if not customer_id:
                 return jsonify({'error': '请选择具体客户'}), 400
             decision = 'assign'
         elif kind == _inbox_questions.QUESTION_FACT_REQUEST:
-            email = str(answer.get('confirmed_email') or '').strip()
-            if email:
-                try:
-                    email = validate_email_address(email, check_deliverability=False).normalized
-                except EmailNotValidError:
-                    return jsonify({'error': '请输入有效邮箱'}), 400
-                contact_id = _normalize_positive_id(answer.get('contact_id'), '联系人编号', allow_empty=False)
-                before = _snapshot_entity(conn, 'contacts', contact_id)
-                if not before:
-                    return jsonify({'error': '联系人不存在'}), 404
-                values = dict(before); values['email'] = email
-                _update_contact(conn, contact_id=contact_id, values=values)
-                after = _snapshot_entity(conn, 'contacts', contact_id)
-                undo_pending = (contact_id, before, after)
-                note = (note + '\n' if note else '') + '人工确认邮箱：' + email
-            elif not note:
+            note, undo_pending = _apply_inbox_email_correction(conn, answer, note)
+            if not note:
                 return jsonify({'error': '请填写所需事实或可联系邮箱'}), 400
+        elif kind == _inbox_questions.QUESTION_INVESTIGATION:
+            conclusion = str(answer.get('conclusion') or '').strip()
+            if conclusion not in ('supported', 'not_supported', 'insufficient'):
+                return jsonify({'error': '请选择调查结论'}), 400
+            note = (note + '\n' if note else '') + '人工调查结论：' + conclusion
         now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
         if customer_id:
             customer_id = _normalize_positive_id(customer_id, '客户编号')
             _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
         _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason=decision or 'answered',
                                       note=note, resolution_source='human', resolved_by=actor)
-        if locals().get('undo_pending'):
+        undo_token = ''
+        if undo_pending:
             contact_id, before, after = undo_pending
             inbox_entities = []
             for undo_item_id in item_ids:
@@ -11159,9 +11268,9 @@ def respond_to_inbox_question(item_id):
             undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
                 [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, '撤销 Inbox 邮箱更正')
         response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
-                    'resolved_item_ids': item_ids, 'effects': ['已记录人工回答并关闭相关证据。'],
+                    'resolved_item_ids': item_ids, 'effects': _question_completion_effects(kind, row),
                     'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
-                    'undo_token': locals().get('undo_token', ''),
+                    'undo_token': undo_token,
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
         remaining_items = _load_open_inbox_items(conn)
         response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}), remaining_items)
