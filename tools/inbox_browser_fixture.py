@@ -26,6 +26,9 @@ def load():
     db.set_db_user('hamid')
     conn = db.get_db()
     try:
+        # This is an isolated rehearsal database. Close unrelated leftovers
+        # from prior integration exercises so the visible count is deterministic.
+        conn.execute("UPDATE trosa.inbox_items SET status='resolved', resolved_at=now(), resolution_reason='rehearsal_fixture_reset' WHERE status='open'")
         # The correction scenario starts from a deliberately stale rehearsal
         # mailbox; it is restored by each fixture reload.
         conn.execute('UPDATE trade_os_compat.contacts SET email=? WHERE id=?',

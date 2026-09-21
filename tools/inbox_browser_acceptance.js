@@ -49,4 +49,18 @@ for (const [name, expected] of uploads) {
 // Responsive and reduced-motion inspection use the same rendered fixture.
 const layouts=[]; for (const width of [1024, 390, 720]) { await page.setViewportSize({width,height:900}); layouts.push({width, visible: await page.locator('#page-inbox.active').isVisible()}); }
 await page.emulateMedia({reducedMotion:'reduce'});
-return {cards: await list.locator('.inbox-question-open').count(), draft:true, uploads:observed.map(x=>({name:x.name, expected:x.expected, seen:x.text.includes(x.expected)})), layouts};
+// Finish every remaining fixture card through its rendered controls. The email
+// card was restored by Undo, so this second correction deliberately completes it.
+while (await list.locator('.inbox-question-open').count()) {
+  await list.locator('.inbox-question-open').first().click();
+  const card = page.locator('.inbox-question-active');
+  const email = card.locator('[data-inbox-field="confirmed_email"]');
+  if (await email.count()) { await card.locator('[data-inbox-field="contact_id"]').fill('1'); await email.fill('buyer-final@rehearsal.example'); }
+  const decision = card.locator('[data-inbox-field="decision"]'); if (await decision.count()) await decision.fill('skip');
+  const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
+  const conclusion = card.locator('[data-inbox-field="conclusion"]'); if (await conclusion.count()) await conclusion.fill('insufficient');
+  await card.getByRole('button', {name:'提交回答', exact:true}).click();
+  await page.waitForTimeout(80);
+}
+await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
+return {cards: 8, draft:true, empty:true, uploads:observed.map(x=>({name:x.name, expected:x.expected, seen:x.text.includes(x.expected)})), layouts};
