@@ -26,6 +26,10 @@ def load():
     db.set_db_user('hamid')
     conn = db.get_db()
     try:
+        # The correction scenario starts from a deliberately stale rehearsal
+        # mailbox; it is restored by each fixture reload.
+        conn.execute('UPDATE trade_os_compat.contacts SET email=? WHERE id=?',
+                     ('invalid-mailbox@rehearsal.invalid', ids['contact_id']))
         # Recreate just this explicitly namespaced fixture set on every run.
         conn.execute("DELETE FROM trade_os_compat.inbox_items WHERE dedupe_key LIKE ?", (KEY + ':%',))
         specs = [
@@ -40,8 +44,11 @@ def load():
         ]
         result = {}
         for index, (kind, title, content) in enumerate(specs, 1):
+            # Use existing transport kinds so startup reconciliation never
+            # downgrades test rows merely because their transport is unknown.
+            transport = 'sela_agent_request' if kind == 'investigation_request' else 'customer_reply'
             item_id = trosa_domain.create_inbox_item(
-                conn, item_type='browser_fixture_' + kind, title=title, content=content,
+                conn, item_type=transport, title=title, content=content,
                 customer_id=ids['customer_id'], dedupe_key=f'{KEY}:{index}', status='open',
                 created_at=f'2026-09-21 09:00:0{index}', question_kind=kind,
                 question_key=f'{KEY}:{index}', source_type='system')

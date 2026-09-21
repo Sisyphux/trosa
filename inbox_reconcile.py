@@ -202,7 +202,10 @@ def reconcile_inbox_connection(conn):
     for row in _open_rows(conn):
         stats['scanned'] += 1
         item_type = str(row.get('item_type') or '')
-        question_kind = iq.question_kind_for(item_type)
+        # Writers may intentionally attach a supported human-question kind to
+        # a shared transport.  Reconciliation fills legacy omissions, but
+        # must not silently rewrite that explicit, auditable decision.
+        question_kind = str(row.get('question_kind') or '').strip() or iq.question_kind_for(item_type)
         question_key = str(row.get('question_key') or '').strip()
         source_type = str(row.get('source_type') or '').strip() or iq.source_type_for(item_type)
 
