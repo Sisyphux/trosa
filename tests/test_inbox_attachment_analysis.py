@@ -2,6 +2,8 @@ import os
 import tempfile
 import unittest
 
+from openpyxl import Workbook
+
 from inbox_attachment_analysis import analyze_import_file
 
 
@@ -33,3 +35,32 @@ class InboxAttachmentAnalysisTest(unittest.TestCase):
     def test_invalid_file_is_analysis_failed(self):
         path = self._file('broken.pdf', b'not a pdf')
         self.assertEqual(analyze_import_file(path, 'broken.pdf')['status'], 'analysis_failed')
+
+    def test_xlsx_retains_sheet_name_row_and_field_citations(self):
+        directory = tempfile.mkdtemp()
+        path = os.path.join(directory, 'imports.xlsx')
+        workbook = Workbook()
+        workbook.active.title = 'Imports 2026'
+        workbook.active.append(['Importer', 'Product description', 'HS code', 'Weight', 'Amount'])
+        workbook.active.append(['Acme Imports', 'PMMA acrylic sheet', '392051', '1200 kg', 'USD 5000'])
+        workbook.create_sheet('Notes').append(['Note'])
+        workbook.save(path)
+        result = analyze_import_file(path, 'imports.xlsx')
+        self.assertEqual(result['status'], 'supported')
+        self.assertEqual(result['citations'][0]['source'], 'Imports 2026')
+        self.assertEqual(result['citations'][0]['row_or_page'], 2)
+        self.assertTrue(any(fact['field'] == 'importer' and fact['value'] == 'Acme Imports'
+                            for fact in result['field_facts']))
+        self.assertTrue(all('method' in fact['citation'] for fact in result['field_facts']))
+
+    def test_image_is_insufficient_when_controlled_ocr_is_unavailable(self):
+        path = self._file('shipping.jpg', b'not decoded here')
+        result = analyze_import_file(path, 'shipping.jpg')
+        self.assertEqual(result['status'], 'insufficient')
+        self.assertIn('OCR', result['missing'][0])
+
+    def test_legacy_xls_is_explicitly_rejected(self):
+        path = self._file('legacy.xls', b'legacy binary')
+        result = analyze_import_file(path, 'legacy.xls')
+        self.assertEqual(result['status'], 'analysis_failed')
+        self.assertIn('XLS', result['error'])

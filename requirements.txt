@@ -4,6 +4,7 @@ waitress==3.0.2
 APScheduler==3.11.2
 requests==2.34.2
 openpyxl==3.1.5
+pypdf==5.9.0
 xlrd==2.0.2
 email-validator==2.3.0
 dnspython==2.8.0
