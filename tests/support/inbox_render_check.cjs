@@ -110,6 +110,23 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(detail.querySelector('.inbox-question-decision'), '回答区域应前置');
   win.closeInboxQuestion();
 
+  // Sela 的 JSON 上下文渲染成带标签的字段，而不是原始 JSON 墙。
+  const selaHtml = win.inboxEvidenceHtml({
+    source_label: 'Sela',
+    structured: {
+      company: 'Boomart', kind: 'SEND_APPROVAL', severity: 'AMBER',
+      proposal: 'Hello Boomart team,',
+      context: '{"action":"send_first_outreach"}',
+      fields: [
+        { key: 'email', label: '收件人', value: 'plastics@boomart.com.au' },
+        { key: 'subject', label: '主题', value: 'Acrylic sheet supply' },
+      ],
+    },
+  }, 0);
+  assert.ok(selaHtml.includes('收件人') && selaHtml.includes('plastics@boomart.com.au'), selaHtml);
+  assert.ok(selaHtml.includes('主题') && selaHtml.includes('Acrylic sheet supply'), selaHtml);
+  assert.ok(!selaHtml.includes('{"action"'), selaHtml);
+
   // 按问题类别过滤
   win.setInboxQuestionFilter('identity_review');
   const filtered = doc.getElementById('inboxList').textContent;

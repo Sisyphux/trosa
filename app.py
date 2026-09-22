@@ -10014,6 +10014,90 @@ def _question_customer(members):
     return None
 
 
+# Sela sometimes sends its ``context`` as a raw JSON payload (for example a
+# ``send_first_outreach`` request carrying ``email`` / ``subject`` / ``policy``).
+# Showing that blob verbatim buries the one thing the human must decide, so the
+# known keys are projected into labeled rows for the Inbox evidence panel.
+_SELA_CONTEXT_LABELS = {
+    'action': '动作',
+    'to': '收件人',
+    'email': '收件人',
+    'recipient': '收件人',
+    'subject': '主题',
+    'company': '公司',
+    'contact': '联系人',
+    'source_id': '来源',
+    'reason': '原因',
+    'note': '说明',
+    'next_step': '下一步',
+    'decision': '系统判定',
+    'policy': '判定',
+    'policy.action': '策略动作',
+    'policy.decision': '系统判定',
+    'policy.rule_id': '规则',
+    'policy.reason': '判定依据',
+}
+
+_SELA_CONTEXT_VALUE_LABELS = {
+    'send_first_outreach': '发送首封开发信',
+    'send_followup': '发送跟进邮件',
+    'send_reply': '发送回复',
+    'require_confirmation': '需要人工确认',
+    'approve': '批准',
+    'skip': '跳过',
+}
+
+
+def _sela_context_fields(context):
+    """Project a JSON Sela context body into labeled, human-readable rows.
+
+    Only a body that is *entirely* a JSON object is projected; prose contexts
+    (or prose followed by JSON) return an empty list so the existing readable
+    text path stays in charge.  Purely technical keys are dropped and identical
+    label/value pairs are de-duplicated to keep the panel focused.
+    """
+    text = str(context or '').strip()
+    if not text or text[0] != '{':
+        return []
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    rows = []
+    seen = set()
+
+    def walk(prefix, value, depth):
+        if depth > 3 or len(rows) >= 12:
+            return
+        if prefix.rsplit('.', 1)[-1] == 'audit':
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                walk(prefix + ('.' if prefix else '') + str(key), item, depth + 1)
+            return
+        if value in (None, '', [], {}):
+            return
+        if prefix.endswith('facts_hash') or prefix.endswith('policy_version'):
+            return
+        if isinstance(value, (list, tuple)):
+            value = '、'.join(str(item) for item in value if item not in (None, ''))
+        if not value:
+            return
+        tail = prefix.rsplit('.', 1)[-1]
+        label = _SELA_CONTEXT_LABELS.get(prefix) or _SELA_CONTEXT_LABELS.get(tail) or tail
+        display = _SELA_CONTEXT_VALUE_LABELS.get(str(value), value)
+        signature = (tail, str(display))
+        if signature in seen:
+            return
+        seen.add(signature)
+        rows.append({'key': prefix, 'label': str(label), 'value': str(display)})
+
+    walk('', parsed, 0)
+    return rows
+
+
 def _sela_request_display(content):
     """Split a stored Sela request into labeled, human-readable parts.
 
@@ -10030,12 +10114,14 @@ def _sela_request_display(content):
             fields[match.group(1)] = match.group(2).strip()
         else:
             body_lines.append(line)
+    context = '\n'.join(body_lines).strip()
     return {
         'company': fields.get('公司', ''),
         'kind': fields.get('类型', ''),
         'severity': fields.get('优先级', ''),
         'proposal': fields.get('建议', ''),
-        'context': '\n'.join(body_lines).strip(),
+        'context': context,
+        'fields': _sela_context_fields(context),
     }
 
 

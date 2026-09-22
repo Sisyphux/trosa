@@ -1672,9 +1672,13 @@ function inboxEvidenceHtml(e, index) {
       return '<span class="inbox-evidence-tag">' + escapeHtml(v) + '</span>';
     }).join('');
     var proposal = s.proposal ? '<p class="inbox-evidence-proposal"><span>建议</span>' + escapeHtml(s.proposal) + '</p>' : '';
-    var context = s.context ? '<p class="inbox-evidence-context">' + escapeHtml(s.context) + '</p>' : '';
+    var fields = (s.fields || []).map(function(f) {
+      return '<div class="inbox-evidence-field"><span>' + escapeHtml(f.label) + '</span><strong>' + escapeHtml(f.value) + '</strong></div>';
+    }).join('');
+    var context = s.context && !fields ? '<p class="inbox-evidence-context">' + escapeHtml(s.context) + '</p>' : '';
     return '<li>' + ordinal + '<div class="inbox-evidence-body">' +
-      (tags ? '<div class="inbox-evidence-tags">' + tags + '</div>' : '') + proposal + context +
+      (tags ? '<div class="inbox-evidence-tags">' + tags + '</div>' : '') + proposal +
+      (fields ? '<div class="inbox-evidence-fields">' + fields + '</div>' : '') + context +
       '</div>' + source + '</li>';
   }
   return '<li>' + ordinal + '<span>' + escapeHtml(e.detail || '原始证据') + '</span>' + source + '</li>';

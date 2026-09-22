@@ -1,3 +1,13 @@
+## 2026-09-22 — Inbox 证据可读：Sela 的 JSON 请求转成人类可读字段，详情卡在平板宽度不再把决策挤出首屏
+
+- 现象：Inbox 详情卡的「相关证据」把 Sela 外联请求的原始 JSON 整段铺开（例如 `{"action": "send_first_outreach", "policy": {...}, "email": ..., "subject": ...}`），业务上真正要看的是「发给谁 / 主题 / 为什么现在需要人确认」，原始 JSON 难以阅读。
+- 根因：Sela 有时把 `context` 作为 JSON 请求体发来，`_sela_request_display` 只做「公司/类型/优先级/建议」行拆分，剩余的 JSON 正文被当作普通文本原样返回并渲染；同时 `inbox-question-active` 在 981–1100px 仍是两栏，较长的证据列会把「请你提供」的决策区推到首屏之下。
+- 修复（后端）：新增 `_sela_context_fields`，当且仅当 Sela 正文本身是一个完整 JSON 对象时，把它投影为带中文标签的字段行（动作 / 收件人 / 主题 / 系统判定 / 规则 / 判定依据 / 来源等），翻译已知枚举值（如 `send_first_outreach` → 发送首封开发信、`require_confirmation` → 需要人工确认），跳过 `facts_hash`、`policy_version` 等纯技术键与重复的 `audit` 回声；散文正文（或混合正文）保持原有文本路径不变。`_sela_request_display` 新增 `fields`，原始 `context` 仍保留以兼容既有消费方。
+- 修复（前端/样式）：`inboxEvidenceHtml` 在结构化证据里渲染 `fields` 为标签—值行，仅在无字段时回退显示 `context`，不再输出原始 JSON 墙；新增 `.inbox-evidence-fields` / `.inbox-evidence-field` 样式；把两栏平板布局改为 `max-width:1100px` 单栏堆叠（队列 → 证据 → 请你提供），保证决策区在阅读顺序中可达。
+- 影响范围：`app.py`、`app/static/app.js`、`app/static/visual-v2.css`、`tests/test_inbox_question_model.py`、`tests/support/inbox_render_check.cjs`。不改接口路径、数据库模型与写入语义。
+- 是否需要迁移：否。
+- 当前状态：本地完成，等待发布门禁。
+
 ## 2026-09-21 — 客户来源：可查看、可修改、可按来源筛选的客户事实
 
 - 需求：每个客户增加「来源」字段与可选补充说明，默认选项为展会、海关数据、LinkedIn、Google / 官网搜索、Sela、客户转介绍、老客户 / 已有资源、Excel / 历史导入、其他；新建时可选、非必填，详情页可查看和修改，客户列表可按来源筛选。

@@ -279,6 +279,38 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(structured['severity'], 'AMBER')
         self.assertIn('info@cwplastic.co.uk', structured['proposal'])
         self.assertIn('官网邮箱冲突', structured['context'])
+        self.assertEqual(structured['fields'], [])
+
+    def test_sela_json_context_becomes_labeled_fields(self):
+        payload = json.dumps({
+            'action': 'send_first_outreach',
+            'policy': {
+                'decision': 'require_confirmation',
+                'rule_id': 'POL-007',
+                'reason': '邮箱尚未核验，需要人工确认',
+                'facts_hash': 'ee38efb655a45a5afca7f3496c194c5d',
+                'audit': {'source_id': 'auto-au-boomart-20260916', 'company': 'Boomart'},
+            },
+            'email': 'plastics@boomart.com.au',
+            'subject': 'Acrylic sheet supply',
+        }, ensure_ascii=False)
+        self._insert_question(
+            'sela_agent_request', 'approval',
+            '公司：Boomart\n类型：SEND_APPROVAL\n优先级：AMBER\n\n' + payload + '\n\n建议：Hello Boomart team,')
+        structured = self.client.get('/api/inbox').get_json()['questions'][0]['evidence'][0]['structured']
+        fields = {row['key']: row for row in structured['fields']}
+        self.assertEqual(fields['action']['label'], '动作')
+        self.assertEqual(fields['action']['value'], '发送首封开发信')
+        self.assertEqual(fields['email']['label'], '收件人')
+        self.assertEqual(fields['email']['value'], 'plastics@boomart.com.au')
+        self.assertEqual(fields['subject']['label'], '主题')
+        self.assertEqual(fields['policy.reason']['label'], '判定依据')
+        self.assertEqual(fields['policy.decision']['value'], '需要人工确认')
+        # Raw context is still returned for compatibility, but the human panel
+        # must not surface technical audit/hash rows.
+        self.assertIn('send_first_outreach', structured['context'])
+        self.assertTrue(all('facts_hash' not in row['key'] for row in structured['fields']))
+        self.assertFalse(any('audit' in row['key'] for row in structured['fields']))
 
     def test_approval_effects_state_it_does_not_modify_data(self):
         self._insert_question('sela_agent_request', 'approval', '类型：DATA_CONFLICT')
