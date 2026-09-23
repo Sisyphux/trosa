@@ -117,7 +117,12 @@ if (!contactSaveTarget || !contactSaveTarget.candidate || !contactSaveTarget.cus
 await selaCard.getByRole('button', {name:'确认并保存邮箱', exact:true}).click();
 await page.getByRole('heading', {name:'确认保存联系人邮箱', exact:true}).waitFor({timeout:10000});
 await page.getByRole('button', {name:'保存联系人邮箱', exact:true}).click();
-await page.getByText('联系人邮箱已保存到 Inbox Browser Prospect；邮箱尚未验证，Inbox 回答仍未提交。', {exact:true}).waitFor({timeout:15000});
+const contactSaveToast = page.locator('#toastContainer .toast.success').filter({hasText:'邮箱尚未验证，Inbox 回答仍未提交。'});
+await contactSaveToast.waitFor({timeout:15000});
+const contactSaveToastText = await contactSaveToast.innerText();
+if (!contactSaveToastText.includes('联系人邮箱已保存到 ' + (contactSaveTarget.company || '对应的 Trosa 客户')) || !contactSaveToastText.includes('撤销')) {
+  throw new Error('confirmed contact save success/undo feedback missing: ' + contactSaveToastText);
+}
 if (await inboxCount() !== beforeContactSaveCount || !await selaCard.isVisible()) throw new Error('saving contact email closed or resolved the Inbox request');
 const savedContacts = await page.evaluate(async (customerId) => fetch('/api/customers/' + customerId + '/contacts').then(response => response.json()), contactSaveTarget.customer_id);
 if (!savedContacts.some(contact => contact.email === 'buyer@inbox-browser-prospect.example')) throw new Error('confirmed contact email was not stored: ' + JSON.stringify(savedContacts));
@@ -127,6 +132,15 @@ await page.getByText('已撤销联系人邮箱保存；Inbox 请求仍保持打�
 const contactsAfterUndo = await page.evaluate(async (customerId) => fetch('/api/customers/' + customerId + '/contacts').then(response => response.json()), contactSaveTarget.customer_id);
 if (contactsAfterUndo.some(contact => contact.email === 'buyer@inbox-browser-prospect.example')) throw new Error('Undo left the confirmed email in Trosa contacts');
 if (await inboxCount() !== beforeContactSaveCount) throw new Error('Undo changed the Inbox question count');
+const selaContactEmailFieldKey = await page.evaluate(async () => {
+  const payload = await fetch('/api/inbox').then(response => response.json());
+  const question = payload.questions.find(item => item.headline === 'Sela 需要确认 prospect 的下一步');
+  const field = (((question || {}).response_schema || {}).fields || []).find(item => item.fact_field === 'contact_email');
+  return field && field.key;
+});
+if (!selaContactEmailFieldKey) throw new Error('Sela contact-email answer field missing after contact-save Undo');
+await page.locator('.inbox-question-active [data-inbox-field="' + selaContactEmailFieldKey + '"]').fill('');
+await page.locator('.inbox-question-active [data-inbox-field="note"]').fill('邮箱尚未确认；先继续整理公开来源。');
 await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}).click();
 const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
