@@ -1598,7 +1598,7 @@ function renderInbox(counts) {
     var identityCount = inboxQuestions.filter(function(question) { return question.kind === 'identity'; }).length;
     overview.innerHTML = '<strong>' + (counts.all || inboxQuestions.length || 0) + '</strong><span>个问题需要判断</span>' +
       (identityCount ? '<button class="btn btn-sm inbox-auto-attribute" type="button" onclick="autoAttributeInbox()">自动归属可确定项</button>' : '') +
-      '<p>系统能自行处理的噪声、退信、技术冲突和重复证据不会出现在这里；这里只留下必须由你决定的问题。</p>';
+      '<p>这里只显示需要人工确认的事项。</p>';
   }
   var filtersEl = document.getElementById('inboxFilters');
   if (filtersEl) {
@@ -1621,7 +1621,7 @@ function renderInbox(counts) {
   if (!questions.length) {
     list.innerHTML = '<div class="inbox-empty"><strong>' +
       (inboxQuestions.length ? '这个分类已清空' : 'Inbox 已清空') +
-      '</strong><span>当前没有需要你作出判断的问题。新的客户回复或无法自动确定的归属会出现在这里。</span></div>';
+      '</strong><span>' + (inboxFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>';
     return;
   }
   list.innerHTML = questions.map(renderInboxQuestionHtml).join('');
@@ -1634,20 +1634,20 @@ function renderInboxQuestionWorkspace(counts) {
   inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
   var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = counts.all || inboxState.questions.length || '';
   var overview = document.getElementById('inboxOverview');
-  if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>个需要你判断的问题</span><p>新证据会先由系统自动匹配、去重、分析和归类；只有无法安全继续的事项才会出现在这里。</p>';
+  if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>个需要你判断的问题</span><p>这里只显示需要人工确认的事项。</p>';
   var kinds = ['all'].concat(Array.from(new Set(inboxState.questions.map(function(q) { return q.kind; }))));
   var filters = document.getElementById('inboxFilters');
   if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? inboxState.questions.length : inboxState.questions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + '<span class="inbox-filter-count">' + n + '</span></button>'; }).join('');
   var list = document.getElementById('inboxList'); if (!list) return;
   var questions = inboxState.questions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
-  if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>新证据会先由系统自动匹配、去重、分析和归类；只有无法安全继续的事项才会出现在这里。</span></div>'; return; }
+  if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>' + (inboxState.activeFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>'; return; }
   list.innerHTML = '<div class="inbox-workspace">' + questions.map(renderInboxQuestionCard).join('') + '</div>';
   hydrateInboxPickers();
 }
 function setInboxQuestionFilter(kind) { inboxState.activeFilter = kind; renderInboxQuestionWorkspace(inboxState.counts); }
 function renderInboxQuestionCard(q) {
   var open = inboxState.expandedQuestionId === q.id, subject = (q.subject && q.subject.company) || '待确认主体';
-  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + ' · 查看详情</small></button></article>';
+  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</small></button></article>';
   var evidence = (q.evidence || []).map(function(e, i) { return inboxEvidenceHtml(e, i); }).join('');
   var draft = inboxState.draftResponses[q.id] || {}, upload = inboxState.uploadStates[q.id] || {};
   var fields = ((q.response_schema || {}).fields || []).map(function(f) { return inboxResponseFieldHtml(q, f, draft); }).join('');
@@ -1661,7 +1661,7 @@ function renderInboxQuestionCard(q) {
   var decision = transactional
     ? '<p class="inbox-field-help">选择下面一项后，系统会打开确认窗口，并把结果写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
     : fields + attachment + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button>';
-  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
+  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据</h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>处理方式</h4>' + decision + '</section></article>';
 }
 function inboxEvidenceHtml(e, index) {
   var ordinal = '<b>' + String(index + 1).padStart(2, '0') + '</b>';
@@ -2775,10 +2775,10 @@ function renderTodayError(message) {
 function renderTodayTasks(reminders) {
   var remEl = document.getElementById('todayReminders');
   if (!reminders || reminders.length === 0) {
-    remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong><span>新的提醒会自动出现在这里。</span></div>';
+    remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong></div>';
     document.getElementById('todayFocus').innerHTML = '<div class="empty-state"><p>今天没有待处理事项</p></div>';
     var wideEmpty = document.getElementById('todayWideDetail');
-    if (wideEmpty) wideEmpty.innerHTML = '<div class="today-wide-empty"><span>今日工作已完成</span><p>新的提醒会自动出现在这里。</p></div>';
+    if (wideEmpty) wideEmpty.innerHTML = '<div class="today-wide-empty"><span>今日工作已完成</span></div>';
     return;
   }
 
@@ -3190,7 +3190,7 @@ function renderTodayWideDetail(r, name, meta, website) {
       '<div><span>最近发生</span><strong>' + renderRichText(activity) + '</strong></div>' +
     '</div>' +
     '<div class="today-wide-compose">' +
-      '<div class="today-wide-compose-title"><span>沟通记录</span><small>在确认面板中记录事实，并按需安排下一步。</small></div>' +
+      '<div class="today-wide-compose-title"><span>沟通记录</span></div>' +
       '<div class="today-wide-compose-footer"><span>当前待办会在确认后完成</span><button type="button" class="btn btn-primary" onclick="openTodayCommunicationConfirm()"><span class="ui-icon ui-icon-check" aria-hidden="true"></span><span>完成并记录</span></button></div>' +
     '</div>';
 }
@@ -5374,12 +5374,12 @@ function renderCustomerTaskEmpty(list) {
     window.setTimeout(function() {
       if (list.dataset.taskEmptyToken !== token || list.querySelector('.customer-task-row')) return;
       delete list.dataset.taskEmptyToken;
-      list.innerHTML = '<div class="customer-task-empty">暂无明确的未完成待办。可以在右侧安排下一步。</div>';
+      list.innerHTML = '<div class="customer-task-empty">暂无未完成待办。</div>';
     }, 330);
     return;
   }
   delete list.dataset.taskEmptyToken;
-  list.innerHTML = '<div class="customer-task-empty">暂无明确的未完成待办。可以在右侧安排下一步。</div>';
+  list.innerHTML = '<div class="customer-task-empty">暂无未完成待办。</div>';
 }
 
 function renderCustomerTasks(tasks, changedKeys) {
@@ -6057,7 +6057,7 @@ function syncContactEditInputValues(contact) {
 
 function renderContacts(contacts) {
   var el = document.getElementById('contactsList');
-  if (!contacts || contacts.length === 0) { el.innerHTML = '<div class="contact-empty-state"><strong>还没有联系人</strong><span>先添加一位主要联系人，后续的沟通记录会更清晰。</span></div>'; return; }
+  if (!contacts || contacts.length === 0) { el.innerHTML = '<div class="contact-empty-state"><strong>还没有联系人</strong></div>'; return; }
   var html = '';
   contacts.forEach(function(c) {
     var contactId = Number(c.id);
@@ -6318,7 +6318,7 @@ function renderCustomerFiles(files) {
   if (!el) return;
   files = files || [];
   if (!files.length) {
-    el.innerHTML = '<div class="customer-file-empty"><strong>还没有客户文件</strong><span>上传报价单、合同、样品图片或展会资料后，查阅这个客户时可以直接点击打开，不用再翻找本地 Excel。</span></div>';
+    el.innerHTML = '<div class="customer-file-empty"><strong>还没有客户文件</strong></div>';
     return;
   }
   var html = '<div class="customer-file-list">';
@@ -6330,9 +6330,6 @@ function renderCustomerFiles(files) {
     var uploader = f.uploaded_by ? '<span>由 ' + escapeHtml(f.uploaded_by) + ' 上传</span>' : '';
     var date = (f.created_at || '').slice(0, 10);
     var metaParts = [customerFileSizeText(f.file_size), date, uploader].filter(Boolean);
-    var openHint = mode === 'preview' ? '<span class="customer-file-hint">点击预览</span>'
-      : mode === 'native' ? '<span class="customer-file-hint">点击预览</span>'
-      : (f.missing ? '' : '<span class="customer-file-hint">点击下载</span>');
     var actions = '<span class="customer-file-actions">' +
       (mode === 'preview' && !f.missing ? '<button class="btn btn-sm" type="button" onclick="event.stopPropagation();openCustomerFile(' + f.id + ',\'preview\')">预览</button>' : '') +
       (!f.missing ? '<button class="btn btn-sm" type="button" onclick="event.stopPropagation();downloadCustomerFile(' + f.id + ')">下载</button>' : '') +
@@ -6344,7 +6341,7 @@ function renderCustomerFiles(files) {
       '<span class="customer-file-icon">' + uiIcon('file') + '</span>' +
       '<span class="customer-file-type">' + escapeHtml(ext) + '</span>' +
       '<span class="customer-file-main"><span class="customer-file-name" title="' + escapeHtml(f.original_name) + '">' + escapeHtml(f.original_name) + '</span>' +
-      '<span class="customer-file-meta">' + metaParts.join(' · ') + ' ' + openHint + ' ' + missing + ' ' + tag + '</span></span>' +
+      '<span class="customer-file-meta">' + metaParts.join(' · ') + ' ' + missing + ' ' + tag + '</span></span>' +
       actions + '</div>';
   });
   el.innerHTML = html + '</div>';
