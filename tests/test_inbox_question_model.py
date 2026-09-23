@@ -275,7 +275,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual([choice['value'] for choice in decision['choices']], ['板材', '展示架'])
         email = next(field for field in question['response_schema']['fields'] if field.get('fact_field') == 'contact_email')
         self.assertEqual(email['key'], 'fact_0')
-        self.assertIn('独立确认操作', email['help'])
+        self.assertIn('单独确认入口', email['help'])
 
     def test_sela_agent_request_evidence_is_structured(self):
         self._insert_question(
