@@ -1575,6 +1575,119 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         returned = next(n for n in listed if n['trosa_inbox_id'] == item['trosa_inbox_id'])
         self.assertEqual(returned['missing_facts'][0]['field'], 'contact_email')
 
+    def test_sela_auto_resume_writes_only_an_unsent_draft_and_existing_profile_in_postgres(self):
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        source_id = 'pg-auto-resume-draft'
+        created = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-auto-resume-prospect'},
+            json={'prospect': {
+                'source_id': source_id, 'company': 'Auto Resume Plastics',
+                'website': 'https://auto-resume.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+            }},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = int(created.get_json()['trosa_id'])
+
+        need_key = 'pg-auto-resume-need'
+        created_need = client.post(
+            '/api/integrations/sela/needs', headers={'X-Idempotency-Key': need_key},
+            json={'request': {
+                'source_id': source_id, 'customer_id': customer_id,
+                'company': 'Auto Resume Plastics', 'kind': 'FACT_GAP',
+                'need': '需要确认联系邮箱', 'severity': 'AMBER',
+                'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '尚未确认'}],
+                'resume': '补充后继续公开研究并准备草稿', 'dedupe_key': need_key,
+            }},
+        )
+        self.assertEqual(created_need.status_code, 200, created_need.get_json())
+        inbox_id = int(created_need.get_json()['item']['trosa_inbox_id'])
+        question = next(row for row in client.get('/api/inbox').get_json()['questions']
+                        if int(row['id']) == inbox_id)
+        answer = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'], 'answer': {'fact_0': 'buyer@auto-resume.example'},
+            'idempotency_key': 'pg-auto-resume-answer',
+        })
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        self.assertTrue(answer.get_json()['sela_handoff']['automatic_run'])
+        needs = client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
+        resolved = next(row for row in needs if row['trosa_inbox_id'] == inbox_id)
+        answer_hash = module._sela_hash(resolved['human_response'])
+        prospects = client.get('/api/integrations/sela/prospects?limit=100').get_json()['prospects']
+        target = next(row for row in prospects if row['id'] == source_id)
+
+        result = client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume',
+            headers={'X-Idempotency-Key': f'sela:auto-resume:{inbox_id}:{answer_hash}'},
+            json={
+                'action': 'draft', 'source_id': source_id, 'inbox_id': inbox_id,
+                'answer_sha256': answer_hash, 'expected_revision': target['trosa_revision'],
+                'research': {
+                    'research_reason': '官网公开资料确认其加工亚克力板材。',
+                    'qualification_method': '官网公开资料',
+                    'qualification_reason': '目标业务符合开发方向。',
+                    'evidence': [{'url': 'https://auto-resume.example/about', 'quote': 'We fabricate acrylic sheets.'}],
+                    'source_urls': ['https://auto-resume.example/about'],
+                },
+                'draft': {
+                    'recipient_email': 'buyer@auto-resume.example',
+                    'subject': 'Acrylic sheet inquiry', 'body': 'Hello, I would like to learn about your product range.',
+                },
+            },
+        )
+        self.assertEqual(result.status_code, 200, result.get_json())
+        self.assertEqual(result.get_json()['status'], 'SYNCED')
+        receipt = client.post(
+            f'/api/integrations/sela/needs/{inbox_id}/resume-status',
+            json={
+                'status': 'completed', 'answer_sha256': answer_hash,
+                'run_session_id': 'pg-auto-resume-run', 'summary': '公开研究已完成。',
+            },
+        )
+        self.assertEqual(receipt.status_code, 200, receipt.get_json())
+        resolved_need = client.get(
+            f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}'
+        ).get_json()['needs']
+        self.assertEqual(len(resolved_need), 1)
+        self.assertEqual(resolved_need[0]['trosa_inbox_id'], inbox_id)
+        handoff = client.get(f'/api/inbox/questions/{inbox_id}/sela-handoff').get_json()
+        self.assertEqual(handoff['status'], 'completed')
+        recent_runs = client.get('/api/inbox').get_json()['sela_resume_runs']
+        recent = next(row for row in recent_runs if row['inbox_id'] == inbox_id)
+        self.assertEqual(recent['status'], 'completed')
+        self.assertEqual(recent['summary'], '公开研究已完成。')
+        profile = self.connection.execute(
+            "SELECT research_json::jsonb->>'research_reason' AS reason FROM trosa.agent_prospect_profiles WHERE source_id=?",
+            (source_id,),
+        ).fetchone()
+        self.assertEqual(profile['reason'], '官网公开资料确认其加工亚克力板材。')
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=?', (customer_id,),
+        ).fetchone()[0], 0)
+        outreach = self.connection.execute(
+            '''SELECT message.sent_at, message.contact_method_id, message.subject, message.body,
+                      message.legacy_payload->>'recipient_email' AS recipient
+                 FROM trosa.outreach_messages message
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=message.id
+                WHERE ref.legacy_user_id='hamid' AND ref.table_name='outreach_emails'
+                  AND message.legacy_payload->>'external_id'=?''',
+            (source_id,),
+        ).fetchone()
+        self.assertIsNotNone(outreach)
+        self.assertIsNone(outreach['sent_at'])
+        self.assertIsNone(outreach['contact_method_id'])
+        self.assertEqual(outreach['recipient'], 'buyer@auto-resume.example')
+        self.assertEqual(self.connection.execute(
+            '''SELECT count(*) FROM trosa.email_delivery_events event
+                WHERE event.outreach_message_id=(
+                    SELECT message.id FROM trosa.outreach_messages message
+                    WHERE message.legacy_payload->>'external_id'=? LIMIT 1
+                )''', (source_id,),
+        ).fetchone()[0], 0)
+
     def test_z_agent_gateway_undo_and_operation_audit_boundary(self):
         """Agent/audit writes stay canonical while old integer views remain projections."""
         from tools.postgres_rehearsal import load_fixture

@@ -317,12 +317,13 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertTrue(all('facts_hash' not in row['key'] for row in structured['fields']))
         self.assertFalse(any('audit' in row['key'] for row in structured['fields']))
 
-    def test_sela_request_effects_state_answer_does_not_start_sela(self):
+    def test_sela_request_without_prospect_is_honest_about_no_automatic_resume(self):
         self._insert_question('sela_agent_request', 'approval', '类型：FACT_GAP')
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         self.assertEqual(question['kind'], 'sela_request')
-        self.assertTrue(any('不会因此自动启动 Sela' in entry for entry in question['will_not_do']))
-        self.assertIn('Sela 后续读取', question['why_human'])
+        self.assertIn('未关联 prospect，不会自动续跑', question['completion_effects'][0])
+        self.assertIn('无法自动续跑', question['why_human'])
+        self.assertTrue(any('不会发送邮件' in entry for entry in question['will_not_do']))
 
     def test_sela_decision_only_accepts_the_options_it_requested(self):
         request = {'kind': 'DECISION', 'decision': {
@@ -344,7 +345,9 @@ class InboxQuestionModelTest(unittest.TestCase):
             'idempotency_key': 'test-sela-valid-option',
         })
         self.assertEqual(valid.status_code, 200, valid.get_data(as_text=True))
-        resolved = self.client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
+        resolved = self.client.get(
+            '/api/integrations/sela/needs?status=resolved&item_id=%d' % item_id
+        ).get_json()['needs']
         need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
         self.assertEqual(need['human_response']['selected_option'], '板材')
 
@@ -367,10 +370,11 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(row['resolution_reason'], 'retired_send_approval')
         self.assertIn('没有发送邮件', row['resolution_note'])
 
-    def test_sela_fact_answer_is_structured_for_next_run_not_written_to_contact(self):
+    def test_sela_fact_answer_is_structured_and_queues_resume_without_contact_write(self):
         customer_id, contact_id = self._insert_customer_with_contact('old@example.com')
         request = {
             'kind': 'FACT_GAP', 'session_id': 'session-123',
+            'source_id': 'prospect-1', 'candidate_id': 'prospect-1',
             'missing_facts': [{'field': 'contact_email', 'label': '确认的联系邮箱',
                                'why': 'Sela 无法从公开来源确认', 'blocking': True}],
             'resume': '补充后继续研究公开资料',
@@ -383,6 +387,8 @@ class InboxQuestionModelTest(unittest.TestCase):
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
         self.assertEqual(email_field['input_type'], 'email')
+        self.assertIn('自动排入受限续跑', question['why_human'])
+        self.assertIn('排入 Sela 自动续跑', question['completion_effects'][0])
         response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
             'revision': question['revision'],
             'answer': {'fact_0': 'fixed@example.com'},
@@ -390,14 +396,78 @@ class InboxQuestionModelTest(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
-        self.assertFalse(body['sela_handoff']['automatic_run'])
-        self.assertEqual(body['sela_handoff']['status'], 'awaiting_agent')
+        self.assertTrue(body['sela_handoff']['automatic_run'])
+        self.assertEqual(body['sela_handoff']['status'], 'queued')
         self.assertEqual(body['sela_handoff']['session_id'], 'session-123')
         resolved = self.client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
         need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
         self.assertEqual(need['human_response']['facts'][0]['field'], 'contact_email')
         self.assertEqual(need['human_response']['facts'][0]['value'], 'fixed@example.com')
         self.assertEqual(need['session_id'], 'session-123')
+        answer_hash = self.module._sela_hash(need['human_response'])
+        running = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'running', 'answer_sha256': answer_hash,
+                'run_session_id': 'sela-run-1', 'summary': '',
+            })
+        self.assertEqual(running.status_code, 200, running.get_data(as_text=True))
+        stale_queued = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'queued', 'answer_sha256': answer_hash, 'run_session_id': '',
+                'summary': 'delayed initial queue receipt',
+            })
+        self.assertEqual(stale_queued.status_code, 200, stale_queued.get_data(as_text=True))
+        self.assertTrue(stale_queued.get_json()['stale'])
+        self.assertEqual(stale_queued.get_json()['resume_run']['status'], 'running')
+        requeued = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'queued', 'answer_sha256': answer_hash, 'run_session_id': 'sela-run-1',
+                'summary': 'temporary issue; retry queued',
+            })
+        self.assertEqual(requeued.status_code, 200, requeued.get_data(as_text=True))
+        self.assertEqual(requeued.get_json()['resume_run']['status'], 'queued')
+        stale_running = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'running', 'answer_sha256': answer_hash, 'run_session_id': 'sela-run-1',
+                'summary': 'late receipt from prior attempt',
+            })
+        self.assertEqual(stale_running.status_code, 200, stale_running.get_data(as_text=True))
+        self.assertTrue(stale_running.get_json()['stale'])
+        running_again = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'running', 'answer_sha256': answer_hash,
+                'run_session_id': 'sela-run-2', 'summary': '',
+            })
+        self.assertEqual(running_again.status_code, 200, running_again.get_data(as_text=True))
+        completed = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'completed', 'answer_sha256': answer_hash,
+                'run_session_id': 'sela-run-2', 'summary': '公开研究已更新。',
+            })
+        self.assertEqual(completed.status_code, 200, completed.get_data(as_text=True))
+        stale = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'queued', 'answer_sha256': answer_hash, 'run_session_id': '',
+                'summary': 'delayed stale receipt',
+            })
+        self.assertEqual(stale.status_code, 200, stale.get_data(as_text=True))
+        self.assertTrue(stale.get_json()['stale'])
+        stale_running_terminal = self.client.post(
+            f'/api/integrations/sela/needs/{item_id}/resume-status', json={
+                'status': 'running', 'answer_sha256': answer_hash, 'run_session_id': 'sela-run-2',
+                'summary': 'delayed running receipt',
+            })
+        self.assertEqual(stale_running_terminal.status_code, 200, stale_running_terminal.get_data(as_text=True))
+        self.assertTrue(stale_running_terminal.get_json()['stale'])
+        handoff = self.client.get(f'/api/inbox/questions/{item_id}/sela-handoff').get_json()
+        self.assertEqual(handoff['status'], 'completed')
+        self.assertTrue(handoff['automatic_run'])
+        self.assertEqual(handoff['summary'], '公开研究已更新。')
+        recent_runs = self.client.get('/api/inbox').get_json()['sela_resume_runs']
+        recent = next(item for item in recent_runs if item['inbox_id'] == item_id)
+        self.assertEqual(recent['status'], 'completed')
+        self.assertEqual(recent['summary'], '公开研究已更新。')
+        self.assertNotIn('human_response', recent)
         conn = self._conn()
         try:
             self.assertEqual(conn.execute('SELECT email FROM contacts WHERE id=?', (contact_id,)).fetchone()['email'],

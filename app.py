@@ -3048,7 +3048,8 @@ def _sela_receipt_write(conn, integration, idempotency_key, request_sha256,
     )
 
 
-def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, item_id=None, dedupe_key=None):
+def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, item_id=None,
+                       dedupe_key=None, limit=None):
     """Read Inbox facts from the canonical relation, projecting only API ids.
 
     ``legacy_row_refs`` is an identifier adapter for existing HTTP clients;
@@ -3092,6 +3093,19 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
             "OR item.dedupe_key=?)"
         )
         params.extend([dedupe_key, dedupe_key])
+    order_by = (
+        'COALESCE(item.resolved_at, item.created_at) DESC, ref.legacy_id DESC'
+        if status == 'resolved' and limit else
+        'item.created_at DESC, ref.legacy_id DESC'
+    )
+    sql_limit = ''
+    if limit is not None:
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 20
+        sql_limit = ' LIMIT ?'
+        params.append(limit)
     rows = conn.execute(
         '''SELECT ref.legacy_id AS id, ar.legacy_customer_id AS customer_id,
                   item.item_type, item.title, item.content,
@@ -3119,7 +3133,7 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
               AND ar.organization_id=ref.organization_id
               AND ar.legacy_user_id=ref.legacy_user_id
             WHERE ''' + ' AND '.join(where) +
-        ''' ORDER BY item.created_at DESC, ref.legacy_id DESC''',
+        ' ORDER BY ' + order_by + sql_limit,
         params,
     ).fetchall()
     return [dict(row) for row in rows]
@@ -4258,6 +4272,7 @@ def _sela_agent_request_view(conn, row):
         'evidence': structured.get('evidence') if isinstance(structured.get('evidence'), list) else [],
         'resume': str(structured.get('resume') or ''),
         'human_response': structured.get('human_response') if isinstance(structured.get('human_response'), dict) else None,
+        'resume_run': structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else None,
         'resolution_action': str(row.get('resolution_reason') or ''),
         'status': 'OPEN' if status == 'open' else 'RESOLVED' if status == 'resolved' else 'SKIPPED',
         'resolution': str(row.get('resolution_note') or ''),
@@ -4267,13 +4282,15 @@ def _sela_agent_request_view(conn, row):
     }
 
 
-def _sela_agent_request_rows(conn, status='all'):
+def _sela_agent_request_rows(conn, status='all', limit=None, item_id=None):
     if postgres_mode():
         normalized_status = _sela_prospect_text(status, 20).lower()
         return _modern_inbox_rows(
             conn,
             status=normalized_status if normalized_status in {'open', 'resolved', 'archived'} else None,
             item_type=_SELA_AGENT_REQUEST_TYPE,
+            item_id=item_id,
+            limit=limit,
         )
     params = [_SELA_AGENT_REQUEST_TYPE]
     where = ['i.item_type=?']
@@ -4283,13 +4300,57 @@ def _sela_agent_request_rows(conn, status='all'):
         params.append(normalized_status)
     elif normalized_status not in {'', 'all'}:
         normalized_status = 'all'
+    if item_id is not None:
+        where.append('i.id=?')
+        params.append(int(item_id))
+    order_by = (
+        'COALESCE(i.resolved_at, i.created_at) DESC, i.id DESC'
+        if normalized_status == 'resolved' and limit else
+        "CASE WHEN i.status='open' THEN 0 ELSE 1 END, i.created_at DESC, i.id DESC"
+    )
+    limit_clause = ''
+    if limit is not None:
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 20
+        limit_clause = ' LIMIT ?'
+        params.append(limit)
     return conn.execute(
         '''SELECT i.* FROM inbox_items i
            WHERE ''' + ' AND '.join(where) + '''
-           ORDER BY CASE WHEN i.status='open' THEN 0 ELSE 1 END,
-                    i.created_at DESC, i.id DESC''',
+           ORDER BY ''' + order_by + limit_clause,
         params,
     ).fetchall()
+
+
+def _inbox_sela_resume_runs(conn, limit=8):
+    """Expose a small, answer-free history of automatic Sela follow-ups."""
+    runs = []
+    for raw_row in _sela_agent_request_rows(conn, 'resolved', limit=100):
+        row = dict(raw_row)
+        request = _sela_agent_request_structured(row)
+        human_response = request.get('human_response')
+        if not request.get('source_id') or not isinstance(human_response, dict) or human_response.get('status') != 'answered':
+            continue
+        resume_run = request.get('resume_run')
+        if not isinstance(resume_run, dict):
+            continue
+        status = str(resume_run.get('status') or '').lower()
+        if status not in {'queued', 'running', 'completed', 'failed', 'needs_review'}:
+            continue
+        display = _sela_request_display(row)
+        runs.append({
+            'inbox_id': int(row.get('id') or 0),
+            'company': str(request.get('company') or display.get('company') or 'Sela prospect')[:500],
+            'status': status,
+            'summary': str(resume_run.get('summary') or '')[:500],
+            'error': str(resume_run.get('error') or '')[:200],
+            'updated_at': str(resume_run.get('updated_at') or row.get('resolved_at') or row.get('created_at') or ''),
+        })
+        if len(runs) >= max(1, min(int(limit or 8), 20)):
+            break
+    return runs
 
 
 def _sela_resolve_agent_request(conn, item_id, action, resolution, now):
@@ -5293,6 +5354,224 @@ def sela_integration_upsert_prospect():
     return jsonify(response_body)
 
 
+@app.route('/api/integrations/sela/prospects/<source_id>/resume', methods=['POST'])
+@login_required
+def sela_integration_auto_resume_result(source_id):
+    """Apply only research-profile facts or a non-sent draft to an existing cold prospect."""
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id or ''):
+        return jsonify({'success': False, 'error': 'Prospect source_id 无效'}), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': 'Sela 续跑结果必须是 JSON 对象'}), 400
+    allowed_keys = {'action', 'source_id', 'inbox_id', 'answer_sha256', 'expected_revision', 'research', 'draft', 'idempotency_key'}
+    if set(payload) - allowed_keys or str(payload.get('source_id') or source_id) != source_id:
+        return jsonify({'success': False, 'error': 'Sela 续跑结果超出允许范围'}), 400
+    action = _sela_prospect_text(payload.get('action'), 20).lower()
+    if action not in {'research', 'draft'}:
+        return jsonify({'success': False, 'error': 'Sela 续跑只允许研究或准备草稿'}), 400
+    try:
+        inbox_id = int(payload.get('inbox_id') or 0)
+    except (TypeError, ValueError):
+        inbox_id = 0
+    answer_sha256 = _sela_prospect_text(payload.get('answer_sha256'), 64).lower()
+    if inbox_id <= 0 or not re.fullmatch(r'[a-f0-9]{64}', answer_sha256):
+        return jsonify({'success': False, 'error': 'Sela 续跑缺少有效的 Inbox 回答引用'}), 400
+    idempotency_key = str(request.headers.get('X-Idempotency-Key') or payload.get('idempotency_key') or '').strip()
+    body_key = str(payload.get('idempotency_key') or '').strip()
+    expected_idempotency_key = f'sela:auto-resume:{inbox_id}:{answer_sha256}'
+    if (not idempotency_key or len(idempotency_key) > 200
+            or (body_key and idempotency_key != body_key)
+            or idempotency_key != expected_idempotency_key):
+        return jsonify({'success': False, 'error': 'Sela 续跑幂等键无效'}), 400
+    request_hash = _sela_hash({key: value for key, value in payload.items() if key != 'idempotency_key'})
+    integration = _SELA_PROSPECT_INTEGRATION + ':auto-resume'
+    conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        receipt = _sela_receipt_read(conn, integration, idempotency_key)
+        if receipt:
+            response = json.loads(receipt['response_json'])
+            if receipt['request_sha256'] != request_hash:
+                # A timed-out worker may rerun the model after Trosa already
+                # committed. The answer hash is the logical job key; return the
+                # first committed result instead of applying a second variant.
+                same_job = (
+                    str(response.get('source_id') or '') == source_id
+                    and int(response.get('trosa_inbox_id') or 0) == inbox_id
+                    and str(response.get('answer_sha256') or '') == answer_sha256
+                )
+                if not same_job:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '该 Inbox 答案已绑定另一项续跑结果'}), 409
+            conn.commit()
+            return jsonify(response)
+        inbox_rows = [dict(row) for row in _sela_agent_request_rows(conn, 'resolved', item_id=inbox_id)]
+        inbox_row = next((row for row in inbox_rows if int(row.get('id') or 0) == inbox_id), None)
+        if not inbox_row:
+            conn.rollback()
+            return jsonify({'success': False, 'error': '找不到已解决的 Sela Inbox 请求'}), 404
+        request_json = _sela_agent_request_structured(inbox_row)
+        human_response = request_json.get('human_response') if isinstance(request_json.get('human_response'), dict) else {}
+        if (str(request_json.get('source_id') or '') != source_id
+                or human_response.get('status') != 'answered'
+                or _sela_hash(human_response) != answer_sha256):
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Inbox 回答与续跑目标不匹配'}), 409
+
+        profile = _sela_profile_by_source(conn, source_id)
+        customer = _sela_profile_customer(conn, int(profile['customer_id'])) if profile else None
+        if not profile or not customer:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Trosa 中找不到现有 Prospect'}), 404
+        profile = dict(profile)
+        prospect_view = _sela_prospect_view(conn, profile)
+        if (prospect_view.get('lifecycle_stage') != 'cold_prospect'
+                or prospect_view.get('customer_linked')
+                or prospect_view.get('lifecycle_rejected')
+                or prospect_view.get('do_not_contact')):
+            response = {'success': True, 'status': 'REVIEW', 'reason': 'TROSA_STAGE_REQUIRES_TROSA',
+                        'source_id': source_id, 'trosa_inbox_id': inbox_id, 'answer_sha256': answer_sha256}
+            _sela_receipt_write(conn, integration, idempotency_key, request_hash,
+                                candidate_id=source_id, customer_id=int(customer['id']), response=response, now=_sela_now())
+            conn.commit()
+            return jsonify(response)
+        expected_revision = _sela_prospect_text(payload.get('expected_revision'), 128)
+        current_revision = _sela_prospect_revision(conn, profile, customer)
+        if not expected_revision or expected_revision != current_revision:
+            response = {'success': True, 'status': 'REVIEW', 'reason': 'TROSA_REVISION_CONFLICT',
+                        'source_id': source_id, 'trosa_id': int(customer['id']),
+                        'trosa_inbox_id': inbox_id, 'answer_sha256': answer_sha256, 'revision': current_revision}
+            _sela_receipt_write(conn, integration, idempotency_key, request_hash,
+                                candidate_id=source_id, customer_id=int(customer['id']), response=response, now=_sela_now())
+            conn.commit()
+            return jsonify(response)
+
+        raw_research = payload.get('research') if isinstance(payload.get('research'), dict) else {}
+        allowed_research = {'research_reason', 'qualification_method', 'qualification_reason', 'evidence', 'source_urls'}
+        if set(raw_research) - allowed_research:
+            conn.rollback()
+            return jsonify({'success': False, 'error': '研究结果超出允许字段'}), 400
+        prior_research = _sela_json_value(profile.get('research_json'), {})
+        updated_research = dict(prior_research) if isinstance(prior_research, dict) else {}
+        for key in ('research_reason', 'qualification_method', 'qualification_reason'):
+            value = _sela_prospect_text(raw_research.get(key), 4000 if key != 'qualification_method' else 200)
+            if value:
+                updated_research[key] = value
+        evidence = []
+        for item in raw_research.get('evidence', [])[:40] if isinstance(raw_research.get('evidence'), list) else []:
+            if not isinstance(item, dict):
+                continue
+            url = _sela_prospect_text(item.get('url'), 2000)
+            quote = _sela_prospect_text(item.get('quote'), 2000)
+            host = urlparse(url).hostname or ''
+            try:
+                is_public_ip = ipaddress.ip_address(host).is_global
+            except ValueError:
+                is_public_ip = True
+            if (urlparse(url).scheme not in {'http', 'https'} or not host
+                    or host.lower() in {'localhost', 'localhost.localdomain'}
+                    or host.lower().endswith(('.local', '.internal')) or not is_public_ip or not quote):
+                conn.rollback()
+                return jsonify({'success': False, 'error': '研究证据必须是可访问的公开网页'}), 400
+            evidence.append({'label': '公开来源', 'type': 'public', 'text': quote,
+                             'excerpt': quote, 'source_url': url, 'url': url})
+        if evidence:
+            updated_research['evidence'] = evidence
+        source_urls = []
+        for url in raw_research.get('source_urls', [])[:40] if isinstance(raw_research.get('source_urls'), list) else []:
+            value = _sela_prospect_text(url, 2000)
+            host = urlparse(value).hostname or ''
+            try:
+                is_public_ip = ipaddress.ip_address(host).is_global
+            except ValueError:
+                is_public_ip = True
+            if (urlparse(value).scheme not in {'http', 'https'} or not host
+                    or host.lower() in {'localhost', 'localhost.localdomain'}
+                    or host.lower().endswith(('.local', '.internal')) or not is_public_ip):
+                conn.rollback()
+                return jsonify({'success': False, 'error': '来源链接必须是公开网页'}), 400
+            source_urls.append(value)
+        if source_urls:
+            updated_research['source_urls'] = list(dict.fromkeys(source_urls))
+        prior_evidence = updated_research.get('evidence') if isinstance(updated_research.get('evidence'), list) else []
+        if not (source_urls or evidence or prior_evidence or updated_research.get('source_urls')):
+            conn.rollback()
+            return jsonify({'success': False, 'error': '研究结果缺少公开来源'}), 400
+
+        now = _sela_now()
+        profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+        profile_scope = 'organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND ' if postgres_mode() else ''
+        research_placeholder = '?::jsonb' if postgres_mode() else '?'
+        conn.execute(f'''UPDATE {profile_relation} SET research_json={research_placeholder}, updated_at=?
+                         WHERE {profile_scope}id=?''',
+                     (json.dumps(updated_research, ensure_ascii=False), now, profile['id']))
+        if action == 'draft':
+            draft = payload.get('draft') if isinstance(payload.get('draft'), dict) else {}
+            if set(draft) - {'recipient_email', 'subject', 'body'}:
+                conn.rollback()
+                return jsonify({'success': False, 'error': '草稿内容超出允许字段'}), 400
+            subject = _sela_prospect_text(draft.get('subject'), 1000)
+            body = str(draft.get('body') or '').strip()[:16000]
+            recipient_email = _sela_prospect_text(draft.get('recipient_email'), 320)
+            if not subject or not body:
+                conn.rollback()
+                return jsonify({'success': False, 'error': '草稿必须包含主题和正文'}), 400
+            if recipient_email:
+                try:
+                    recipient_email = validate_email_address(recipient_email, check_deliverability=False).normalized
+                except EmailNotValidError:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '草稿收件地址格式无效'}), 400
+            allowed_recipient_emails = {_canonical_email(prospect_view.get('email'))} - {''}
+            for fact in human_response.get('facts', []) if isinstance(human_response.get('facts'), list) else []:
+                if isinstance(fact, dict) and str(fact.get('field') or '').lower() == 'contact_email':
+                    value = _canonical_email(fact.get('value'))
+                    if value:
+                        allowed_recipient_emails.add(value)
+            if recipient_email and _canonical_email(recipient_email) not in allowed_recipient_emails:
+                conn.rollback()
+                return jsonify({'success': False, 'error': '草稿收件地址未由现有资料或人工回答确认'}), 409
+            current_profile_row = _sela_profile_by_source(conn, source_id)
+            if not current_profile_row:
+                conn.rollback()
+                return jsonify({'success': False, 'error': 'Prospect 已不存在'}), 404
+            current = _sela_prospect_view(conn, current_profile_row)
+            if (current.get('outreach_status') in {'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'PAUSED', 'DRAFT_READY', 'GMAIL_DRAFTED'}
+                    or current.get('sent_at')):
+                conn.rollback()
+                return jsonify({'success': True, 'status': 'REVIEW', 'reason': 'EXISTING_OUTREACH_REQUIRES_REVIEW',
+                                'source_id': source_id, 'trosa_inbox_id': inbox_id}), 200
+            profile_now = dict(current_profile_row)
+            transport = _sela_json_value(profile_now.get('transport_json'), {})
+            if transport.get('gmail_draft_id'):
+                conn.rollback()
+                return jsonify({'success': True, 'status': 'REVIEW', 'reason': 'EXISTING_GMAIL_DRAFT_REQUIRES_REVIEW',
+                                'source_id': source_id, 'trosa_inbox_id': inbox_id}), 200
+            _sela_v2_upsert_outreach(conn, int(customer['id']), source_id, {
+                'outreach_status': 'DRAFT_READY', 'subject': subject, 'email_draft': body,
+                'email': recipient_email, 'contact': {},
+            }, now)
+        _record_operation_log(conn, 'UPDATE', 'sela_auto_resume', int(customer['id']),
+                              f'sela auto resume {source_id}', now)
+        response = {'success': True, 'status': 'SYNCED', 'action': action, 'source_id': source_id,
+                    'trosa_inbox_id': inbox_id, 'answer_sha256': answer_sha256,
+                    'summary': '研究已更新。' if action == 'research' else '未发送草稿已保存。'}
+        _sela_receipt_write(conn, integration, idempotency_key, request_hash,
+                            candidate_id=source_id, customer_id=int(customer['id']), response=response, now=now)
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'success': False, 'error': error.message}), error.status
+    except Exception:
+        conn.rollback()
+        logger.exception('Sela auto-resume result write failed for source %s', source_id)
+        return jsonify({'success': False, 'error': 'Sela 续跑结果写入失败'}), 500
+    finally:
+        conn.close()
+    schedule_safety_backup('sela_auto_resume_result')
+    return jsonify(response)
+
+
 @app.route('/api/integrations/sela/prospects/<source_id>/email-verification', methods=['POST'])
 @login_required
 def sela_integration_prospect_email_verification(source_id):
@@ -5634,9 +5913,16 @@ def sela_integration_upsert_exclusion():
 def sela_integration_agent_needs():
     """Read Sela-originated human requests from Trosa's Inbox."""
     status = _sela_prospect_text(request.args.get('status') or 'open', 20).lower()
+    raw_item_id = request.args.get('item_id')
+    try:
+        item_id = int(raw_item_id) if raw_item_id not in (None, '') else None
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Inbox 请求编号无效'}), 400
+    if item_id is not None and item_id <= 0:
+        return jsonify({'success': False, 'error': 'Inbox 请求编号无效'}), 400
     conn = get_db()
     try:
-        rows = _sela_agent_request_rows(conn, status)
+        rows = _sela_agent_request_rows(conn, status, item_id=item_id)
         needs = [_sela_agent_request_view(conn, row) for row in rows]
     finally:
         conn.close()
@@ -5646,6 +5932,132 @@ def sela_integration_agent_needs():
         'needs': needs,
         'inbox_api': 'trosa-v1',
     })
+
+
+def _save_sela_inbox_resume_status(conn, *, inbox_item_id, request_json):
+    """Persist the bounded execution receipt beside a resolved Sela request."""
+    request_json = str(request_json or '')[:40000]
+    if not postgres_mode():
+        changed = conn.execute(
+            '''UPDATE inbox_items SET request_json=?
+                 WHERE id=? AND item_type='sela_agent_request' AND status='resolved' ''',
+            (request_json, inbox_item_id),
+        )
+    else:
+        changed = conn.execute(
+            '''UPDATE trosa.inbox_items item
+                  SET legacy_payload=coalesce(item.legacy_payload, '{}'::jsonb)
+                      || jsonb_build_object('sela_request_json', ?::text)
+                 FROM trosa.legacy_row_refs ref
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id=trosa.compat_current_user()
+                  AND ref.table_name='inbox_items' AND ref.legacy_id=?
+                  AND item.id=ref.target_id
+                  AND item.item_type='sela_agent_request' AND item.status='resolved' ''',
+            (request_json, inbox_item_id),
+        )
+    if not changed.rowcount:
+        raise ValueError('Sela Inbox request is not resolved or visible')
+
+
+@app.route('/api/integrations/sela/needs/<int:item_id>/resume-status', methods=['POST'])
+@login_required
+def sela_integration_update_resume_status(item_id):
+    """Store execution state for an already answered Sela Inbox request."""
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': '续跑状态必须是 JSON 对象'}), 400
+    status = _sela_prospect_text(payload.get('status'), 30).lower()
+    if status not in {'queued', 'running', 'completed', 'failed', 'needs_review'}:
+        return jsonify({'success': False, 'error': '续跑状态无效'}), 400
+    answer_sha256 = _sela_prospect_text(payload.get('answer_sha256'), 64).lower()
+    if not re.fullmatch(r'[a-f0-9]{64}', answer_sha256):
+        return jsonify({'success': False, 'error': '回答校验值无效'}), 400
+    run_session_id = _sela_prospect_text(payload.get('run_session_id'), 128)
+    summary = _sela_prospect_text(payload.get('summary'), 500)
+    error = _sela_prospect_text(payload.get('error'), 200)
+    conn = get_db()
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        if postgres_mode():
+            row = next(iter(_modern_inbox_rows(conn, item_type=_SELA_AGENT_REQUEST_TYPE, item_id=item_id)), None)
+        else:
+            row = conn.execute(
+                'SELECT * FROM inbox_items WHERE id=? AND item_type=? LIMIT 1',
+                (item_id, _SELA_AGENT_REQUEST_TYPE),
+            ).fetchone()
+        row_status = row.get('status') if isinstance(row, dict) else (row['status'] if row else '')
+        if not row or str(row_status or '').lower() != 'resolved':
+            conn.rollback()
+            return jsonify({'success': False, 'error': '找不到已解决的 Sela Inbox 请求'}), 404
+        row = dict(row)
+        structured = _sela_agent_request_structured(row)
+        human_response = structured.get('human_response') if isinstance(structured.get('human_response'), dict) else {}
+        if human_response.get('status') != 'answered' or _sela_hash(human_response) != answer_sha256:
+            conn.rollback()
+            return jsonify({'success': False, 'error': '回答已变化或尚未提交'}), 409
+        current = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
+        current_status = str(current.get('status') or 'queued').lower()
+        terminal = {'completed', 'failed', 'needs_review'}
+        current_run = str(current.get('run_session_id') or '')
+        transitions = {
+            'queued': {'queued', 'running', 'completed', 'failed', 'needs_review'},
+            'running': {'running', 'queued', 'completed', 'failed', 'needs_review'},
+            'completed': {'completed'}, 'failed': {'failed'}, 'needs_review': {'needs_review'},
+        }
+        if current_status in terminal and status in {'queued', 'running'}:
+            conn.commit()
+            return jsonify({
+                'success': True, 'status': 'SYNCED', 'stale': True,
+                'resume_run': current,
+            })
+        if current_status == 'queued' and status == 'running' and current_run and run_session_id == current_run:
+            conn.commit()
+            return jsonify({
+                'success': True, 'status': 'SYNCED', 'stale': True,
+                'resume_run': current,
+            })
+        if status not in transitions.get(current_status, set()):
+            conn.rollback()
+            return jsonify({'success': False, 'error': '续跑状态不能回退或跨越'}), 409
+        if current_status == 'running' and current_run and status in {'queued', 'running', 'completed', 'failed', 'needs_review'} and run_session_id != current_run:
+            if status == 'queued':
+                conn.commit()
+                return jsonify({
+                    'success': True, 'status': 'SYNCED', 'stale': True,
+                    'resume_run': current,
+                })
+            conn.rollback()
+            return jsonify({'success': False, 'error': '续跑 session 不匹配'}), 409
+        now = _calendar_now_text()
+        updated = dict(current)
+        updated.update({
+            'status': status,
+            'answer_sha256': answer_sha256,
+            'run_session_id': run_session_id or current_run,
+            'summary': summary,
+            'error': error,
+            'updated_at': now,
+        })
+        if status == 'running' and not updated.get('started_at'):
+            updated['started_at'] = now
+        if status in terminal:
+            updated['completed_at'] = now
+        structured['resume_run'] = updated
+        _save_sela_inbox_resume_status(
+            conn, inbox_item_id=item_id,
+            request_json=json.dumps(structured, ensure_ascii=False),
+        )
+        conn.commit()
+        with _INBOX_CACHE_LOCK:
+            _INBOX_CACHE.clear()
+        return jsonify({'success': True, 'status': 'SYNCED', 'resume_run': updated})
+    except Exception:
+        conn.rollback()
+        logger.exception('Sela Inbox resume status update failed: %s', item_id)
+        return jsonify({'success': False, 'error': '续跑状态未保存'}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/api/integrations/sela/needs', methods=['POST'])
@@ -10269,7 +10681,13 @@ def _question_why(kind, primary):
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return 'Sela 发现这条 prospect 可能属于历史排除主体；你的决定会更新 Trosa 中的排除状态。'
     if kind == _inbox_questions.QUESTION_SELA_REQUEST:
-        return 'Sela 缺少继续研究所需的事实或需要你的业务判断；回答会保存并供 Sela 后续读取。'
+        request = _sela_agent_request_structured(primary or {})
+        request_kind = str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
+        if request_kind == 'SEND_APPROVAL':
+            return '这是旧版发送审批请求；回答只会关闭请求，不会发送邮件或启动 Sela。'
+        if request.get('source_id'):
+            return 'Sela 缺少继续研究所需的事实或需要你的业务判断；保存回答后会自动排入受限续跑，继续公开研究或准备未发送草稿。'
+        return 'Sela 缺少继续研究所需的事实或需要你的业务判断；回答会保存在 Trosa，但这条请求没有关联 prospect，无法自动续跑。'
     return '系统缺少作出安全判断所需的信息。'
 
 
@@ -10312,9 +10730,12 @@ def _question_completion_effects(kind, primary=None):
     """What actually happens when the human answer is recorded (honest, per kind)."""
     if kind == _inbox_questions.QUESTION_SELA_REQUEST:
         request = _sela_agent_request_structured(primary or {})
-        if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
+        request_kind = str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
+        if request_kind == 'SEND_APPROVAL':
             return ['关闭这条旧发送审批请求；不会触发邮件发送。']
-        return ['记录你的结构化回答并关闭请求；Sela 可在下一次运行时读取。']
+        if request.get('source_id'):
+            return ['记录结构化回答并关闭请求；保存后排入 Sela 自动续跑，继续公开研究或准备未发送草稿。']
+        return ['记录结构化回答并关闭请求；此请求未关联 prospect，不会自动续跑。']
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['保存主体判断并更新 Trosa 中的 Sela 排除状态。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -10334,7 +10755,7 @@ def _question_will_not_do(kind, primary=None):
         request = _sela_agent_request_structured(primary or {})
         if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
             return ['不会发送邮件，也不会创建客户、联系人或待办。']
-        return ['不会因此自动启动 Sela；不会创建客户、联系人或待办，也不会发送邮件。']
+        return ['不会发送邮件，不会创建或修改客户、联系人、待办或业务阶段。']
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['不会新建客户或联系人；不会发送邮件。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -10642,6 +11063,31 @@ def _archive_inbox_question_group(conn, item_id, *, changed_at, resolution_sourc
     return item_ids
 
 
+@app.route('/api/inbox/questions/<int:item_id>/sela-handoff', methods=['GET'])
+@login_required
+def get_inbox_sela_handoff_status(item_id):
+    """Return only the execution receipt for one resolved Sela Inbox item."""
+    conn = get_db()
+    try:
+        rows = [dict(item) for item in _sela_agent_request_rows(conn, 'resolved', item_id=item_id)]
+        row = next((item for item in rows if int(item.get('id') or 0) == item_id), None)
+        if not row:
+            return jsonify({'success': False, 'error': '找不到已解决的 Sela Inbox 请求'}), 404
+        structured = _sela_agent_request_structured(row)
+        resume_run = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
+        return jsonify({
+            'success': True,
+            'status': str(resume_run.get('status') or 'awaiting_agent'),
+            'automatic_run': bool(structured.get('source_id')),
+            'summary': str(resume_run.get('summary') or '')[:500],
+            'error': str(resume_run.get('error') or '')[:200],
+            'updated_at': str(resume_run.get('updated_at') or ''),
+            'run_session_id': str(resume_run.get('run_session_id') or ''),
+        })
+    finally:
+        conn.close()
+
+
 @app.route('/api/inbox', methods=['GET'])
 @login_required
 def get_inbox():
@@ -10661,7 +11107,10 @@ def get_inbox():
         matches_by_item = _inbox_capture_suggestions(conn, items)
         questions = _build_inbox_questions(items, matches_by_item)
         counts = _inbox_question_counts(questions, items)
-        payload = {'items': items, 'questions': questions, 'counts': counts}
+        payload = {
+            'items': items, 'questions': questions, 'counts': counts,
+            'sela_resume_runs': _inbox_sela_resume_runs(conn),
+        }
     finally:
         conn.close()
 
@@ -11451,6 +11900,15 @@ def _sela_human_response(row, answer, *, responded_at, responded_by):
     }
     updated = dict(payload)
     updated['human_response'] = human_response
+    if str(payload.get('source_id') or '').strip():
+        updated['resume_run'] = {
+            'status': 'queued',
+            'answer_sha256': _sela_hash(human_response),
+            'run_session_id': '',
+            'summary': '',
+            'error': '',
+            'updated_at': responded_at,
+        }
     summary = []
     if selected_option:
         summary.append('选择：' + selected_option)
@@ -11568,10 +12026,19 @@ def respond_to_inbox_question(item_id):
                     inbox_entities.append(_undo_entity('inbox_items', undo_item_id, restored, current))
             undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
                 [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, '撤销 Inbox 邮箱更正')
+        structured_sela_request = sela_response.get('payload', {}) if isinstance(sela_response, dict) else {}
+        resume_run = structured_sela_request.get('resume_run') if isinstance(structured_sela_request.get('resume_run'), dict) else {}
+        auto_resume = bool(
+            sela_response and sela_response.get('reason') == 'answered'
+            and structured_sela_request.get('source_id')
+            and resume_run.get('status') == 'queued'
+        )
         next_system_step = (
             '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
             if sela_response and sela_response.get('reason') == 'retired_send_approval' else
-            '回答已保存到 Trosa；Sela 不会因此自动启动，可在下一次 Agent 运行时读取。'
+            '回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。'
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume else
+            '回答已保存，但请求没有唯一 Prospect 关联；Sela 不能自动继续。'
             if kind == _inbox_questions.QUESTION_SELA_REQUEST else
             '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
             if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW else
@@ -11584,9 +12051,10 @@ def respond_to_inbox_question(item_id):
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
         if sela_response:
             response['sela_handoff'] = {
-                'status': 'awaiting_agent',
-                'automatic_run': False,
-                'session_id': _sela_agent_request_structured(row).get('session_id') or '',
+                'status': 'queued' if auto_resume else 'awaiting_agent',
+                'automatic_run': auto_resume,
+                'session_id': structured_sela_request.get('session_id') or '',
+                'trosa_inbox_id': int(item_id),
             }
         remaining_items = _load_open_inbox_items(conn)
         response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}), remaining_items)

@@ -1402,6 +1402,10 @@ async function loadInbox() {
     inboxItems = data.items || [];
     inboxQuestions = data.questions || [];
     _inboxQuestionsContractLoaded = Array.isArray(data.questions);
+    inboxState.selaRuns = Array.isArray(data.sela_resume_runs) ? data.sela_resume_runs : [];
+    inboxState.selaRuns.forEach(function(run) {
+      if (run && (run.status === 'queued' || run.status === 'running')) startSelaInboxHandoffWatch(run.inbox_id);
+    });
     _captureMatches = {};
     // 服务端问题模型已带归属建议，直接种入行内一键归属，无需二次请求。
     inboxQuestions.forEach(function(question) {
@@ -1584,7 +1588,7 @@ var INBOX_QUESTION_FILTER_LABELS = {
 var INBOX_QUESTION_FILTER_ORDER = ['all', 'identity', 'reply', 'fact_request', 'investigation_request', 'sela_request', 'exclusion_review', 'approval', 'identity_review'];
 
 var _inboxExpanded = new Set();
-var inboxState = { questions: [], counts: {}, activeFilter: 'all', expandedQuestionId: '', draftResponses: {}, pendingQuestionId: '', uploadStates: {}, analysisStates: {}, inlineErrors: {}, responseAttempts: {}, analysisResolved: false };
+var inboxState = { questions: [], counts: {}, activeFilter: 'all', expandedQuestionId: '', draftResponses: {}, pendingQuestionId: '', uploadStates: {}, analysisStates: {}, inlineErrors: {}, responseAttempts: {}, analysisResolved: false, selaRuns: [] };
 
 function toggleInboxItem(key) {
   if (_inboxExpanded.has(key)) _inboxExpanded.delete(key);
@@ -1636,6 +1640,7 @@ function inboxQuestionFilter(kind) {
 }
 function renderInboxQuestionWorkspace(counts) {
   inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
+  renderSelaInboxRuns(inboxState.selaRuns || []);
   var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = counts.all || inboxState.questions.length || '';
   var overview = document.getElementById('inboxOverview');
   if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>项待确认</span>';
@@ -1649,6 +1654,27 @@ function renderInboxQuestionWorkspace(counts) {
   hydrateInboxPickers();
 }
 function setInboxQuestionFilter(kind) { inboxState.activeFilter = kind; renderInboxQuestionWorkspace(inboxState.counts); }
+function renderSelaInboxRuns(runs) {
+  var section = document.getElementById('inboxSelaRuns');
+  if (!section) {
+    var list = document.getElementById('inboxList');
+    if (!list || !list.parentNode) return;
+    section = document.createElement('section');
+    section.id = 'inboxSelaRuns';
+    section.className = 'inbox-sela-runs';
+    section.setAttribute('aria-live', 'polite');
+    section.hidden = true;
+    list.parentNode.insertBefore(section, list.nextSibling);
+  }
+  if (!runs.length) { section.hidden = true; section.innerHTML = ''; return; }
+  var labels = { queued: '排队中', running: '正在续跑', completed: '已完成', failed: '运行失败', needs_review: '需要复核' };
+  section.hidden = false;
+  section.innerHTML = '<div class="inbox-sela-runs-heading"><strong>Sela 自动续跑</strong><span>回答保存后的执行状态</span></div><ul>' + runs.map(function(run) {
+    var status = String(run.status || '').toLowerCase();
+    var detail = run.error || run.summary || (status === 'queued' ? '已排队，等待 Sela 续跑服务领取。' : status === 'running' ? '正在继续公开研究或准备未发送草稿。' : status === 'completed' ? '后续研究与草稿准备已完成。' : '需要人工复核后才能继续。');
+    return '<li class="inbox-sela-run" data-status="' + escapeHtml(status) + '"><div><strong>' + escapeHtml(run.company || 'Sela prospect') + '</strong><span class="inbox-sela-run-status">' + escapeHtml(labels[status] || '状态未知') + '</span></div><p>' + escapeHtml(detail) + '</p><small>' + escapeHtml(formatDate(run.updated_at || '')) + '</small></li>';
+  }).join('') + '</ul><p class="inbox-sela-runs-boundary">自动续跑只做公开研究和未发送草稿；不会发送邮件或修改客户、联系人、待办和业务阶段。</p>';
+}
 function renderInboxQuestionCard(q) {
   var open = inboxState.expandedQuestionId === q.id, subject = (q.subject && q.subject.company) || '待确认主体';
   if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</small></button></article>';
@@ -1788,6 +1814,35 @@ function inboxResponseAttempt(id) { var key = 'trosa-inbox-response-attempt-' + 
 function advanceInboxResponseAttempt(id) { var next = inboxResponseAttempt(id) + 1; inboxState.responseAttempts[id] = next; sessionStorage.setItem('trosa-inbox-response-attempt-' + id, String(next)); }
 function openInboxQuestion(id) { inboxState.expandedQuestionId = String(id); renderInboxQuestionWorkspace(inboxState.counts); }
 function closeInboxQuestion() { inboxState.expandedQuestionId = ''; renderInboxQuestionWorkspace(inboxState.counts); if (inboxState.analysisResolved) { inboxState.analysisResolved = false; loadInbox(); } }
+var _selaInboxHandoffWatchers = {};
+function startSelaInboxHandoffWatch(questionId) {
+  var id = String(questionId || '');
+  if (!id || _selaInboxHandoffWatchers[id]) return;
+  _selaInboxHandoffWatchers[id] = true;
+  watchSelaInboxHandoff(id).finally(function() { delete _selaInboxHandoffWatchers[id]; });
+}
+async function watchSelaInboxHandoff(questionId) {
+  var lastStatus = 'queued';
+  for (var attempt = 0; attempt < 48; attempt++) {
+    await new Promise(function(resolve) { window.setTimeout(resolve, 15000); });
+    try {
+      var state = await api('/api/inbox/questions/' + encodeURIComponent(questionId) + '/sela-handoff', { retryAttempts: 1, retryDelayMs: 150 });
+      if (state.status !== lastStatus) {
+        lastStatus = state.status;
+        if (state.status === 'running') showToast('Sela 已开始续跑，正在处理公开研究或未发送草稿。', 'info');
+        loadInbox();
+      }
+      if (state.status === 'completed' || state.status === 'failed' || state.status === 'needs_review') {
+        var message = state.summary || (state.status === 'completed' ? 'Sela 已完成后续研究/准备。' : 'Sela 未能自动完成，仍可继续人工处理。');
+        showToast(escapeHtml(message), state.status === 'completed' ? 'success' : state.status === 'needs_review' ? 'warning' : 'error');
+        loadInbox();
+        return;
+      }
+    } catch (_) {}
+  }
+  showToast('Sela 仍在排队或处理中；最新状态保留在 Inbox 的续跑记录中。', 'info');
+  loadInbox();
+}
 async function submitInboxQuestion(id) {
   var q = inboxState.questions.find(function(x) { return String(x.id) === String(id); });
   var card = document.getElementById('inbox-question-' + id);
@@ -1822,6 +1877,9 @@ async function submitInboxQuestion(id) {
       });
     } else {
       showToast(result.next_system_step || '回答已保存，问题已关闭。', 'success');
+    }
+    if (result.sela_handoff && result.sela_handoff.automatic_run) {
+      startSelaInboxHandoffWatch(result.sela_handoff.trosa_inbox_id || result.resolved_question_id || id);
     }
   } catch (e) {
     inboxState.pendingQuestionId = '';

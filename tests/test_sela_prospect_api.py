@@ -562,6 +562,109 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(resolved_repeat.status_code, 200)
         self.assertEqual(resolved_repeat.get_json(), resolved.get_json())
 
+    def test_answered_inbox_can_save_only_an_unsent_research_backed_draft(self):
+        source_id = 'resume-draft-1'
+        body = prospect(source_id)
+        body.update({
+            'contact': {}, 'outreach_status': '', 'subject': '', 'email_draft': '',
+            'gmail_draft_id': '', 'gmail_thread_id': '', 'email': '',
+        })
+        created = self.post_prospect(body, 'sela-v2:resume-draft:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = int(created.get_json()['trosa_id'])
+
+        need_key = 'sela:resume-draft:need'
+        need = self.client.post('/api/integrations/sela/needs', json={
+            'request': {
+                'source_id': source_id, 'candidate_id': source_id,
+                'customer_id': customer_id, 'company': 'Acrílicos S.A.',
+                'kind': 'FACT_GAP', 'severity': 'AMBER', 'need': '确认业务邮箱后继续研究',
+                'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '当前无已确认邮箱'}],
+                'resume': '补充后继续研究并准备未发送草稿', 'dedupe_key': need_key,
+            }, 'idempotency_key': need_key,
+        }, headers=self.headers(need_key))
+        self.assertEqual(need.status_code, 200, need.get_data(as_text=True))
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+
+        self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        question = next(row for row in self.client.get('/api/inbox').get_json()['questions']
+                        if int(row['id']) == inbox_id)
+        answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},
+            'idempotency_key': 'resume-draft-answer-1',
+        })
+        self.assertEqual(answered.status_code, 200, answered.get_data(as_text=True))
+        self.assertTrue(answered.get_json()['sela_handoff']['automatic_run'])
+        resolved = self.client.get('/api/integrations/sela/needs?status=resolved', headers=self.headers())
+        self.assertEqual(resolved.status_code, 200, resolved.get_data(as_text=True))
+        resolved_need = next(row for row in resolved.get_json()['needs'] if row['trosa_inbox_id'] == inbox_id)
+        answer_hash = self.module._sela_hash(resolved_need['human_response'])
+        listed = self.client.get('/api/integrations/sela/prospects?limit=100', headers=self.headers())
+        target = next(row for row in listed.get_json()['prospects'] if row['id'] == source_id)
+
+        resume_key = f'sela:auto-resume:{inbox_id}:{answer_hash}'
+        resume_payload = {
+            'action': 'draft', 'source_id': source_id, 'inbox_id': inbox_id,
+            'answer_sha256': answer_hash, 'expected_revision': target['trosa_revision'],
+            'research': {
+                'research_reason': '官网确认主营亚克力板材加工。',
+                'qualification_method': '官网公开资料',
+                'qualification_reason': '公开页面展示板材加工业务。',
+                'evidence': [{'url': 'https://acrilicos.example/about', 'quote': 'We fabricate acrylic sheets.'}],
+                'source_urls': ['https://acrilicos.example/about'],
+            },
+            'draft': {
+                'recipient_email': 'buyer@acrilicos.example',
+                'subject': 'Acrylic sheet inquiry',
+                'body': 'Hello, I would like to learn about your acrylic sheet range.',
+            },
+        }
+        rejected_payload = dict(resume_payload)
+        rejected_payload['draft'] = dict(resume_payload['draft'], recipient_email='unconfirmed@elsewhere.example')
+        rejected = self.client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume', json=rejected_payload,
+            headers=self.headers(resume_key),
+        )
+        self.assertEqual(rejected.status_code, 409, rejected.get_data(as_text=True))
+
+        saved = self.client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume', json=resume_payload,
+            headers=self.headers(resume_key),
+        )
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        self.assertEqual(saved.get_json()['status'], 'SYNCED')
+        replay_payload = dict(resume_payload)
+        replay_payload['draft'] = dict(resume_payload['draft'], body='A different retry must not overwrite the first saved draft.')
+        replay = self.client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume', json=replay_payload,
+            headers=self.headers(resume_key),
+        )
+        self.assertEqual(replay.status_code, 200, replay.get_data(as_text=True))
+        self.assertEqual(replay.get_json(), saved.get_json())
+
+        conn = self.hamid_db()
+        try:
+            profile = conn.execute(
+                'SELECT research_json FROM agent_prospect_profiles WHERE source_id=?', (source_id,),
+            ).fetchone()
+            research = json.loads(profile['research_json'])
+            self.assertEqual(research['research_reason'], '官网确认主营亚克力板材加工。')
+            self.assertEqual(research['evidence'][0]['url'], 'https://acrilicos.example/about')
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM reminders WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            outreach = conn.execute(
+                'SELECT * FROM outreach_emails WHERE external_source=? AND external_id=?',
+                ('sela', source_id),
+            ).fetchone()
+            self.assertIsNotNone(outreach)
+            self.assertEqual(outreach['recipient_email'], 'buyer@acrilicos.example')
+            self.assertEqual(outreach['sent_date'], '')
+            self.assertIsNone(outreach['contact_id'])
+            self.assertEqual(outreach['message_id'], '')
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_delivery_events').fetchone()[0], 0)
+        finally:
+            conn.close()
+
     def test_unmatched_gmail_is_a_trosa_capture_not_a_second_sela_history(self):
         message = {
             'id': 'gmail-unmatched-1',
