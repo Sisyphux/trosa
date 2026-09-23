@@ -2,7 +2,7 @@
 # Run the specialist Inbox human-intervention matrix in a real Chromium browser.
 #
 # Separate from browser_acceptance.sh: it loads a deterministic, namespaced Inbox
-# fixture (8 actionable cards), generates fixed upload samples, then drives the
+# fixture (10 actionable questions), generates fixed upload samples, then drives the
 # rendered Inbox through Tabbit. It never converts a missing browser into SKIP.
 set -euo pipefail
 export LC_ALL=C
@@ -76,7 +76,7 @@ else
   eval "$("$PYTHON_BIN" "$ROOT/tools/postgres_rehearsal.py" env)"
 fi
 
-# Deterministic Inbox-only fixture (8 cards) plus fixed upload samples.
+# Deterministic Inbox-only fixture (10 questions) plus fixed upload samples.
 fixture_json="$(CRM_ENV=rehearsal "$PYTHON_BIN" "$ROOT/tools/inbox_browser_fixture.py" 2>/dev/null | tail -n 1)"
 contact_id="$(printf '%s' "$fixture_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["contact_id"])')" \
   || fail "无法解析 fixture contact_id：$fixture_json"

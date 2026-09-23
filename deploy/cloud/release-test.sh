@@ -223,6 +223,13 @@ run_rehearsal_browser_branch() {
     "$TREE/tools/browser_acceptance.sh" \
     || fail '真实 Chromium 页面验收失败；不会以 DOM/语法测试代替'
   printf '完成：真实 Chromium 页面验收\n'
+
+  printf '\n==> 真实 Chromium Inbox 专项验收（Sela 续跑、手机遮挡、键盘与上传）\n'
+  TROSA_INBOX_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
+    TROSA_INBOX_BROWSER_REUSE_REHEARSAL=1 \
+    bash "$TREE/tools/inbox_browser_acceptance.sh" \
+    || fail 'Inbox 专项 Chromium 验收失败；不能用通用页面流程替代'
+  printf '完成：Inbox 专项 Chromium 验收\n'
 }
 
 # 分支 C：浏览器扩展回归。与 A/B 完全独立，因此并行执行。

@@ -1681,10 +1681,12 @@ function renderInboxQuestionCard(q) {
   var open = inboxState.expandedQuestionId === q.id, subjectData = q.subject || {};
   var subject = subjectData.company || (q.kind === 'sela_request' ? '未命名 Sela prospect' : '待确认主体');
   var subjectLabel = subjectData.label || '';
+  var humanReason = String(q.why_human || q.why || '').trim();
+  if (humanReason === '系统缺少作出安全判断所需的信息。') humanReason = '';
   var subjectLine = subjectData.company
     ? '<div class="inbox-question-subject"><span>' + escapeHtml(subjectLabel || '关联主体') + '</span><strong>' + escapeHtml(subjectData.company) + '</strong>' + (q.kind === 'sela_request' && !subjectData.customer_id ? '<small>尚未关联 Trosa 客户</small>' : '') + '</div>'
     : '';
-  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + (subjectLabel ? escapeHtml(subjectLabel) + ' · ' : '') + escapeHtml(subject) + ' · ' + escapeHtml(q.why_human || q.why || '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</small></button></article>';
+  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + (subjectLabel ? escapeHtml(subjectLabel) + ' · ' : '') + escapeHtml(subject) + (humanReason ? ' · ' + escapeHtml(humanReason) : '') + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</small></button></article>';
   var evidence = (q.evidence || []).map(function(e, i) { return inboxEvidenceHtml(e, i); }).join('');
   var draft = inboxState.draftResponses[q.id] || {}, upload = inboxState.uploadStates[q.id] || {};
   var fields = ((q.response_schema || {}).fields || []).map(function(f) { return inboxResponseFieldHtml(q, f, draft); }).join('');
@@ -1702,7 +1704,7 @@ function renderInboxQuestionCard(q) {
       : fields + attachment) + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">' + (q.response_schema && q.response_schema.retired_send_approval ? '关闭旧请求（不发送）' : '保存回答') + '</button>';
   var title = q.headline || q.question;
   var summary = q.summary && q.summary !== title ? '<p>' + escapeHtml(q.summary) + '</p>' : '';
-  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(title) + '</h3>' + subjectLine + summary + '<p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
+  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(title) + '</h3>' + subjectLine + summary + (humanReason ? '<p><b>为什么需要你：</b>' + escapeHtml(humanReason) + '</p>' : '') + '</section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
 }
 function inboxEvidenceHtml(e, index) {
   var ordinal = '<b>' + String(index + 1).padStart(2, '0') + '</b>';

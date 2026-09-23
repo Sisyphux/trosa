@@ -7820,3 +7820,67 @@ html.motion-lite .card {
     display: none !important;
   }
 }
+
+/* Inbox has one secondary capture action. Keep it with the page heading on
+   touch widths so it cannot cover the question queue or evidence. */
+@media (max-width: 820px) {
+  #page-inbox .inbox-page-header {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
+  #page-inbox .inbox-command-shelf {
+    position: static !important;
+    inset: auto !important;
+    display: inline-flex !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    margin: 0 0 0 auto !important;
+    padding: 0 !important;
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: auto !important;
+  }
+  #page-inbox .inbox-command-shelf .command-primary {
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 168px !important;
+    height: 42px !important;
+    padding: 0 14px !important;
+    gap: 8px !important;
+  }
+  #page-inbox .inbox-command-shelf .command-primary .command-label { display: inline !important; }
+  #page-inbox.inbox-question-expanded .inbox-command-shelf { display: none !important; }
+}
+
+@media (max-width: 620px) {
+  #page-inbox .inbox-page-header {
+    display: block !important;
+    position: relative !important;
+    box-sizing: border-box;
+    padding-right: 132px !important;
+  }
+  #page-inbox .inbox-command-shelf {
+    position: absolute !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: auto !important;
+    left: auto !important;
+    max-width: 124px !important;
+    margin: 0 !important;
+  }
+  #page-inbox .inbox-command-shelf .command-icon { display: none !important; }
+  #page-inbox .inbox-command-shelf .command-primary {
+    max-width: 124px !important;
+    padding: 0 12px !important;
+  }
+  #page-inbox.inbox-question-expanded .inbox-command-shelf { display: none !important; }
+}

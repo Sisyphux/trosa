@@ -56,7 +56,7 @@ const questions = [
   {
     key: 'sela:prospect-review:p1', kind: 'identity_review', kind_label: '身份待确认',
     question: '这两条身份记录是不是同一个业务主体？', headline: '确认这是否是同一个业务主体',
-    why: '仅凭名称或来源无法安全判定是否为同一主体。', customer: null,
+    why: '系统缺少作出安全判断所需的信息。', customer: null,
     suggested_customer: null, known_facts: ['尚未关联任何客户'],
     evidence: [{ item_id: 9, source_label: 'Sela', date: '2026-09-12', detail: 'MULTIPLE_TROSA_MATCHES' }],
     options: [
@@ -101,6 +101,7 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   const headline = doc.getElementById('inboxList').textContent;
   assert.ok(headline.includes('这可能属于 TEXFIRE'), headline);
   assert.ok(headline.includes('确认这是否是同一个业务主体'), headline);
+  assert.ok(!headline.includes('系统缺少作出安全判断所需的信息。'), headline);
 
   // 展开后形成队列、连续证据、前置回答三个真实文档区域。
   win.openInboxQuestion(String(questions[0].primary_item_id));
@@ -112,6 +113,12 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(detail.querySelector('.inbox-question-decision'), '回答区域应前置');
   win.closeInboxQuestion();
   assert.ok(!doc.getElementById('page-inbox').classList.contains('inbox-question-expanded'));
+  win.openInboxQuestion(String(questions[1].primary_item_id));
+  const genericReasonDetail = doc.querySelector('.inbox-question-active .inbox-question-queue');
+  assert.ok(genericReasonDetail, 'generic-reason question should still open');
+  assert.ok(!genericReasonDetail.textContent.includes('为什么需要你'));
+  assert.ok(!genericReasonDetail.textContent.includes('系统缺少作出安全判断所需的信息。'));
+  win.closeInboxQuestion();
 
   // Sela 的 JSON 上下文渲染成带标签的字段，而不是原始 JSON 墙。
   const selaHtml = win.inboxEvidenceHtml({

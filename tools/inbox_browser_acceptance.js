@@ -56,7 +56,31 @@ const inboxCount = async () => Number((await page.locator('#inboxOverview strong
 const performanceModeApplied = await page.evaluate(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'));
 if (!performanceModeApplied) throw new Error('Inbox is not running in performance-priority mode');
 const cardCount = await list.locator('.inbox-question-open').count();
-if (cardCount < 9) throw new Error('fixture card count mismatch: ' + cardCount + ' / ' + (await list.innerText()));
+if (cardCount < 10) throw new Error('fixture card count mismatch: ' + cardCount + ' / ' + (await list.innerText()));
+// On a phone-sized viewport the primary action belongs in the Inbox header;
+// it must not float over a question or force horizontal scrolling.
+await page.setViewportSize({width:390,height:844});
+const mobileActionLayout = await page.evaluate(() => {
+  const action = document.querySelector('#page-inbox .inbox-command-shelf');
+  const actionRect = action?.getBoundingClientRect();
+  const rows = Array.from(document.querySelectorAll('#inboxList .inbox-question-row'));
+  const overlapsRow = !!actionRect && rows.some((row) => {
+    const rect = row.getBoundingClientRect();
+    return actionRect.left < rect.right && actionRect.right > rect.left
+      && actionRect.top < rect.bottom && actionRect.bottom > rect.top;
+  });
+  return {
+    position: action ? getComputedStyle(action).position : '',
+    overlapsRow,
+    scrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  };
+});
+if (mobileActionLayout.position === 'fixed' || mobileActionLayout.overlapsRow
+    || mobileActionLayout.scrollWidth > mobileActionLayout.viewportWidth + 1) {
+  throw new Error('mobile Inbox action is obscuring content or overflowing: ' + JSON.stringify(mobileActionLayout));
+}
+await page.setViewportSize({width:1440,height:900});
 // Draft survives an actual render caused by closing and reopening its card.
 await list.locator('.inbox-question-open').first().click();
 const field = page.locator('[data-inbox-field="answer"]').first(); await field.fill('draft survives rerender');
@@ -73,9 +97,9 @@ await page.locator('[data-inbox-field="confirmed_email"]').fill('');
 const firstCardId = await page.locator('.inbox-question-active').getAttribute('id');
 await page.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + firstCardId).waitFor({state:'detached', timeout:15000});
-if (await inboxCount() !== 8) throw new Error('Inbox count did not update immediately after a response: ' + await inboxCount());
-// A structured Sela decision must show its actual choices and answer honestly:
-// saving it stores a pull handoff, but does not launch the Sela Agent.
+if (await inboxCount() !== 9) throw new Error('Inbox count did not update immediately after a response: ' + await inboxCount());
+// A linked Sela decision must persist a durable automatic-run queue entry.
+// The fixture does not run Sela itself, so its visible state should remain queued.
 await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'Sela 需要确认 prospect 的下一步'}).click();
 const selaCard = page.locator('.inbox-question-active');
@@ -85,8 +109,25 @@ await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}
 const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + selaCardId).waitFor({state:'detached', timeout:15000});
-await page.getByText('回答已保存到 Trosa；Sela 不会因此自动启动，可在下一次 Agent 运行时读取。', {exact:true}).waitFor({timeout:15000});
-if (await inboxCount() !== 7) throw new Error('Sela answer did not resolve its Inbox request: ' + await inboxCount());
+await page.getByText('回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
+const linkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'});
+await linkedResume.waitFor({timeout:15000});
+if (await linkedResume.getAttribute('data-status') !== 'queued') throw new Error('linked Sela answer did not appear as queued: ' + await linkedResume.innerText());
+if (await inboxCount() !== 8) throw new Error('linked Sela answer did not resolve its Inbox request: ' + await inboxCount());
+// An answered request without a unique prospect must be honest about staying
+// manual and must not create an automatic-run status card.
+await backToQueue();
+await list.locator('.inbox-question-open').filter({hasText:'Sela 请求但未关联 prospect'}).click();
+const unlinkedCard = page.locator('.inbox-question-active');
+await unlinkedCard.getByRole('button', {name:'继续整理公开来源', exact:true}).click();
+const unlinkedCardId = await unlinkedCard.getAttribute('id');
+await unlinkedCard.getByRole('button', {name:'保存回答', exact:true}).click();
+await page.locator('#' + unlinkedCardId).waitFor({state:'detached', timeout:15000});
+await page.getByText('回答已保存，但请求没有唯一 Prospect 关联；Sela 不能自动继续。', {exact:true}).waitFor({timeout:15000});
+if (await page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Unlinked Inbox Prospect'}).count()) {
+  throw new Error('unlinked Sela answer incorrectly created an automatic-run status card');
+}
+if (await inboxCount() !== 7) throw new Error('unlinked Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // Correct the deliberately stale rehearsal email through the normal answer
 // form, then use the visible Undo action returned by the same response.
 await backToQueue();
@@ -188,4 +229,4 @@ while (await list.locator('.inbox-question-open').count()) {
   await page.waitForTimeout(300);
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
-return {cards: 8, draft:true, retry:true, emailCorrection:true, undo:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, layouts};
+return {cards: 10, draft:true, retry:true, emailCorrection:true, undo:true, automaticResumeQueued:true, unlinkedSelaManual:true, mobileActionClear:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, layouts};
