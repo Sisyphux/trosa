@@ -83,6 +83,115 @@ class SelaServiceAuthTest(unittest.TestCase):
             401,
         )
 
+    def test_service_token_can_complete_only_the_sela_inbox_resume_handoff(self):
+        service = self.module.app.test_client()
+        service_headers = {'Authorization': f'Bearer {SERVICE_TOKEN}'}
+        source_id = 'service-resume-auth-1'
+        company = 'Service Resume Auth Plastics'
+        prospect_key = 'service-resume-auth-prospect'
+        created = service.post(
+            '/api/integrations/sela/prospects',
+            json={'prospect': {
+                'source_id': source_id,
+                'company': company,
+                'website': 'https://service-resume.example/',
+                'country': 'US',
+                'business_type': 'Acrylic sheet fabricator',
+                'status': 'READY TO CONTACT',
+                'research_status': 'VERIFIED',
+                'confidence': 'HIGH',
+                'reason': 'Public company information is ready for follow-up.',
+                'source_urls': ['https://service-resume.example/about'],
+                'evidence': [{'type': 'website', 'text': 'Fabricates acrylic displays.',
+                              'source_url': 'https://service-resume.example/about'}],
+                'outreach_status': 'CONTACT_NEEDED',
+            }, 'idempotency_key': prospect_key},
+            headers={**service_headers, 'X-Idempotency-Key': prospect_key},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = created.get_json()['trosa_id']
+
+        need_key = 'service-resume-auth-need'
+        need = service.post('/api/integrations/sela/needs', json={
+            'request': {
+                'source_id': source_id,
+                'candidate_id': source_id,
+                'customer_id': customer_id,
+                'company': company,
+                'kind': 'DECISION',
+                'severity': 'AMBER',
+                'need': 'Choose whether public research should continue.',
+                'decision': {
+                    'question': 'What should Sela do next?',
+                    'options': ['Research public sources', 'Stop for now'],
+                    'recommended': 'Research public sources',
+                },
+                'resume': 'Continue public research and save the evidence.',
+                'dedupe_key': need_key,
+            },
+            'idempotency_key': need_key,
+        }, headers=service_headers)
+        self.assertEqual(need.status_code, 200, need.get_json())
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+
+        session = self.module.app.test_client()
+        self.assertEqual(session.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        question = next(row for row in session.get('/api/inbox').get_json()['questions']
+                        if int(row.get('primary_item_id') or 0) == inbox_id)
+        answered = session.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'],
+            'answer': {'selected_option': 'Research public sources'},
+            'idempotency_key': 'service-resume-auth-answer',
+        })
+        self.assertEqual(answered.status_code, 200, answered.get_json())
+        self.assertTrue(answered.get_json()['sela_handoff']['automatic_run'])
+
+        resolved = service.get('/api/integrations/sela/needs?status=resolved', headers=service_headers)
+        self.assertEqual(resolved.status_code, 200, resolved.get_json())
+        resolved_need = next(row for row in resolved.get_json()['needs'] if row['trosa_inbox_id'] == inbox_id)
+        answer_hash = self.module._sela_hash(resolved_need['human_response'])
+        running = service.post(f'/api/integrations/sela/needs/{inbox_id}/resume-status', json={
+            'status': 'running', 'answer_sha256': answer_hash,
+            'run_session_id': 'service-resume-auth-run', 'summary': '',
+        }, headers=service_headers)
+        self.assertEqual(running.status_code, 200, running.get_json())
+
+        prospects = service.get('/api/integrations/sela/prospects?limit=100', headers=service_headers)
+        self.assertEqual(prospects.status_code, 200, prospects.get_json())
+        target = next(row for row in prospects.get_json()['prospects'] if row['id'] == source_id)
+        resume_key = f'sela:auto-resume:{inbox_id}:{answer_hash}'
+        saved = service.post(f'/api/integrations/sela/prospects/{source_id}/resume', json={
+            'action': 'research',
+            'source_id': source_id,
+            'inbox_id': inbox_id,
+            'answer_sha256': answer_hash,
+            'expected_revision': target['trosa_revision'],
+            'research': {
+                'research_reason': 'Local service-auth regression research result.',
+                'qualification_method': 'Public company website',
+                'qualification_reason': 'The public about page confirms acrylic fabrication.',
+                'evidence': [{'url': 'https://service-resume.example/about',
+                              'quote': 'We fabricate acrylic displays.'}],
+                'source_urls': ['https://service-resume.example/about'],
+            },
+            'idempotency_key': resume_key,
+        }, headers={**service_headers, 'X-Idempotency-Key': resume_key})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertEqual(saved.get_json()['status'], 'SYNCED')
+
+        completed = service.post(f'/api/integrations/sela/needs/{inbox_id}/resume-status', json={
+            'status': 'completed', 'answer_sha256': answer_hash,
+            'run_session_id': 'service-resume-auth-run',
+            'summary': 'Public research was saved to the existing Prospect.',
+        }, headers=service_headers)
+        self.assertEqual(completed.status_code, 200, completed.get_json())
+        self.assertEqual(completed.get_json()['resume_run']['status'], 'completed')
+
+        confirmed = service.get('/api/integrations/sela/prospects?limit=100', headers=service_headers)
+        saved_prospect = next(row for row in confirmed.get_json()['prospects'] if row['id'] == source_id)
+        self.assertEqual(saved_prospect['research_reason'], 'Local service-auth regression research result.')
+        self.assertIn('https://service-resume.example/about', saved_prospect['source_urls'])
+
     def test_issuance_stores_only_digest_and_replaces_previous_service_token(self):
         session = self.module.app.test_client()
         self.assertEqual(session.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)

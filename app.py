@@ -361,6 +361,14 @@ def _sela_integration_path_allowed():
             r'/api/integrations/sela/needs/\d+/resolve',
             request.path,
         ))
+        or (request.method == 'POST' and re.fullmatch(
+            r'/api/integrations/sela/needs/\d+/resume-status',
+            request.path,
+        ))
+        or (request.method == 'POST' and re.fullmatch(
+            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/resume',
+            request.path,
+        ))
         # Sela's service identity operates only Hamid's ordinary customer
         # records through the same API surface used by Trosa itself.  The
         # identity is mapped to Hamid server-side in ``before_request``;
