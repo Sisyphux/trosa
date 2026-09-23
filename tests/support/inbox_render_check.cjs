@@ -89,11 +89,12 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
 (async () => {
   await win.loadInbox();
 
-  // chips 动态渲染且带计数，只显示存在问题的问题类别
+  // 总量只在摘要出现一次；类别筛选保留各自计数
   const chips = Array.from(doc.querySelectorAll('#inboxFilters .inbox-filter'));
   const chipKeys = chips.map((chip) => chip.dataset.inboxFilter);
   assert.deepEqual(chipKeys, ['all', 'identity', 'identity_review']);
-  assert.equal(doc.querySelector('[data-inbox-filter="all"] .inbox-filter-count').textContent, '2');
+  assert.equal(doc.querySelector('#inboxOverview strong').textContent, '2');
+  assert.equal(doc.querySelector('[data-inbox-filter="all"] .inbox-filter-count'), null);
   assert.equal(doc.querySelector('[data-inbox-filter="identity"] .inbox-filter-count').textContent, '1');
 
   // 队列以“我需要决定什么”为标题，而不是技术来源

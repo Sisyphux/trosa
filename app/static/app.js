@@ -6888,12 +6888,14 @@ function renderCustomerTimelineEmpty(el) {
       if (el.dataset.timelineEmptyToken !== token || list.querySelector('.tl-item')) return;
       delete el.dataset.timelineEmptyToken;
       el.textContent = '';
+      el.innerHTML = '<div class="empty-state"><p>暂无沟通记录</p></div>';
     }, 330);
     renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
     return;
   }
   delete el.dataset.timelineEmptyToken;
   el.textContent = '';
+  el.innerHTML = '<div class="empty-state"><p>暂无沟通记录</p></div>';
 }
 
 // The timeline is reconciled by record identity instead of being replaced as a
