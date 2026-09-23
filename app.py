@@ -4333,13 +4333,13 @@ def _sela_agent_request_rows(conn, status='all', limit=None, item_id=None):
 
 
 def _inbox_sela_resume_runs(conn, limit=8):
-    """Expose a small, answer-free history of automatic Sela follow-ups."""
+    """Expose a small, answer-free history of Sela continuation decisions."""
     runs = []
     for raw_row in _sela_agent_request_rows(conn, 'resolved', limit=100):
         row = dict(raw_row)
         request = _sela_agent_request_structured(row)
         human_response = request.get('human_response')
-        if not request.get('source_id') or not isinstance(human_response, dict) or human_response.get('status') != 'answered':
+        if not isinstance(human_response, dict) or human_response.get('status') != 'answered':
             continue
         resume_run = request.get('resume_run')
         if not isinstance(resume_run, dict):
@@ -5436,7 +5436,13 @@ def sela_integration_auto_resume_result(source_id):
         if (prospect_view.get('lifecycle_stage') != 'cold_prospect'
                 or prospect_view.get('customer_linked')
                 or prospect_view.get('lifecycle_rejected')
-                or prospect_view.get('do_not_contact')):
+                or prospect_view.get('do_not_contact')
+                or prospect_view.get('exclusion_review')
+                or str(prospect_view.get('outreach_status') or '').upper() in {
+                    'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'PAUSED',
+                    'DRAFT_READY', 'GMAIL_DRAFTED',
+                }
+                or str(prospect_view.get('sent_at') or '').strip()):
             response = {'success': True, 'status': 'REVIEW', 'reason': 'TROSA_STAGE_REQUIRES_TROSA',
                         'source_id': source_id, 'trosa_inbox_id': inbox_id, 'answer_sha256': answer_sha256}
             _sela_receipt_write(conn, integration, idempotency_key, request_hash,
@@ -10346,7 +10352,12 @@ def _apply_question_metadata(item):
     """给每条 Inbox 证据补齐业务问题元数据（问题类别/问题键/来源）。"""
     item_type = str(item.get('item_type') or '')
     kind = str(item.get('question_kind') or '').strip()
-    if item_type == 'sela_agent_request' and kind in ('', _inbox_questions.QUESTION_APPROVAL):
+    if item_type == 'sela_agent_request' and kind in (
+            '', _inbox_questions.QUESTION_APPROVAL, _inbox_questions.QUESTION_FACT_REQUEST):
+        # Sela request kinds (FACT_GAP, DECISION, SEND_APPROVAL, ...) describe
+        # the Agent's business request, not the Inbox renderer's question kind.
+        # Older fact/approval rows can carry a generic marker; route those
+        # through the structured Sela form while preserving investigation requests.
         kind = _inbox_questions.QUESTION_SELA_REQUEST
     elif item_type == 'sela_exclusion_review':
         kind = _inbox_questions.QUESTION_EXCLUSION_REVIEW
@@ -10693,9 +10704,11 @@ def _question_why(kind, primary):
         request_kind = str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
         if request_kind == 'SEND_APPROVAL':
             return '这是旧版发送审批请求；回答只会关闭请求，不会发送邮件或启动 Sela。'
-        if request.get('source_id'):
-            return 'Sela 缺少继续研究所需的事实或需要你的业务判断；保存回答后会自动排入受限续跑，继续公开研究或准备未发送草稿。'
-        return 'Sela 缺少继续研究所需的事实或需要你的业务判断；回答会保存在 Trosa，但这条请求没有关联 prospect，无法自动续跑。'
+        if not str(request.get('source_id') or '').strip():
+            return '此请求没有唯一 Prospect 来源；回答会保存在 Trosa，但无法自动续跑，请人工处理。'
+        return ('Sela 请求了补充事实或业务判断。回答会先保存在 Trosa；只有目标仍是未互动冷线索、'
+                '未被排除或停止联系，且没有发送记录或现有草稿时，才会排入公开研究/未发送草稿续跑。'
+                '其他情况会标记为需人工复核。')
     return '系统缺少作出安全判断所需的信息。'
 
 
@@ -10741,9 +10754,14 @@ def _question_completion_effects(kind, primary=None):
         request_kind = str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
         if request_kind == 'SEND_APPROVAL':
             return ['关闭这条旧发送审批请求；不会触发邮件发送。']
-        if request.get('source_id'):
-            return ['记录结构化回答并关闭请求；保存后排入 Sela 自动续跑，继续公开研究或准备未发送草稿。']
-        return ['记录结构化回答并关闭请求；此请求未关联 prospect，不会自动续跑。']
+        if not str(request.get('source_id') or '').strip():
+            return ['记录结构化回答并关闭请求；此请求未关联 prospect，不会自动续跑。']
+        effects = ['记录结构化回答并关闭请求。符合续跑条件时排入 Sela 公开研究或未发送草稿。']
+        missing = request.get('missing_facts') if isinstance(request.get('missing_facts'), list) else []
+        if any(str(fact.get('field') or '').lower() == 'contact_email'
+               for fact in missing if isinstance(fact, dict)):
+            effects.append('补充邮箱只记录在本次 Sela 请求中，不会写入或验证 Trosa 联系人。')
+        return effects
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['保存主体判断并更新 Trosa 中的 Sela 排除状态。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -10763,7 +10781,7 @@ def _question_will_not_do(kind, primary=None):
         request = _sela_agent_request_structured(primary or {})
         if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
             return ['不会发送邮件，也不会创建客户、联系人或待办。']
-        return ['不会发送邮件，不会创建或修改客户、联系人、待办或业务阶段。']
+        return ['不会发送邮件、验证邮箱，或创建/修改客户、联系人、待办和业务阶段。']
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['不会新建客户或联系人；不会发送邮件。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -10819,10 +10837,15 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
                     continue
                 fact_name = _sela_prospect_text(fact.get('field'), 80)
                 label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
+                help_text = _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'
+                if fact_name == 'contact_email':
+                    help_text += (' 该邮箱只作为本次 Sela 请求的事实；不会写入或验证 Trosa 联系人。'
+                                  '符合续跑条件时可用于准备未发送草稿；要保存到联系人请在客户联系人工作区人工确认并登记。')
                 fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
-                               'label': label, 'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
+                               'label': '联系邮箱（仅供本次 Sela 请求/未发送草稿）' if fact_name == 'contact_email' else label,
+                               'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
                                'required': False, 'validation': {},
-                               'help': _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'})
+                               'help': help_text})
             fields.append({'key': 'note', 'label': '补充说明', 'input_type': 'textarea', 'required': False,
                            'validation': {}, 'help': '如暂时无法确认，请说明原因。'})
         else:
@@ -10889,7 +10912,7 @@ def _inbox_question_revision(members):
     return hashlib.sha256(value.encode('utf-8')).hexdigest()[:16]
 
 
-def _build_inbox_questions(items, matches_by_item):
+def _build_inbox_questions(items, matches_by_item, conn=None):
     """把多条证据收敛成用户真正需要决定的问题。"""
     groups = {}
     order = []
@@ -10916,17 +10939,45 @@ def _build_inbox_questions(items, matches_by_item):
         if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
             sela_review = _inbox_sela_review_payload(primary)
         sela_request = _sela_request_display(primary) if kind == _inbox_questions.QUESTION_SELA_REQUEST else {}
+        sela_prospect = None
+        sela_subject_label = 'Trosa 档案'
+        sela_relationship_label = '关系阶段：Trosa 档案'
+        if kind == _inbox_questions.QUESTION_SELA_REQUEST and conn is not None:
+            request_payload = _sela_agent_request_structured(primary)
+            source_id = str(request_payload.get('source_id') or '').strip()
+            profile = _sela_profile_by_source(conn, source_id) if source_id else None
+            sela_prospect = _sela_prospect_view(conn, profile) if profile else None
+            if sela_prospect:
+                stage = sela_prospect.get('lifecycle_stage')
+                if sela_prospect.get('lifecycle_rejected'):
+                    sela_subject_label, sela_relationship_label = 'Trosa 已标记不联系', '关系阶段：已标记不联系'
+                elif sela_prospect.get('do_not_contact'):
+                    sela_subject_label, sela_relationship_label = 'Trosa 已停止联系', '关系阶段：已停止联系'
+                elif sela_prospect.get('exclusion_review'):
+                    sela_subject_label, sela_relationship_label = 'Trosa 待排除复核', '关系阶段：待排除复核'
+                elif stage == 'cold_prospect' and not sela_prospect.get('customer_linked'):
+                    sela_subject_label, sela_relationship_label = 'Trosa 冷线索', '关系阶段：未互动冷线索'
+                elif stage == 'engaged_lead':
+                    sela_subject_label, sela_relationship_label = 'Trosa 已互动线索', '关系阶段：已有客户互动'
+                elif stage == 'qualified_opportunity':
+                    sela_subject_label, sela_relationship_label = 'Trosa 商机', '关系阶段：已进入商机阶段'
+                elif stage == 'customer':
+                    sela_subject_label, sela_relationship_label = 'Trosa 客户', '关系阶段：已成交客户'
         known = []
         if customer:
             facts = [value for value in (customer.get('company'), customer.get('country'),
                                          customer.get('contact_name')) if value]
-            known.append('客户：' + (customer.get('name') or customer.get('company') or '已关联客户'))
+            company = customer.get('name') or customer.get('company') or '已关联档案'
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+                known.append(sela_subject_label + '：' + company)
+            else:
+                known.append('客户：' + company)
             if facts:
                 known.append('资料：' + ' · '.join(facts))
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
             if sela_request.get('company'):
                 known.append('Sela prospect：' + sela_request['company'])
-            known.append('尚未关联 Trosa 客户')
+            known.append('尚未关联 Trosa 档案')
         else:
             identity = primary.get('capture_identity') or ''
             if identity:
@@ -10935,7 +10986,10 @@ def _build_inbox_questions(items, matches_by_item):
         if len(members) > 1:
             known.append('该问题现有 %d 条相关证据' % len(members))
         if customer:
-            known.append('已归属客户')
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+                known.append(sela_relationship_label)
+            else:
+                known.append('已归属客户')
         questions.append({
             'id': str(primary.get('id')),
             'key': key,
@@ -10953,7 +11007,13 @@ def _build_inbox_questions(items, matches_by_item):
             'subject': {
                 'customer_id': (customer or {}).get('id'),
                 'company': (customer or {}).get('company') or (customer or {}).get('name') or sela_request.get('company', ''),
-                'label': 'Trosa 客户' if customer else 'Sela prospect' if kind == _inbox_questions.QUESTION_SELA_REQUEST else '',
+                'label': (
+                    sela_subject_label
+                    if customer and kind == _inbox_questions.QUESTION_SELA_REQUEST
+                    else 'Trosa 客户' if customer
+                    else 'Sela prospect' if kind == _inbox_questions.QUESTION_SELA_REQUEST
+                    else ''
+                ),
             },
             'customer': customer,
             'suggested_customer': suggested,
@@ -11092,10 +11152,11 @@ def get_inbox_sela_handoff_status(item_id):
             return jsonify({'success': False, 'error': '找不到已解决的 Sela Inbox 请求'}), 404
         structured = _sela_agent_request_structured(row)
         resume_run = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
+        status = str(resume_run.get('status') or 'awaiting_agent').lower()
         return jsonify({
             'success': True,
-            'status': str(resume_run.get('status') or 'awaiting_agent'),
-            'automatic_run': bool(structured.get('source_id')),
+            'status': status,
+            'automatic_run': status in {'queued', 'running', 'completed', 'failed'},
             'summary': str(resume_run.get('summary') or '')[:500],
             'error': str(resume_run.get('error') or '')[:200],
             'updated_at': str(resume_run.get('updated_at') or ''),
@@ -11122,7 +11183,7 @@ def get_inbox():
     try:
         items = _load_open_inbox_items(conn)
         matches_by_item = _inbox_capture_suggestions(conn, items)
-        questions = _build_inbox_questions(items, matches_by_item)
+        questions = _build_inbox_questions(items, matches_by_item, conn)
         counts = _inbox_question_counts(questions, items)
         payload = {
             'items': items, 'questions': questions, 'counts': counts,
@@ -11148,7 +11209,7 @@ def get_inbox_counts():
     conn = get_db()
     try:
         items = _load_open_inbox_items(conn)
-        questions = _build_inbox_questions(items, {})
+        questions = _build_inbox_questions(items, {}, conn)
         counts = _inbox_question_counts(questions, items)
     finally:
         conn.close()
@@ -11860,7 +11921,41 @@ def _apply_inbox_email_correction(conn, answer, note):
     return (note + '\n' if note else '') + '人工确认邮箱：' + email, (contact_id, before, after)
 
 
-def _sela_human_response(row, answer, *, responded_at, responded_by):
+def _sela_resume_eligibility(conn, request_payload):
+    """Mirror Sela's automatic-resume safety gate before promising a queue slot."""
+    source_id = str(request_payload.get('source_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+        return {'eligible': False, 'reason': 'missing_source',
+                'summary': '这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。'}
+    profile = _sela_profile_by_source(conn, source_id)
+    if not profile:
+        return {'eligible': False, 'reason': 'prospect_missing',
+                'summary': 'Trosa 找不到对应 Prospect；回答已保存，但 Sela 不会自动续跑。'}
+    prospect = _sela_prospect_view(conn, profile)
+    if not prospect:
+        return {'eligible': False, 'reason': 'prospect_missing',
+                'summary': 'Trosa 找不到对应 Prospect；回答已保存，但 Sela 不会自动续跑。'}
+    if (prospect.get('lifecycle_stage') != 'cold_prospect'
+            or prospect.get('customer_linked') or prospect.get('lifecycle_rejected')):
+        stage = str(prospect.get('lifecycle_stage') or '未知阶段')
+        return {'eligible': False, 'reason': 'prospect_not_cold',
+                'summary': f'目标当前属于 Trosa 的 {stage} 阶段；Sela 未自动续跑，请人工处理。'}
+    if prospect.get('exclusion_review'):
+        return {'eligible': False, 'reason': 'exclusion_review',
+                'summary': '目标存在待确认的排除判断；Sela 未自动续跑，请先人工复核。'}
+    if prospect.get('do_not_contact'):
+        return {'eligible': False, 'reason': 'contact_paused',
+                'summary': '目标已停止联系；Sela 未自动续跑，请人工处理。'}
+    if (str(prospect.get('outreach_status') or '').upper() in {
+            'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'PAUSED',
+            'DRAFT_READY', 'GMAIL_DRAFTED',
+    } or str(prospect.get('sent_at') or '').strip()):
+        return {'eligible': False, 'reason': 'existing_outreach',
+                'summary': '目标已有发送记录或草稿；Sela 未自动续跑，请人工检查后继续。'}
+    return {'eligible': True, 'reason': '', 'summary': ''}
+
+
+def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
     """Validate and persist a machine-readable answer for a Sela request."""
     payload = _sela_agent_request_structured(row)
     request_kind = str(payload.get('kind') or _sela_request_display(row).get('kind') or '').upper()
@@ -11917,15 +12012,24 @@ def _sela_human_response(row, answer, *, responded_at, responded_by):
     }
     updated = dict(payload)
     updated['human_response'] = human_response
-    if str(payload.get('source_id') or '').strip():
-        updated['resume_run'] = {
-            'status': 'queued',
-            'answer_sha256': _sela_hash(human_response),
-            'run_session_id': '',
-            'summary': '',
-            'error': '',
-            'updated_at': responded_at,
-        }
+    eligibility = _sela_resume_eligibility(conn, payload)
+    resume_status = 'queued' if eligibility['eligible'] else 'needs_review'
+    resume_summary = eligibility['summary']
+    has_email_gap = any(
+        isinstance(fact, dict) and str(fact.get('field') or '').lower() == 'contact_email'
+        for fact in raw_missing[:20]
+    )
+    if has_email_gap and not eligibility['eligible']:
+        resume_summary += ' 补充邮箱只保存在本次 Sela 请求中，不会写入或验证 Trosa 联系人；请在客户联系人工作区人工确认并登记。'
+    updated['resume_run'] = {
+        'status': resume_status,
+        'answer_sha256': _sela_hash(human_response),
+        'run_session_id': '',
+        'summary': resume_summary,
+        'error': '',
+        'reason': eligibility['reason'],
+        'updated_at': responded_at,
+    }
     summary = []
     if selected_option:
         summary.append('选择：' + selected_option)
@@ -11994,7 +12098,7 @@ def respond_to_inbox_question(item_id):
             _sela_resolve_exclusion_review(conn, profile, decision, note, _calendar_now_text(), resolve_inbox=False)
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
             now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
-            sela_response = _sela_human_response(row, answer, responded_at=now, responded_by=actor)
+            sela_response = _sela_human_response(conn, row, answer, responded_at=now, responded_by=actor)
             serialized_response = json.dumps(sela_response['payload'], ensure_ascii=False)
             if len(serialized_response) > 40000:
                 raise CrmWriteError('回答内容过长，请精简后重试')
@@ -12047,15 +12151,25 @@ def respond_to_inbox_question(item_id):
         resume_run = structured_sela_request.get('resume_run') if isinstance(structured_sela_request.get('resume_run'), dict) else {}
         auto_resume = bool(
             sela_response and sela_response.get('reason') == 'answered'
-            and structured_sela_request.get('source_id')
             and resume_run.get('status') == 'queued'
+        )
+        resume_status = str(resume_run.get('status') or '').lower()
+        human_response = structured_sela_request.get('human_response') if isinstance(structured_sela_request.get('human_response'), dict) else {}
+        human_facts = human_response.get('facts') if isinstance(human_response.get('facts'), list) else []
+        confirmed_email = any(
+            isinstance(fact, dict) and str(fact.get('field') or '').lower() == 'contact_email'
+            for fact in human_facts
         )
         next_system_step = (
             '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
             if sela_response and sela_response.get('reason') == 'retired_send_approval' else
+            str(resume_run.get('summary') or '当前条件不支持自动续跑，请人工处理。')
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST and resume_status == 'needs_review' else
+            '回答已保存并排入 Sela 自动续跑；补充邮箱只作为本次请求事实，不会写入或验证 Trosa 联系人。'
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume and confirmed_email else
             '回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。'
             if kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume else
-            '回答已保存，但请求没有唯一 Prospect 关联；Sela 不能自动继续。'
+            '回答已保存；Sela 不会自动续跑，请在 Trosa 人工处理。'
             if kind == _inbox_questions.QUESTION_SELA_REQUEST else
             '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
             if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW else
@@ -12068,13 +12182,13 @@ def respond_to_inbox_question(item_id):
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
         if sela_response:
             response['sela_handoff'] = {
-                'status': 'queued' if auto_resume else 'awaiting_agent',
+                'status': ('queued' if auto_resume else resume_status or 'awaiting_agent'),
                 'automatic_run': auto_resume,
                 'session_id': structured_sela_request.get('session_id') or '',
                 'trosa_inbox_id': int(item_id),
             }
         remaining_items = _load_open_inbox_items(conn)
-        response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}), remaining_items)
+        response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}, conn), remaining_items)
         _agent_gateway_receipt_write(conn, 'inbox_response', idempotency_key, request_hash,
                                     json.dumps(response, ensure_ascii=False), None, now)
         conn.commit()

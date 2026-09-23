@@ -562,6 +562,164 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(resolved_repeat.status_code, 200)
         self.assertEqual(resolved_repeat.get_json(), resolved.get_json())
 
+    def test_sela_resume_is_not_queued_for_non_cold_contact_email_gap(self):
+        source_id = 'resume-customer-email-gap'
+        body = prospect(source_id)
+        body.update({
+            'contact': {}, 'outreach_status': '', 'subject': '', 'email_draft': '',
+            'gmail_draft_id': '', 'gmail_thread_id': '', 'email': '',
+        })
+        created = self.post_prospect(body, 'sela-v2:resume-customer:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = int(created.get_json()['trosa_id'])
+
+        need_key = 'sela:resume-customer:email-gap'
+        need = self.client.post('/api/integrations/sela/needs', json={
+            'request': {
+                'source_id': source_id, 'customer_id': customer_id,
+                'company': 'Acrílicos S.A.', 'kind': 'FACT_GAP', 'severity': 'AMBER',
+                'need': '确认联系人邮箱',
+                'missing_facts': [{'field': 'contact_email', 'label': '联系人邮箱', 'why': '尚未确认'}],
+                'resume': '补充后继续研究', 'dedupe_key': need_key,
+            }, 'idempotency_key': need_key,
+        }, headers=self.headers(need_key))
+        self.assertEqual(need.status_code, 200, need.get_data(as_text=True))
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+
+        conn = self.hamid_db()
+        try:
+            # A legacy row can carry a generic fact_request marker. It still
+            # needs Sela's structured response fields, not the generic form.
+            conn.execute("UPDATE inbox_items SET question_kind='fact_request' WHERE id=?", (inbox_id,))
+            conn.execute("UPDATE customers SET business_stage='成交' WHERE id=?", (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        question = next(item for item in self.client.get('/api/inbox').get_json()['questions']
+                        if int(item['id']) == inbox_id)
+        self.assertEqual(question['kind'], 'sela_request')
+        self.assertEqual(question['subject']['label'], 'Trosa 客户')
+        email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
+        self.assertEqual(email_field['label'], '联系邮箱（仅供本次 Sela 请求/未发送草稿）')
+        self.assertIn('不会写入或验证 Trosa 联系人', email_field['help'])
+        self.assertTrue(any('不会写入或验证 Trosa 联系人' in effect
+                            for effect in question['completion_effects']))
+        self.assertTrue(any('不会发送邮件、验证邮箱' in effect for effect in question['will_not_do']))
+
+        answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},
+            'idempotency_key': 'resume-customer-email-gap-answer',
+        })
+        self.assertEqual(answered.status_code, 200, answered.get_data(as_text=True))
+        result = answered.get_json()
+        self.assertFalse(result['sela_handoff']['automatic_run'])
+        self.assertEqual(result['sela_handoff']['status'], 'needs_review')
+        self.assertIn('Sela 未自动续跑', result['next_system_step'])
+        self.assertIn('不会写入或验证 Trosa 联系人', result['next_system_step'])
+
+        resolved = self.client.get(
+            f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}', headers=self.headers(),
+        )
+        self.assertEqual(resolved.status_code, 200, resolved.get_data(as_text=True))
+        need_view = resolved.get_json()['needs'][0]
+        self.assertEqual(need_view['human_response']['status'], 'answered')
+        self.assertEqual(need_view['resume_run']['status'], 'needs_review')
+        self.assertEqual(need_view['resume_run']['reason'], 'prospect_not_cold')
+        answer_hash = self.module._sela_hash(need_view['human_response'])
+        target = next(row for row in self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers(),
+        ).get_json()['prospects'] if row['id'] == source_id)
+        blocked_result = self.client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume',
+            headers=self.headers(f'sela:auto-resume:{inbox_id}:{answer_hash}'),
+            json={
+                'action': 'research', 'source_id': source_id, 'inbox_id': inbox_id,
+                'answer_sha256': answer_hash, 'expected_revision': target['trosa_revision'], 'research': {},
+            },
+        )
+        self.assertEqual(blocked_result.status_code, 200, blocked_result.get_data(as_text=True))
+        self.assertEqual(blocked_result.get_json()['status'], 'REVIEW')
+        self.assertEqual(blocked_result.get_json()['reason'], 'TROSA_STAGE_REQUIRES_TROSA')
+        state = self.client.get(f'/api/inbox/questions/{inbox_id}/sela-handoff').get_json()
+        self.assertEqual(state['status'], 'needs_review')
+        self.assertFalse(state['automatic_run'])
+        runs = self.client.get('/api/inbox').get_json()['sela_resume_runs']
+        visible_run = next(run for run in runs if run['inbox_id'] == inbox_id)
+        self.assertEqual(visible_run['status'], 'needs_review')
+
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_verifications WHERE lower(email)=?',
+                                          ('buyer@acrilicos.example',)).fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_historical_sela_resolution_is_not_backfilled_into_resume_queue(self):
+        source_id = 'resume-history-1'
+        body = prospect(source_id)
+        body.update({'contact': {}, 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'email': ''})
+        created = self.post_prospect(body, 'sela-v2:resume-history:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        need_key = 'sela:resume-history:need'
+        need = self.client.post('/api/integrations/sela/needs', json={
+            'request': {'source_id': source_id, 'customer_id': created.get_json()['trosa_id'],
+                        'kind': 'FACT_GAP', 'need': '历史回答回归',
+                        'missing_facts': [{'field': 'product_direction', 'label': '产品方向'}],
+                        'dedupe_key': need_key},
+            'idempotency_key': need_key,
+        }, headers=self.headers(need_key))
+        self.assertEqual(need.status_code, 200, need.get_data(as_text=True))
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+
+        old_resolution = {'action': 'edit', 'resolution': '既有历史人工处理'}
+        resolved = self.client.post(
+            f'/api/integrations/sela/needs/{inbox_id}/resolve', json=old_resolution,
+            headers=self.headers('resume-history:resolve'),
+        )
+        self.assertEqual(resolved.status_code, 200, resolved.get_data(as_text=True))
+        need_view = self.client.get(
+            f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}', headers=self.headers(),
+        ).get_json()['needs'][0]
+        self.assertIsNone(need_view['human_response'])
+        self.assertIsNone(need_view['resume_run'])
+        self.assertFalse(any(run['inbox_id'] == inbox_id
+                             for run in self.client.get('/api/inbox', headers=self.headers()).get_json()['sela_resume_runs']))
+
+    def test_send_approval_response_never_queues_sela(self):
+        source_id = 'resume-retired-send-1'
+        body = prospect(source_id)
+        body.update({'contact': {}, 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'email': ''})
+        created = self.post_prospect(body, 'sela-v2:resume-retired-send:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        need_key = 'sela:resume-retired-send:need'
+        need = self.client.post('/api/integrations/sela/needs', json={
+            'request': {'source_id': source_id, 'customer_id': created.get_json()['trosa_id'],
+                        'kind': 'SEND_APPROVAL', 'need': '旧发送审批', 'context': '不得触发发送。',
+                        'dedupe_key': need_key},
+            'idempotency_key': need_key,
+        }, headers=self.headers(need_key))
+        self.assertEqual(need.status_code, 200, need.get_data(as_text=True))
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+        self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        question = next(item for item in self.client.get('/api/inbox').get_json()['questions']
+                        if int(item['id']) == inbox_id)
+        answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'], 'answer': {}, 'idempotency_key': 'retired-send-answer',
+        })
+        self.assertEqual(answered.status_code, 200, answered.get_data(as_text=True))
+        self.assertFalse(answered.get_json()['sela_handoff']['automatic_run'])
+        self.assertIn('没有发送邮件', answered.get_json()['next_system_step'])
+        need_view = self.client.get(
+            f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}', headers=self.headers(),
+        ).get_json()['needs'][0]
+        self.assertEqual(need_view['human_response']['status'], 'retired')
+        self.assertIsNone(need_view['resume_run'])
+
     def test_answered_inbox_can_save_only_an_unsent_research_backed_draft(self):
         source_id = 'resume-draft-1'
         body = prospect(source_id)
@@ -589,6 +747,8 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
         question = next(row for row in self.client.get('/api/inbox').get_json()['questions']
                         if int(row['id']) == inbox_id)
+        self.assertEqual(question['subject']['label'], 'Trosa 冷线索')
+        self.assertTrue(any('未互动冷线索' in item for item in question['known_facts']))
         answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},
             'idempotency_key': 'resume-draft-answer-1',

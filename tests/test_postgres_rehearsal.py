@@ -1607,6 +1607,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         inbox_id = int(created_need.get_json()['item']['trosa_inbox_id'])
         question = next(row for row in client.get('/api/inbox').get_json()['questions']
                         if int(row['id']) == inbox_id)
+        self.assertEqual(question['subject']['label'], 'Trosa 冷线索')
         answer = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@auto-resume.example'},
             'idempotency_key': 'pg-auto-resume-answer',
@@ -1686,6 +1687,97 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                     SELECT message.id FROM trosa.outreach_messages message
                     WHERE message.legacy_payload->>'external_id'=? LIMIT 1
                 )''', (source_id,),
+        ).fetchone()[0], 0)
+
+    def test_sela_non_cold_email_gap_response_stays_in_review_and_uses_structured_form(self):
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        source_id = 'pg-resume-review-email-gap'
+        created = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-resume-review-prospect'},
+            json={'prospect': {
+                'source_id': source_id, 'company': 'Review Plastics',
+                'website': 'https://review-plastics.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+            }},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = int(created.get_json()['trosa_id'])
+        module._set_customer_stage(self.connection, customer_ids=[customer_id], stage='成交')
+        self.connection.commit()
+
+        need_key = 'pg-resume-review-need'
+        created_need = client.post(
+            '/api/integrations/sela/needs', headers={'X-Idempotency-Key': need_key},
+            json={'request': {
+                'source_id': source_id, 'customer_id': customer_id,
+                'company': 'Review Plastics', 'kind': 'FACT_GAP',
+                'need': '确认联系人邮箱', 'severity': 'AMBER',
+                'missing_facts': [{'field': 'contact_email', 'label': '联系人邮箱', 'why': '尚未确认'}],
+                'resume': '补充后继续研究', 'dedupe_key': need_key,
+            }},
+        )
+        self.assertEqual(created_need.status_code, 200, created_need.get_json())
+        inbox_id = int(created_need.get_json()['item']['trosa_inbox_id'])
+        canonical = self.connection.execute(
+            '''SELECT target_id FROM trosa.legacy_row_refs
+                 WHERE legacy_user_id='hamid' AND table_name='inbox_items' AND legacy_id=?''',
+            (inbox_id,),
+        ).fetchone()['target_id']
+        self.connection.execute(
+            "UPDATE trosa.inbox_items SET question_kind='fact_request' WHERE id=?", (canonical,),
+        )
+        self.connection.commit()
+
+        question = next(item for item in client.get('/api/inbox').get_json()['questions']
+                        if int(item['id']) == inbox_id)
+        self.assertEqual(question['kind'], 'sela_request')
+        self.assertEqual(question['subject']['label'], 'Trosa 客户')
+        self.assertIn('未互动冷线索', question['why'])
+        email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
+        self.assertEqual(email_field['label'], '联系邮箱（仅供本次 Sela 请求/未发送草稿）')
+        self.assertIn('不会写入或验证 Trosa 联系人', email_field['help'])
+
+        answered = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
+            'revision': question['revision'], 'answer': {'fact_0': 'buyer@review-plastics.example'},
+            'idempotency_key': 'pg-resume-review-answer',
+        })
+        self.assertEqual(answered.status_code, 200, answered.get_json())
+        self.assertEqual(answered.get_json()['sela_handoff']['status'], 'needs_review')
+        self.assertFalse(answered.get_json()['sela_handoff']['automatic_run'])
+        self.assertIn('Sela 未自动续跑', answered.get_json()['next_system_step'])
+        self.assertIn('不会写入或验证 Trosa 联系人', answered.get_json()['next_system_step'])
+
+        need_view = client.get(
+            f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}'
+        ).get_json()['needs'][0]
+        self.assertEqual(need_view['resume_run']['status'], 'needs_review')
+        self.assertEqual(need_view['resume_run']['reason'], 'prospect_not_cold')
+        answer_hash = module._sela_hash(need_view['human_response'])
+        target = next(row for row in client.get('/api/integrations/sela/prospects?limit=100').get_json()['prospects']
+                      if row['id'] == source_id)
+        blocked_result = client.post(
+            f'/api/integrations/sela/prospects/{source_id}/resume',
+            headers={'X-Idempotency-Key': f'sela:auto-resume:{inbox_id}:{answer_hash}'},
+            json={
+                'action': 'research', 'source_id': source_id, 'inbox_id': inbox_id,
+                'answer_sha256': answer_hash, 'expected_revision': target['trosa_revision'], 'research': {},
+            },
+        )
+        self.assertEqual(blocked_result.status_code, 200, blocked_result.get_json())
+        self.assertEqual(blocked_result.get_json()['status'], 'REVIEW')
+        self.assertEqual(blocked_result.get_json()['reason'], 'TROSA_STAGE_REQUIRES_TROSA')
+        handoff = client.get(f'/api/inbox/questions/{inbox_id}/sela-handoff').get_json()
+        self.assertEqual(handoff['status'], 'needs_review')
+        self.assertFalse(handoff['automatic_run'])
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=?', (customer_id,),
+        ).fetchone()[0], 0)
+        self.assertEqual(self.connection.execute(
+            "SELECT count(*) FROM trosa.email_verifications WHERE lower(trim(email))=?",
+            ('buyer@review-plastics.example',),
         ).fetchone()[0], 0)
 
     def test_z_agent_gateway_undo_and_operation_audit_boundary(self):

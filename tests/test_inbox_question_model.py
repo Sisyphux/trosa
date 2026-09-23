@@ -301,7 +301,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(question['subject']['company'], 'Audit Plastics Co')
         self.assertEqual(question['subject']['label'], 'Sela prospect')
         self.assertEqual(question['known_facts'], [
-            'Sela prospect：Audit Plastics Co', '尚未关联 Trosa 客户',
+            'Sela prospect：Audit Plastics Co', '尚未关联 Trosa 档案',
         ])
 
     def test_sela_json_context_becomes_labeled_fields(self):
@@ -390,6 +390,18 @@ class InboxQuestionModelTest(unittest.TestCase):
 
     def test_sela_fact_answer_is_structured_and_queues_resume_without_contact_write(self):
         customer_id, contact_id = self._insert_customer_with_contact('old@example.com')
+        conn = self._conn()
+        try:
+            with self.module.app.app_context():
+                self.module._sela_upsert_profile(
+                    conn, customer_id, 'prospect-1',
+                    {'contact': {}, 'email': '', 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
+                    '2026-09-24 00:00:00',
+                )
+            conn.commit()
+        finally:
+            conn.close()
         request = {
             'kind': 'FACT_GAP', 'session_id': 'session-123',
             'source_id': 'prospect-1', 'candidate_id': 'prospect-1',
@@ -405,8 +417,8 @@ class InboxQuestionModelTest(unittest.TestCase):
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
         self.assertEqual(email_field['input_type'], 'email')
-        self.assertIn('自动排入受限续跑', question['why_human'])
-        self.assertIn('排入 Sela 自动续跑', question['completion_effects'][0])
+        self.assertIn('才会排入公开研究/未发送草稿续跑', question['why_human'])
+        self.assertIn('符合续跑条件时排入 Sela', question['completion_effects'][0])
         response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
             'revision': question['revision'],
             'answer': {'fact_0': 'fixed@example.com'},

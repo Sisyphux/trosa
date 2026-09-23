@@ -1887,7 +1887,8 @@ async function submitInboxQuestion(id) {
         showToast('已恢复旧邮箱和 Inbox 问题。', 'success');
       });
     } else {
-      showToast(result.next_system_step || '回答已保存，问题已关闭。', 'success');
+      var handoffStatus = result.sela_handoff && String(result.sela_handoff.status || '').toLowerCase();
+      showToast(result.next_system_step || '回答已保存，问题已关闭。', handoffStatus === 'needs_review' ? 'warning' : 'success');
     }
     if (result.sela_handoff && result.sela_handoff.automatic_run) {
       startSelaInboxHandoffWatch(result.sela_handoff.trosa_inbox_id || result.resolved_question_id || id);

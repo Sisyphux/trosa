@@ -4,6 +4,7 @@ It runs only with ``CRM_ENV=rehearsal`` and uses the normal canonical domain
 writer; no HTTP test endpoint or production behaviour is introduced.
 """
 from pathlib import Path
+import importlib.util
 import json
 import os
 import sys
@@ -18,6 +19,10 @@ if os.environ.get('CRM_ENV') != 'rehearsal':
 from tools.postgres_rehearsal import load_fixture
 import db
 import trosa_domain
+
+app_spec = importlib.util.spec_from_file_location('trosa_inbox_browser_fixture_app', ROOT / 'app.py')
+app_module = importlib.util.module_from_spec(app_spec)
+app_spec.loader.exec_module(app_module)
 
 KEY = 'inbox-browser-specialist-v1'
 
@@ -34,6 +39,39 @@ def load():
         # mailbox; it is restored by each fixture reload.
         conn.execute('UPDATE trade_os_compat.contacts SET email=? WHERE id=?',
                      ('invalid-mailbox@rehearsal.invalid', ids['contact_id']))
+        prospect_source_id = 'inbox-browser-prospect-1'
+        profile = conn.execute(
+            '''SELECT customer_id FROM trosa.agent_prospect_profiles
+               WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                 AND source='sela' AND source_id=? LIMIT 1''',
+            (prospect_source_id,),
+        ).fetchone()
+        if profile:
+            cold_customer_id = int(profile['customer_id'])
+            trosa_domain.update_customer(conn, customer_id=cold_customer_id, values={
+                'business_stage': '', 'business_role': '', 'customer_judgment': '',
+            })
+        else:
+            cold_customer_id = trosa_domain.create_customer(
+                conn,
+                values={
+                    'name': 'Inbox Browser Prospect',
+                    'company': 'Inbox Browser Prospect',
+                    'country': 'US',
+                    'website': 'https://inbox-browser-prospect.example/',
+                    'field': 'acrylic sheet',
+                    'industry': 'fabrication',
+                    'import_source': 'inbox-browser-fixture',
+                    'business_stage': '', 'business_role': '', 'customer_judgment': '',
+                },
+            )
+            with app_module.app.app_context():
+                app_module._sela_upsert_profile(
+                    conn, cold_customer_id, prospect_source_id,
+                    {'contact': {}, 'email': '', 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
+                    '2026-09-24 00:00:00',
+                )
         # Recreate just this explicitly namespaced fixture set on every run.
         conn.execute("DELETE FROM trade_os_compat.inbox_items WHERE dedupe_key LIKE ?", (KEY + ':%',))
         specs = [
@@ -58,7 +96,7 @@ def load():
                 question_key=f'{KEY}:{index}', source_type='system')
             result[title] = item_id
         sela_request = {
-            'source_id': 'inbox-browser-prospect-1',
+            'source_id': prospect_source_id,
             'session_id': 'inbox-browser-session-1',
             'kind': 'DECISION',
             'severity': 'AMBER',
@@ -75,7 +113,7 @@ def load():
         result['Sela 需要确认 prospect 的下一步'] = trosa_domain.create_inbox_item(
             conn, item_type='sela_agent_request', title='Sela 需要确认 prospect 的下一步',
             content='公司：Inbox Browser Prospect\n类型：DECISION\n优先级：AMBER\n请确认后续研究方向。',
-            customer_id=ids['customer_id'], dedupe_key=f'{KEY}:9', status='open',
+            customer_id=cold_customer_id, dedupe_key=f'{KEY}:9', status='open',
             created_at='2026-09-21 09:00:09', question_kind='sela_request',
             question_key=f'{KEY}:9', source_type='sela', request_json=json.dumps(sela_request, ensure_ascii=False),
         )
@@ -96,7 +134,7 @@ def load():
         result['Sela 请求但未关联 prospect'] = trosa_domain.create_inbox_item(
             conn, item_type='sela_agent_request', title='Sela 请求但未关联 prospect',
             content='公司：Unlinked Inbox Prospect\n类型：DECISION\n优先级：AMBER\n请确认后续研究方向。',
-            customer_id=ids['customer_id'], dedupe_key=f'{KEY}:10', status='open',
+            customer_id=None, dedupe_key=f'{KEY}:10', status='open',
             created_at='2026-09-21 09:00:10', question_kind='sela_request',
             question_key=f'{KEY}:10', source_type='sela', request_json=json.dumps(unlinked_sela_request, ensure_ascii=False),
         )

@@ -115,7 +115,7 @@ await linkedResume.waitFor({timeout:15000});
 if (await linkedResume.getAttribute('data-status') !== 'queued') throw new Error('linked Sela answer did not appear as queued: ' + await linkedResume.innerText());
 if (await inboxCount() !== 8) throw new Error('linked Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // An answered request without a unique prospect must be honest about staying
-// manual and must not create an automatic-run status card.
+// manual. It gets a needs_review receipt, but never an automatic-run status.
 await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'Sela 请求但未关联 prospect'}).click();
 const unlinkedCard = page.locator('.inbox-question-active');
@@ -123,10 +123,13 @@ await unlinkedCard.getByRole('button', {name:'继续整理公开来源', exact:t
 const unlinkedCardId = await unlinkedCard.getAttribute('id');
 await unlinkedCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + unlinkedCardId).waitFor({state:'detached', timeout:15000});
-await page.getByText('回答已保存，但请求没有唯一 Prospect 关联；Sela 不能自动继续。', {exact:true}).waitFor({timeout:15000});
-if (await page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Unlinked Inbox Prospect'}).count()) {
-  throw new Error('unlinked Sela answer incorrectly created an automatic-run status card');
-}
+await page.getByText('这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。', {exact:true}).waitFor({timeout:15000});
+const unlinkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Unlinked Inbox Prospect'});
+await unlinkedResume.waitFor({timeout:15000});
+if (await unlinkedResume.getAttribute('data-status') !== 'needs_review') throw new Error('unlinked Sela answer did not stay in review: ' + await unlinkedResume.innerText());
+const unlinkedInboxId = Number(String(unlinkedCardId).replace('inbox-question-', ''));
+const unlinkedReceipt = await page.evaluate(async (id) => fetch('/api/inbox/questions/' + id + '/sela-handoff').then(r => r.json()), unlinkedInboxId);
+if (unlinkedReceipt.status !== 'needs_review' || unlinkedReceipt.automatic_run) throw new Error('unlinked Sela answer has an incorrect handoff receipt: ' + JSON.stringify(unlinkedReceipt));
 if (await inboxCount() !== 7) throw new Error('unlinked Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // Correct the deliberately stale rehearsal email through the normal answer
 // form, then use the visible Undo action returned by the same response.
