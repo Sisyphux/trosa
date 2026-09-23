@@ -263,6 +263,7 @@ class InboxQuestionModelTest(unittest.TestCase):
             'kind': 'DECISION', 'decision': {
                 'question': '优先哪个产品线？', 'options': ['板材', '展示架'], 'recommended': '板材',
             },
+            'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '待确认'}],
         }
         self._insert_question('sela_agent_request', 'approval',
                               '公司：CW Plastic\n类型：DECISION\n优先级：AMBER\n\n正文\n\n建议：板材',
@@ -272,6 +273,9 @@ class InboxQuestionModelTest(unittest.TestCase):
         decision = next(field for field in question['response_schema']['fields'] if field['key'] == 'selected_option')
         self.assertEqual(decision['input_type'], 'choice')
         self.assertEqual([choice['value'] for choice in decision['choices']], ['板材', '展示架'])
+        email = next(field for field in question['response_schema']['fields'] if field.get('fact_field') == 'contact_email')
+        self.assertEqual(email['key'], 'fact_0')
+        self.assertIn('独立确认操作', email['help'])
 
     def test_sela_agent_request_evidence_is_structured(self):
         self._insert_question(
@@ -429,6 +433,18 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertTrue(body['sela_handoff']['automatic_run'])
         self.assertEqual(body['sela_handoff']['status'], 'queued')
         self.assertEqual(body['sela_handoff']['session_id'], 'session-123')
+        conn = self._conn()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE lower(trim(email))=?',
+                ('fixed@example.com',),
+            ).fetchone()[0], 0)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM email_verifications WHERE lower(trim(email))=?',
+                ('fixed@example.com',),
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
         resolved = self.client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
         need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
         self.assertEqual(need['human_response']['facts'][0]['field'], 'contact_email')
@@ -506,6 +522,143 @@ class InboxQuestionModelTest(unittest.TestCase):
                              'resolved')
         finally:
             conn.close()
+
+    def test_sela_contact_email_save_is_separate_idempotent_and_undoable(self):
+        customer_id, _ = self._insert_customer_with_contact()
+        conn = self._conn()
+        try:
+            with self.module.app.app_context():
+                self.module._sela_upsert_profile(
+                    conn, customer_id, 'contact-save-prospect',
+                    {'contact': {}, 'email': '', 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
+                    '2026-09-24 00:00:00',
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        request = {
+            'kind': 'FACT_GAP', 'source_id': 'contact-save-prospect',
+            'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '尚未确认'}],
+            'evidence': [{'source': '官网联系页', 'quote': '邮箱 buyer@cwplastic.example',
+                          'source_url': 'https://cwplastic.example/contact'}],
+        }
+        item_id = self._insert_question(
+            'sela_agent_request', 'sela_request', '缺少联系邮箱', customer_id=customer_id,
+            dedupe_key='sela:contact-save:prospect', request_json=json.dumps(request, ensure_ascii=False),
+        )
+        question = next(row for row in self.client.get('/api/inbox').get_json()['questions']
+                        if int(row['id']) == item_id)
+        self.assertEqual(question['sela_contact_save']['customer_id'], customer_id)
+        self.assertEqual(question['sela_contact_save']['candidate']['email'], 'buyer@cwplastic.example')
+        self.assertEqual(question['sela_contact_save']['candidate']['source_urls'],
+                         ['https://cwplastic.example/contact'])
+
+        payload = {
+            'revision': question['revision'], 'email': 'buyer@cwplastic.example',
+            'idempotency_key': 'inbox-contact-save-prospect-1',
+        }
+        saved = self.client.post(f'/api/inbox/questions/{item_id}/save-contact-email', json=payload)
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        body = saved.get_json()
+        self.assertEqual(body['status'], 'saved')
+        self.assertFalse(body['email_verified'])
+        self.assertTrue(body['undo_token'])
+        row = self._row(item_id)
+        self.assertEqual(row['status'], 'open')
+        structured = json.loads(row['request_json'])
+        self.assertNotIn('human_response', structured)
+        self.assertNotIn('resume_run', structured)
+        conn = self._conn()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE customer_id=? AND lower(trim(email))=?',
+                (customer_id, 'buyer@cwplastic.example'),
+            ).fetchone()[0], 1)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM email_verifications WHERE lower(trim(email))=?',
+                ('buyer@cwplastic.example',),
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+        repeated = self.client.post(f'/api/inbox/questions/{item_id}/save-contact-email', json=payload)
+        self.assertEqual(repeated.status_code, 200, repeated.get_data(as_text=True))
+        self.assertEqual(repeated.get_json(), body)
+
+        undone = self.client.post('/api/undo/' + body['undo_token'], json={})
+        self.assertEqual(undone.status_code, 200, undone.get_data(as_text=True))
+        self.assertEqual(self._row(item_id)['status'], 'open')
+        conn = self._conn()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE lower(trim(email))=?',
+                ('buyer@cwplastic.example',),
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_sela_contact_email_save_rejects_invalid_duplicate_and_stale_target(self):
+        customer_id, _ = self._insert_customer_with_contact()
+        conn = self._conn()
+        try:
+            conn.execute("INSERT INTO customers (name, company, country) VALUES ('Other Co', 'Other Co', 'US')")
+            other_id = conn.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
+            conn.execute('INSERT INTO contacts (customer_id, name, email, is_primary) VALUES (?, ?, ?, 0)',
+                         (other_id, 'Other Buyer', 'claimed@other.example'))
+            with self.module.app.app_context():
+                self.module._sela_upsert_profile(
+                    conn, customer_id, 'contact-save-conflict',
+                    {'contact': {}, 'email': '', 'outreach_status': '', 'subject': '', 'email_draft': '',
+                     'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
+                    '2026-09-24 00:00:00',
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        request = {
+            'kind': 'FACT_GAP', 'source_id': 'contact-save-conflict',
+            'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱'}],
+        }
+        item_id = self._insert_question(
+            'sela_agent_request', 'sela_request', '缺少联系邮箱', customer_id=customer_id,
+            dedupe_key='sela:contact-save:conflict', request_json=json.dumps(request, ensure_ascii=False),
+        )
+        question = next(row for row in self.client.get('/api/inbox').get_json()['questions']
+                        if int(row['id']) == item_id)
+        invalid = self.client.post(f'/api/inbox/questions/{item_id}/save-contact-email', json={
+            'revision': question['revision'], 'email': 'not-an-email', 'idempotency_key': 'invalid-email-key',
+        })
+        self.assertEqual(invalid.status_code, 400)
+        duplicate = self.client.post(f'/api/inbox/questions/{item_id}/save-contact-email', json={
+            'revision': question['revision'], 'email': 'claimed@other.example', 'idempotency_key': 'cross-customer-key',
+        })
+        self.assertEqual(duplicate.status_code, 409)
+        stale = self.client.post(f'/api/inbox/questions/{item_id}/save-contact-email', json={
+            'revision': 'stale-revision', 'email': 'fresh@cwplastic.example', 'idempotency_key': 'stale-revision-key',
+        })
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(self._row(item_id)['status'], 'open')
+        conn = self._conn()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE customer_id=? AND lower(trim(email))=?',
+                (customer_id, 'fresh@cwplastic.example'),
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_sela_contact_candidate_requires_one_linked_structured_email(self):
+        helper = self.module._sela_contact_email_candidate
+        base = {'missing_facts': [{'field': 'contact_email'}], 'evidence': [
+            {'quote': 'Contact buyer@one.example', 'source_url': 'https://example.test/contact'}]}
+        self.assertEqual(helper(base)['email'], 'buyer@one.example')
+        base['evidence'].append({'quote': 'Email sales@one.example', 'source_url': 'https://example.test/sales'})
+        self.assertIsNone(helper(base))
+        base['evidence'] = [{'quote': 'Contact buyer@one.example'}]
+        self.assertIsNone(helper(base))
+        base['evidence'] = []
+        base['context'] = 'Contact buyer@one.example at https://example.test/contact'
+        self.assertIsNone(helper(base))
 
 
     def test_investigation_conclusion_has_human_choices(self):

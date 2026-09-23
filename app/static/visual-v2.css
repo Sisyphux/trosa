@@ -7861,6 +7861,30 @@ html.motion-lite .card {
   #page-inbox.inbox-question-expanded .inbox-command-shelf { display: none !important; }
 }
 
+.inbox-contact-save {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border, #d8d5ce);
+  border-radius: 12px;
+  background: var(--surface-subtle, #f7f6f2);
+}
+.inbox-contact-save h5,
+.inbox-contact-save p { margin: 0; }
+.inbox-contact-save h5 { font-size: 0.95rem; }
+.inbox-contact-save p { color: var(--text-secondary, #5c5b56); line-height: 1.5; }
+.inbox-contact-candidate { display: grid; gap: 3px; }
+.inbox-contact-candidate > span:first-child { font-size: 0.82rem; }
+.inbox-contact-candidate > strong { color: var(--text-primary, #24231f); overflow-wrap: anywhere; }
+.inbox-contact-candidate > span:last-child { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.84rem; }
+.inbox-contact-save .btn { justify-self: start; min-height: 40px; }
+.inbox-contact-save-status { color: var(--text-primary, #24231f) !important; font-weight: 600; }
+@media (max-width: 620px) {
+  .inbox-contact-save { padding: 12px; }
+  .inbox-contact-save .btn { width: 100%; justify-self: stretch; }
+}
+
 @media (max-width: 620px) {
   #page-inbox .inbox-page-header {
     display: block !important;

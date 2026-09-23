@@ -72,6 +72,11 @@ def load():
                      'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
                     '2026-09-24 00:00:00',
                 )
+        conn.execute(
+            '''DELETE FROM trade_os_compat.contacts
+                WHERE customer_id=? AND lower(trim(email))=?''',
+            (cold_customer_id, 'buyer@inbox-browser-prospect.example'),
+        )
         # Recreate just this explicitly namespaced fixture set on every run.
         conn.execute("DELETE FROM trade_os_compat.inbox_items WHERE dedupe_key LIKE ?", (KEY + ':%',))
         specs = [
@@ -107,7 +112,10 @@ def load():
                 'options': ['先补齐联系人事实', '继续整理公开来源'],
                 'recommended': '继续整理公开来源',
             },
-            'evidence': [{'source': '官网', 'quote': '提供 acrylic sheet 产品目录。'}],
+            'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '待人工确认'}],
+            'evidence': [{'source': '官网联系页',
+                          'quote': '公开邮箱 buyer@inbox-browser-prospect.example',
+                          'source_url': 'https://inbox-browser-prospect.example/contact'}],
             'resume': '读取你的选择后继续准备研究摘要；对外联系仍需人工确认。',
         }
         result['Sela 需要确认 prospect 的下一步'] = trosa_domain.create_inbox_item(
@@ -159,6 +167,14 @@ def load():
                         WHERE item.dedupe_key LIKE ?
                           AND receipt.idempotency_key LIKE ('inbox-' || item.id::text || '-%')
                    )''', receipt_scope)
+        # The rehearsal database is isolated. Clear the separate contact-save
+        # idempotency receipts so repeated browser runs exercise a fresh write.
+        conn.execute(
+            "DELETE FROM audit.agent_gateway_idempotency WHERE action='inbox_contact_email' AND idempotency_key LIKE 'inbox-contact-%'"
+        )
+        conn.execute(
+            "DELETE FROM trade_os_compat.agent_gateway_rows WHERE action='inbox_contact_email' AND idempotency_key LIKE 'inbox-contact-%'"
+        )
         conn.commit()
         result.update(ids)
         return result

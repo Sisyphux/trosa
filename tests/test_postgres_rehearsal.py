@@ -1689,6 +1689,85 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                 )''', (source_id,),
         ).fetchone()[0], 0)
 
+    def test_sela_inbox_contact_email_save_is_separate_and_undoable_in_postgres(self):
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        source_id = 'pg-inbox-contact-save'
+        created = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': 'pg-inbox-contact-save-prospect'},
+            json={'prospect': {
+                'source_id': source_id, 'company': 'Contact Save Plastics',
+                'website': 'https://contact-save.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+            }},
+        )
+        self.assertEqual(created.status_code, 200, created.get_json())
+        customer_id = int(created.get_json()['trosa_id'])
+        need_key = 'pg-inbox-contact-save-need'
+        need = client.post(
+            '/api/integrations/sela/needs', headers={'X-Idempotency-Key': need_key},
+            json={'request': {
+                'source_id': source_id, 'customer_id': customer_id,
+                'company': 'Contact Save Plastics', 'kind': 'FACT_GAP',
+                'need': '确认联系人邮箱',
+                'missing_facts': [{'field': 'contact_email', 'label': '联系邮箱', 'why': '待确认'}],
+                'evidence': [{'source': '官网联系页',
+                              'quote': '邮箱 buyer@contact-save.example',
+                              'source_url': 'https://contact-save.example/contact'}],
+                'dedupe_key': need_key,
+            }},
+        )
+        self.assertEqual(need.status_code, 200, need.get_json())
+        inbox_id = int(need.get_json()['item']['trosa_inbox_id'])
+        question = next(item for item in client.get('/api/inbox').get_json()['questions']
+                        if int(item['id']) == inbox_id)
+        self.assertEqual(question['sela_contact_save']['customer_id'], customer_id)
+        self.assertEqual(question['sela_contact_save']['candidate']['email'], 'buyer@contact-save.example')
+        payload = {
+            'revision': question['revision'], 'email': 'buyer@contact-save.example',
+            'idempotency_key': 'pg-inbox-contact-save-1',
+        }
+        saved = client.post(f'/api/inbox/questions/{inbox_id}/save-contact-email', json=payload)
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        body = saved.get_json()
+        self.assertEqual(body['status'], 'saved')
+        self.assertFalse(body['email_verified'])
+        self.assertTrue(body['undo_token'])
+        self.connection.commit()
+        contact = self.connection.execute(
+            '''SELECT contact.email FROM trosa.contacts contact
+                WHERE contact.customer_id=?
+                  AND lower(contact.email)=lower(?)''',
+            (customer_id, 'buyer@contact-save.example'),
+        ).fetchone()
+        self.assertEqual(contact['email'], 'buyer@contact-save.example')
+        self.assertEqual(self.connection.execute(
+            '''SELECT count(*) FROM trosa.email_verifications WHERE lower(email)=lower(?)''',
+            ('buyer@contact-save.example',),
+        ).fetchone()[0], 0)
+        open_request = client.get(f'/api/integrations/sela/needs?status=open&item_id={inbox_id}').get_json()['needs']
+        self.assertEqual(len(open_request), 1)
+        self.assertIsNone(open_request[0]['human_response'])
+        self.assertIsNone(open_request[0]['resume_run'])
+        repeated = client.post(f'/api/inbox/questions/{inbox_id}/save-contact-email', json=payload)
+        self.assertEqual(repeated.status_code, 200, repeated.get_json())
+        self.assertEqual(repeated.get_json(), body)
+
+        undone = client.post('/api/undo/' + body['undo_token'], json={})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.connection.commit()
+        remaining = self.connection.execute(
+            '''SELECT count(*) FROM trosa.contacts contact
+                WHERE contact.customer_id=?
+                  AND lower(contact.email)=lower(?)''',
+            (customer_id, 'buyer@contact-save.example'),
+        ).fetchone()[0]
+        self.assertEqual(remaining, 0)
+        open_request = client.get(f'/api/integrations/sela/needs?status=open&item_id={inbox_id}').get_json()['needs']
+        self.assertEqual(len(open_request), 1)
+
     def test_sela_non_cold_email_gap_response_stays_in_review_and_uses_structured_form(self):
         module = self._app_module()
         client = module.app.test_client()

@@ -4133,7 +4133,11 @@ def _sela_request_structured(value):
             source = _sela_prospect_text(item.get('source'), 300)
             quote = _sela_prospect_text(item.get('quote'), 2000)
             if source and quote:
-                evidence.append({'source': source, 'quote': quote})
+                entry = {'source': source, 'quote': quote}
+                source_url = _sela_public_source_url(item.get('source_url') or item.get('url'))
+                if source_url:
+                    entry['source_url'] = source_url
+                evidence.append(entry)
     return {
         'missing_facts': missing_facts,
         'decision': decision,
@@ -10789,6 +10793,24 @@ def _question_will_not_do(kind, primary=None):
     return ['不会自动发送邮件、报价或作出价格、交期承诺。']
 
 
+def _sela_missing_fact_response_fields(missing):
+    fields = []
+    for index, fact in enumerate(missing[:20] if isinstance(missing, list) else []):
+        if not isinstance(fact, dict):
+            continue
+        fact_name = _sela_prospect_text(fact.get('field'), 80)
+        label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
+        help_text = _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'
+        if fact_name == 'contact_email':
+            help_text += (' 该邮箱只作为本次 Sela 请求的事实；不会写入或验证 Trosa 联系人。'
+                          '符合续跑条件时可用于准备未发送草稿；要保存到联系人请使用下方单独确认入口，目标不明确时不会显示该入口。')
+        fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
+                       'label': '联系邮箱（仅供本次 Sela 请求/未发送草稿）' if fact_name == 'contact_email' else label,
+                       'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
+                       'required': False, 'validation': {}, 'help': help_text})
+    return fields
+
+
 def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
     """The UI renders these fields; it must never infer a form from item_type."""
     attachments = {'allowed': kind == _inbox_questions.QUESTION_INVESTIGATION,
@@ -10829,23 +10851,12 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
             fields.append({'key': 'selected_option', 'label': raw_decision.get('question') or '请选择处理方向',
                            'input_type': 'choice', 'required': True, 'validation': {'options': options},
                            'choices': [{'value': option, 'label': option} for option in options], 'help': ''})
+            fields.extend(_sela_missing_fact_response_fields(missing))
             fields.append({'key': 'note', 'label': '补充说明', 'input_type': 'textarea', 'required': False,
-                           'validation': {}, 'help': '可说明原因或补充背景。'})
+                           'validation': {},
+                           'help': '已补充事实时可选；如果无法补充上方事实，请说明原因。' if missing else '可说明原因或补充背景。'})
         elif missing:
-            for index, fact in enumerate(missing[:20]):
-                if not isinstance(fact, dict):
-                    continue
-                fact_name = _sela_prospect_text(fact.get('field'), 80)
-                label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
-                help_text = _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'
-                if fact_name == 'contact_email':
-                    help_text += (' 该邮箱只作为本次 Sela 请求的事实；不会写入或验证 Trosa 联系人。'
-                                  '符合续跑条件时可用于准备未发送草稿；要保存到联系人请在客户联系人工作区人工确认并登记。')
-                fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
-                               'label': '联系邮箱（仅供本次 Sela 请求/未发送草稿）' if fact_name == 'contact_email' else label,
-                               'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
-                               'required': False, 'validation': {},
-                               'help': help_text})
+            fields.extend(_sela_missing_fact_response_fields(missing))
             fields.append({'key': 'note', 'label': '补充说明', 'input_type': 'textarea', 'required': False,
                            'validation': {}, 'help': '如暂时无法确认，请说明原因。'})
         else:
@@ -10907,6 +10918,91 @@ def _inbox_email_correction_field(key):
             'required': False, 'validation': {}, 'help': '填写后会更新该联系人邮箱；旧邮箱与历史投递事实保留，并可撤销。'}
 
 
+def _sela_public_source_url(value):
+    """Accept only ordinary public web URLs as evidence links."""
+    candidate = _sela_prospect_text(value, 2000)
+    try:
+        parsed = urlparse(candidate)
+        host = (parsed.hostname or '').lower()
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return ''
+    if (parsed.scheme not in {'http', 'https'} or not host or parsed.username or parsed.password
+            or host in {'localhost', 'localhost.localdomain'}
+            or host.endswith(('.local', '.internal'))):
+        return ''
+    try:
+        if not ipaddress.ip_address(host).is_global:
+            return ''
+    except ValueError:
+        pass
+    return candidate
+
+
+def _sela_contact_email_candidate(request_payload):
+    """Find one format-valid email cited by structured, linked Sela evidence.
+
+    Free text and unlinked evidence are intentionally excluded.  The returned
+    address is only an unverified candidate for a human to review.
+    """
+    payload = request_payload if isinstance(request_payload, dict) else {}
+    missing = payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else []
+    if not any(isinstance(item, dict) and str(item.get('field') or '').lower() == 'contact_email'
+               for item in missing):
+        return None
+    matches = {}
+    evidence = payload.get('evidence') if isinstance(payload.get('evidence'), list) else []
+    pattern = re.compile(r'(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b')
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        source_url = _sela_public_source_url(item.get('source_url') or item.get('url'))
+        if not source_url:
+            continue
+        quote = str(item.get('quote') or '')
+        for raw_email in pattern.findall(quote):
+            try:
+                normalized = validate_email_address(raw_email, check_deliverability=False).normalized
+            except EmailNotValidError:
+                continue
+            matches.setdefault(_canonical_email(normalized), set()).add(source_url)
+    if len(matches) != 1:
+        return None
+    email, source_urls = next(iter(matches.items()))
+    return {'email': email, 'source_urls': sorted(source_urls)} if source_urls else None
+
+
+def _sela_inbox_contact_save_target(conn, primary, profile=None, prospect=None):
+    """Resolve a human-confirmed contact save target from the Sela source id."""
+    row = primary if isinstance(primary, dict) else dict(primary or {})
+    payload = _sela_agent_request_structured(row)
+    if str(payload.get('kind') or '').upper() == 'SEND_APPROVAL':
+        return None
+    candidate = _sela_contact_email_candidate(payload)
+    missing = payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else []
+    if not any(isinstance(item, dict) and str(item.get('field') or '').lower() == 'contact_email'
+               for item in missing):
+        return None
+    source_id = str(payload.get('source_id') or '').strip()
+    if not source_id:
+        return None
+    profile = profile or _sela_profile_by_source(conn, source_id)
+    if not profile:
+        return None
+    profile = dict(profile)
+    if str(profile.get('source_id') or '') != source_id:
+        return None
+    prospect = prospect or _sela_prospect_view(conn, profile)
+    if (not prospect or prospect.get('do_not_contact') or prospect.get('lifecycle_rejected')
+            or prospect.get('exclusion_review')):
+        return None
+    return {
+        'customer_id': int(prospect['trosa_id']),
+        'company': str(prospect.get('company') or ''),
+        'candidate': candidate,
+    }
+
+
 def _inbox_question_revision(members):
     value = '|'.join('%s:%s:%s' % (item.get('id'), item.get('created_at'), item.get('content')) for item in members)
     return hashlib.sha256(value.encode('utf-8')).hexdigest()[:16]
@@ -10940,6 +11036,7 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
             sela_review = _inbox_sela_review_payload(primary)
         sela_request = _sela_request_display(primary) if kind == _inbox_questions.QUESTION_SELA_REQUEST else {}
         sela_prospect = None
+        sela_contact_save = None
         sela_subject_label = 'Trosa 档案'
         sela_relationship_label = '关系阶段：Trosa 档案'
         if kind == _inbox_questions.QUESTION_SELA_REQUEST and conn is not None:
@@ -10947,6 +11044,9 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
             source_id = str(request_payload.get('source_id') or '').strip()
             profile = _sela_profile_by_source(conn, source_id) if source_id else None
             sela_prospect = _sela_prospect_view(conn, profile) if profile else None
+            sela_contact_save = _sela_inbox_contact_save_target(
+                conn, primary, profile=profile, prospect=sela_prospect,
+            )
             if sela_prospect:
                 stage = sela_prospect.get('lifecycle_stage')
                 if sela_prospect.get('lifecycle_rejected'):
@@ -11025,6 +11125,7 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
             'will_not_do': _question_will_not_do(kind, primary),
             'options': _question_options(kind, primary, suggested, sela_review),
             'sela_review': sela_review,
+            'sela_contact_save': sela_contact_save,
             'primary_item_id': primary.get('id'),
             'item_ids': [member.get('id') for member in members],
             'source_type': primary.get('source_type') or '',
@@ -12204,6 +12305,127 @@ def respond_to_inbox_question(item_id):
     with _INBOX_CACHE_LOCK:
         _INBOX_CACHE.clear()
     return jsonify(response)
+
+
+@app.route('/api/inbox/questions/<int:item_id>/save-contact-email', methods=['POST'])
+@login_required
+def save_sela_inbox_contact_email(item_id):
+    """Save one human-confirmed Sela Inbox email to its exact Trosa prospect."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': '联系人邮箱请求无效'}), 400
+    revision = str(data.get('revision') or '').strip()
+    idempotency_key = str(data.get('idempotency_key') or '').strip()
+    raw_email = str(data.get('email') or '').strip()
+    if not revision or not re.fullmatch(r'[A-Za-z0-9:._-]{1,200}', idempotency_key):
+        return jsonify({'error': '保存联系人必须包含问题版本和幂等键'}), 400
+    try:
+        email = validate_email_address(raw_email, check_deliverability=False).normalized
+    except EmailNotValidError:
+        return jsonify({'error': '请输入格式有效的邮箱地址'}), 400
+    email = _canonical_email(email)
+    request_hash = _sela_hash({'item_id': item_id, 'revision': revision, 'email': email})
+    now = _calendar_now_text()
+
+    def operation(conn, cursor):
+        if postgres_mode():
+            lock_key = f'{_db_scope_user()}:{idempotency_key}'
+            conn.execute('SELECT pg_advisory_xact_lock(hashtext(?))', ('inbox-contact-email:' + lock_key,))
+        receipt = _agent_gateway_receipt_read(conn, 'inbox_contact_email', idempotency_key)
+        if receipt:
+            if receipt['request_sha256'] != request_hash:
+                raise CrmWriteError('幂等键已用于不同联系人邮箱', 409)
+            return {'response': json.loads(receipt['response_json'])}
+
+        row = next(iter(_sela_agent_request_rows(conn, status='open', item_id=item_id)), None)
+        if not row:
+            raise CrmWriteError('这条 Sela Inbox 请求已处理或不存在', 409)
+        row = dict(row)
+        _, item_ids = _inbox_group_item_ids(conn, item_id)
+        open_items = _load_open_inbox_items(conn)
+        member_set = set(item_ids)
+        members = [item for item in open_items if int(item.get('id') or 0) in member_set]
+        if not members or revision != _inbox_question_revision(members):
+            raise CrmWriteError('Inbox 问题已变化，请检查后重试', 409)
+        _apply_question_metadata(row)
+        kind = row.get('question_kind') or _inbox_questions.question_kind_for(row.get('item_type'))
+        if kind != _inbox_questions.QUESTION_SELA_REQUEST:
+            raise CrmWriteError('该 Inbox 问题不支持保存 Sela 联系人', 400)
+        target = _sela_inbox_contact_save_target(conn, row)
+        if not target:
+            raise CrmWriteError('该请求没有安全、明确的 Trosa 联系人目标', 409)
+        customer_id = int(target['customer_id'])
+        customer = _customer_record(conn, customer_id) if postgres_mode() else cursor.execute(
+            'SELECT id, name, company, is_deleted FROM customers WHERE id=?', (customer_id,)
+        ).fetchone()
+        if not customer:
+            raise CrmWriteError('对应的 Trosa 客户不存在', 404)
+
+        duplicate = None
+        if postgres_mode():
+            for owner in _active_customers(conn):
+                for contact in _customer_contacts(conn, int(owner['id'])):
+                    if _canonical_email(contact.get('email')) == email:
+                        duplicate = {**contact, 'customer_id': int(owner['id']),
+                                     'company': owner.get('company') or owner.get('name') or ''}
+                        break
+                if duplicate:
+                    break
+        else:
+            duplicate_row = cursor.execute(
+                '''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted
+                     FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+                    WHERE lower(trim(ct.email))=? ORDER BY ct.id LIMIT 1''', (email,)
+            ).fetchone()
+            duplicate = dict(duplicate_row) if duplicate_row else None
+        if duplicate and int(duplicate.get('customer_id') or 0) != customer_id:
+            company = duplicate.get('company') or duplicate.get('customer_name') or '其他客户'
+            raise CrmWriteError(f'该邮箱已属于其他客户：{company}', 409)
+
+        if duplicate:
+            response = {
+                'success': True, 'status': 'already_present', 'already_present': True,
+                'customer': {'id': customer_id, 'company': target['company']},
+                'contact': {'id': int(duplicate['id']), 'email': email},
+                'undo_token': '',
+                'message': '该邮箱已在此客户的联系人中。',
+            }
+        else:
+            contact_id = _create_contact(conn, customer_id=customer_id, values={
+                'name': '', 'email': email, 'preferred_channel': 'email',
+                'contact_type': 'person', 'is_primary': 0,
+                'notes': '由 Sela Inbox 人工确认保存；邮箱尚未验证。',
+            }, created_at=now)
+            after = _snapshot_entity(conn, 'contacts', contact_id)
+            undo_token = _create_undo_action(
+                conn, 'CREATE_CONTACT', 'contact', contact_id,
+                [_undo_entity('contacts', contact_id, None, after)], '撤销 Inbox 保存联系人邮箱',
+            )
+            _record_operation_log(conn, 'CREATE', 'contact', contact_id,
+                                  f'Inbox 人工确认保存联系人邮箱 {email}', now)
+            response = {
+                'success': True, 'status': 'saved', 'already_present': False,
+                'customer': {'id': customer_id, 'company': target['company']},
+                'contact': {'id': int(contact_id), 'email': email},
+                'email_verified': False, 'undo_token': undo_token,
+                'message': '联系人邮箱已保存；邮箱尚未验证。',
+            }
+        _agent_gateway_receipt_write(
+            conn, 'inbox_contact_email', idempotency_key, request_hash,
+            json.dumps(response, ensure_ascii=False), None, now,
+        )
+        return {'response': response}
+
+    try:
+        result = _run_crm_write(operation)
+    except CrmWriteError as error:
+        return jsonify({'error': error.message}), error.status
+    except Exception:
+        logger.exception('Sela Inbox contact email save failed: %s', item_id)
+        return jsonify({'error': '联系人邮箱未保存'}), 500
+    with _INBOX_CACHE_LOCK:
+        _INBOX_CACHE.clear()
+    return jsonify(result['response'])
 
 
 @app.route('/api/inbox/<int:item_id>/record-reply', methods=['POST'])

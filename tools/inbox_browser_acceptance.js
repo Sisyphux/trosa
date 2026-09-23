@@ -105,6 +105,28 @@ await list.locator('.inbox-question-open').filter({hasText:'Sela 需要确认 pr
 const selaCard = page.locator('.inbox-question-active');
 const selaCardText = await selaCard.innerText();
 if (!selaCardText.includes('下一步先做什么？') || !selaCardText.includes('回答后 Sela 的计划') || !selaCardText.includes('公开来源')) throw new Error('structured Sela context is incomplete: ' + selaCardText);
+if (!selaCardText.includes('公开证据候选（未验证）') || !selaCardText.includes('buyer@inbox-browser-prospect.example')) throw new Error('unverified contact candidate is missing: ' + selaCardText);
+await selaCard.getByRole('link', {name:'查看证据 1', exact:true}).waitFor({timeout:15000});
+const beforeContactSaveCount = await inboxCount();
+const contactSaveTarget = await page.evaluate(async () => {
+  const payload = await fetch('/api/inbox').then(response => response.json());
+  const q = payload.questions.find(item => item.headline === 'Sela 需要确认 prospect 的下一步');
+  return q && q.sela_contact_save;
+});
+if (!contactSaveTarget || !contactSaveTarget.candidate || !contactSaveTarget.customer_id) throw new Error('Sela contact save target missing: ' + JSON.stringify(contactSaveTarget));
+await selaCard.getByRole('button', {name:'确认并保存邮箱', exact:true}).click();
+await page.getByRole('heading', {name:'确认保存联系人邮箱', exact:true}).waitFor({timeout:10000});
+await page.getByRole('button', {name:'保存联系人邮箱', exact:true}).click();
+await page.getByText('联系人邮箱已保存到 Inbox Browser Prospect；邮箱尚未验证，Inbox 回答仍未提交。', {exact:true}).waitFor({timeout:15000});
+if (await inboxCount() !== beforeContactSaveCount || !await selaCard.isVisible()) throw new Error('saving contact email closed or resolved the Inbox request');
+const savedContacts = await page.evaluate(async (customerId) => fetch('/api/customers/' + customerId + '/contacts').then(response => response.json()), contactSaveTarget.customer_id);
+if (!savedContacts.some(contact => contact.email === 'buyer@inbox-browser-prospect.example')) throw new Error('confirmed contact email was not stored: ' + JSON.stringify(savedContacts));
+const contactSaveUndo = page.locator('#toastContainer .toast').filter({hasText:'联系人邮箱已保存到 Inbox Browser Prospect'}).getByRole('button', {name:'撤销', exact:true});
+await contactSaveUndo.click();
+await page.getByText('已撤销联系人邮箱保存；Inbox 请求仍保持打开。', {exact:true}).waitFor({timeout:15000});
+const contactsAfterUndo = await page.evaluate(async (customerId) => fetch('/api/customers/' + customerId + '/contacts').then(response => response.json()), contactSaveTarget.customer_id);
+if (contactsAfterUndo.some(contact => contact.email === 'buyer@inbox-browser-prospect.example')) throw new Error('Undo left the confirmed email in Trosa contacts');
+if (await inboxCount() !== beforeContactSaveCount) throw new Error('Undo changed the Inbox question count');
 await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}).click();
 const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
