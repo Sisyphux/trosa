@@ -10,8 +10,8 @@
 <title>Trade OS · 外贸工作系统</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
-<link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-cleanup-20260923">
-<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-cleanup-20260923">
+<link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
+<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
 </head>
 <body>
 
@@ -41,9 +41,8 @@
     <div class="login-title">加入 Trade OS</div>
     <div class="login-desc" id="invitationDesc">正在验证邀请链接…</div>
     <form class="login-pin-form" id="invitationForm" hidden>
-      <label class="form-label" for="invitationName">姓名</label>
+      <label class="form-label" for="invitationName">姓名（登录账号）</label>
       <input class="form-control" id="invitationName" type="text" required maxlength="80" autocomplete="name">
-      <div class="settings-help" id="invitationAccountHint" style="margin:6px 0 12px;">登录账号与姓名相同</div>
       <label class="form-label" for="invitationPassword">设置 6 位数字密码</label>
       <input class="form-control" id="invitationPassword" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password">
       <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认 6 位数字密码</label>
@@ -156,11 +155,11 @@
         </div>
       </div>
       <div class="page-body today-page-body">
-        <div class="today-fullscreen-shell">
-        <div class="today-workspace">
+        <div class="today-fullscreen-shell is-empty">
+        <div class="today-workspace is-empty">
           <section class="today-task-section">
             <div class="today-section-header"><div><h3>今日跟进</h3><div class="section-caption">拖动卡片调整顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
-            <div class="today-task-list" id="todayReminders"><div class="empty-state"><p>今天没有需要处理的客户</p></div></div>
+            <div class="today-task-list" id="todayReminders"><div class="empty-state" role="status"><p>正在加载今日跟进…</p></div></div>
             <div class="today-dashboard-error" id="todayDashboardError" hidden role="alert"></div>
             <div class="batch-bar today-batch-bar" id="todayBatchBar">
               <span class="batch-count" id="todayBatchCount">已选 0 项</span>
@@ -417,7 +416,6 @@
     <div class="page-section" id="page-logs">
       <div class="page-header">
         <h2>操作日志</h2>
-        <div class="page-desc">客户、联系人和待办的创建、修改与删除记录</div>
       </div>
       <div class="page-body">
         <div class="card"><div class="card-body" id="logsList"><div class="empty-state"><p>正在加载...</p></div></div></div>
@@ -589,7 +587,7 @@
             <div id="outreachList"></div>
             <div class="customer-timeline-more" id="customerTimelineMore" hidden></div>
             <details class="workspace-compose workspace-communication-compose" id="followCompose">
-              <summary>记录沟通</summary>
+              <summary>手动录入</summary>
               <div class="workspace-compose-body">
                 <div class="workspace-compose-switch" role="tablist" aria-label="沟通记录类型">
                   <button type="button" class="workspace-compose-mode active" data-compose-mode="history" role="tab" aria-selected="true" onclick="switchCustomerCompose('history')">沟通记录</button>
@@ -809,9 +807,9 @@
       <div class="form-row add-customer-advanced new-customer-advanced"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="newCustomerSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="newCustomerSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div></div>
       <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button class="btn btn-sm btn-primary" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="btn btn-sm add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
       <section class="draft-contacts-section">
-        <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加另一位</button></div>
+        <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加联系人</button></div>
         <div id="newDraftContacts"></div>
-        <details class="draft-email-import" open><summary>邮箱可发送性检查与导入</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="粘贴邮箱后自动检查；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、路由与重复邮箱。</small></div></details>
+        <details class="draft-email-import"><summary>批量导入邮箱</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="每行一个邮箱，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、路由与重复邮箱。</small></div></details>
       </section>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站智能填充，也可以手动填写"></textarea></div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
@@ -864,7 +862,7 @@
         <div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="addExistSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div>
       </div>
       <section class="draft-contacts-section">
-        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴后自动生成联系人</span></div></div>
+        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong></div></div>
         <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('exist')">检查并添加</button></div></details>
         <details class="manual-contact-entry"><summary>手动填写联系人（可选）</summary><div id="existDraftContacts"></div><button type="button" class="text-action" onclick="addDraftContact('exist')">＋ 再添加一位联系人</button></details>
       </section>
@@ -952,7 +950,7 @@
 <!-- Inbox Reply Modal -->
 <div class="modal-overlay" id="inboxReplyModal">
   <div class="modal inbox-reply-modal">
-    <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle"></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle" hidden></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
       <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
       <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea></div>
@@ -1101,6 +1099,6 @@
 <datalist id="communicationTypeOptions">
   <option value="WhatsApp"><option value="邮件"><option value="电话"><option value="会议"><option value="报价"><option value="寄样"><option value="展会现场"><option value="微信"><option value="视频会议"><option value="客户来访"><option value="其他跟进">
 </datalist>
-  <script src="/app.js?v={{VERSION}}-ui-copy-cleanup-20260923"></script>
+  <script src="/app.js?v={{VERSION}}-ui-copy-noise-20260923-r5"></script>
 </body>
 </html>

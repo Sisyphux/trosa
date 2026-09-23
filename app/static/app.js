@@ -817,7 +817,7 @@ function openSearchMatchContext(customer) {
       content: context.content || context.title || '', rawContent: context.content || '', followDate: context.date || '',
       direction: context.direction || 'unknown', activityType: context.activity_type || 'follow_up',
       sourceLabel: context.source_label || 'Search 命中', sourceDetail: context.source_url || '',
-      subtitle: 'Search 已带入匹配的 Inbox 原文。核对后保存，必要时再安排下一步。'
+      subtitle: '已带入 Inbox 原文，请核对后确认。'
     });
     return;
   }
@@ -1596,9 +1596,8 @@ function renderInbox(counts) {
   var overview = document.getElementById('inboxOverview');
   if (overview) {
     var identityCount = inboxQuestions.filter(function(question) { return question.kind === 'identity'; }).length;
-    overview.innerHTML = '<strong>' + (counts.all || inboxQuestions.length || 0) + '</strong><span>个问题需要判断</span>' +
-      (identityCount ? '<button class="btn btn-sm inbox-auto-attribute" type="button" onclick="autoAttributeInbox()">自动归属可确定项</button>' : '') +
-      '<p>这里只显示需要人工确认的事项。</p>';
+    overview.innerHTML = '<strong>' + (counts.all || inboxQuestions.length || 0) + '</strong><span>项待确认</span>' +
+      (identityCount ? '<button class="btn btn-sm inbox-auto-attribute" type="button" onclick="autoAttributeInbox()">自动归属可确定项</button>' : '');
   }
   var filtersEl = document.getElementById('inboxFilters');
   if (filtersEl) {
@@ -1607,9 +1606,10 @@ function renderInbox(counts) {
     });
     filtersEl.innerHTML = kinds.map(function(key) {
       var countText = key === 'all' ? inboxQuestions.length : (counts[key] || 0);
+      var countBadge = key === 'all' || !countText ? '' : '<span class="inbox-filter-count">' + countText + '</span>';
       return '<button class="inbox-filter' + (key === inboxFilter ? ' active' : '') + '" data-inbox-filter="' + key +
         '" onclick="setInboxFilter(\'' + key + '\')">' + INBOX_QUESTION_FILTER_LABELS[key] +
-        (countText ? '<span class="inbox-filter-count">' + countText + '</span>' : '') + '</button>';
+        countBadge + '</button>';
     }).join('');
     updateFilterIndicator(filtersEl);
   }
@@ -1634,10 +1634,10 @@ function renderInboxQuestionWorkspace(counts) {
   inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
   var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = counts.all || inboxState.questions.length || '';
   var overview = document.getElementById('inboxOverview');
-  if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>个需要你判断的问题</span><p>这里只显示需要人工确认的事项。</p>';
+  if (overview) overview.innerHTML = '<strong>' + (counts.all || inboxState.questions.length) + '</strong><span>项待确认</span>';
   var kinds = ['all'].concat(Array.from(new Set(inboxState.questions.map(function(q) { return q.kind; }))));
   var filters = document.getElementById('inboxFilters');
-  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? inboxState.questions.length : inboxState.questions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + '<span class="inbox-filter-count">' + n + '</span></button>'; }).join('');
+  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? inboxState.questions.length : inboxState.questions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + (kind === 'all' ? '' : '<span class="inbox-filter-count">' + n + '</span>') + '</button>'; }).join('');
   var list = document.getElementById('inboxList'); if (!list) return;
   var questions = inboxState.questions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
   if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>' + (inboxState.activeFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>'; return; }
@@ -1659,7 +1659,7 @@ function renderInboxQuestionCard(q) {
     return '<button class="' + cls + '" onclick="runInboxOption(' + Number(q.primary_item_id) + ',\'' + escapeHtml(option.key) + '\')">' + escapeHtml(option.label) + '</button>';
   }).join('');
   var decision = transactional
-    ? '<p class="inbox-field-help">选择下面一项后，系统会打开确认窗口，并把结果写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
+    ? '<p class="inbox-field-help">确认后写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
     : fields + attachment + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button>';
   return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据</h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>处理方式</h4>' + decision + '</section></article>';
 }
@@ -2054,7 +2054,7 @@ async function recordInboxReply(itemId) {
     direction: item.direction || 'inbound', activityType: item.activity_type || 'customer_reply',
     sourceLabel: item.source_label || 'Inbox 客户回复',
     autoAnalyze: true,
-    subtitle: 'AI 已整理摘要，请核对后保存为客户事实；原始回复会一并保留。'
+    subtitle: 'AI 摘要与原文一并保存，请核对后确认。'
   });
 }
 
@@ -2073,7 +2073,7 @@ function recordInboxCapture(itemId) {
     sourceLabel: item.capture_platform || item.capture_channel || (item.item_type === 'gmail_capture' ? 'Gmail' : '浏览器采集'),
     sourceDetail: item.capture_source_url || item.capture_identity || '',
     autoAnalyze: true, autoPipeline: true, queueSize: remaining,
-    subtitle: 'AI 已整理摘要，请核对归属与内容；原始记录会一并保留。'
+    subtitle: 'AI 摘要与原文一并保存，请核对归属和内容。'
   });
 }
 
@@ -2103,7 +2103,7 @@ async function openAgentProposalConfirmation(proposalId) {
     followDate: payload.follow_date || localDateString(), direction: payload.direction || 'unknown',
     activityType: payload.activity_type || 'follow_up', source: payload.source || 'agent_gateway',
     inboxItemId: payload.inbox_item_id || '', reminderId: action === 'complete_task' ? payload.task_id : '',
-    sourceLabel: proposal.source_reference || 'Agent 提议', subtitle: '你可以编辑后再确认；确认后才会写入 CRM。'
+    sourceLabel: proposal.source_reference || 'Agent 提议', subtitle: '确认后写入客户记录。'
   });
 }
 
@@ -2126,7 +2126,10 @@ async function openCommunicationConfirm(options) {
   var contentLabel = document.getElementById('communicationConfirmContentLabel');
   if (title) title.textContent = context.source === 'today' ? '完成并记录' : '记录沟通';
   if (kicker) kicker.textContent = context.source === 'today' ? '今日待办' : '沟通确认';
-  if (subtitle) subtitle.textContent = context.subtitle || '确认实际发生的事实；需要时再安排明确的下一步。';
+  if (subtitle) {
+    subtitle.textContent = context.subtitle || '';
+    subtitle.hidden = !context.subtitle;
+  }
   if (contentLabel) contentLabel.innerHTML = '这次发生了什么 <span class="required">*</span>';
   document.getElementById('inboxReplyContent').value = context.content || '';
   _inboxReplyRawContent = context.content || '';
@@ -2649,6 +2652,8 @@ function updateTodaySummary(reminders) {
   });
   document.getElementById('statPending').textContent = uniqueCustomers.size;
   document.getElementById('statOverdue').textContent = overdueCount;
+  var summary = document.querySelector('#page-dashboard .today-summary');
+  if (summary) summary.hidden = uniqueCustomers.size === 0 && overdueCount === 0;
 }
 
 function arrangeOverdueReminders(button) {
@@ -2748,8 +2753,8 @@ async function loadDashboard() {
     renderTodaySchedule(dashboardReminders.concat(upcoming));
   } else {
     dashboardReminders = [];
-    renderTodayError('今日跟进暂时无法加载，系统没有把它当作“已完成”。');
-    showError('今日跟进暂时无法加载，客户数据没有被清空。');
+    renderTodayError();
+    showError('今日跟进暂时无法加载；待办未标记完成，客户数据未清空。');
   }
 
   var logsResult = requests[2];
@@ -2765,20 +2770,40 @@ async function loadDashboard() {
   if (weeklyResult.status === 'fulfilled') loadWeeklyFollowList(weeklyResult.value || []);
 }
 
-function renderTodayError(message) {
+function renderTodayError() {
+  setTodayWorkspaceEmpty(true);
   var remEl = document.getElementById('todayReminders');
-  if (remEl) remEl.innerHTML = '<div class="empty-state"><strong>' + escapeHtml(message || '今日跟进暂时无法加载') + '</strong><p>请点击“重新加载”重试。</p></div>';
+  if (remEl) remEl.innerHTML = '';
   var focus = document.getElementById('todayFocus');
-  if (focus) focus.innerHTML = '<div class="empty-state"><p>等待今日跟进数据</p></div>';
+  if (focus) focus.innerHTML = '';
+  var wide = document.getElementById('todayWideDetail');
+  if (wide) {
+    wide.innerHTML = '';
+    delete wide.dataset.reminderId;
+    delete wide.dataset.customerId;
+  }
+}
+
+function setTodayWorkspaceEmpty(isEmpty) {
+  var workspace = document.querySelector('#page-dashboard .today-workspace');
+  var shell = document.querySelector('#page-dashboard .today-fullscreen-shell');
+  if (workspace) workspace.classList.toggle('is-empty', !!isEmpty);
+  if (shell) shell.classList.toggle('is-empty', !!isEmpty);
 }
 
 function renderTodayTasks(reminders) {
   var remEl = document.getElementById('todayReminders');
-  if (!reminders || reminders.length === 0) {
+  var isEmpty = !reminders || reminders.length === 0;
+  setTodayWorkspaceEmpty(isEmpty);
+  if (isEmpty) {
     remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong></div>';
     document.getElementById('todayFocus').innerHTML = '<div class="empty-state"><p>今天没有待处理事项</p></div>';
     var wideEmpty = document.getElementById('todayWideDetail');
-    if (wideEmpty) wideEmpty.innerHTML = '<div class="today-wide-empty"><span>今日工作已完成</span></div>';
+    if (wideEmpty) {
+      wideEmpty.innerHTML = '';
+      delete wideEmpty.dataset.reminderId;
+      delete wideEmpty.dataset.customerId;
+    }
     return;
   }
 
@@ -3213,7 +3238,7 @@ function openReminderCommunicationConfirm(reminder) {
   openCommunicationConfirm({
     source: 'today', sourceLabel: 'Today 待办', reminderId: Number(reminder.id), customerId: Number(reminder.customer_id),
     customerName: reminder.customer_company || reminder.customer_name || '当前客户', direction: 'unknown', activityType: 'follow_up',
-    subtitle: '记录这次实际沟通；确认后会完成当前这条待办，必要时再安排下一步。'
+    subtitle: ''
   });
 }
 
@@ -4217,7 +4242,7 @@ function renderCustomerTable(tbodyId, customers, type) {
     var person = c.company && c.name && c.name !== c.company ? c.name : '';
     var hasContact = !!c.has_contact;
     var lastDate = c.last_contact || c.latest_outreach_date || '';
-    var lastText = hasContact ? formatDate(lastDate) : '尚未获得客户回复';
+    var lastText = hasContact ? formatDate(lastDate) : (lastDate ? '开发邮件 ' + formatDate(lastDate) : '—');
     if (c.waiting_reply) lastText += ' · 等待回复';
     else if (c.days_since_contact !== null && c.days_since_contact >= 30) lastText += ' · ' + c.days_since_contact + '天未联系';
     var relationshipBadge = '<span class="customer-contact-state ' + (hasContact ? 'contacted' : 'uncontacted') + '">' + (hasContact ? '已有联系' : '未获回复') + '</span>';
@@ -4226,7 +4251,15 @@ function renderCustomerTable(tbodyId, customers, type) {
     var tags = (c.tags || '').split(/[,，]/).map(function(tag){ return tag.trim(); }).filter(Boolean);
     var tagsHtml = tags.length ? '<div class="customer-tags">' + tags.slice(0, 4).map(function(tag){ return '<span>' + escapeHtml(tag) + '</span>'; }).join('') + '</div>' : '';
     var matchReasons = (c.match_reasons || []).length ? '<div class="customer-match-reasons">' + c.match_reasons.map(function(reason) { return '<span>' + escapeHtml(reason) + '</span>'; }).join('') + '</div>' : '';
-    var issuesHtml = (c.data_quality_issues || []).length ? '<div class="customer-quality-issues">' + c.data_quality_issues.map(function(issue) { return '<span>' + escapeHtml(issue) + '</span>'; }).join('') + '</div>' : '';
+    var qualityIssues = c.data_quality_issues || [];
+    var missingIssues = qualityIssues.filter(function(issue) { return String(issue).indexOf('缺少') === 0; });
+    var otherIssues = qualityIssues.filter(function(issue) { return String(issue).indexOf('缺少') !== 0; });
+    var qualityBadges = [];
+    if (missingIssues.length) {
+      qualityBadges.push('<span class="customer-quality-summary" title="' + escapeHtml(missingIssues.join('、')) + '" aria-label="资料待检查：' + escapeHtml(missingIssues.join('、')) + '">资料待检查 · ' + missingIssues.length + '</span>');
+    }
+    otherIssues.forEach(function(issue) { qualityBadges.push('<span>' + escapeHtml(issue) + '</span>'); });
+    var issuesHtml = qualityBadges.length ? '<div class="customer-quality-issues">' + qualityBadges.join('') + '</div>' : '';
     var matchContext = c.match_context || {};
     var matchContextDetail = [matchContext.content || matchContext.title || matchContext.contact_name, matchContext.date ? formatDate(matchContext.date) : ''].filter(Boolean).join(' · ');
     var matchContextHtml = matchContextDetail ? '<div class="customer-match-context"><span>' + highlightSearchText(matchContextDetail, searchQuery) + '</span></div>' : '';
@@ -5328,8 +5361,10 @@ function renderCustomerNextTask(reminders) {
   var openTasks = reminders || [];
   var next = (reminders || [])[0];
   if (!next) {
-    el.innerHTML = '<span class="workspace-muted">尚未安排下一步</span>';
-    el.hidden = false;
+    // The customer summary already states that no next step is arranged.
+    // Keep this action area focused on what the user can do now.
+    el.innerHTML = '';
+    el.hidden = true;
     if (actionButton) actionButton.textContent = '安排下一步';
     if (quickActions) quickActions.hidden = true;
     if (otherEl) otherEl.innerHTML = '';
@@ -5429,6 +5464,7 @@ function renderCustomerFactsBrief(customer) {
   var currentNext = customer.current_next_step || {};
   var nextTask = (customer.reminders || [])[0] || customer.next_task;
   var nextLabel = currentNext.label || (nextTask && (nextTask.title || nextTask.content)) || '未安排下一步';
+  var hasNextTask = !!(nextTask && (nextTask.title || nextTask.content));
   var nextDate = currentNext.date || (nextTask && nextTask.remind_date) || '';
   var waitingText = customer.customer_judgment || '未记录人工判断';
   var website = (customer.website || '').trim();
@@ -5457,7 +5493,7 @@ function renderCustomerFactsBrief(customer) {
     var gapLabel = gap.label || '资料待确认';
     var gapDetail = gap.detail || '需要人工确认';
     return '<button type="button" class="customer-gap-item" title="' + escapeHtml(gapDetail) + '" aria-label="' + escapeHtml(gapLabel + '：' + gapDetail) + '" onclick="focusCustomerGap(\'' + escapeHtml(gap.target || 'editTabBasic') + '\')"><span>' + escapeHtml(gapLabel) + '</span></button>';
-  }).join('') : '<div class="customer-gap-empty">暂无缺口</div>';
+  }).join('') : '';
   var customerLevel = customerLevelForDisplay(customer.level);
   var agentProspect = customer.agent_prospect || null;
   var agentResearchHtml = '';
@@ -5486,22 +5522,21 @@ function renderCustomerFactsBrief(customer) {
     '</section>';
   }
   summary.innerHTML =
-    '<div class="customer-facts-brief-head"><div><span class="workspace-kicker">客户当前工作</span><span class="customer-facts-brief-hint">先看最近发生什么，再决定下一步</span></div></div>' +
     '<div class="customer-now-next-grid">' +
-      '<section class="customer-fact-section customer-fact-now"><div class="customer-fact-section-head"><div><span class="customer-fact-label">现在</span><span class="customer-fact-label-sub">最近一次重要沟通</span></div><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabOutreach\')">时间线</button></div><div class="customer-fact-events">' + recentHtml + '</div><div class="customer-now-waiting"><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong><button type="button" class="text-action" onclick="editCustomerWaiting()">调整</button></div></section>' +
-      '<section class="customer-fact-section customer-fact-next"><div class="customer-fact-section-head"><div><span class="customer-fact-label">下一步</span><span class="customer-fact-label-sub">最需要执行的一个动作</span></div><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabTasks\')">全部待办</button></div><strong class="customer-next-title">' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time class="customer-next-date">' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : '<span class="customer-next-date">尚未安排日期</span>') + '</section>' +
+      '<section class="customer-fact-section customer-fact-now"><div class="customer-fact-section-head"><span class="customer-fact-label">最近沟通</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabOutreach\')">时间线</button></div><div class="customer-fact-events">' + recentHtml + '</div><div class="customer-now-waiting"><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong><button type="button" class="text-action" onclick="editCustomerWaiting()">调整</button></div></section>' +
+      '<section class="customer-fact-section customer-fact-next"><div class="customer-fact-section-head"><span class="customer-fact-label">下一步</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabTasks\')">全部待办</button></div><strong class="customer-next-title">' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time class="customer-next-date">' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : (hasNextTask ? '<span class="customer-next-date">未安排日期</span>' : '')) + '</section>' +
     '</div>' +
-    '<details class="customer-secondary-info"><summary><span>资料与历史信息</span><span class="customer-secondary-hint">' + (gaps.length ? gaps.length + ' 项待确认 · ' : '') + '联系人、客户资料、状态与信息缺口</span></summary><div class="customer-secondary-grid">' +
+    '<details class="customer-secondary-info"><summary><span>资料与历史信息</span>' + (gaps.length ? '<span class="customer-secondary-hint">' + gaps.length + ' 项需检查</span>' : '') + '</summary><div class="customer-secondary-grid">' +
       '<section class="customer-fact-section customer-fact-identity"><div class="customer-fact-section-head"><span class="customer-fact-label">客户身份</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabBasic\')">资料</button></div>' +
         '<strong class="customer-fact-company">' + escapeHtml(customer.company || customer.name || '未记录公司名称') + '</strong>' +
         (customer.name && customer.company && customer.name !== customer.company ? '<span class="customer-fact-subline">客户名称：' + escapeHtml(customer.name) + '</span>' : '') +
         '<div class="customer-fact-values"><span><b>国家/地区</b>' + escapeHtml(customer.country || '未记录') + '</span><span><b>行业/领域</b>' + escapeHtml(customer.industry || customer.field || '未记录') + '</span><span><b>来源</b>' + escapeHtml([customer.source, customer.source_detail].filter(Boolean).join(' · ') || '未记录') + '</span><label class="customer-level-quick" title="点击等级即可直接输入修改"><b>等级</b><span class="customer-level-quick-control"><input class="customer-level-quick-input" type="text" inputmode="text" autocapitalize="characters" aria-label="客户等级，输入 A/B/C/D，可选加号或减号" value="' + escapeHtml(customerLevel) + '" data-current-level="' + escapeHtml(customerLevel) + '" onchange="quickUpdateCustomerLevel(this)"><span class="customer-level-quick-affordance" aria-hidden="true"><span class="ui-icon ui-icon-edit"></span></span><span class="customer-level-quick-feedback" aria-live="polite"></span></span></label><span class="customer-fact-website"><b>网站</b>' + (websiteUrl ? '<a href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener">' + escapeHtml(websiteHost) + '</a>' : '未记录') + '</span></div>' +
       '</section>' +
       '<section class="customer-fact-section customer-fact-contact"><div class="customer-fact-section-head"><span class="customer-fact-label">沟通对象</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabContacts\')">' + (primaryContact ? '查看' : '添加') + '</button></div>' + contactHtml + '</section>' +
-      '<section class="customer-fact-section customer-fact-status"><div class="customer-fact-section-head"><span class="customer-fact-label">客户状态</span><button type="button" class="text-action" onclick="editCustomerWaiting()">编辑等待</button></div><div class="customer-fact-status-grid"><div><span>关系状态</span><strong>' + escapeHtml(currentStatus.label || '未记录') + '</strong></div><div><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong></div><div><span>下一步</span><strong>' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time>' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : '') + '</div></div></section>' +
-      '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">当前上下文</span><span class="customer-fact-gap-count">关键需求：' + escapeHtml(customer.field || customer.industry || '待补充') + '</span></div><p class="customer-fact-context-copy">' + renderRichText((customer.profile || customer.notes || '尚未记录当前背景；可在资料中补充。').slice(0, 360)) + '</p><small class="customer-fact-files">相关资料：' + Number(customer.file_count || 0) + ' 个文件</small></section>' +
+      '<section class="customer-fact-section customer-fact-status"><div class="customer-fact-section-head"><span class="customer-fact-label">关系状态</span></div><div class="customer-fact-status-grid"><div><strong>' + escapeHtml(currentStatus.label || '未记录') + '</strong></div></div></section>' +
+      '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">客户背景</span></div><p class="customer-fact-context-copy">' + renderRichText((customer.profile || customer.notes || '尚未记录').slice(0, 360)) + '</p></section>' +
       agentResearchHtml +
-      '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">信息缺口</span><span class="customer-fact-gap-count">' + (gaps.length ? gaps.length + ' 项待确认' : '基础字段完整') + '</span></div><div class="customer-gap-list">' + gapsHtml + '</div></section>' +
+      (gaps.length ? '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">资料需检查</span></div><div class="customer-gap-list">' + gapsHtml + '</div></section>' : '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">基础字段齐全</span></div></section>') +
     '</div></details>';
 }
 
@@ -6853,14 +6888,12 @@ function renderCustomerTimelineEmpty(el) {
       if (el.dataset.timelineEmptyToken !== token || list.querySelector('.tl-item')) return;
       delete el.dataset.timelineEmptyToken;
       el.textContent = '';
-      el.innerHTML = '<div class="empty-state" style="padding:30px;"><p>暂无关系动态</p></div>';
     }, 330);
     renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
     return;
   }
   delete el.dataset.timelineEmptyToken;
   el.textContent = '';
-  el.innerHTML = '<div class="empty-state" style="padding:30px;"><p>暂无关系动态</p></div>';
 }
 
 // The timeline is reconciled by record identity instead of being replaced as a
@@ -7949,13 +7982,19 @@ function initIcalUrl() {
   api('/api/network/ip').then(function(net) {
     input.value = net.subscribe_url || '';
     if (status) {
-      var changed = net.last_changed_at && !net.last_changed_at.startsWith('2000-') ? net.last_changed_at : '暂无未来待办';
-      status.textContent = '个人订阅源已更新：' + changed + ' · 当前 ' + (net.active_count || 0) + ' 项待办';
+      status.textContent = calendarFeedStatus(net);
     }
   }).catch(function() {
     input.value = '获取个人订阅链接失败';
     if (status) status.textContent = '请确认服务正在运行后重试';
   });
+}
+
+function calendarFeedStatus(data) {
+  var changed = data.last_changed_at && !data.last_changed_at.startsWith('2000-') ? data.last_changed_at : '';
+  var activeCount = Number(data.active_count) || 0;
+  if (changed) return '订阅源已更新：' + changed + (activeCount ? '' : ' · 暂无待办');
+  return activeCount ? activeCount + ' 项待办' : '暂无待办';
 }
 
 function copyIcalUrl() {
@@ -7994,8 +8033,7 @@ function refreshCalendarFeed() {
   showToast('正在检查个人订阅源...', 'info');
   api('/api/calendar/refresh', { method: 'POST' }).then(function(data){
     if (data.success) {
-      var changed = data.last_changed_at && !data.last_changed_at.startsWith('2000-') ? data.last_changed_at : '暂无未来待办';
-      if (status) status.textContent = '个人订阅源已更新：' + changed + ' · 当前 ' + (data.active_count || 0) + ' 项待办';
+      if (status) status.textContent = calendarFeedStatus(data);
       showToast('订阅源已是最新，Apple 日历会在下次获取时同步', 'success');
     }
   }).catch(function() {
@@ -8022,7 +8060,7 @@ async function loadHistory() {
   try {
     var history = await api('/api/follow-history');
     var el = document.getElementById('historyTimeline');
-    if (!history || history.length === 0) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + uiIcon('list') + '</div><p>暂无跟进历史</p></div>'; return; }
+    if (!history || history.length === 0) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + uiIcon('list') + '</div><p>暂无沟通记录</p></div>'; return; }
     _followTimelineCache = {};
     var html = '<div class="timeline">';
     history.forEach(function(h) {
@@ -9050,7 +9088,7 @@ async function showInvitationAcceptance(token) {
     var response = await fetch('/api/invitations/' + encodeURIComponent(token), {cache: 'no-store'});
     var data = await response.json();
     if (!response.ok || !data.valid) throw new Error((data && data.error) || '邀请链接无效');
-    if (desc) desc.textContent = '请设置你的姓名和密码。姓名就是登录账号。';
+    if (desc) desc.textContent = '请设置姓名与密码。';
     if (form) {
       form.hidden = false;
       form.dataset.token = token;
@@ -9071,12 +9109,6 @@ function returnToStandardLogin() {
   if (overlay) { overlay.hidden = true; overlay.style.display = 'none'; }
   checkLogin();
 }
-
-document.getElementById('invitationName').addEventListener('input', function(event) {
-  var hint = document.getElementById('invitationAccountHint');
-  var name = event.target.value.trim();
-  if (hint) hint.textContent = name ? '登录账号：' + name : '账号将使用你填写的姓名';
-});
 
 document.getElementById('invitationForm').addEventListener('submit', async function(event) {
   event.preventDefault();
@@ -9377,7 +9409,7 @@ function renderWeeklyMemberNavigator() {
     var color = OV.colors[uid] || '#8B7355';
     filters += '<button type="button" class="weekly-member-filter' + (isActive ? ' is-active' : '') + '" data-weekly-filter="' + escapeHtml(uid) + '" aria-pressed="' + isActive + '" style="--member-color:' + color + '" onclick="setWeeklyMemberFilter(' + filterValue + ')"><i aria-hidden="true">' + escapeHtml((OV.labels[uid] || uid).slice(0, 1)) + '</i><span>' + escapeHtml(OV.labels[uid]) + '</span></button>';
   });
-  root.innerHTML = '<div class="weekly-team-summary" aria-live="polite"><span>本周沟通</span><strong>' + escapeHtml(OV.labels[activeFilter] || '客户沟通') + ' 的客户记录</strong></div><div class="weekly-team-index" aria-label="选择负责人的周报">' + filters + '</div>';
+  root.innerHTML = '<div class="weekly-team-summary"><span>负责人</span></div><div class="weekly-team-index" aria-label="选择负责人的周报">' + filters + '</div>';
 }
 
 function setWeeklyMemberFilter(uid) {
@@ -9442,7 +9474,7 @@ function renderWeeklyMember(uid, data, error, options) {
   var statusText = options.staleError ? '更新失败' : (options.fromCache ? '更新中' : '');
   var html = '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div>' + (statusText ? '<div class="weekly-person-header-meta"><em>' + statusText + '</em></div>' : '') + '</header>';
   if (options.staleError) html += '<div class="weekly-member-refresh-error" role="alert">更新失败，已保留最近一次内容。<button type="button" onclick="loadWeeklyMember(\'' + uid + '\')">重试</button></div>';
-  if (!reps.length) html += '<div class="weekly-person-empty"><strong>本周还没有确认的沟通</strong><span>确认后的客户进展会按负责人汇总在这里。</span></div>';
+  if (!reps.length) html += '<div class="weekly-person-empty"><strong>本周没有已确认的沟通</strong></div>';
   reps.forEach(function(r) {
     var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
     html += '<article class="weekly-work-card">';
