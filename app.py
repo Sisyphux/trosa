@@ -10907,6 +10907,7 @@ def _build_inbox_questions(items, matches_by_item):
         sela_review = None
         if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
             sela_review = _inbox_sela_review_payload(primary)
+        sela_request = _sela_request_display(primary) if kind == _inbox_questions.QUESTION_SELA_REQUEST else {}
         known = []
         if customer:
             facts = [value for value in (customer.get('company'), customer.get('country'),
@@ -10914,6 +10915,10 @@ def _build_inbox_questions(items, matches_by_item):
             known.append('客户：' + (customer.get('name') or customer.get('company') or '已关联客户'))
             if facts:
                 known.append('资料：' + ' · '.join(facts))
+        elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
+            if sela_request.get('company'):
+                known.append('Sela prospect：' + sela_request['company'])
+            known.append('尚未关联 Trosa 客户')
         else:
             identity = primary.get('capture_identity') or ''
             if identity:
@@ -10937,7 +10942,11 @@ def _build_inbox_questions(items, matches_by_item):
             'why': _question_why(kind, primary),
             'summary': _question_headline(kind, primary, suggested, customer),
             'why_human': _question_why(kind, primary),
-            'subject': {'customer_id': (customer or {}).get('id'), 'company': (customer or {}).get('company') or (customer or {}).get('name') or ''},
+            'subject': {
+                'customer_id': (customer or {}).get('id'),
+                'company': (customer or {}).get('company') or (customer or {}).get('name') or sela_request.get('company', ''),
+                'label': 'Trosa 客户' if customer else 'Sela prospect' if kind == _inbox_questions.QUESTION_SELA_REQUEST else '',
+            },
             'customer': customer,
             'suggested_customer': suggested,
             'known_facts': known,

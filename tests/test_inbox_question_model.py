@@ -286,6 +286,24 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertIn('官网邮箱冲突', structured['context'])
         self.assertEqual(structured['fields'], [])
 
+    def test_sela_prospect_is_visible_as_subject_without_claiming_trosa_customer_link(self):
+        request = {
+            'kind': 'FACT_GAP', 'source_id': 'prospect-subject-1',
+            'company': 'Audit Plastics Co',
+            'missing_facts': [{'field': 'product_line', 'label': '优先产品线'}],
+        }
+        self._insert_question(
+            'sela_agent_request', 'approval', '类型：FACT_GAP',
+            title='补充产品方向', dedupe_key='sela:agent-request:prospect-subject-1',
+            request_json=json.dumps(request, ensure_ascii=False),
+        )
+        question = self.client.get('/api/inbox').get_json()['questions'][0]
+        self.assertEqual(question['subject']['company'], 'Audit Plastics Co')
+        self.assertEqual(question['subject']['label'], 'Sela prospect')
+        self.assertEqual(question['known_facts'], [
+            'Sela prospect：Audit Plastics Co', '尚未关联 Trosa 客户',
+        ])
+
     def test_sela_json_context_becomes_labeled_fields(self):
         payload = json.dumps({
             'action': 'send_first_outreach',

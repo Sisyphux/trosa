@@ -106,10 +106,12 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   win.openInboxQuestion(String(questions[0].primary_item_id));
   const detail = doc.querySelector('.inbox-question-active');
   assert.ok(detail, '展开后应有问题工作台');
+  assert.ok(doc.getElementById('page-inbox').classList.contains('inbox-question-expanded'));
   assert.ok(detail.querySelector('.inbox-question-queue').textContent.includes('为什么需要你'));
   assert.ok(detail.querySelector('.inbox-question-evidence').textContent.includes('2.8mm clear acrylic sheets'));
   assert.ok(detail.querySelector('.inbox-question-decision'), '回答区域应前置');
   win.closeInboxQuestion();
+  assert.ok(!doc.getElementById('page-inbox').classList.contains('inbox-question-expanded'));
 
   // Sela 的 JSON 上下文渲染成带标签的字段，而不是原始 JSON 墙。
   const selaHtml = win.inboxEvidenceHtml({
@@ -134,6 +136,25 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(filtered.includes('确认这是否是同一个业务主体'), filtered);
   assert.ok(!filtered.includes('TEXFIRE'), filtered);
   win.setInboxQuestionFilter('all');
+
+  const selaQuestion = {
+    id: '13', kind: 'sela_request', headline: '补充产品方向', summary: '补充产品方向',
+    why_human: 'Sela 需要优先产品线，回答后会继续公开研究。',
+    subject: { customer_id: null, company: 'Audit Plastics Co', label: 'Sela prospect' },
+    evidence_count: 1, primary_item_id: 13, created_at: '2026-09-23 09:00:00',
+    response_schema: { fields: [], attachments: { allowed: false } },
+    completion_effects: [], will_not_do: [], evidence: [],
+  };
+  setInboxPayload({ items: [], questions: [selaQuestion], counts: { all: 1, sela_request: 1 } });
+  await win.loadInbox();
+  const selaRow = doc.querySelector('.inbox-question-open').textContent;
+  assert.ok(selaRow.includes('Sela prospect') && selaRow.includes('Audit Plastics Co'), selaRow);
+  win.openInboxQuestion('13');
+  const selaDetail = doc.querySelector('.inbox-question-active');
+  assert.ok(selaDetail.querySelector('.inbox-question-subject').textContent.includes('尚未关联 Trosa 客户'));
+  assert.equal(selaDetail.querySelector('.inbox-question-queue').textContent.match(/补充产品方向/g).length, 1,
+    '相同标题和摘要不应在展开区重复');
+  win.closeInboxQuestion();
 
   // 空列表显示明确空状态而不是“没有数据”
   setInboxPayload({ items: [], questions: [], counts: { all: 0, questions: 0 } });
