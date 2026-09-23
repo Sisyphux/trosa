@@ -1844,6 +1844,21 @@ html.motion-lite #page-dashboard .today-focus-card {
 #page-inbox .inbox-evidence-field { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 13px; line-height: 1.55; }
 #page-inbox .inbox-evidence-field > span { color: var(--ui-ink-muted); }
 #page-inbox .inbox-evidence-field > strong { color: var(--ui-ink); font-weight: 500; word-break: break-word; }
+#page-inbox .inbox-sela-block { margin-top: 12px; }
+#page-inbox .inbox-sela-block > span, #page-inbox .inbox-evidence-resume > span { display: block; margin-bottom: 5px; color: var(--ui-ink-muted); font-size: 12px; font-weight: 600; }
+#page-inbox .inbox-sela-block ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+#page-inbox .inbox-sela-block li { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; background: rgba(250,248,242,.78); font-size: 13px; line-height: 1.5; }
+#page-inbox .inbox-sela-block li strong { color: var(--ui-ink); font-weight: 600; }
+#page-inbox .inbox-sela-block li span, #page-inbox .inbox-sela-block li small { color: var(--ui-ink-muted); }
+#page-inbox .inbox-sela-decision { display: grid; gap: 4px; margin-top: 12px; padding: 10px 12px; border-left: 2px solid var(--v2-clay); background: rgba(178,105,74,.06); font-size: 13px; line-height: 1.55; }
+#page-inbox .inbox-sela-decision strong { color: var(--ui-ink); font-weight: 600; }
+#page-inbox .inbox-sela-decision span, #page-inbox .inbox-sela-decision small { color: var(--ui-ink-muted); }
+#page-inbox .inbox-evidence-background { margin-top: 9px; color: var(--ui-ink-muted); font-size: 12px; }
+#page-inbox .inbox-evidence-background summary { cursor: pointer; }
+#page-inbox .inbox-evidence-resume { margin: 12px 0 0; padding: 9px 11px; border-radius: 8px; background: rgba(122,113,135,.08); color: var(--ui-ink-soft); font-size: 13px; line-height: 1.55; }
+#page-inbox .inbox-retired-request { display: grid; gap: 4px; padding: 12px; border: 1px solid rgba(168,95,69,.2); border-radius: 9px; background: rgba(178,105,74,.07); font-size: 13px; }
+#page-inbox .inbox-retired-request strong { color: var(--v2-clay); }
+#page-inbox .inbox-retired-request span { color: var(--ui-ink-soft); }
 /* Tablet widths: keep the decision reachable by stacking queue → evidence → 请你提供
    instead of dropping the response plane below a tall evidence column. */
 @media (max-width: 1100px) { #page-inbox .inbox-question-active { grid-template-columns: minmax(0,1fr); } #page-inbox .inbox-question-queue { border-right: 0; border-bottom: 1px solid var(--ui-line); } #page-inbox .inbox-question-decision { grid-column: 1; margin: 14px; } }

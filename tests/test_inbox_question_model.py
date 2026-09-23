@@ -244,29 +244,34 @@ class InboxQuestionModelTest(unittest.TestCase):
             conn.close()
 
     def _insert_question(self, item_type, question_kind, content, customer_id=None,
-                         title='待处理', dedupe_key='sela:question:1'):
+                         title='待处理', dedupe_key='sela:question:1', request_json=''):
         conn = self._conn()
         try:
             conn.execute(
                 '''INSERT INTO inbox_items
                    (item_type, customer_id, title, content, dedupe_key, status, created_at,
-                    question_kind, question_key, source_type)
-                   VALUES (?, ?, ?, ?, ?, 'open', '2026-09-18 09:00:00', ?, ?, 'sela')''',
-                (item_type, customer_id, title, content, dedupe_key, question_kind, dedupe_key))
+                    question_kind, question_key, source_type, request_json)
+                   VALUES (?, ?, ?, ?, ?, 'open', '2026-09-18 09:00:00', ?, ?, 'sela', ?)''',
+                (item_type, customer_id, title, content, dedupe_key, question_kind, dedupe_key, request_json))
             conn.commit()
             return conn.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
         finally:
             conn.close()
 
     def test_choice_fields_expose_human_labels(self):
+        request = {
+            'kind': 'DECISION', 'decision': {
+                'question': '优先哪个产品线？', 'options': ['板材', '展示架'], 'recommended': '板材',
+            },
+        }
         self._insert_question('sela_agent_request', 'approval',
-                              '类型：DATA_CONFLICT\n优先级：AMBER\n\n正文\n\n建议：更正邮箱')
+                              '公司：CW Plastic\n类型：DECISION\n优先级：AMBER\n\n正文\n\n建议：板材',
+                              request_json=json.dumps(request, ensure_ascii=False))
         question = self.client.get('/api/inbox').get_json()['questions'][0]
-        self.assertEqual(question['kind'], 'approval')
-        decision = next(field for field in question['response_schema']['fields'] if field['key'] == 'decision')
+        self.assertEqual(question['kind'], 'sela_request')
+        decision = next(field for field in question['response_schema']['fields'] if field['key'] == 'selected_option')
         self.assertEqual(decision['input_type'], 'choice')
-        self.assertGreaterEqual(len(decision['choices']), 2)
-        self.assertTrue(all(choice.get('label') for choice in decision['choices']))
+        self.assertEqual([choice['value'] for choice in decision['choices']], ['板材', '展示架'])
 
     def test_sela_agent_request_evidence_is_structured(self):
         self._insert_question(
@@ -312,42 +317,93 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertTrue(all('facts_hash' not in row['key'] for row in structured['fields']))
         self.assertFalse(any('audit' in row['key'] for row in structured['fields']))
 
-    def test_approval_effects_state_it_does_not_modify_data(self):
-        self._insert_question('sela_agent_request', 'approval', '类型：DATA_CONFLICT')
+    def test_sela_request_effects_state_answer_does_not_start_sela(self):
+        self._insert_question('sela_agent_request', 'approval', '类型：FACT_GAP')
         question = self.client.get('/api/inbox').get_json()['questions'][0]
-        self.assertTrue(any('不会自动修改' in entry for entry in question['will_not_do']))
-        self.assertIn('不会自动修改', question['why_human'])
+        self.assertEqual(question['kind'], 'sela_request')
+        self.assertTrue(any('不会因此自动启动 Sela' in entry for entry in question['will_not_do']))
+        self.assertIn('Sela 后续读取', question['why_human'])
 
-    def test_approval_email_correction_is_audited_and_undoable(self):
-        customer_id, contact_id = self._insert_customer_with_contact('old@example.com')
-        item_id = self._insert_question('sela_agent_request', 'approval',
-                                        '类型：DATA_CONFLICT\n\n建议：更正邮箱', customer_id=customer_id)
+    def test_sela_decision_only_accepts_the_options_it_requested(self):
+        request = {'kind': 'DECISION', 'decision': {
+            'question': '优先哪个产品线？', 'options': ['板材', '展示架'],
+        }}
+        item_id = self._insert_question(
+            'sela_agent_request', 'approval', '类型：DECISION\n\n优先选方向',
+            dedupe_key='sela:agent-request:prospect-2:direction',
+            request_json=json.dumps(request, ensure_ascii=False),
+        )
         question = self.client.get('/api/inbox').get_json()['questions'][0]
+        invalid = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
+            'revision': question['revision'], 'answer': {'selected_option': '发邮件'},
+            'idempotency_key': 'test-sela-invalid-option',
+        })
+        self.assertEqual(invalid.status_code, 400)
+        valid = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
+            'revision': question['revision'], 'answer': {'selected_option': '板材'},
+            'idempotency_key': 'test-sela-valid-option',
+        })
+        self.assertEqual(valid.status_code, 200, valid.get_data(as_text=True))
+        resolved = self.client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
+        need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
+        self.assertEqual(need['human_response']['selected_option'], '板材')
+
+    def test_retired_send_approval_can_only_be_closed_without_sending(self):
+        item_id = self._insert_question(
+            'sela_agent_request', 'approval',
+            '公司：Boomart\n类型：SEND_APPROVAL\n优先级：AMBER\n\n未核验邮箱要求确认发送。',
+            dedupe_key='sela:agent-request:prospect-legacy:send',
+        )
+        question = self.client.get('/api/inbox').get_json()['questions'][0]
+        self.assertTrue(question['response_schema']['retired_send_approval'])
+        self.assertEqual(question['response_schema']['fields'], [])
+        response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
+            'revision': question['revision'], 'answer': {},
+            'idempotency_key': 'test-retired-send-request',
+        })
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertIn('没有发送邮件', response.get_json()['next_system_step'])
+        row = self._row(item_id)
+        self.assertEqual(row['resolution_reason'], 'retired_send_approval')
+        self.assertIn('没有发送邮件', row['resolution_note'])
+
+    def test_sela_fact_answer_is_structured_for_next_run_not_written_to_contact(self):
+        customer_id, contact_id = self._insert_customer_with_contact('old@example.com')
+        request = {
+            'kind': 'FACT_GAP', 'session_id': 'session-123',
+            'missing_facts': [{'field': 'contact_email', 'label': '确认的联系邮箱',
+                               'why': 'Sela 无法从公开来源确认', 'blocking': True}],
+            'resume': '补充后继续研究公开资料',
+        }
+        item_id = self._insert_question('sela_agent_request', 'approval',
+                                        '公司：CW Plastic\n类型：FACT_GAP\n\n缺少邮箱',
+                                        customer_id=customer_id,
+                                        dedupe_key='sela:agent-request:prospect-1:email',
+                                        request_json=json.dumps(request, ensure_ascii=False))
+        question = self.client.get('/api/inbox').get_json()['questions'][0]
+        email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
+        self.assertEqual(email_field['input_type'], 'email')
         response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
             'revision': question['revision'],
-            'answer': {'decision': 'approve', 'note': '已核对官网并更正',
-                       'contact_id': contact_id, 'confirmed_email': 'fixed@example.com'},
-            'idempotency_key': 'test-approval-email-1',
+            'answer': {'fact_0': 'fixed@example.com'},
+            'idempotency_key': 'test-sela-fact-answer-1',
         })
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
-        self.assertTrue(body['undo_token'])
-        conn = self._conn()
-        try:
-            self.assertEqual(conn.execute('SELECT email FROM contacts WHERE id=?', (contact_id,)).fetchone()['email'],
-                             'fixed@example.com')
-            self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (item_id,)).fetchone()['status'],
-                             'resolved')
-        finally:
-            conn.close()
-        undo = self.client.post('/api/undo/%s' % body['undo_token'], json={})
-        self.assertEqual(undo.status_code, 200, undo.get_data(as_text=True))
+        self.assertFalse(body['sela_handoff']['automatic_run'])
+        self.assertEqual(body['sela_handoff']['status'], 'awaiting_agent')
+        self.assertEqual(body['sela_handoff']['session_id'], 'session-123')
+        resolved = self.client.get('/api/integrations/sela/needs?status=resolved').get_json()['needs']
+        need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
+        self.assertEqual(need['human_response']['facts'][0]['field'], 'contact_email')
+        self.assertEqual(need['human_response']['facts'][0]['value'], 'fixed@example.com')
+        self.assertEqual(need['session_id'], 'session-123')
         conn = self._conn()
         try:
             self.assertEqual(conn.execute('SELECT email FROM contacts WHERE id=?', (contact_id,)).fetchone()['email'],
                              'old@example.com')
             self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (item_id,)).fetchone()['status'],
-                             'open')
+                             'resolved')
         finally:
             conn.close()
 

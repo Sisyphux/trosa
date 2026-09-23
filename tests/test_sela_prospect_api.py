@@ -459,6 +459,39 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_inbox_exclusion_decision_updates_sela_profile(self):
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        body = prospect()
+        body['agent_state'] = {'exclusion_review': {
+            'canonical_name': 'Acrílicos Histórico', 'matched_value': 'acrilicos',
+            'registry_status': 'recommended_pending', 'source': 'legacy_exclusion_registry',
+        }}
+        self.assertEqual(self.post_prospect(body).status_code, 200)
+        payload = self.client.get('/api/inbox').get_json()
+        self.assertEqual(len(payload['questions']), 1)
+        question = payload['questions'][0]
+        self.assertEqual(question['kind'], 'exclusion_review')
+        self.assertEqual(question['evidence'][0]['structured']['fields'][0]['value'], 'Acrílicos Histórico')
+        decision = next(field for field in question['response_schema']['fields'] if field['key'] == 'decision')
+        self.assertEqual({choice['value'] for choice in decision['choices']}, {'accept', 'reject'})
+        response = self.client.post('/api/inbox/questions/%s/respond' % question['id'], json={
+            'revision': question['revision'],
+            'answer': {'decision': 'reject', 'note': '名称和来源已核实为同一主体'},
+            'idempotency_key': 'test-inbox-exclusion-decision',
+        })
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            profile = conn.execute(
+                'SELECT contact_permission, research_json FROM agent_prospect_profiles WHERE source_id=?',
+                ('prospect-1',),
+            ).fetchone()
+            self.assertEqual(profile['contact_permission'], 'do_not_contact')
+            self.assertEqual(json.loads(profile['research_json'])['agent_state']['exclusion_resolution'], 'REJECTED_SAME_ENTITY')
+        finally:
+            conn.close()
+        self.assertIn('更新 Trosa 中的 Sela 排除状态', response.get_json()['effects'][0])
+
     def test_agent_requests_use_trosa_inbox_and_timeline_idempotently(self):
         created = self.post_prospect(prospect())
         self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
@@ -978,6 +1011,7 @@ class SelaProspectApiTest(unittest.TestCase):
             'request': {
                 'candidate_id': 'prospect-1', 'customer_id': customer_id,
                 'company': 'Acrílicos S.A.', 'kind': 'FACT_GAP', 'severity': 'AMBER',
+                'session_id': 'session-fact-gap-1',
                 'need': '缺少关键邮箱', 'context': '官网没有公开邮箱，无法首次触达。',
                 'proposal': '板材',
                 'missing_facts': [{'field': 'contact_email', 'label': '关键邮箱',
@@ -1001,6 +1035,7 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(item['decision']['options'], ['板材', '展示架'])
         self.assertEqual(item['evidence'][0]['source'], '官网')
         self.assertEqual(item['resume'], '补充邮箱后继续首次开发')
+        self.assertEqual(item['session_id'], 'session-fact-gap-1')
 
         # The structure is persisted as a field, not only rendered into prose.
         conn = self.hamid_db()

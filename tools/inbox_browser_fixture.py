@@ -4,6 +4,7 @@ It runs only with ``CRM_ENV=rehearsal`` and uses the normal canonical domain
 writer; no HTTP test endpoint or production behaviour is introduced.
 """
 from pathlib import Path
+import json
 import os
 import sys
 
@@ -56,6 +57,28 @@ def load():
                 created_at=f'2026-09-21 09:00:0{index}', question_kind=kind,
                 question_key=f'{KEY}:{index}', source_type='system')
             result[title] = item_id
+        sela_request = {
+            'source_id': 'inbox-browser-prospect-1',
+            'session_id': 'inbox-browser-session-1',
+            'kind': 'DECISION',
+            'severity': 'AMBER',
+            'company': 'Inbox Browser Prospect',
+            'proposal': '请确认后续研究方向。',
+            'decision': {
+                'question': '下一步先做什么？',
+                'options': ['先补齐联系人事实', '继续整理公开来源'],
+                'recommended': '继续整理公开来源',
+            },
+            'evidence': [{'source': '官网', 'quote': '提供 acrylic sheet 产品目录。'}],
+            'resume': '读取你的选择后继续准备研究摘要；对外联系仍需人工确认。',
+        }
+        result['Sela 需要确认 prospect 的下一步'] = trosa_domain.create_inbox_item(
+            conn, item_type='sela_agent_request', title='Sela 需要确认 prospect 的下一步',
+            content='公司：Inbox Browser Prospect\n类型：DECISION\n优先级：AMBER\n请确认后续研究方向。',
+            customer_id=ids['customer_id'], dedupe_key=f'{KEY}:9', status='open',
+            created_at='2026-09-21 09:00:09', question_kind='sela_request',
+            question_key=f'{KEY}:9', source_type='sela', request_json=json.dumps(sela_request, ensure_ascii=False),
+        )
         # Response receipts are durable by design.  Remove only receipts whose
         # keys address this namespaced fixture's current rows, so a fixture
         # reset remains repeatable instead of colliding with a prior browser

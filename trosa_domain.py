@@ -842,6 +842,36 @@ def resolve_inbox_item(
         raise ValueError('inbox item is not visible or already resolved')
 
 
+def save_sela_inbox_response(conn: Any, *, inbox_item_id: int, request_json: str) -> None:
+    """Persist the structured human response beside a Sela Inbox request.
+
+    The response is part of the Inbox fact so Sela can read it on a later
+    session.  It is not a trigger or proof that an Agent has resumed.
+    """
+    request_json = str(request_json or '')[:40000]
+    if not postgres_mode():
+        changed = conn.execute(
+            '''UPDATE inbox_items SET request_json=?
+                 WHERE id=? AND item_type='sela_agent_request' AND status='open' ''',
+            (request_json, inbox_item_id),
+        )
+    else:
+        changed = conn.execute(
+            '''UPDATE trosa.inbox_items item
+                  SET legacy_payload=coalesce(item.legacy_payload, '{}'::jsonb)
+                      || jsonb_build_object('sela_request_json', ?::text)
+                 FROM trosa.legacy_row_refs ref
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id=trosa.compat_current_user()
+                  AND ref.table_name='inbox_items' AND ref.legacy_id=?
+                  AND item.id=ref.target_id
+                  AND item.item_type='sela_agent_request' AND item.status='open' ''',
+            (request_json, inbox_item_id),
+        )
+    if not changed.rowcount:
+        raise ValueError('Sela Inbox request is not visible or already resolved')
+
+
 def set_inbox_status(conn: Any, *, inbox_item_id: int, status: str, changed_at: str,
                      resolution_source: str = '', resolved_by: str = '', resolution_note: str = '') -> None:
     """Set a canonical Inbox lifecycle status while preserving its content."""

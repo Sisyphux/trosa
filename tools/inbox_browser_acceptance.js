@@ -12,8 +12,15 @@ await page.evaluate(async () => { localStorage.clear(); sessionStorage.clear(); 
 await page.reload({waitUntil: 'domcontentloaded'});
 if (await page.locator('#loginOverlay').isVisible()) {
   await page.waitForFunction(() => !document.querySelector('#loginOverlay') || getComputedStyle(document.querySelector('#loginOverlay')).display === 'none' || !!document.querySelector('#loginUsers [data-user-id="hamid"]'), null, {timeout:15000});
-  if (await page.locator('#loginUsers [data-user-id="hamid"]').count()) await page.locator('#loginUsers [data-user-id="hamid"]').click();
+if (await page.locator('#loginUsers [data-user-id="hamid"]').count()) await page.locator('#loginUsers [data-user-id="hamid"]').click();
 }
+// Use the real Settings control to enable performance-priority mode in the
+// isolated rehearsal account, then exercise Inbox under that mode.
+await page.getByRole('button', {name:'设置', exact:true}).click();
+await page.locator('#page-settings.active').waitFor();
+await page.locator('#preferenceInterfacePerformance').selectOption('performance');
+await page.getByRole('button', {name:'保存设置', exact:true}).click();
+await page.waitForFunction(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'), null, {timeout:15000});
 await page.locator('[data-page="inbox"]').first().click();
 await page.locator('#page-inbox.active').waitFor();
 const apiKinds = await page.evaluate(() => fetch('/api/inbox').then(r => r.json()).then(x => x.questions.filter(q => q.headline === '调查证据 CSV').map(q => [q.kind, q.response_schema.attachments.allowed])));
@@ -46,8 +53,10 @@ const selectInboxContact = async (contactId) => {
   await select.selectOption(String(contactId));
 };
 const inboxCount = async () => Number((await page.locator('#inboxOverview strong').innerText()).trim());
+const performanceModeApplied = await page.evaluate(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'));
+if (!performanceModeApplied) throw new Error('Inbox is not running in performance-priority mode');
 const cardCount = await list.locator('.inbox-question-open').count();
-if (cardCount < 8) throw new Error('fixture card count mismatch: ' + cardCount + ' / ' + (await list.innerText()));
+if (cardCount < 9) throw new Error('fixture card count mismatch: ' + cardCount + ' / ' + (await list.innerText()));
 // Draft survives an actual render caused by closing and reopening its card.
 await list.locator('.inbox-question-open').first().click();
 const field = page.locator('[data-inbox-field="answer"]').first(); await field.fill('draft survives rerender');
@@ -57,21 +66,34 @@ if (await field.inputValue() !== 'draft survives rerender') throw new Error('dra
 // answer must remain editable, and the normal retry must then resolve.
 await selectInboxContact(fixtureContactId);
 await page.locator('[data-inbox-field="confirmed_email"]').fill('not-an-email');
-await page.getByRole('button', {name:'提交回答', exact:true}).click();
+await page.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('.inbox-inline-error').getByText('请输入有效邮箱').waitFor({timeout:15000});
 if (await field.inputValue() !== 'draft survives rerender') throw new Error('draft lost after rejected request');
 await page.locator('[data-inbox-field="confirmed_email"]').fill('');
 const firstCardId = await page.locator('.inbox-question-active').getAttribute('id');
-await page.getByRole('button', {name:'提交回答', exact:true}).click();
+await page.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + firstCardId).waitFor({state:'detached', timeout:15000});
-if (await inboxCount() !== 7) throw new Error('Inbox count did not update immediately after a response: ' + await inboxCount());
+if (await inboxCount() !== 8) throw new Error('Inbox count did not update immediately after a response: ' + await inboxCount());
+// A structured Sela decision must show its actual choices and answer honestly:
+// saving it stores a pull handoff, but does not launch the Sela Agent.
+await backToQueue();
+await list.locator('.inbox-question-open').filter({hasText:'Sela 需要确认 prospect 的下一步'}).click();
+const selaCard = page.locator('.inbox-question-active');
+const selaCardText = await selaCard.innerText();
+if (!selaCardText.includes('下一步先做什么？') || !selaCardText.includes('回答后 Sela 的计划') || !selaCardText.includes('公开来源')) throw new Error('structured Sela context is incomplete: ' + selaCardText);
+await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}).click();
+const selaCardId = await selaCard.getAttribute('id');
+await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
+await page.locator('#' + selaCardId).waitFor({state:'detached', timeout:15000});
+await page.getByText('回答已保存到 Trosa；Sela 不会因此自动启动，可在下一次 Agent 运行时读取。', {exact:true}).waitFor({timeout:15000});
+if (await inboxCount() !== 7) throw new Error('Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // Correct the deliberately stale rehearsal email through the normal answer
 // form, then use the visible Undo action returned by the same response.
 await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'更正失效邮箱'}).click();
 await selectInboxContact(fixtureContactId);
 await page.locator('[data-inbox-field="confirmed_email"]').fill('buyer-fixed@rehearsal.example');
-await page.getByRole('button', {name:'提交回答', exact:true}).click();
+await page.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('更正失效邮箱') || document.querySelector('.inbox-inline-error')?.textContent, null, {timeout:15000});
 const undo = page.getByRole('button', {name:'撤销', exact:true}).last(); if (!await undo.count()) throw new Error('email correction failed: ' + await page.locator('#inboxList').innerText()); await undo.click();
 await page.waitForFunction(() => document.querySelector('#inboxList')?.textContent?.includes('更正失效邮箱'), null, {timeout:15000});
@@ -158,7 +180,7 @@ while (await list.locator('.inbox-question-open').count()) {
   const answer = card.locator('[data-inbox-field="answer"]'); if (await answer.count()) await answer.fill('fixture complete');
   const insufficientChoice = card.getByRole('button', {name:'资料不足', exact:true}); if (await insufficientChoice.count()) await insufficientChoice.click();
   const activeId = await card.getAttribute('id');
-  await card.getByRole('button', {name:'提交回答', exact:true}).click();
+  await card.getByRole('button', {name:'保存回答', exact:true}).click();
   await page.locator('#' + activeId).waitFor({state:'detached', timeout:15000}).catch(async () => {
     const error = await page.locator('.inbox-inline-error').first().innerText().catch(() => '');
     throw new Error('Inbox card ' + headline + ' was not completed: ' + error);
@@ -166,4 +188,4 @@ while (await list.locator('.inbox-question-open').count()) {
   await page.waitForTimeout(300);
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
-return {cards: 8, draft:true, retry:true, emailCorrection:true, undo:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, empty:true, uploads:observed, layouts};
+return {cards: 8, draft:true, retry:true, emailCorrection:true, undo:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, layouts};

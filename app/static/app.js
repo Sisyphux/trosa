@@ -1574,10 +1574,14 @@ var INBOX_QUESTION_FILTER_LABELS = {
   all: '全部',
   identity: '待归属',
   reply: '客户回复',
+  fact_request: '补充资料',
+  investigation_request: '提交调查',
+  sela_request: 'Sela 补充 / 判断',
+  exclusion_review: '排除身份',
   approval: '待批准',
   identity_review: '身份待确认',
 };
-var INBOX_QUESTION_FILTER_ORDER = ['all', 'identity', 'reply', 'approval', 'identity_review'];
+var INBOX_QUESTION_FILTER_ORDER = ['all', 'identity', 'reply', 'fact_request', 'investigation_request', 'sela_request', 'exclusion_review', 'approval', 'identity_review'];
 
 var _inboxExpanded = new Set();
 var inboxState = { questions: [], counts: {}, activeFilter: 'all', expandedQuestionId: '', draftResponses: {}, pendingQuestionId: '', uploadStates: {}, analysisStates: {}, inlineErrors: {}, responseAttempts: {}, analysisResolved: false };
@@ -1628,7 +1632,7 @@ function renderInbox(counts) {
 }
 
 function inboxQuestionFilter(kind) {
-  return ({ identity: '确认归属', reply: '处理回复', fact_request: '补充资料', investigation_request: '提交调查', approval: '批准动作', identity_review: '确认主体' })[kind] || '补充资料';
+  return ({ identity: '确认归属', reply: '处理回复', fact_request: '补充资料', investigation_request: '提交调查', sela_request: 'Sela 补充 / 判断', exclusion_review: '排除身份', approval: '批准动作', identity_review: '确认主体' })[kind] || '补充资料';
 }
 function renderInboxQuestionWorkspace(counts) {
   inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
@@ -1659,9 +1663,11 @@ function renderInboxQuestionCard(q) {
     return '<button class="' + cls + '" onclick="runInboxOption(' + Number(q.primary_item_id) + ',\'' + escapeHtml(option.key) + '\')">' + escapeHtml(option.label) + '</button>';
   }).join('');
   var decision = transactional
-    ? '<p class="inbox-field-help">确认后写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
-    : fields + attachment + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">提交回答</button>';
-  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据</h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>处理方式</h4>' + decision + '</section></article>';
+    ? '<p class="inbox-field-help">选择下面一项后，系统会打开确认窗口，并把结果写入客户记录。</p><div class="inbox-options">' + optionsHtml + '</div>'
+    : (q.response_schema && q.response_schema.retired_send_approval
+      ? '<div class="inbox-retired-request"><strong>旧发送审批类型已停用</strong><span>关闭这条旧请求不会发送邮件。</span></div>'
+      : fields + attachment) + '<p class="inbox-effects"><b>提交后：</b>' + escapeHtml((q.completion_effects || []).join(' ')) + '<br><b>不会：</b>' + escapeHtml((q.will_not_do || []).join(' ')) + '</p><p class="inbox-inline-error" aria-live="polite"></p><button class="btn btn-primary" onclick="submitInboxQuestion(\'' + escapeHtml(q.id) + '\')">' + (q.response_schema && q.response_schema.retired_send_approval ? '关闭旧请求（不发送）' : '保存回答') + '</button>';
+  return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(q.headline || q.question) + '</h3><p>' + escapeHtml(q.summary || '') + '</p><p><b>为什么需要你：</b>' + escapeHtml(q.why_human || q.why || '') + '</p></section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
 }
 function inboxEvidenceHtml(e, index) {
   var ordinal = '<b>' + String(index + 1).padStart(2, '0') + '</b>';
@@ -1675,10 +1681,23 @@ function inboxEvidenceHtml(e, index) {
     var fields = (s.fields || []).map(function(f) {
       return '<div class="inbox-evidence-field"><span>' + escapeHtml(f.label) + '</span><strong>' + escapeHtml(f.value) + '</strong></div>';
     }).join('');
-    var context = s.context && !fields ? '<p class="inbox-evidence-context">' + escapeHtml(s.context) + '</p>' : '';
+    var missing = (s.missing_facts || []).map(function(f) {
+      return '<li><strong>' + escapeHtml(f.label || f.field || '待补充事实') + '</strong>' + (f.why ? '<span>' + escapeHtml(f.why) + '</span>' : '') + (f.blocking ? '<small>影响后续判断</small>' : '') + '</li>';
+    }).join('');
+    var need = s.decision || {};
+    var decision = (need.question || (need.options || []).length || need.recommended)
+      ? '<div class="inbox-sela-decision"><strong>' + escapeHtml(need.question || '需要你的业务判断') + '</strong>' + ((need.options || []).length ? '<span>可选：' + escapeHtml(need.options.join(' · ')) + '</span>' : '') + (need.recommended ? '<small>建议：' + escapeHtml(need.recommended) + '</small>' : '') + '</div>' : '';
+    var evidence = (s.evidence || []).map(function(item) {
+      return '<li><strong>' + escapeHtml(item.source || '来源') + '</strong><span>' + escapeHtml(item.quote || '') + '</span></li>';
+    }).join('');
+    var context = s.context ? '<details class="inbox-evidence-background"><summary>背景说明</summary><p class="inbox-evidence-context">' + escapeHtml(s.context) + '</p></details>' : '';
+    var resume = s.resume && s.resume !== s.proposal ? '<p class="inbox-evidence-resume"><span>回答后 Sela 的计划</span>' + escapeHtml(s.resume) + '</p>' : '';
     return '<li>' + ordinal + '<div class="inbox-evidence-body">' +
       (tags ? '<div class="inbox-evidence-tags">' + tags + '</div>' : '') + proposal +
       (fields ? '<div class="inbox-evidence-fields">' + fields + '</div>' : '') + context +
+      (missing ? '<section class="inbox-sela-block"><span>缺少的事实</span><ul>' + missing + '</ul></section>' : '') +
+      decision +
+      (evidence ? '<section class="inbox-sela-block"><span>已有证据</span><ul>' + evidence + '</ul></section>' : '') + resume +
       '</div>' + source + '</li>';
   }
   return '<li>' + ordinal + '<span>' + escapeHtml(e.detail || '原始证据') + '</span>' + source + '</li>';
@@ -1769,7 +1788,48 @@ function inboxResponseAttempt(id) { var key = 'trosa-inbox-response-attempt-' + 
 function advanceInboxResponseAttempt(id) { var next = inboxResponseAttempt(id) + 1; inboxState.responseAttempts[id] = next; sessionStorage.setItem('trosa-inbox-response-attempt-' + id, String(next)); }
 function openInboxQuestion(id) { inboxState.expandedQuestionId = String(id); renderInboxQuestionWorkspace(inboxState.counts); }
 function closeInboxQuestion() { inboxState.expandedQuestionId = ''; renderInboxQuestionWorkspace(inboxState.counts); if (inboxState.analysisResolved) { inboxState.analysisResolved = false; loadInbox(); } }
-async function submitInboxQuestion(id) { var q = inboxState.questions.find(function(x) { return String(x.id) === String(id); }), card = document.getElementById('inbox-question-' + id); if (!q || !card || inboxState.pendingQuestionId) return; var answer = inboxState.draftResponses[id] || {}; card.querySelectorAll('[data-inbox-field]').forEach(function(el) { answer[el.dataset.inboxField] = el.value.trim(); }); inboxState.draftResponses[id] = answer; inboxState.pendingQuestionId = id; card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = true; }); try { var result = await api('/api/inbox/questions/' + encodeURIComponent(id) + '/respond', { method: 'POST', body: JSON.stringify({ revision: q.revision, answer: answer, attachment_ids: (inboxState.uploadStates[id] || {}).attachmentIds || [], idempotency_key: 'inbox-' + id + '-' + q.revision + '-' + inboxResponseAttempt(id) }) }); delete inboxState.draftResponses[id]; inboxState.questions = inboxState.questions.filter(function(x) { return String(x.id) !== String(id); }); inboxQuestions = inboxState.questions; inboxState.expandedQuestionId = ''; inboxState.pendingQuestionId = ''; renderInboxQuestionWorkspace({ all: inboxState.questions.length }); refreshInboxBadge(); setTimeout(loadInbox, 250); if (result.undo_token) showToastAction('邮箱已更正；系统将继续准备后续工作。', 'success', '撤销', async function() { await api('/api/undo/' + encodeURIComponent(result.undo_token), { method: 'POST', body: '{}' }); advanceInboxResponseAttempt(id); await loadInbox(); showToast('已恢复旧邮箱和 Inbox 问题。', 'success'); }); else showToast('回答已保存；系统将继续准备后续工作。', 'success'); } catch (e) { inboxState.pendingQuestionId = ''; card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = false; }); var error = card.querySelector('.inbox-inline-error'); if (error) error.textContent = e && e.message ? e.message : '提交失败，草稿已保留。'; } }
+async function submitInboxQuestion(id) {
+  var q = inboxState.questions.find(function(x) { return String(x.id) === String(id); });
+  var card = document.getElementById('inbox-question-' + id);
+  if (!q || !card || inboxState.pendingQuestionId) return;
+  var answer = inboxState.draftResponses[id] || {};
+  card.querySelectorAll('[data-inbox-field]').forEach(function(el) { answer[el.dataset.inboxField] = el.value.trim(); });
+  inboxState.draftResponses[id] = answer;
+  inboxState.pendingQuestionId = id;
+  card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = true; });
+  try {
+    var result = await api('/api/inbox/questions/' + encodeURIComponent(id) + '/respond', {
+      method: 'POST', body: JSON.stringify({
+        revision: q.revision, answer: answer,
+        attachment_ids: (inboxState.uploadStates[id] || {}).attachmentIds || [],
+        idempotency_key: 'inbox-' + id + '-' + q.revision + '-' + inboxResponseAttempt(id),
+      })
+    });
+    delete inboxState.draftResponses[id];
+    inboxState.questions = inboxState.questions.filter(function(x) { return String(x.id) !== String(id); });
+    inboxQuestions = inboxState.questions;
+    inboxState.expandedQuestionId = '';
+    inboxState.pendingQuestionId = '';
+    renderInboxQuestionWorkspace({ all: inboxState.questions.length });
+    refreshInboxBadge();
+    setTimeout(loadInbox, 250);
+    if (result.undo_token) {
+      showToastAction('邮箱已更正并记录；可撤销本次修改。', 'success', '撤销', async function() {
+        await api('/api/undo/' + encodeURIComponent(result.undo_token), { method: 'POST', body: '{}' });
+        advanceInboxResponseAttempt(id);
+        await loadInbox();
+        showToast('已恢复旧邮箱和 Inbox 问题。', 'success');
+      });
+    } else {
+      showToast(result.next_system_step || '回答已保存，问题已关闭。', 'success');
+    }
+  } catch (e) {
+    inboxState.pendingQuestionId = '';
+    card.querySelectorAll('button,input,textarea').forEach(function(el) { el.disabled = false; });
+    var error = card.querySelector('.inbox-inline-error');
+    if (error) error.textContent = e && e.message ? e.message : '提交失败，草稿已保留。';
+  }
+}
 async function uploadInboxEvidence(questionId, customerId, input) { var files = Array.from(input.files || []); if (!files.length) return; inboxState.uploadStates[questionId] = { pending: true, files: files, message: '正在上传并分析证据…', attachmentIds: (inboxState.uploadStates[questionId] || {}).attachmentIds || [] }; renderInboxQuestionWorkspace(inboxState.counts); try { var form = new FormData(); files.forEach(function(file) { form.append('files', file); }); form.append('category', 'inbox_evidence'); var response = await fetch('/api/customers/' + customerId + '/files', { method: 'POST', body: form, credentials: 'same-origin' }); var uploaded = await response.json(); if (!response.ok) throw new Error(uploaded.error || '上传失败'); var ids = (uploaded.created || []).map(function(file) { return file.id; }), analyses = []; for (var i = 0; i < ids.length; i++) { var result = await api('/api/inbox/questions/' + questionId + '/attachments/' + ids[i] + '/analyze', { method: 'POST', body: '{}' }); analyses.push(result.analysis || {}); } inboxState.analysisStates[questionId] = analyses; inboxState.uploadStates[questionId] = { attachmentIds: ids, message: '证据已分析并附上可审计引用。' }; renderInboxQuestionWorkspace(inboxState.counts); if (analyses.some(function(a) { return a && (a.status === 'supported' || a.status === 'not_supported'); })) { inboxState.analysisResolved = true; _pageDataLoadedAt = Date.now(); } } catch (e) { inboxState.uploadStates[questionId] = { files: files, error: true, attachmentIds: (inboxState.uploadStates[questionId] || {}).attachmentIds || [], message: (e && e.message) || '上传或分析失败；文件已保留，可重试。' }; renderInboxQuestionWorkspace(inboxState.counts); } }
 function retryInboxEvidence(questionId, customerId) { var state = inboxState.uploadStates[questionId] || {}; if (!state.files || !state.files.length) return; uploadInboxEvidence(questionId, customerId, { files: state.files }); }
 

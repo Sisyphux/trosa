@@ -96,6 +96,7 @@ from trosa_domain import (
     assign_inbox_customer as _assign_inbox_customer,
     create_inbox_item as _create_inbox_item,
     resolve_inbox_item as _resolve_inbox_item,
+    save_sela_inbox_response as _save_sela_inbox_response,
     set_inbox_status as _set_inbox_status,
     set_customer_judgment as _set_customer_judgment,
     set_customer_deleted as _set_customer_deleted,
@@ -4134,6 +4135,9 @@ def _sela_agent_request_payload(value):
     company = _sela_prospect_text(value.get('company'), 500)
     kind = _sela_prospect_text(value.get('kind'), 80).upper() or 'DECISION'
     severity = _sela_prospect_text(value.get('severity'), 30).upper() or 'AMBER'
+    session_id = _sela_prospect_text(value.get('session_id'), 128)
+    if session_id and not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session_id):
+        raise CrmWriteError('Agent 请求 session_id 格式无效')
     if not title:
         raise CrmWriteError('Agent 请求缺少 need/title')
     if not context and not proposal:
@@ -4170,6 +4174,7 @@ def _sela_agent_request_payload(value):
         'severity': severity,
         'proposal': proposal,
         'source_id': source_id,
+        'session_id': session_id,
         'company': company,
         **structured,
     }, ensure_ascii=False)[:20000]
@@ -4182,6 +4187,7 @@ def _sela_agent_request_payload(value):
         'company': company,
         'severity': severity,
         'kind': kind,
+        'session_id': session_id,
         'request_json': request_json,
     }
 
@@ -4219,8 +4225,8 @@ def _sela_agent_request_view(conn, row):
     customer_id = row.get('customer_id')
     customer = _sela_profile_customer(conn, int(customer_id)) if customer_id else None
     customer = dict(customer) if customer else {}
-    source_id = _sela_agent_request_source_id(row.get('dedupe_key'))
     structured = _sela_agent_request_structured(row)
+    source_id = str(structured.get('source_id') or _sela_agent_request_source_id(row.get('dedupe_key')))
     content = str(row.get('content') or '')
     metadata = {}
     for label, key in (('公司', 'company'), ('类型', 'kind'), ('优先级', 'severity')):
@@ -4243,6 +4249,7 @@ def _sela_agent_request_view(conn, row):
         'company': str(structured.get('company') or customer.get('company') or customer.get('name') or metadata.get('company') or row.get('title') or '未关联客户'),
         'customer_id': int(customer_id) if customer_id else None,
         'candidate_id': source_id,
+        'session_id': str(structured.get('session_id') or ''),
         'context': content,
         'need': str(row.get('title') or ''),
         'proposal': str(structured.get('proposal') or proposal),
@@ -4250,6 +4257,8 @@ def _sela_agent_request_view(conn, row):
         'decision': decision,
         'evidence': structured.get('evidence') if isinstance(structured.get('evidence'), list) else [],
         'resume': str(structured.get('resume') or ''),
+        'human_response': structured.get('human_response') if isinstance(structured.get('human_response'), dict) else None,
+        'resolution_action': str(row.get('resolution_reason') or ''),
         'status': 'OPEN' if status == 'open' else 'RESOLVED' if status == 'resolved' else 'SKIPPED',
         'resolution': str(row.get('resolution_note') or ''),
         'resolved_at': str(row.get('resolved_at') or ''),
@@ -4346,7 +4355,7 @@ def _sela_resolve_agent_request(conn, item_id, action, resolution, now):
     return _sela_agent_request_view(conn, updated)
 
 
-def _sela_resolve_exclusion_review(conn, profile, decision, note, now):
+def _sela_resolve_exclusion_review(conn, profile, decision, note, now, *, resolve_inbox=True):
     """Persist a human identity decision in the Trosa-owned Agent profile."""
     profile = dict(profile)
     decision = _sela_prospect_text(decision, 30).lower()
@@ -4401,7 +4410,7 @@ def _sela_resolve_exclusion_review(conn, profile, decision, note, now):
             '''SELECT id FROM inbox_items WHERE dedupe_key=? AND status='open' LIMIT 1''',
             (f'sela:exclusion-review:{source_id}',),
         ).fetchone()
-    if inbox:
+    if inbox and resolve_inbox:
         _resolve_inbox_item(conn, inbox_item_id=inbox['id'], resolved_at=now,
                             resolution_note=_sela_prospect_text(note, 4000))
     updated = _sela_profile_by_source(conn, source_id)
@@ -9916,7 +9925,12 @@ def _question_identity_for_item(item):
 def _apply_question_metadata(item):
     """给每条 Inbox 证据补齐业务问题元数据（问题类别/问题键/来源）。"""
     item_type = str(item.get('item_type') or '')
-    kind = str(item.get('question_kind') or '').strip() or _inbox_questions.question_kind_for(item_type)
+    kind = str(item.get('question_kind') or '').strip()
+    if item_type == 'sela_agent_request' and kind in ('', _inbox_questions.QUESTION_APPROVAL):
+        kind = _inbox_questions.QUESTION_SELA_REQUEST
+    elif item_type == 'sela_exclusion_review':
+        kind = _inbox_questions.QUESTION_EXCLUSION_REVIEW
+    kind = kind or _inbox_questions.question_kind_for(item_type)
     key = str(item.get('question_key') or '').strip()
     if not key:
         key = _inbox_questions.question_key_for(
@@ -10098,13 +10112,16 @@ def _sela_context_fields(context):
     return rows
 
 
-def _sela_request_display(content):
+def _sela_request_display(content, item=None):
     """Split a stored Sela request into labeled, human-readable parts.
 
     ``content`` is assembled by ``_sela_agent_request_payload`` as metadata
     lines, the context body, then an optional ``建议：`` line.  Rendering that
     blob verbatim is what made approval cards unreadable, so expose the parts.
     """
+    if isinstance(content, dict):
+        item = content
+        content = content.get('content') or ''
     fields = {}
     body_lines = []
     for line in str(content or '').splitlines():
@@ -10115,13 +10132,19 @@ def _sela_request_display(content):
         else:
             body_lines.append(line)
     context = '\n'.join(body_lines).strip()
+    payload = _sela_agent_request_structured(item or {})
     return {
-        'company': fields.get('公司', ''),
-        'kind': fields.get('类型', ''),
-        'severity': fields.get('优先级', ''),
-        'proposal': fields.get('建议', ''),
+        'company': str(payload.get('company') or fields.get('公司', '')),
+        'kind': str(payload.get('kind') or fields.get('类型', '')),
+        'severity': str(payload.get('severity') or fields.get('优先级', '')),
+        'proposal': str(payload.get('proposal') or fields.get('建议', '')),
         'context': context,
         'fields': _sela_context_fields(context),
+        'missing_facts': payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else [],
+        'decision': payload.get('decision') if isinstance(payload.get('decision'), dict) else {},
+        'evidence': payload.get('evidence') if isinstance(payload.get('evidence'), list) else [],
+        'resume': str(payload.get('resume') or ''),
+        'session_id': str(payload.get('session_id') or ''),
     }
 
 
@@ -10134,8 +10157,32 @@ def _question_evidence(member):
     elif item_type in ('sela_identity_review', 'sela_exclusion_review'):
         review = _inbox_sela_review_payload(member)
         detail = review.get('explanation') or review.get('reason_label') or ''
+        if item_type == 'sela_exclusion_review':
+            structured = {
+                'kind': review.get('reason_label') or '排除身份核对',
+                'company': review.get('canonical_name') or '',
+                'fields': [
+                    {'label': '历史排除主体', 'value': review.get('canonical_name') or ''},
+                    {'label': '当前线索名称', 'value': review.get('matched_value') or ''},
+                    {'label': '关联客户', 'value': review.get('customer_company') or ''},
+                    {'label': '登记来源', 'value': review.get('source') or ''},
+                    {'label': '登记状态', 'value': review.get('registry_status') or ''},
+                ],
+            }
+            structured['fields'] = [field for field in structured['fields'] if field['value']]
+        else:
+            structured = {
+                'kind': review.get('reason_label') or '身份待确认',
+                'company': review.get('company') or '',
+                'fields': [
+                    {'label': '官网', 'value': review.get('website') or ''},
+                    {'label': '邮箱', 'value': review.get('email') or ''},
+                ],
+                'context': detail,
+            }
+            structured['fields'] = [field for field in structured['fields'] if field['value']]
     elif item_type == 'sela_agent_request':
-        structured = _sela_request_display(member.get('content'))
+        structured = _sela_request_display(member)
         detail = structured.get('context') or structured.get('proposal') or ''
     else:
         detail = member.get('content') or ''
@@ -10176,6 +10223,11 @@ def _inbox_sela_review_payload(item):
     return {
         'source_id': str(payload.get('source_id') or '').strip(),
         'company': str(payload.get('company') or '').strip(),
+        'canonical_name': str(payload.get('canonical_name') or '').strip(),
+        'matched_value': str(payload.get('matched_value') or '').strip(),
+        'registry_status': str(payload.get('registry_status') or '').strip(),
+        'source': str(payload.get('source') or '').strip(),
+        'customer_company': str(item.get('customer_company') or item.get('customer_name') or '').strip(),
         'website': str(payload.get('website') or '').strip(),
         'email': str(payload.get('email') or '').strip(),
         'reason': reason,
@@ -10197,6 +10249,10 @@ def _question_headline(kind, primary, suggested, customer):
         return primary.get('title') or '是否批准这个对外动作？'
     if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
         return primary.get('title') or '确认这是否是同一个业务主体'
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return primary.get('title') or '确认是否属于已排除主体'
+    if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+        return primary.get('title') or 'Sela 需要补充事实或业务判断'
     return primary.get('title') or '需要你作出判断'
 
 
@@ -10210,6 +10266,10 @@ def _question_why(kind, primary):
                 '也不会发送邮件、报价或作出价格、交期承诺。要更正资料请在右侧直接填写。')
     if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
         return '仅凭名称或来源无法安全判定是否为同一主体，需要你的业务判断。'
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return 'Sela 发现这条 prospect 可能属于历史排除主体；你的决定会更新 Trosa 中的排除状态。'
+    if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+        return 'Sela 缺少继续研究所需的事实或需要你的业务判断；回答会保存并供 Sela 后续读取。'
     return '系统缺少作出安全判断所需的信息。'
 
 
@@ -10240,11 +10300,23 @@ def _question_options(kind, primary, suggested, sela_review):
             {'key': 'same', 'action': 'identity_same', 'style': 'primary', 'label': '是同一主体'},
             {'key': 'different', 'action': 'identity_different', 'style': 'text', 'label': '不是同一主体'},
         ]
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return [
+            {'key': 'reject', 'action': 'resolve_exclusion', 'style': 'primary', 'label': '确认同一主体，停止联系'},
+            {'key': 'accept', 'action': 'resolve_exclusion', 'style': 'text', 'label': '确认是新主体'},
+        ]
     return [{'key': 'archive', 'action': 'archive', 'style': 'text', 'label': '无需处理'}]
 
 
 def _question_completion_effects(kind, primary=None):
     """What actually happens when the human answer is recorded (honest, per kind)."""
+    if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+        request = _sela_agent_request_structured(primary or {})
+        if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
+            return ['关闭这条旧发送审批请求；不会触发邮件发送。']
+        return ['记录你的结构化回答并关闭请求；Sela 可在下一次运行时读取。']
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return ['保存主体判断并更新 Trosa 中的 Sela 排除状态。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
         return ['记录你的判断并关闭这组证据。']
     if kind == _inbox_questions.QUESTION_FACT_REQUEST:
@@ -10257,7 +10329,14 @@ def _question_completion_effects(kind, primary=None):
     return ['记录人工回答并关闭这组证据。']
 
 
-def _question_will_not_do(kind):
+def _question_will_not_do(kind, primary=None):
+    if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+        request = _sela_agent_request_structured(primary or {})
+        if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
+            return ['不会发送邮件，也不会创建客户、联系人或待办。']
+        return ['不会因此自动启动 Sela；不会创建客户、联系人或待办，也不会发送邮件。']
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return ['不会新建客户或联系人；不会发送邮件。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
         return ['不会自动修改客户或联系人资料。', '不会自动发送邮件、报价或作出价格、交期承诺。']
     return ['不会自动发送邮件、报价或作出价格、交期承诺。']
@@ -10282,6 +10361,46 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
                            {'key': 'customer_id', 'label': '同一主体对应的客户', 'input_type': 'customer_picker',
                             'required': False, 'validation': {'required_when': {'decision': 'same'}, 'options_source': 'customers'},
                             'help': '选择“是同一主体”时必须指定目标客户。'}], 'attachments': attachments}
+    if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+        return {'fields': [{'key': 'decision', 'label': '主体判断', 'input_type': 'choice', 'required': True,
+                            'validation': {'options': ['accept', 'reject']},
+                            'choices': [{'value': 'reject', 'label': '与历史排除主体相同，停止联系'},
+                                        {'value': 'accept', 'label': '不是同一主体，可保留 prospect'}],
+                            'help': ''},
+                           {'key': 'note', 'label': '判断依据', 'input_type': 'textarea', 'required': False,
+                            'validation': {}, 'help': '可补充核对依据。'}], 'attachments': attachments}
+    if kind == _inbox_questions.QUESTION_SELA_REQUEST:
+        payload = _sela_agent_request_structured(primary or {})
+        request_kind = str(payload.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
+        if request_kind == 'SEND_APPROVAL':
+            return {'fields': [], 'attachments': attachments, 'retired_send_approval': True}
+        raw_decision = payload.get('decision') if isinstance(payload.get('decision'), dict) else {}
+        options = raw_decision.get('options') if isinstance(raw_decision.get('options'), list) else []
+        missing = payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else []
+        fields = []
+        if options:
+            fields.append({'key': 'selected_option', 'label': raw_decision.get('question') or '请选择处理方向',
+                           'input_type': 'choice', 'required': True, 'validation': {'options': options},
+                           'choices': [{'value': option, 'label': option} for option in options], 'help': ''})
+            fields.append({'key': 'note', 'label': '补充说明', 'input_type': 'textarea', 'required': False,
+                           'validation': {}, 'help': '可说明原因或补充背景。'})
+        elif missing:
+            for index, fact in enumerate(missing[:20]):
+                if not isinstance(fact, dict):
+                    continue
+                fact_name = _sela_prospect_text(fact.get('field'), 80)
+                label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
+                fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
+                               'label': label, 'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
+                               'required': False, 'validation': {},
+                               'help': _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'})
+            fields.append({'key': 'note', 'label': '补充说明', 'input_type': 'textarea', 'required': False,
+                           'validation': {}, 'help': '如暂时无法确认，请说明原因。'})
+        else:
+            prompt = _sela_prospect_text(raw_decision.get('question'), 300)
+            fields.append({'key': 'answer', 'label': prompt or '补充事实或判断依据',
+                           'input_type': 'textarea', 'required': True, 'validation': {}, 'help': ''})
+        return {'fields': fields, 'attachments': attachments}
     if kind == _inbox_questions.QUESTION_APPROVAL:
         fields = [{'key': 'decision', 'label': '处理决定', 'input_type': 'choice', 'required': True,
                    'validation': {'options': ['approve', 'skip']},
@@ -10320,7 +10439,7 @@ def _question_needs_contact_correction(primary):
     if not primary:
         return False
     text = str(primary.get('content') or '')
-    structured = _sela_request_display(text)
+    structured = _sela_request_display(primary)
     if str(structured.get('kind') or '').upper() in ('DATA_CONFLICT', 'CONTACT_CONFLICT', 'EMAIL_CONFLICT'):
         return True
     return any(token in text for token in ('邮箱', 'email', '联系人'))
@@ -10390,6 +10509,8 @@ def _build_inbox_questions(items, matches_by_item):
             'revision': _inbox_question_revision(members),
             'kind': kind,
             'kind_label': _inbox_questions.question_label(kind),
+            'sela_request_kind': str(_sela_agent_request_structured(primary).get('kind') or '').upper()
+                if str(primary.get('item_type') or '') == 'sela_agent_request' else '',
             'question': _inbox_questions.question_text(kind),
             'headline': _question_headline(kind, primary, suggested, customer),
             'why': _question_why(kind, primary),
@@ -10403,7 +10524,7 @@ def _build_inbox_questions(items, matches_by_item):
             'evidence_count': len(members),
             'response_schema': _inbox_response_schema(kind, primary, suggested, sela_review),
             'completion_effects': _question_completion_effects(kind, primary),
-            'will_not_do': _question_will_not_do(kind),
+            'will_not_do': _question_will_not_do(kind, primary),
             'options': _question_options(kind, primary, suggested, sela_review),
             'sela_review': sela_review,
             'primary_item_id': primary.get('id'),
@@ -10462,7 +10583,7 @@ def _inbox_question_counts(questions, items):
     # Legacy count keys keep the navigation badge and older clients working.
     counts['capture'] = counts.get(_inbox_questions.QUESTION_IDENTITY, 0)
     counts['customer_reply'] = counts.get(_inbox_questions.QUESTION_REPLY, 0)
-    counts['sela_agent_request'] = counts.get(_inbox_questions.QUESTION_APPROVAL, 0)
+    counts['sela_agent_request'] = counts.get(_inbox_questions.QUESTION_SELA_REQUEST, 0)
     return counts
 
 
@@ -11273,6 +11394,79 @@ def _apply_inbox_email_correction(conn, answer, note):
     return (note + '\n' if note else '') + '人工确认邮箱：' + email, (contact_id, before, after)
 
 
+def _sela_human_response(row, answer, *, responded_at, responded_by):
+    """Validate and persist a machine-readable answer for a Sela request."""
+    payload = _sela_agent_request_structured(row)
+    request_kind = str(payload.get('kind') or _sela_request_display(row).get('kind') or '').upper()
+    note = _sela_prospect_text(answer.get('note'), 2000)
+    if request_kind == 'SEND_APPROVAL':
+        return {
+            'payload': {**payload, 'human_response': {
+                'status': 'retired', 'request_kind': request_kind,
+                'responded_at': responded_at, 'responded_by': responded_by,
+            }},
+            'reason': 'retired_send_approval',
+            'note': '已关闭旧发送审批请求；没有发送邮件。',
+        }
+
+    raw_decision = payload.get('decision') if isinstance(payload.get('decision'), dict) else {}
+    raw_options = raw_decision.get('options') if isinstance(raw_decision.get('options'), list) else []
+    options = [_sela_prospect_text(option, 500) for option in raw_options]
+    selected_option = _sela_prospect_text(answer.get('selected_option'), 500)
+    if options and selected_option not in options:
+        raise CrmWriteError('请选择 Sela 请求中列出的一个处理方向')
+
+    raw_missing = payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else []
+    facts = []
+    for index, fact in enumerate(raw_missing[:20]):
+        if not isinstance(fact, dict):
+            continue
+        field = _sela_prospect_text(fact.get('field'), 80)
+        label = _sela_prospect_text(fact.get('label') or field, 120)
+        value = _sela_prospect_text(answer.get(f'fact_{index}'), 500)
+        if value and field == 'contact_email':
+            try:
+                value = validate_email_address(value, check_deliverability=False).normalized
+            except EmailNotValidError:
+                raise CrmWriteError('请填写有效的联系邮箱，或在说明中写明目前无法确认') from None
+        if field and value:
+            facts.append({'field': field, 'label': label, 'value': value})
+    free_answer = _sela_prospect_text(answer.get('answer'), 2000)
+    if not options and not raw_missing and not free_answer and not note:
+        raise CrmWriteError('请填写补充事实或判断依据')
+    if options and not selected_option:
+        raise CrmWriteError('请选择处理方向')
+    if raw_missing and not facts and not note:
+        raise CrmWriteError('请补充至少一项事实，或说明目前无法确认')
+
+    human_response = {
+        'status': 'answered',
+        'request_kind': request_kind,
+        'selected_option': selected_option,
+        'facts': facts,
+        'answer': free_answer,
+        'note': note,
+        'responded_at': responded_at,
+        'responded_by': responded_by,
+    }
+    updated = dict(payload)
+    updated['human_response'] = human_response
+    summary = []
+    if selected_option:
+        summary.append('选择：' + selected_option)
+    if facts:
+        summary.append('补充事实：' + '；'.join(f"{fact['label']}：{fact['value']}" for fact in facts))
+    if free_answer:
+        summary.append('回答：' + free_answer)
+    if note:
+        summary.append('说明：' + note)
+    return {
+        'payload': updated,
+        'reason': 'answered',
+        'note': '\n'.join(summary)[:4000],
+    }
+
+
 @app.route('/api/inbox/questions/<int:item_id>/respond', methods=['POST'])
 @login_required
 def respond_to_inbox_question(item_id):
@@ -11306,13 +11500,34 @@ def respond_to_inbox_question(item_id):
         members = [item for item in open_items if int(item.get('id') or 0) in set(item_ids)]
         if revision != _inbox_question_revision(members):
             return jsonify({'error': '该问题已由其他操作处理'}), 409
-        kind = str(row.get('question_kind') or '') or _inbox_questions.question_kind_for(row.get('item_type'))
+        _apply_question_metadata(row)
+        kind = row.get('question_kind') or _inbox_questions.question_kind_for(row.get('item_type'))
         schema = _inbox_response_schema(kind, row)
         decision = str(answer.get('decision') or '').strip().lower()
         note = str(answer.get('note') or answer.get('answer') or data.get('note') or '').strip()[:4000]
         customer_id = answer.get('customer_id')
         undo_pending = None
-        if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+        sela_response = None
+        if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+            if decision not in ('accept', 'reject'):
+                return jsonify({'error': '请选择主体判断结果'}), 400
+            review = _inbox_sela_review_payload(row)
+            profile = _sela_profile_by_source(conn, review.get('source_id')) if review.get('source_id') else None
+            if not profile:
+                return jsonify({'error': '找不到对应的 Sela prospect，未保存决定'}), 404
+            note = _sela_prospect_text(answer.get('note'), 4000)
+            _sela_resolve_exclusion_review(conn, profile, decision, note, _calendar_now_text(), resolve_inbox=False)
+        elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
+            now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
+            sela_response = _sela_human_response(row, answer, responded_at=now, responded_by=actor)
+            serialized_response = json.dumps(sela_response['payload'], ensure_ascii=False)
+            if len(serialized_response) > 40000:
+                raise CrmWriteError('回答内容过长，请精简后重试')
+            for member_id in item_ids:
+                _save_sela_inbox_response(conn, inbox_item_id=member_id, request_json=serialized_response)
+            decision = sela_response['reason']
+            note = sela_response['note']
+        elif kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
             if decision not in ('same', 'different'):
                 return jsonify({'error': '请选择身份判断结果'}), 400
             if decision == 'same' and not customer_id:
@@ -11353,11 +11568,26 @@ def respond_to_inbox_question(item_id):
                     inbox_entities.append(_undo_entity('inbox_items', undo_item_id, restored, current))
             undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
                 [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, '撤销 Inbox 邮箱更正')
+        next_system_step = (
+            '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
+            if sela_response and sela_response.get('reason') == 'retired_send_approval' else
+            '回答已保存到 Trosa；Sela 不会因此自动启动，可在下一次 Agent 运行时读取。'
+            if kind == _inbox_questions.QUESTION_SELA_REQUEST else
+            '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
+            if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW else
+            '回答已记录，问题已关闭。'
+        )
         response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
                     'resolved_item_ids': item_ids, 'effects': _question_completion_effects(kind, row),
-                    'next_system_step': '系统会继续准备后续工作；正式发送前仍需人工确认。',
+                    'next_system_step': next_system_step,
                     'undo_token': undo_token,
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
+        if sela_response:
+            response['sela_handoff'] = {
+                'status': 'awaiting_agent',
+                'automatic_run': False,
+                'session_id': _sela_agent_request_structured(row).get('session_id') or '',
+            }
         remaining_items = _load_open_inbox_items(conn)
         response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}), remaining_items)
         _agent_gateway_receipt_write(conn, 'inbox_response', idempotency_key, request_hash,
