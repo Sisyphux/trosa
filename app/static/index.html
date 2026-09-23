@@ -10,8 +10,8 @@
 <title>Trade OS · 外贸工作系统</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
-<link rel="stylesheet" href="/style.css?v={{VERSION}}-weekly-ui-refinement-8">
-<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-weekly-ui-refinement-8">
+<link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-cleanup-20260923">
+<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-cleanup-20260923">
 </head>
 <body>
 
@@ -41,13 +41,13 @@
     <div class="login-title">加入 Trade OS</div>
     <div class="login-desc" id="invitationDesc">正在验证邀请链接…</div>
     <form class="login-pin-form" id="invitationForm" hidden>
-      <label class="form-label" for="invitationName">姓名（也是登录账号）</label>
-      <input class="form-control" id="invitationName" type="text" required maxlength="80" autocomplete="name" placeholder="填写你的姓名">
-      <div class="settings-help" id="invitationAccountHint" style="margin:6px 0 12px;">账号将使用你填写的姓名</div>
+      <label class="form-label" for="invitationName">姓名</label>
+      <input class="form-control" id="invitationName" type="text" required maxlength="80" autocomplete="name">
+      <div class="settings-help" id="invitationAccountHint" style="margin:6px 0 12px;">登录账号与姓名相同</div>
       <label class="form-label" for="invitationPassword">设置 6 位数字密码</label>
-      <input class="form-control" id="invitationPassword" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="输入 6 位数字">
+      <input class="form-control" id="invitationPassword" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password">
       <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认 6 位数字密码</label>
-      <input class="form-control" id="invitationPasswordConfirm" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password" placeholder="再次输入 6 位数字">
+      <input class="form-control" id="invitationPasswordConfirm" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password">
       <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号并进入</button>
       <div class="login-error" id="invitationError" role="alert"></div>
     </form>
@@ -101,7 +101,7 @@
       <div class="sidebar-tools-menu">
         <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">未建立真实沟通</span></button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
-        <button type="button" onclick="switchPage('history')" aria-label="打开全部记录" title="打开全部记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">全部记录</span></button>
+        <button type="button" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">沟通记录</span></button>
         <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">操作日志</span></button>
       </div>
     </details>
@@ -159,7 +159,7 @@
         <div class="today-fullscreen-shell">
         <div class="today-workspace">
           <section class="today-task-section">
-            <div class="today-section-header"><div><h3>今日跟进</h3><div class="section-caption">拖动客户卡片即可调整今天的关注顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
+            <div class="today-section-header"><div><h3>今日跟进</h3><div class="section-caption">拖动卡片调整顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
             <div class="today-task-list" id="todayReminders"><div class="empty-state"><p>今天没有需要处理的客户</p></div></div>
             <div class="today-dashboard-error" id="todayDashboardError" hidden role="alert"></div>
             <div class="batch-bar today-batch-bar" id="todayBatchBar">
@@ -199,7 +199,7 @@
     <!-- ==================== INBOX ==================== -->
     <div class="page-section" id="page-inbox">
       <div class="page-header inbox-page-header">
-        <div><h2>Inbox</h2><div class="page-desc">只承接系统无法自行决定、必须由你作出判断的未决问题</div></div>
+        <div><h2>Inbox</h2></div>
         <div class="command-shelf is-collapsible inbox-command-shelf" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="refreshInboxManually()" aria-label="刷新 Inbox" title="刷新 Inbox">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg>
@@ -220,7 +220,7 @@
     <!-- ==================== EXISTING CUSTOMERS ==================== -->
     <div class="page-section" id="page-customers">
       <div class="page-header customer-page-workbar">
-        <div><h2>客户</h2><div class="page-desc">所有公司与关系都在这里，不需要维护固定分类</div></div>
+        <div><h2>客户</h2></div>
         <div class="command-shelf is-collapsible customer-command-shelf" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
@@ -254,9 +254,9 @@
         </div>
         <div class="customer-advanced-filters" id="customerAdvancedFilters" hidden>
           <div class="advanced-filter-grid">
-            <label>国家 / 地区<input type="text" id="filterCountry" placeholder="例如：阿联酋"></label>
+            <label>国家 / 地区<input type="text" id="filterCountry"></label>
             <label>业务角色<select id="filterBusinessRole"><option value="">全部</option><option value="中间商">中间商</option><option value="终端">终端</option></select></label>
-            <label>行业领域<input type="text" id="filterField" placeholder="可自由填写"></label>
+            <label>行业领域<input type="text" id="filterField"></label>
             <label>客户等级<select id="filterLevel"><option value="">全部</option><option>A</option><option>B</option><option>C</option><option>D</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>C+</option><option>C-</option><option>D+</option><option>D-</option></select></label>
             <label>人工判断<select id="filterJudgment"><option value="">全部</option><option value="yes">有记录</option><option value="no">未记录</option></select></label>
             <label>下一步<select id="filterNextState"><option value="">全部</option><option value="scheduled">已有下一步</option><option value="none">尚无下一步</option><option value="overdue">下一步已逾期</option></select></label>
@@ -264,7 +264,7 @@
             <label>最多未联系<input type="number" id="filterDaysMax" min="0" placeholder="天数"></label>
             <label>联系日期从<input type="date" id="filterLastFrom"></label>
             <label>联系日期到<input type="date" id="filterLastTo"></label>
-            <label>标签<input type="text" id="filterTag" placeholder="例如：展会客户"></label>
+            <label>标签<input type="text" id="filterTag"></label>
             <label>客户来源<select id="filterSource"><option value="">全部</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></label>
           </div>
           <div class="advanced-filter-actions"><button class="btn btn-sm" onclick="clearCustomerFilters()">清空</button><button class="btn btn-sm btn-primary" onclick="applyCustomerFilters()">应用筛选</button></div>
@@ -294,7 +294,7 @@
     <div class="page-section" id="page-newpool" hidden>
       <div class="page-header">
         <h2>新客户</h2>
-        <div class="page-desc">尚未产生任何有效沟通或开发邮件的潜在客户</div>
+        <div class="page-desc">尚无有效沟通或开发邮件的潜在客户</div>
       </div>
       <div class="page-body">
         <div class="toolbar">
@@ -377,7 +377,6 @@
     <div class="page-section" id="page-calendar">
       <div class="page-header">
         <h2>跟进日历</h2>
-        <div class="page-desc">查看每月跟进任务</div>
       </div>
       <div class="page-body">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">
@@ -405,8 +404,7 @@
     <!-- ==================== FOLLOW-UP HISTORY ==================== -->
     <div class="page-section" id="page-history">
       <div class="page-header">
-        <h2>记录</h2>
-        <div class="page-desc">所有通话、邮件和会议记录</div>
+        <h2>沟通记录</h2>
       </div>
       <div class="page-body">
         <div class="card"><div class="card-body" id="historyTimeline"><div class="empty-state"><p>正在加载...</p></div></div></div>
@@ -419,7 +417,7 @@
     <div class="page-section" id="page-logs">
       <div class="page-header">
         <h2>操作日志</h2>
-        <div class="page-desc">系统审计记录 — 自动记录对客户、提醒等数据的创建/修改/删除操作，用于排查问题和数据追踪</div>
+        <div class="page-desc">客户、联系人和待办的创建、修改与删除记录</div>
       </div>
       <div class="page-body">
         <div class="card"><div class="card-body" id="logsList"><div class="empty-state"><p>正在加载...</p></div></div></div>
@@ -434,7 +432,6 @@
             <div>
               <div class="ov-hero-kicker">团队工作台</div>
               <div class="ov-hero-title">本周沟通</div>
-              <p class="ov-hero-desc">按负责人整理本周实际发生的客户进展，方便快速回到下一步。</p>
             </div>
             <div class="ov-hero-date" id="overviewDateLabel"></div>
           </div>
@@ -456,23 +453,22 @@
     <div class="page-section" id="page-settings">
       <div class="page-header">
         <h2>设置</h2>
-        <div class="page-desc">系统配置与维护</div>
       </div>
       <div class="page-body">
         <div class="card personalization-card" style="margin-bottom:22px;">
-          <div class="card-header"><div><h3>个人使用设置</h3><p>调整现有界面，只保留当前工作需要的功能。</p></div><button class="btn btn-sm btn-primary" onclick="savePersonalSettings()">保存设置</button></div>
+          <div class="card-header"><div><h3>个人使用设置</h3></div><button class="btn btn-sm btn-primary" onclick="savePersonalSettings()">保存设置</button></div>
           <div class="card-body">
-            <div class="settings-group"><h4>固定核心</h4><p class="settings-help">今天、Inbox、客户、沟通记录、待办、搜索和数据安全始终启用。</p></div>
+            <div class="settings-group"><h4>固定核心</h4><p class="settings-help">始终启用：今天、Inbox、客户、沟通、待办、搜索、数据安全</p></div>
             <div class="settings-group"><h4>可选功能</h4><div class="module-settings-grid" id="moduleSettingsGrid"></div></div>
             <div class="settings-group"><h4>主导航顺序</h4><div class="nav-order-settings" id="navOrderSettings"></div><label class="settings-inline-field">默认打开<select id="preferenceDefaultPage"><option value="dashboard">今天</option><option value="inbox">Inbox</option><option value="customers">客户</option><option value="overview">本周工作</option></select></label></div>
             <div class="settings-group"><h4>客户列表字段</h4><div class="column-settings" id="customerColumnSettings"></div></div>
-            <div class="settings-group"><h4>界面字号</h4><div class="settings-inline-field"><span>字号</span><select id="preferenceFontSize" onchange="applyFontSize(this.value)"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xl">超大</option></select><span class="settings-font-preview">Aa 文字预览</span></div><p class="settings-help">调整整个界面的文字大小，切换即时预览，保存后持久生效。</p></div>
-            <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式会参考设备状态与一次不到一秒的本地帧率测试；不会上传页面内容或客户数据。</p></div>
+            <div class="settings-group"><h4>界面字号</h4><div class="settings-inline-field"><span>字号</span><select id="preferenceFontSize" onchange="applyFontSize(this.value)"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xl">超大</option></select><span class="settings-font-preview">Aa 文字预览</span></div></div>
+            <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式参考设备状态与本地帧率，不上传页面或客户数据。</p></div>
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
         </div>
         <div class="card ai-integration-card" id="aiIntegrationSettingsCard" style="margin-bottom:22px;" aria-labelledby="aiIntegrationTitle">
-          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>系统内所有 AI 功能共用当前生效的这一套接口；支持的服务商可读取模型列表，也可以手动填写。截图识别要求模型支持图片输入。连接测试不会携带客户资料。</p></div></div>
+          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>AI 功能共用此接口。截图识别需使用支持图片的模型；连接测试不发送客户资料。</p></div></div>
           <div class="card-body">
             <div class="ai-config-status" id="aiConfigStatus" aria-live="polite">正在读取 AI 配置…</div>
             <div class="ai-config-form" id="aiConfigForm" hidden>
@@ -510,7 +506,7 @@
           </div>
         </div>
         <div class="card" id="teamMembersSettingsCard" style="margin-bottom:22px; display:none;">
-          <div class="card-header"><div><h3>团队成员</h3><p>创建链接后自行转发。成员打开链接，自行设置姓名（即账号）和密码；链接仅可使用一次，7 天后失效。</p></div></div>
+          <div class="card-header"><div><h3>团队成员</h3><p>邀请链接需手动转发，单次有效，7 天后失效。</p></div></div>
           <div class="card-body">
             <form id="teamInvitationForm" class="settings-inline-field" style="align-items:end; flex-wrap:wrap; gap:12px;" onsubmit="createTeamInvitation(event)">
               <button class="btn btn-sm btn-primary" type="submit">生成邀请链接</button>
@@ -520,13 +516,13 @@
           </div>
         </div>
         <div class="card gmail-integration-card" style="margin-bottom:22px;" aria-labelledby="gmailIntegrationTitle">
-          <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>读取已连接 Gmail 的收发邮件；唯一精确邮箱会自动归到客户，其他邮件保留在 Inbox 供你确认。</p></div></div>
+          <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>同步收发邮件；唯一邮箱匹配自动关联客户，其余进入 Inbox 确认。</p></div></div>
           <div class="card-body" id="gmailIntegrationStatus" aria-live="polite"><div class="settings-help">正在检查 Gmail 连接状态…</div></div>
         </div>
         <div class="card" id="excelImportSettingsCard" data-module="excel_import" style="margin-bottom:22px;">
           <div class="card-header"><h3>Excel 导入</h3></div>
           <div class="card-body">
-            <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">上传客户跟进表格（.xlsx / .xls），系统自动识别列名并导入</p>
+            <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">支持 .xlsx、.xls，上传后自动识别列名。</p>
             <form id="excelUploadForm" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
               <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="font-size:0.85rem;">
               <button type="button" class="btn btn-primary btn-sm" onclick="uploadExcel()">上传并导入</button>
@@ -540,7 +536,7 @@
         </div>
         <div class="card" style="margin-bottom:22px;">
           <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">一键诊断</button></div>
-          <div class="card-body" id="healthCheckPanel"><div class="empty-state"><p style="color:var(--fg-muted);">点击「一键诊断」检测系统运行状态</p></div></div>
+          <div class="card-body" id="healthCheckPanel"><div class="empty-state"><p style="color:var(--fg-muted);">尚未检测</p></div></div>
         </div>
         <div class="card">
           <div class="card-header"><h3>系统信息</h3></div>
@@ -612,7 +608,7 @@
                 <button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
                 </div>
                 <div class="workspace-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
-                <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="直接粘贴邮件即可；系统会自动提取主题、正文和发送时间。&#10;&#10;支持 Outlook、Gmail 的完整邮件内容，也支持只粘贴主题和正文。"></textarea><small class="email-import-hint">默认记录为“待回复”；粘贴退信或客户回复时会自动调整状态。</small></div>
+                <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="自动提取主题、正文和发送时间"></textarea><small class="email-import-hint">默认状态为“待回复”；退信或客户回复会自动调整。</small></div>
                 <details class="workspace-compose"><summary>需要修正主题、时间或状态？</summary><div class="workspace-compose-body"><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
                 <textarea id="outreachContent" hidden></textarea>
                 <button class="btn btn-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
@@ -623,11 +619,7 @@
 
           <div class="tab-content" id="editTabContacts">
             <div id="contactsList"></div>
-            <details class="workspace-compose workspace-email-import" data-module="email_validation" open>
-              <summary>批量导入邮箱</summary>
-              <div class="workspace-compose-body"><div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">检查格式、邮件路由、一次性邮箱、免费邮箱、部门邮箱和重复联系人。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button></div>
-            </details>
-            <details class="workspace-compose workspace-contact-compose">
+            <details class="workspace-compose workspace-contact-compose" open>
               <summary>添加联系人</summary>
               <div class="workspace-compose-body">
                 <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
@@ -636,11 +628,15 @@
                 <button class="btn btn-primary btn-sm" id="addContactSubmit" type="button" onclick="addContact()">添加联系人</button>
               </div>
             </details>
+            <details class="workspace-compose workspace-email-import" data-module="email_validation">
+              <summary>批量导入邮箱</summary>
+              <div class="workspace-compose-body"><div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button></div>
+            </details>
           </div>
 
           <div class="tab-content" id="editTabFiles">
             <div class="customer-file-panel-header">
-              <div><h4>客户文件</h4><p>把报价单、合同、样品图片、展会资料等存到客户名下，查阅客户时可以直接打开。</p></div>
+              <div><h4>客户文件</h4></div>
               <button class="btn btn-sm btn-primary" type="button" onclick="openCustomerFilePicker()">添加文件</button>
             </div>
             <div id="customerFilesList"></div>
@@ -671,7 +667,7 @@
           </div>
 
           <div class="tab-content" id="editTabTasks">
-            <div class="workspace-panel-header customer-task-panel-header"><div><h4>全部待办</h4><p>只显示已明确安排、带日期的下一步。</p></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal('create')">新增待办</button></div>
+            <div class="workspace-panel-header customer-task-panel-header"><div><h4>已安排待办</h4></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal('create')">新增待办</button></div>
             <div id="customerTasksList"></div>
           </div>
 
@@ -724,9 +720,9 @@
       <input type="hidden" id="completeReminderId">
       <div style="margin-bottom:16px;"><div style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:4px;">客户</div><div style="font-weight:600;" id="completeCustomerName"></div></div>
       <div style="margin-bottom:16px;"><div style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:4px;">任务</div><div style="font-size:0.88rem;color:var(--fg-secondary);" id="completeContent"></div></div>
-      <div class="form-group"><div class="form-label-row"><label class="form-label">客户怎么回复，或者这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('complete')">AI 帮我整理</button></div><textarea class="form-control" id="completeResult" rows="5" oninput="updateAutoDirectionPreview('complete')" placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容"></textarea><div class="auto-direction-row"><span id="completeDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="completeDirectionOverride" onchange="updateAutoDirectionPreview('complete')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('complete')">AI 帮我整理</button></div><textarea class="form-control" id="completeResult" rows="5" oninput="updateAutoDirectionPreview('complete')" placeholder="邮件、WhatsApp 或会议记录"></textarea><div class="auto-direction-row"><span id="completeDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="completeDirectionOverride" onchange="updateAutoDirectionPreview('complete')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
       <div class="quick-reply-analysis" id="completeAnalysis" hidden></div>
-      <label class="complete-next-toggle"><input type="checkbox" id="completeHasNext" onchange="toggleCompleteNext()"><span><strong>还需要下一步</strong><small>需要继续推进时再安排动作和日期</small></span></label>
+      <label class="complete-next-toggle"><input type="checkbox" id="completeHasNext" onchange="toggleCompleteNext()"><span><strong>安排下一步</strong></span></label>
       <div class="form-group complete-next-section" id="completeNextSection" hidden>
         <label class="form-label">下一步做什么？</label>
         <input type="text" class="form-control" id="completeNextTask" placeholder="例如：发送再生料方案报价" oninput="updateCompleteSaveLabel()">
@@ -782,7 +778,7 @@
       <input type="hidden" id="batchCompleteGroup">
       <div style="margin-bottom:16px;padding:12px;background:var(--brand-50);border-radius:var(--radius-sm);border:1px solid var(--border-200);">
         <div style="font-size:0.85rem;color:var(--text-600);font-weight:600;" id="batchCompleteTitle">将完成 0 个客户的跟进</div>
-        <div style="font-size:0.78rem;color:var(--text-400);margin-top:4px;">填写本次跟进结果和新的下次跟进日期</div>
+        <div style="font-size:0.78rem;color:var(--text-400);margin-top:4px;">结果和日期将应用到全部所选客户</div>
       </div>
       <div class="form-group"><label class="form-label">跟进结果</label><textarea class="form-control" id="batchCompleteResult" rows="3" placeholder="记录本次沟通的内容和结果..."></textarea></div>
       <div class="form-row">
@@ -804,7 +800,6 @@
       <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <p style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:18px;">适合刚发现、还没有沟通记录或开发邮件的潜在客户；系统会自动安排开发节奏。</p>
       <div class="form-group"><label class="form-label">公司 <span class="required">*</span></label><input type="text" class="form-control" id="newCustomerName"></div>
       <div class="form-row add-customer-advanced new-customer-advanced">
         <div class="form-group"><label class="form-label">国家</label><input type="text" class="form-control" id="newCustomerCountry"></div>
@@ -816,7 +811,7 @@
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加另一位</button></div>
         <div id="newDraftContacts"></div>
-        <details class="draft-email-import" open><summary>邮箱可发送性检查与导入</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="粘贴邮箱后自动检查；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、邮件路由、一次性邮箱、免费邮箱、部门邮箱和重复联系人。</small></div></details>
+        <details class="draft-email-import" open><summary>邮箱可发送性检查与导入</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="粘贴邮箱后自动检查；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、路由与重复邮箱。</small></div></details>
       </section>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站智能填充，也可以手动填写"></textarea></div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
@@ -836,7 +831,6 @@
       <button class="modal-close" onclick="closeModal('addCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <p class="add-customer-intro">粘贴官网后会自动识别资料；补充联系方式后即可保存并复制邮箱。</p>
       <div class="add-customer-basics">
         <div class="form-group">
           <label class="form-label">客户官网 <span class="required">*</span></label>
@@ -870,8 +864,8 @@
         <div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="addExistSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div>
       </div>
       <section class="draft-contacts-section">
-        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴邮箱后自动检查并生成联系人</span></div></div>
-        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('exist')">检查并添加</button><small>粘贴后会自动检查格式、邮件路由和重复联系人。</small></div></details>
+        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong><span>粘贴后自动生成联系人</span></div></div>
+        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="btn btn-sm" onclick="importDraftEmails('exist')">检查并添加</button></div></details>
         <details class="manual-contact-entry"><summary>手动填写联系人（可选）</summary><div id="existDraftContacts"></div><button type="button" class="text-action" onclick="addDraftContact('exist')">＋ 再添加一位联系人</button></details>
       </section>
       <button type="button" class="btn btn-sm add-more-toggle" onclick="toggleAddCustomerAdvanced('exist')">更多公司资料</button>
@@ -890,7 +884,7 @@
 <!-- Smart website import preview -->
 <div class="modal-overlay" id="smartFillPreviewModal">
   <div class="modal" style="max-width:620px;">
-    <div class="modal-header"><div><h3>确认识别结果</h3><p class="modal-subtitle">以下内容尚未保存，请确认后应用到客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-header"><div><h3>确认识别结果</h3><p class="modal-subtitle">尚未保存；确认后填入客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body" id="smartFillPreviewContent"></div>
     <div class="modal-footer"><button class="btn" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
   </div>
@@ -913,8 +907,7 @@
       <button class="modal-close" onclick="closeModal('batchAddModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <p style="font-size:0.82rem;color:var(--fg-muted);margin-bottom:14px;">每行一个客户。格式：姓名，公司，国家，行业领域，备注</p>
-      <div class="form-group"><label class="form-label">客户列表</label><textarea class="form-control" id="batchAddText" rows="10" placeholder="方式一：每行一个客户&#10;示例：&#10;公司名称, 中国, 亚克力分销, 备注&#10;公司名称, 美国, 工程塑料分销, 备注&#10;&#10;方式二：直接粘贴公司名称，每行一个"></textarea></div>
+      <div class="form-group"><label class="form-label">客户列表</label><textarea class="form-control" id="batchAddText" rows="10" placeholder="每行一条：姓名, 公司, 国家, 行业, 备注&#10;例如：Mia, ABC GmbH, 德国, 工程塑料, 展会客户&#10;或只填写公司名称"></textarea></div>
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('batchAddModal')">取消</button>
@@ -938,7 +931,6 @@
       <div class="form-group">
         <label class="form-label" for="customerTaskTitle">具体动作 <span class="required">*</span></label>
         <textarea class="form-control task-action-textarea" id="customerTaskTitle" rows="4" placeholder="例如：确认样品测试结果，并根据反馈准备报价"></textarea>
-        <p class="form-hint">写清楚自己下一次需要做的事，系统会在当天把它带回 Today。</p>
       </div>
       <div class="form-group">
         <label class="form-label" for="customerTaskDate">什么时候做 <span class="required">*</span></label>
@@ -960,10 +952,10 @@
 <!-- Inbox Reply Modal -->
 <div class="modal-overlay" id="inboxReplyModal">
   <div class="modal inbox-reply-modal">
-    <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle">确认实际发生的事实；需要时再安排明确的下一步。</p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+    <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle"></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
       <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
-      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="AI 会先整理摘要放在这里，可直接修改；也可以自己记录"></textarea></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea></div>
       <div class="quick-reply-analysis" id="inboxReplyAnalysis" hidden></div>
       <details class="communication-raw-source" id="inboxReplyRawSource" hidden><summary>原始记录</summary><pre id="inboxReplyRawSourceText"></pre></details>
       <div class="form-group" id="communicationConfirmKnownCustomer" hidden><span class="form-label">客户</span><p class="form-hint" id="communicationConfirmKnownCustomerName"></p></div>
@@ -1109,6 +1101,6 @@
 <datalist id="communicationTypeOptions">
   <option value="WhatsApp"><option value="邮件"><option value="电话"><option value="会议"><option value="报价"><option value="寄样"><option value="展会现场"><option value="微信"><option value="视频会议"><option value="客户来访"><option value="其他跟进">
 </datalist>
-  <script src="/app.js?v={{VERSION}}-grade-input-feedback"></script>
+  <script src="/app.js?v={{VERSION}}-ui-copy-cleanup-20260923"></script>
 </body>
 </html>
