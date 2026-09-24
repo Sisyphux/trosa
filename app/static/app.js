@@ -1691,7 +1691,7 @@ function renderSelaInboxRuns(runs) {
   var olderRuns = history.length
     ? '<details class="inbox-sela-runs-history"><summary>查看其他最近回执（' + history.length + '）</summary><ul>' + history.map(renderRun).join('') + '</ul></details>'
     : '';
-  section.innerHTML = '<div class="inbox-sela-runs-heading"><strong>Sela 执行回执</strong><span>只对符合条件的 Sela 请求答案续跑；排队不代表已经开始。</span></div>' + summary + olderRuns +
+  section.innerHTML = '<div class="inbox-sela-runs-heading"><strong>Sela 执行回执</strong><span>只对符合条件的 Sela 请求答案续跑；普通客户回复、身份判断和旧发送请求不会启动 Sela。排队不代表已经开始。</span></div>' + summary + olderRuns +
     '<details class="inbox-sela-runs-scope"><summary>触发条件与自动范围</summary><p>仅限唯一关联、仍未互动且未停联的冷线索；已有发送或草稿、排除复核、找不到唯一 Prospect 时转人工处理。Sela 只做公开资料研究或准备未发送草稿，不会发送邮件、建立 Gmail 草稿或修改联系人、待办、业务阶段。</p></details>';
 }
 function renderInboxQuestionCard(q) {
