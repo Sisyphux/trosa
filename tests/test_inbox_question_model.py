@@ -229,6 +229,68 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(payload['counts']['all'], 1)
         self.assertEqual(payload['questions'][0]['kind'], 'identity_review')
 
+    def test_identity_review_evidence_shows_stored_matched_candidates(self):
+        conn = self._conn()
+        try:
+            conn.execute(
+                '''INSERT INTO inbox_items
+                   (item_type, title, content, dedupe_key, status, created_at,
+                    question_kind, question_key, source_type)
+                   VALUES ('sela_identity_review', 'sela 身份待确认', ?,
+                           'sela:prospect-review:stored', 'open', '2026-09-18 09:00:00',
+                           'identity_review', 'sela:prospect-review:stored', 'sela')''',
+                (json.dumps({
+                    'source_id': 'stored', 'company': 'Shared Co',
+                    'reason': 'MULTIPLE_TROSA_MATCHES',
+                    'candidates': [
+                        {'customer_id': 41, 'company': 'Matched A',
+                         'website': 'https://a.example', 'matched_by': ['email']},
+                        {'customer_id': 42, 'company': 'Matched B',
+                         'website': 'https://b.example', 'matched_by': ['domain']},
+                    ],
+                }),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        payload = self.client.get('/api/inbox').get_json()
+        structured = payload['questions'][0]['evidence'][0]['structured']
+        self.assertEqual([candidate['company'] for candidate in structured['candidates']],
+                         ['Matched A', 'Matched B'])
+        self.assertEqual(structured['candidates'][0]['matched_by'], ['email'])
+        # 客户选择器直接呈现候选，人工判断不必先猜公司名。
+        self.assertEqual(payload['questions'][0]['sela_review']['candidates'][1]['customer_id'], 42)
+
+    def test_legacy_identity_review_derives_candidates_at_read_time(self):
+        conn = self._conn()
+        try:
+            for name in ('Matched A', 'Matched B'):
+                customer_id = conn.execute(
+                    'INSERT INTO customers(name, company) VALUES (?, ?)', (name, name),
+                ).lastrowid
+                conn.execute(
+                    'INSERT INTO contacts(customer_id, name, email) VALUES (?, ?, ?)',
+                    (customer_id, name, 'shared@example.com'),
+                )
+            conn.execute(
+                '''INSERT INTO inbox_items
+                   (item_type, title, content, dedupe_key, status, created_at,
+                    question_kind, question_key, source_type)
+                   VALUES ('sela_identity_review', 'sela 身份待确认', ?,
+                           'sela:prospect-review:legacy', 'open', '2026-09-18 09:00:00',
+                           'identity_review', 'sela:prospect-review:legacy', 'sela')''',
+                (json.dumps({'source_id': 'legacy', 'company': 'Shared Co',
+                             'email': 'shared@example.com',
+                             'reason': 'MULTIPLE_TROSA_MATCHES'}),),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        payload = self.client.get('/api/inbox').get_json()
+        structured = payload['questions'][0]['evidence'][0]['structured']
+        self.assertEqual(sorted(candidate['company'] for candidate in structured['candidates']),
+                         ['Matched A', 'Matched B'])
+
 
     def _insert_customer_with_contact(self, email='old@example.com'):
         conn = self._conn()

@@ -4048,13 +4048,41 @@ def _sela_profile_customer(conn, customer_id):
     ).fetchone()
 
 
-def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now):
+def _sela_review_candidate(row, reason=''):
+    """One existing Trosa customer that matched a Sela prospect.
+
+    The human cannot decide "same entity?" without seeing *which* records
+    matched and on what basis, so capture the auditable identity keys here.
+    """
+    if not row:
+        return None
+    if not isinstance(row, dict):
+        try:
+            row = dict(row)
+        except (TypeError, ValueError):
+            return None
+    try:
+        customer_id = int(row['id'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    methods = row.get('matched_by') if isinstance(row.get('matched_by'), (list, tuple, set)) else []
+    return {
+        'customer_id': customer_id,
+        'company': _sela_prospect_text(row.get('company') or row.get('name'), 500),
+        'website': _sela_prospect_text(row.get('website'), 2000),
+        'matched_by': [_sela_prospect_text(method, 40) for method in methods if _sela_prospect_text(method, 40)][:10],
+    }
+
+
+def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now, candidates=None):
+    candidates = [item for item in (candidates or []) if isinstance(item, dict)][:20]
     content = json.dumps({
         'source_id': source_id,
         'company': _sela_prospect_text(prospect.get('company'), 500),
         'website': _sela_prospect_text(prospect.get('website') or prospect.get('domain'), 2000),
         'email': _canonical_email((prospect.get('contact') or {}).get('email') if isinstance(prospect.get('contact'), dict) else prospect.get('email')),
         'reason': reason,
+        'candidates': candidates,
         'research': _sela_prospect_research(prospect),
     }, ensure_ascii=False)[:20000]
     _create_inbox_item(
@@ -4945,6 +4973,9 @@ def _sela_upsert_prospect(conn, prospect):
             return {
                 'success': True, 'status': 'REVIEW', 'reason': 'SOURCE_IDENTITY_CONFLICT',
                 'source_id': source_id, 'trosa_id': int(customer['id']),
+                'candidates': [candidate for candidate in
+                               [_sela_review_candidate({**dict(customer), 'matched_by': ['website']},
+                                                       'SOURCE_IDENTITY_CONFLICT')] if candidate],
             }
         customer_id = int(customer['id'])
     else:
@@ -4960,11 +4991,16 @@ def _sela_upsert_prospect(conn, prospect):
             return {
                 'success': True, 'status': 'REVIEW', 'reason': match_error,
                 'source_id': source_id,
+                'candidates': [candidate for candidate in
+                               [_sela_review_candidate(row, match_error) for row in matches] if candidate],
             }
         if len(matches) > 1:
             return {
                 'success': True, 'status': 'REVIEW', 'reason': 'MULTIPLE_TROSA_MATCHES',
                 'source_id': source_id, 'trosa_ids': [int(row['id']) for row in matches],
+                'candidates': [candidate for candidate in
+                               [_sela_review_candidate(row, 'MULTIPLE_TROSA_MATCHES') for row in matches]
+                               if candidate],
             }
         if matches:
             customer = matches[0]
@@ -4974,6 +5010,9 @@ def _sela_upsert_prospect(conn, prospect):
                 return {
                     'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT',
                     'source_id': source_id, 'trosa_id': customer_id,
+                    'candidates': [candidate for candidate in
+                                   [_sela_review_candidate({**dict(customer), 'matched_by': ['external_id']},
+                                                           'CUSTOMER_ALREADY_HAS_SELA_PROSPECT')] if candidate],
                 }
             owner = str(customer.get('external_source') or '').strip()
             owner_id = str(customer.get('external_id') or '').strip()
@@ -4981,6 +5020,9 @@ def _sela_upsert_prospect(conn, prospect):
                 return {
                     'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_LINKED',
                     'source_id': source_id, 'trosa_id': customer_id,
+                    'candidates': [candidate for candidate in
+                                   [_sela_review_candidate({**dict(customer), 'matched_by': ['external_id']},
+                                                           'CUSTOMER_ALREADY_LINKED')] if candidate],
                 }
         else:
             website = normalize_website(prospect.get('website') or prospect.get('domain'))
@@ -5380,7 +5422,7 @@ def sela_integration_upsert_prospect():
         if result.get('status') == 'REVIEW' and str(result.get('reason') or '') != 'TROSA_REVISION_CONFLICT':
             _sela_prospect_review_inbox(
                 conn, source_id, prospect, str(result.get('reason') or 'IDENTITY_REVIEW'),
-                _sela_now(),
+                _sela_now(), candidates=result.get('candidates'),
             )
         now = _sela_now()
         response_body = {
@@ -10626,14 +10668,14 @@ def _sela_request_display(content, item=None):
     }
 
 
-def _question_evidence(member):
+def _question_evidence(member, sela_review=None):
     item_type = str(member.get('item_type') or '')
     detail = ''
     structured = None
     if item_type in _CAPTURE_INBOX_TYPES:
         detail = member.get('capture_content') or ''
     elif item_type in ('sela_identity_review', 'sela_exclusion_review'):
-        review = _inbox_sela_review_payload(member)
+        review = sela_review if sela_review is not None else _inbox_sela_review_payload(member)
         detail = review.get('explanation') or review.get('reason_label') or ''
         if item_type == 'sela_exclusion_review':
             structured = {
@@ -10656,6 +10698,7 @@ def _question_evidence(member):
                     {'label': '官网', 'value': review.get('website') or ''},
                     {'label': '邮箱', 'value': review.get('email') or ''},
                 ],
+                'candidates': review.get('candidates') or [],
                 'context': detail,
             }
             structured['fields'] = [field for field in structured['fields'] if field['value']]
@@ -10676,7 +10719,63 @@ def _question_evidence(member):
     }
 
 
-def _inbox_sela_review_payload(item):
+def _normalize_sela_review_candidate(value):
+    """Validate one persisted matched-customer candidate for the Inbox UI."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        customer_id = int(value.get('customer_id'))
+    except (TypeError, ValueError):
+        return None
+    methods = value.get('matched_by') if isinstance(value.get('matched_by'), list) else []
+    return {
+        'customer_id': customer_id,
+        'company': _sela_prospect_text(value.get('company'), 500),
+        'website': _sela_prospect_text(value.get('website'), 2000),
+        'matched_by': [method for method in
+                       (_sela_prospect_text(item, 40) for item in methods) if method][:10],
+    }
+
+
+def _sela_review_candidates(conn, review):
+    """Resolve which existing Trosa customers matched a prospect review.
+
+    New reviews persist ``candidates`` at creation time. Older open items do not,
+    so re-derive them from the live prospect identity when a connection is
+    available, instead of asking the human to judge blind.
+    """
+    stored = review.get('candidates') if isinstance(review.get('candidates'), list) else []
+    if stored:
+        return [candidate for candidate in
+                (_normalize_sela_review_candidate(item) for item in stored) if candidate]
+    if conn is None:
+        return []
+    reason = str(review.get('reason') or '')
+    source_id = str(review.get('source_id') or '').strip()
+    if reason in ('SOURCE_IDENTITY_CONFLICT', 'EXTERNAL_IDENTITY_CONFLICT', 'EXTERNAL_ID_CONFLICT',
+                  'CUSTOMER_ALREADY_HAS_SELA_PROSPECT', 'CUSTOMER_ALREADY_LINKED'):
+        if not source_id:
+            return []
+        profile = _sela_profile_by_source(conn, source_id)
+        if not profile:
+            return []
+        candidate = _sela_review_candidate(
+            _sela_profile_customer(conn, int(profile['customer_id'])), reason)
+        return [candidate] if candidate else []
+    if reason == 'MULTIPLE_TROSA_MATCHES':
+        matches, _error = _sela_match_customers(conn, {
+            'candidate_id': source_id,
+            'company': review.get('company'),
+            'website': review.get('website'),
+            'contact': {'email': review.get('email')},
+        })
+        if len(matches) > 1:
+            return [candidate for candidate in
+                    (_sela_review_candidate(row, reason) for row in matches) if candidate]
+    return []
+
+
+def _inbox_sela_review_payload(item, conn=None):
     """Normalize a Sela identity-review payload into business context."""
     try:
         payload = json.loads(str(item.get('content') or '') or '{}')
@@ -10698,7 +10797,7 @@ def _inbox_sela_review_payload(item):
             explanation = '来源同时匹配到多个客户，系统无法安全地自动选择。'
         elif reason in ('SOURCE_IDENTITY_CONFLICT', 'EXTERNAL_IDENTITY_CONFLICT'):
             explanation = '来源身份与已有客户的资料冲突，需要人工判断是否为同一主体。'
-    return {
+    review = {
         'source_id': str(payload.get('source_id') or '').strip(),
         'company': str(payload.get('company') or '').strip(),
         'canonical_name': str(payload.get('canonical_name') or '').strip(),
@@ -10711,7 +10810,10 @@ def _inbox_sela_review_payload(item):
         'reason': reason,
         'reason_label': reason_labels.get(reason, reason or '身份待确认'),
         'explanation': explanation,
+        'candidates': payload.get('candidates') if isinstance(payload.get('candidates'), list) else [],
     }
+    review['candidates'] = _sela_review_candidates(conn, review)
+    return review
 
 
 def _question_headline(kind, primary, suggested, customer):
@@ -11076,7 +11178,7 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
                     break
         sela_review = None
         if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
-            sela_review = _inbox_sela_review_payload(primary)
+            sela_review = _inbox_sela_review_payload(primary, conn)
         sela_request = _sela_request_display(primary) if kind == _inbox_questions.QUESTION_SELA_REQUEST else {}
         sela_prospect = None
         sela_contact_save = None
@@ -11161,7 +11263,13 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
             'customer': customer,
             'suggested_customer': suggested,
             'known_facts': known,
-            'evidence': [_question_evidence(member) for member in members],
+            'evidence': [
+                _question_evidence(
+                    member,
+                    sela_review if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW else None,
+                )
+                for member in members
+            ],
             'evidence_count': len(members),
             'response_schema': _inbox_response_schema(kind, primary, suggested, sela_review),
             'completion_effects': _question_completion_effects(kind, primary),

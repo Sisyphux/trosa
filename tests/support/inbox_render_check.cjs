@@ -58,7 +58,29 @@ const questions = [
     question: '这两条身份记录是不是同一个业务主体？', headline: '确认这是否是同一个业务主体',
     why: '系统缺少作出安全判断所需的信息。', customer: null,
     suggested_customer: null, known_facts: ['尚未关联任何客户'],
-    evidence: [{ item_id: 9, source_label: 'Sela', date: '2026-09-12', detail: 'MULTIPLE_TROSA_MATCHES' }],
+    sela_review: { candidates: [
+      { customer_id: 7, company: 'Existing A', website: 'https://a.example', matched_by: ['email'] },
+      { customer_id: 8, company: 'Existing B', matched_by: ['domain'] },
+    ] },
+    evidence: [{
+      item_id: 9, source_label: 'Sela', date: '2026-09-12', detail: 'MULTIPLE_TROSA_MATCHES',
+      structured: {
+        kind: '多个客户都匹配到这个来源', company: 'Acrílicos', fields: [],
+        candidates: [
+          { customer_id: 7, company: 'Existing A', website: 'https://a.example', matched_by: ['email'] },
+          { customer_id: 8, company: 'Existing B', matched_by: ['domain'] },
+        ],
+      },
+    }],
+    response_schema: {
+      fields: [
+        { key: 'decision', label: '判断结果', input_type: 'choice', required: true,
+          choices: [{ value: 'same', label: '是同一主体' }, { value: 'different', label: '不是同一主体' }] },
+        { key: 'customer_id', label: '同一主体对应的客户', input_type: 'customer_picker',
+          required: false, validation: { options_source: 'customers' }, help: '' },
+      ],
+      attachments: { allowed: false },
+    },
     options: [
       { key: 'same', action: 'identity_same', style: 'primary', label: '是同一主体' },
       { key: 'different', action: 'identity_different', style: 'text', label: '不是同一主体' },
@@ -120,6 +142,16 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(genericReasonDetail, 'generic-reason question should still open');
   assert.ok(!genericReasonDetail.textContent.includes('为什么需要你'));
   assert.ok(!genericReasonDetail.textContent.includes('系统缺少作出安全判断所需的信息。'));
+  // 人工判断“是否同一主体”前必须看到具体匹配到哪些客户及依据。
+  const reviewEvidence = doc.querySelector('.inbox-question-active .inbox-question-evidence').textContent;
+  assert.ok(reviewEvidence.includes('匹配到的 Trosa 客户'), reviewEvidence);
+  assert.ok(reviewEvidence.includes('Existing A') && reviewEvidence.includes('Existing B'), reviewEvidence);
+  assert.ok(reviewEvidence.includes('匹配依据：邮箱完全一致'), reviewEvidence);
+  assert.ok(reviewEvidence.includes('匹配依据：官网域名一致'), reviewEvidence);
+  // 客户选择器直接列出候选，而不是只给一个空下拉框。
+  const candidateSelect = doc.querySelector('.inbox-question-active select[data-inbox-picker="customers"]');
+  const candidateValues = candidateSelect ? Array.from(candidateSelect.options).map(function(o) { return o.value; }) : [];
+  assert.deepEqual(candidateValues, ['', '7', '8']);
   win.closeInboxQuestion();
 
   // Sela 的 JSON 上下文渲染成带标签的字段，而不是原始 JSON 墙。

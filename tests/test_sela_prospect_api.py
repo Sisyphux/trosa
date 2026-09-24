@@ -308,6 +308,10 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()['status'], 'REVIEW')
         self.assertEqual(response.get_json()['reason'], 'MULTIPLE_TROSA_MATCHES')
+        # 人工判断"是否同一主体"前必须看到具体匹配到哪些客户及依据。
+        candidates = response.get_json()['candidates']
+        self.assertEqual([candidate['company'] for candidate in candidates], ['Existing A', 'Existing B'])
+        self.assertTrue(all('email' in candidate['matched_by'] for candidate in candidates))
 
         conn = self.hamid_db()
         try:
@@ -316,6 +320,11 @@ class SelaProspectApiTest(unittest.TestCase):
                 "SELECT item_type, status FROM inbox_items WHERE dedupe_key='sela:prospect-review:ambiguous-prospect'"
             ).fetchone()
             self.assertEqual(tuple(inbox), ('sela_identity_review', 'open'))
+            stored = json.loads(conn.execute(
+                "SELECT content FROM inbox_items WHERE dedupe_key='sela:prospect-review:ambiguous-prospect'"
+            ).fetchone()['content'])
+            self.assertEqual([item['company'] for item in stored['candidates']],
+                             ['Existing A', 'Existing B'])
         finally:
             conn.close()
 

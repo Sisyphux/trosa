@@ -1735,6 +1735,20 @@ function renderInboxQuestionCard(q) {
   var summary = q.summary && q.summary !== title ? '<p>' + escapeHtml(q.summary) + '</p>' : '';
   return '<article class="inbox-question-active" id="inbox-question-' + escapeHtml(q.id) + '"><section class="inbox-question-queue"><button class="text-action" onclick="closeInboxQuestion()">返回队列</button><h3>' + escapeHtml(title) + '</h3>' + subjectLine + summary + (humanReason ? '<p><b>为什么需要你：</b>' + escapeHtml(humanReason) + '</p>' : '') + '</section><section class="inbox-question-evidence"><h4>相关证据 <small>按业务相关度排序</small></h4><ol>' + evidence + '</ol></section><section class="inbox-question-decision"><h4>请你提供</h4>' + decision + '</section></article>';
 }
+var INBOX_MATCH_BASIS_LABELS = {
+  email: '邮箱完全一致',
+  phone: '手机号一致',
+  external_id: 'Sela 外部编号一致',
+  domain: '官网域名一致',
+  website: '官网域名一致',
+  company: '公司名称一致',
+  name: '公司名称一致',
+};
+function inboxMatchBasisLabel(value) {
+  var key = String(value || '').trim().toLowerCase();
+  if (!key) return '';
+  return INBOX_MATCH_BASIS_LABELS[key] || key;
+}
 function inboxEvidenceHtml(e, index) {
   var ordinal = '<b>' + String(index + 1).padStart(2, '0') + '</b>';
   var source = '<small>' + escapeHtml(e.source_label || '来源') + '</small>';
@@ -1747,6 +1761,16 @@ function inboxEvidenceHtml(e, index) {
     var fields = (s.fields || []).map(function(f) {
       return '<div class="inbox-evidence-field"><span>' + escapeHtml(f.label) + '</span><strong>' + escapeHtml(f.value) + '</strong></div>';
     }).join('');
+    var candidates = (s.candidates || []).map(function(c) {
+      var name = c.company || ('客户 #' + c.customer_id);
+      var basis = (c.matched_by || []).map(inboxMatchBasisLabel).filter(function(v) { return v; }).join('、');
+      return '<li><strong>' + escapeHtml(name) + '</strong>' +
+        (c.website ? '<span>' + escapeHtml(c.website) + '</span>' : '') +
+        (basis ? '<small>匹配依据：' + escapeHtml(basis) + '</small>' : '') + '</li>';
+    }).join('');
+    var matched = candidates
+      ? '<section class="inbox-sela-block inbox-review-candidates"><span>匹配到的 Trosa 客户</span><ul>' + candidates + '</ul></section>'
+      : '';
     var missing = (s.missing_facts || []).map(function(f) {
       return '<li><strong>' + escapeHtml(f.label || f.field || '待补充事实') + '</strong>' + (f.why ? '<span>' + escapeHtml(f.why) + '</span>' : '') + (f.blocking ? '<small>影响后续判断</small>' : '') + '</li>';
     }).join('');
@@ -1764,7 +1788,7 @@ function inboxEvidenceHtml(e, index) {
     var resume = s.resume && s.resume !== s.proposal ? '<p class="inbox-evidence-resume"><span>回答后 Sela 的计划</span>' + escapeHtml(s.resume) + '</p>' : '';
     return '<li>' + ordinal + '<div class="inbox-evidence-body">' +
       (tags ? '<div class="inbox-evidence-tags">' + tags + '</div>' : '') + proposal +
-      (fields ? '<div class="inbox-evidence-fields">' + fields + '</div>' : '') + context +
+      (fields ? '<div class="inbox-evidence-fields">' + fields + '</div>' : '') + matched + context +
       (missing ? '<section class="inbox-sela-block"><span>缺少的事实</span><ul>' + missing + '</ul></section>' : '') +
       decision +
       (evidence ? '<section class="inbox-sela-block"><span>已有证据</span><ul>' + evidence + '</ul></section>' : '') + resume +
@@ -1791,16 +1815,24 @@ function inboxResponseFieldHtml(q, f, draft) {
   if (f.input_type === 'customer_picker') {
     var source = (f.validation && f.validation.options_source) || (f.key === 'contact_id' ? 'contacts' : 'customers');
     var customerId = q.subject && q.subject.customer_id ? Number(q.subject.customer_id) : 0;
-    var placeholder = source === 'contacts' ? '加载联系人…' : '加载客户…';
+    var reviewCandidates = source === 'customers' && q.sela_review && Array.isArray(q.sela_review.candidates)
+      ? q.sela_review.candidates : [];
+    var candidateOptions = reviewCandidates.map(function(c) {
+      return '<option value="' + escapeHtml(String(c.customer_id)) + '">' +
+        escapeHtml(c.company || ('客户 #' + c.customer_id)) + '</option>';
+    }).join('');
+    var placeholder = source === 'contacts' ? '加载联系人…'
+      : (candidateOptions ? '选择匹配到的客户，或输入名称查找' : '加载客户…');
     var search = source === 'customers'
       ? '<input type="search" class="inbox-customer-search" data-inbox-customer-search placeholder="输入客户名称查找" aria-label="搜索' + escapeHtml(f.label) + '" oninput="searchInboxCustomerPicker(this)">'
       : '';
     return '<label>' + escapeHtml(f.label) + required +
       search +
       '<select data-inbox-field="' + escapeHtml(f.key) + '" data-inbox-picker="' + escapeHtml(source) +
-      '" data-customer-id="' + customerId + '" data-subject-company="' + escapeHtml((q.subject && q.subject.company) || '') + '" data-inbox-value="' + escapeHtml(current) +
-      '" onchange="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"><option value="">' +
-      escapeHtml(placeholder) + '</option></select>' + help + '</label>';
+      '" data-customer-id="' + customerId + '" data-subject-company="' + escapeHtml((q.subject && q.subject.company) || '') +
+      '" data-inbox-value="' + escapeHtml(current) + '"' + (candidateOptions ? ' data-has-candidates="1"' : '') +
+      ' onchange="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"><option value="">' +
+      escapeHtml(placeholder) + '</option>' + candidateOptions + '</select>' + help + '</label>';
   }
   var type = f.input_type === 'textarea' || f.input_type === 'investigation_conclusion' ? 'textarea' : 'input';
   var value = escapeHtml(current);
@@ -1871,6 +1903,16 @@ async function hydrateInboxPickers() {
           return '<option value="' + escapeHtml(String(c.id)) + '">' +
             escapeHtml((c.name || '未命名联系人') + (c.email ? ' · ' + c.email : '')) + '</option>';
         }).join('');
+      } else if (select.dataset.hasCandidates === '1') {
+        // Matched candidates are already rendered from the review evidence;
+        // keep them visible until the human searches for another customer.
+        if (current && !Array.prototype.some.call(select.options, function(option) { return option.value === current; })) {
+          var chosenCandidate = await api('/api/customers/' + encodeURIComponent(current));
+          if (!select.isConnected) continue;
+          select.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(current) + '">' +
+            escapeHtml(chosenCandidate.company || chosenCandidate.name || ('客户 #' + current)) + '</option>');
+        }
+        if (current) select.value = current;
       } else {
         var initialSequence = Number(select.dataset.searchSequence || 0);
         var query = ((select.dataset.subjectCompany || '').trim().split(/\s+/)[0] || '').replace(/[.,]+$/, '');
