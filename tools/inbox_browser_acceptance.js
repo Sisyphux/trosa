@@ -34,6 +34,10 @@ const choiceContracts = await page.evaluate(() => fetch('/api/inbox').then(r => 
 if (!choiceContracts.length || choiceContracts.some(c => c[1].length < 2)) throw new Error('choice label contract missing: ' + JSON.stringify(choiceContracts));
 const list = page.locator('#inboxList');
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('正在整理 Inbox'), null, {timeout: 15000});
+const selaReceiptIntro = await page.locator('#inboxSelaRuns').innerText();
+if (!selaReceiptIntro.includes('排队不代表已经开始') || !selaReceiptIntro.includes('普通客户回复')) {
+  throw new Error('Inbox does not explain when Sela runs: ' + selaReceiptIntro);
+}
 // A successful submit (and Undo) re-renders the workspace and closes the open
 // card, so 返回队列 may legitimately already be gone. Never wait 30s for it.
 const backToQueue = async () => {
@@ -149,6 +153,7 @@ await page.getByText('回答已保存并排入 Sela 自动续跑；Sela 会研�
 const linkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'});
 await linkedResume.waitFor({timeout:15000});
 if (await linkedResume.getAttribute('data-status') !== 'queued') throw new Error('linked Sela answer did not appear as queued: ' + await linkedResume.innerText());
+if (!(await linkedResume.innerText()).includes('尚未收到 Sela 已开始的回执')) throw new Error('queued state is being presented as a completed run: ' + await linkedResume.innerText());
 if (await inboxCount() !== 8) throw new Error('linked Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // An answered request without a unique prospect must be honest about staying
 // manual. It gets a needs_review receipt, but never an automatic-run status.

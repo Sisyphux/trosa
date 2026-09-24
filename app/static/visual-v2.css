@@ -7502,6 +7502,14 @@ html.motion-lite .card {
   font-size: 13px !important;
 }
 
+#page-inbox .inbox-overview .inbox-overview-note {
+  display: block !important;
+  margin-top: 4px !important;
+  color: var(--ui-ink-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
 #page-inbox .inbox-overview p {
   margin-top: 4px !important;
   max-width: 62ch !important;
@@ -7512,16 +7520,18 @@ html.motion-lite .card {
 
 #page-inbox .inbox-sela-runs[hidden] { display: none !important; }
 #page-inbox .inbox-sela-runs {
-  margin: 22px 0 0;
-  padding: 15px 0 0;
-  border-top: 1px solid var(--ui-line);
+  margin: 0 0 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: rgba(250, 248, 242, .55);
 }
 #page-inbox .inbox-sela-runs-heading {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 4px;
 }
 #page-inbox .inbox-sela-runs-heading strong { color: var(--ui-ink); font-size: 14px; font-weight: 600; }
 #page-inbox .inbox-sela-runs-heading > span,
@@ -7529,16 +7539,15 @@ html.motion-lite .card {
 #page-inbox .inbox-sela-runs-boundary { color: var(--ui-ink-muted); font-size: 12px; }
 #page-inbox .inbox-sela-runs ul {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 0 22px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 #page-inbox .inbox-sela-run {
   min-width: 0;
-  padding: 12px 0 10px;
-  border-top: 1px solid var(--ui-line);
+  padding: 6px 0 3px;
 }
 #page-inbox .inbox-sela-run > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 #page-inbox .inbox-sela-run > div > strong {
@@ -7567,7 +7576,32 @@ html.motion-lite .card {
 #page-inbox .inbox-sela-run[data-status="needs_review"] .inbox-sela-run-status { border-color: rgba(168, 95, 69, .28); color: #884c38; background: rgba(239, 225, 216, .65); }
 #page-inbox .inbox-sela-run p { margin: 5px 0 2px; color: var(--ui-ink-soft); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 #page-inbox .inbox-sela-run small { display: block; }
-#page-inbox .inbox-sela-runs-boundary { margin: 10px 0 0; line-height: 1.5; }
+#page-inbox .inbox-sela-runs-empty { margin: 3px 0 5px; color: var(--ui-ink-muted); font-size: 12px; line-height: 1.5; }
+#page-inbox .inbox-sela-runs-scope,
+#page-inbox .inbox-sela-runs-history { margin-top: 5px; color: var(--ui-ink-muted); font-size: 12px; }
+#page-inbox .inbox-sela-runs-scope summary,
+#page-inbox .inbox-sela-runs-history summary { width: fit-content; cursor: pointer; }
+#page-inbox .inbox-sela-runs-scope p { max-width: 76ch; margin: 6px 0 2px; color: var(--ui-ink-soft); font-size: 12px; line-height: 1.5; }
+#page-inbox .inbox-sela-runs-history .inbox-sela-run { border-top: 1px solid var(--ui-line); }
+
+#page-inbox .inbox-retired-requests { margin-top: 22px; }
+#page-inbox .inbox-retired-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px 12px;
+  padding: 12px 2px 8px;
+  border-top: 1px solid var(--ui-line);
+}
+#page-inbox .inbox-retired-heading strong { color: var(--ui-ink-soft); font-size: 13px; font-weight: 600; }
+#page-inbox .inbox-retired-heading span { color: var(--ui-ink-muted); font-size: 12px; line-height: 1.45; }
+#page-inbox .inbox-retired-requests .inbox-question-open { padding-top: 11px; padding-bottom: 11px; }
+#page-inbox .inbox-retired-requests .inbox-question-open strong { color: var(--ui-ink-soft); font-size: 14px; }
+
+@media (max-width: 620px) {
+  #page-inbox .inbox-sela-runs { padding: 10px 11px; }
+  #page-inbox .inbox-retired-heading { display: grid; gap: 3px; }
+}
 
 /* The rule-split line already separates the overview from the list, so the
    placeholder is a quiet block rather than a second, competing container. */
