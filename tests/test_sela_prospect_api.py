@@ -328,6 +328,72 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_duplicate_domain_customers_auto_link_without_human_review(self):
+        # 两条 Trosa 客户记录共享同一官网域名 = 同一家公司的重复记录，
+        # 不该再让人回答“是否同一主体”。
+        first = self.add_customer('Excelite Plas', website='https://exceliteplas.com.au/')
+        self.add_customer('Excelite Plas Pty', website='https://exceliteplas.com.au/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                'INSERT INTO contacts(customer_id, name, email) VALUES (?, ?, ?)',
+                (first, 'Buyer', 'buyer@exceliteplas.com.au'))
+            conn.commit()
+        finally:
+            conn.close()
+        body = prospect('dup-domain-prospect')
+        body['company'] = 'Excelite Plas'
+        body['website'] = 'https://exceliteplas.com.au/'
+        body['contact'] = {'name': 'New Buyer', 'email': 'new@exceliteplas.com.au', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:dup-domain:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()
+        self.assertEqual(result['status'], 'SYNCED', result)
+        # 更完整、名称更吻合的记录被复用。
+        self.assertEqual(result['trosa_id'], first)
+        self.assertTrue(any('重复客户' in warning for warning in result['warnings']), result['warnings'])
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_prospect_profiles').fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_same_name_without_domain_still_requires_review(self):
+        # 只有名称相同、没有域名证据时仍必须人工判断，不能自动合并。
+        self.add_customer('Shared Plastics')
+        self.add_customer('Shared Plastics')
+        body = prospect('name-only-prospect')
+        body['company'] = 'Shared Plastics'
+        body['website'] = ''
+        body['contact'] = {'name': 'X', 'email': 'x@shared.example', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:name-only:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'REVIEW')
+        self.assertEqual(response.get_json()['reason'], 'MULTIPLE_TROSA_MATCHES')
+
+    def test_duplicate_domain_prefers_record_without_sela_profile(self):
+        first = self.add_customer('Excelite Plas', website='https://exceliteplas.com.au/')
+        seed = prospect('seed-source')
+        seed['company'] = 'Excelite Plas'
+        seed['website'] = 'https://exceliteplas.com.au/'
+        seed['contact'] = {'name': 'A', 'email': 'a@exceliteplas.com.au', 'is_primary': 1}
+        seeded = self.post_prospect(seed, 'sela-v2:seed:one')
+        self.assertEqual(seeded.get_json()['status'], 'SYNCED', seeded.get_data(as_text=True))
+        self.assertEqual(seeded.get_json()['trosa_id'], first)
+        second = self.add_customer('Excelite Plas Pty', website='https://exceliteplas.com.au/')
+        body = prospect('dup-source')
+        body['company'] = 'Excelite Plas'
+        body['website'] = 'https://exceliteplas.com.au/'
+        body['contact'] = {'name': 'B', 'email': 'b@exceliteplas.com.au', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:dup:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'SYNCED', response.get_json())
+        # 已归属其它 Sela 来源的记录不再复用，改用无归属的重复记录。
+        self.assertEqual(response.get_json()['trosa_id'], second)
+
     def test_reply_can_resolve_trosa_profile_without_a_sela_identity_map(self):
         created = self.post_prospect(prospect())
         self.assertEqual(created.status_code, 200)

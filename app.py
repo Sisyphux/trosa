@@ -3319,6 +3319,54 @@ def _sela_match_customers(conn, payload):
     return _sela_company_identity_matches(rows, payload)
 
 
+def _sela_canonical_duplicate_match(conn, matches, source_id, company=''):
+    """Collapse duplicate Customer rows that share one canonical website domain.
+
+    A canonical domain identifies one company ("one company, one domain"), so
+    when every match shares it, the incoming prospect is unambiguously that
+    company: the only reason for a review is that Trosa itself holds duplicate
+    rows.  Pick the most complete usable record instead of asking a human to
+    answer an identity question whose answer is already known.
+
+    Returns ``None`` when the matches are not one domain identity (mixed
+    identity keys or several domains), which still needs a human decision.
+    """
+    domains = set()
+    for row in matches:
+        methods = set(row.get('matched_by') or [])
+        if methods & {'email', 'phone'}:
+            return None
+        domain = _canonical_website_domain(row.get('website'))
+        if not domain:
+            return None
+        domains.add(domain)
+    if len(domains) != 1:
+        return None
+
+    def usable(row):
+        customer_id = int(row['id'])
+        if _sela_profile_for_customer(conn, customer_id):
+            return False
+        owner = str(row.get('external_source') or '').strip()
+        owner_id = str(row.get('external_id') or '').strip()
+        return not (owner and (owner != _SELA_PROSPECT_SOURCE or owner_id != source_id))
+
+    pool = [row for row in matches if usable(row)]
+    if not pool:
+        return None
+    wanted_name = _sync_name_key(company)
+
+    def rank(row):
+        name_match = 0 if wanted_name and _sync_name_key(row.get('company') or row.get('name')) == wanted_name else 1
+        try:
+            contacts = len(_customer_contacts(conn, int(row['id'])))
+        except Exception:
+            contacts = 0
+        return (name_match, -contacts, int(row['id']))
+
+    return min(pool, key=rank)
+
+
 def _sela_upsert_contact(conn, customer_id, raw_contact, now):
     if not isinstance(raw_contact, dict):
         return []
@@ -4995,13 +5043,23 @@ def _sela_upsert_prospect(conn, prospect):
                                [_sela_review_candidate(row, match_error) for row in matches] if candidate],
             }
         if len(matches) > 1:
-            return {
-                'success': True, 'status': 'REVIEW', 'reason': 'MULTIPLE_TROSA_MATCHES',
-                'source_id': source_id, 'trosa_ids': [int(row['id']) for row in matches],
-                'candidates': [candidate for candidate in
-                               [_sela_review_candidate(row, 'MULTIPLE_TROSA_MATCHES') for row in matches]
-                               if candidate],
-            }
+            canonical = _sela_canonical_duplicate_match(conn, matches, source_id, company)
+            if canonical is None:
+                return {
+                    'success': True, 'status': 'REVIEW', 'reason': 'MULTIPLE_TROSA_MATCHES',
+                    'source_id': source_id, 'trosa_ids': [int(row['id']) for row in matches],
+                    'candidates': [candidate for candidate in
+                                   [_sela_review_candidate(row, 'MULTIPLE_TROSA_MATCHES') for row in matches]
+                                   if candidate],
+                }
+            duplicate_ids = [int(row['id']) for row in matches if int(row['id']) != int(canonical['id'])]
+            matches = [canonical]
+            warnings.append(
+                '同一官网域名存在 %d 条重复客户记录（已复用 #%d，重复：#%s）；'
+                '系统按同一公司处理，建议后续合并重复客户。' % (
+                    len(duplicate_ids) + 1, int(canonical['id']),
+                    ', '.join(str(customer_id) for customer_id in duplicate_ids),
+                ))
         if matches:
             customer = matches[0]
             customer_id = int(customer['id'])
