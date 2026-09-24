@@ -1194,6 +1194,59 @@ class SelaProspectApiTest(unittest.TestCase):
         body.update(fields)
         return self.post_prospect(body, f'sela-v2:{source_id}:one')
 
+    def test_prospect_projection_uses_earliest_sent_event_as_stable_first_touch(self):
+        source_id = 'first-touch-time'
+        self._publish(source_id)
+        conn = self.hamid_db()
+        try:
+            outreach_id = conn.execute(
+                '''SELECT id FROM outreach_emails
+                   WHERE external_source='sela' AND external_id=?''',
+                (source_id,),
+            ).fetchone()['id']
+            conn.execute(
+                "UPDATE outreach_emails SET sent_date='2026-09-24' WHERE id=?",
+                (outreach_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        before = self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers(),
+        ).get_json()['prospects']
+        row = next(item for item in before if item['id'] == source_id)
+        self.assertEqual(row['first_touch_at'], '')
+        before_revision = row['trosa_revision']
+
+        conn = self.hamid_db()
+        try:
+            # The offset-aware event is lexically first, but the naive local
+            # timestamp is the earlier instant in Asia/Shanghai.
+            conn.executemany(
+                '''INSERT INTO email_delivery_events
+                   (email, outreach_email_id, event_type, message_id, source, occurred_at)
+                   VALUES (?, ?, ?, ?, 'test', ?)''',
+                [
+                    (f'buyer@{source_id}.example', outreach_id, 'sent', 'later-utc',
+                     '2026-09-17T22:30:00Z'),
+                    (f'buyer@{source_id}.example', outreach_id, 'sent', 'earlier-local',
+                     '2026-09-18 00:10:00'),
+                    (f'buyer@{source_id}.example', outreach_id, 'bounced', 'bounce',
+                     '2026-09-01 00:00:00'),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        after = self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers(),
+        ).get_json()['prospects']
+        row = next(item for item in after if item['id'] == source_id)
+        self.assertEqual(row['first_touch_at'], '2026-09-18')
+        self.assertNotEqual(row['trosa_revision'], before_revision)
+
     def _post_reply(self, source_id, event, intent='UNKNOWN'):
         reply = {
             'candidate_id': source_id,

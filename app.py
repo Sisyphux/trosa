@@ -3171,6 +3171,11 @@ def _modern_outreach_rows(conn, *, customer_id=None, source_id=None):
                   -- a session-dependent full timestamp that disagrees with the
                   -- legacy value and can land on the wrong local day.
                   COALESCE(trosa.compat_local_date(message.sent_at), '') AS sent_date,
+                  COALESCE((SELECT trosa.compat_local_date(MIN(event.occurred_at))
+                              FROM trosa.email_delivery_events event
+                             WHERE event.organization_id=trosa.compat_org_id()
+                               AND event.outreach_message_id=message.id
+                               AND event.event_type='sent'), '') AS first_touch_at,
                   message.reply_status, message.reply_content,
                   COALESCE(trosa.compat_local_date(message.reply_at), '') AS reply_date,
                   CASE WHEN lower(COALESCE(message.legacy_payload->>'is_reported','0'))
@@ -4575,6 +4580,36 @@ def _sela_latest_reply_event(conn, customer_id):
     return ''
 
 
+def _sela_first_touch_at_sqlite(conn, outreach_email_id):
+    """Return the earliest sent-event date in the CRM business timezone.
+
+    SQLite stores legacy event timestamps as text, so SQL MIN would compare
+    mixed ISO/local timestamp formats lexicographically instead of by time.
+    Treat naive legacy values as the calendar timezone and normalize offsets
+    before selecting the earliest event.
+    """
+    if not outreach_email_id:
+        return ''
+    rows = conn.execute(
+        '''SELECT occurred_at FROM email_delivery_events
+           WHERE outreach_email_id=? AND event_type='sent' ''',
+        (outreach_email_id,),
+    ).fetchall()
+    timestamps = []
+    for row in rows:
+        raw = str(row['occurred_at'] or '').strip()
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_CALENDAR_TZ)
+        timestamps.append(value.astimezone(_CALENDAR_TZ))
+    return min(timestamps).date().isoformat() if timestamps else ''
+
+
 def _sela_prospect_revision(conn, profile, customer=None):
     """Hash the Agent-visible CRM facts used for optimistic update checks."""
     profile = dict(profile)
@@ -4603,12 +4638,17 @@ def _sela_prospect_revision(conn, profile, customer=None):
             (email,),
         ).fetchone() if email else None
         outreach = conn.execute(
-            '''SELECT subject, content, sent_date, reply_status, reply_content, reply_date,
-                      message_id, external_updated_at
-               FROM outreach_emails WHERE external_source=? AND external_id=?
-               ORDER BY id DESC LIMIT 1''',
+            '''SELECT outreach.id, outreach.subject, outreach.content, outreach.sent_date,
+                      outreach.reply_status, outreach.reply_content, outreach.reply_date,
+                      outreach.message_id, outreach.external_updated_at
+               FROM outreach_emails outreach
+              WHERE outreach.external_source=? AND outreach.external_id=?
+              ORDER BY outreach.id DESC LIMIT 1''',
             (_SELA_PROSPECT_SOURCE, profile['source_id']),
         ).fetchone()
+        outreach = dict(outreach) if outreach else None
+        if outreach:
+            outreach['first_touch_at'] = _sela_first_touch_at_sqlite(conn, outreach['id'])
     return _sela_hash({
         'profile': {
             key: profile.get(key) for key in (
@@ -5090,6 +5130,8 @@ def _sela_prospect_view(conn, profile):
             (_SELA_PROSPECT_SOURCE, profile['source_id']),
         ).fetchone()
         outreach = dict(outreach) if outreach else None
+        if outreach:
+            outreach['first_touch_at'] = _sela_first_touch_at_sqlite(conn, outreach['id'])
     outreach = outreach or {}
     permission = str(profile.get('contact_permission') or 'allowed')
     delivery = str(verification.get('deliverability_status') or '').lower()
@@ -5182,6 +5224,7 @@ def _sela_prospect_view(conn, profile):
         'outreach_status': outreach_status,
         'outcome': outcome,
         'sent_at': str(outreach.get('sent_date') or ''),
+        'first_touch_at': str(outreach.get('first_touch_at') or ''),
         'last_outreach_at': str(outreach.get('external_updated_at') or outreach.get('sent_date') or ''),
         'last_inbound_at': reply_received_at,
         'last_reply_received_at': reply_received_at,

@@ -1256,6 +1256,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(prospect_view['trosa_id'], prospect_customer_id)
         self.assertEqual(prospect_view['outreach_status'], 'SENT')
+        self.assertEqual(prospect_view['first_touch_at'], '2026-09-20')
 
         # A confirmed outreach must close the prospect's legacy routine
         # development task instead of leaving it in Today as an overdue follow-up.
@@ -1290,6 +1291,13 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             json={'prospect': sent_again},
         )
         self.assertEqual(confirmed_again.status_code, 200, confirmed_again.get_json())
+        prospect_list = client.get('/api/integrations/sela/prospects?limit=100')
+        prospect_view = next(
+            item for item in prospect_list.get_json()['prospects']
+            if item['id'] == source_id
+        )
+        self.assertEqual(prospect_view['sent_at'], '2026-09-21')
+        self.assertEqual(prospect_view['first_touch_at'], '2026-09-20')
         self.assertEqual(
             self.connection.execute(
                 '''SELECT task.status FROM trosa.tasks task
