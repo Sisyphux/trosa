@@ -1792,9 +1792,13 @@ function inboxResponseFieldHtml(q, f, draft) {
     var source = (f.validation && f.validation.options_source) || (f.key === 'contact_id' ? 'contacts' : 'customers');
     var customerId = q.subject && q.subject.customer_id ? Number(q.subject.customer_id) : 0;
     var placeholder = source === 'contacts' ? '加载联系人…' : '加载客户…';
+    var search = source === 'customers'
+      ? '<input type="search" class="inbox-customer-search" data-inbox-customer-search placeholder="输入客户名称查找" aria-label="搜索' + escapeHtml(f.label) + '" oninput="searchInboxCustomerPicker(this)">'
+      : '';
     return '<label>' + escapeHtml(f.label) + required +
+      search +
       '<select data-inbox-field="' + escapeHtml(f.key) + '" data-inbox-picker="' + escapeHtml(source) +
-      '" data-customer-id="' + customerId + '" data-inbox-value="' + escapeHtml(current) +
+      '" data-customer-id="' + customerId + '" data-subject-company="' + escapeHtml((q.subject && q.subject.company) || '') + '" data-inbox-value="' + escapeHtml(current) +
       '" onchange="rememberInboxDraft(\'' + escapeHtml(q.id) + '\',this)"><option value="">' +
       escapeHtml(placeholder) + '</option></select>' + help + '</label>';
   }
@@ -1820,7 +1824,37 @@ function selectInboxChoice(id, button) {
   if (input) { input.value = button.getAttribute('data-inbox-choice') || ''; rememberInboxDraft(id, input); }
 }
 
-var _inboxPickerCustomers = null;
+function searchInboxCustomerPicker(input) {
+  var select = input.parentNode.querySelector('select[data-inbox-picker="customers"]');
+  if (!select) return;
+  var query = input.value.trim();
+  select.dataset.searchSequence = String(Number(select.dataset.searchSequence || 0) + 1);
+  select.value = '';
+  select.dataset.inboxValue = '';
+  var card = input.closest('.inbox-question-active');
+  if (card) rememberInboxDraft(card.id.slice('inbox-question-'.length), select);
+  clearTimeout(input._inboxSearchTimer);
+  if (!query) { select.innerHTML = '<option value="">输入客户名称查找</option>'; return; }
+  select.innerHTML = '<option value="">正在查找客户…</option>';
+  input._inboxSearchTimer = setTimeout(function() { loadInboxCustomerPicker(select, query); }, 250);
+}
+async function loadInboxCustomerPicker(select, query) {
+  var sequence = Number(select.dataset.searchSequence || 0);
+  try {
+    var result = await api('/api/customers?view=all&per_page=10&search=' + encodeURIComponent(query));
+    if (!select.isConnected || sequence !== Number(select.dataset.searchSequence || 0)) return;
+    var list = (result && result.customers) || [];
+    select.innerHTML = '<option value="">' + (list.length ? '选择匹配客户' : '没有找到客户，请换个关键词') + '</option>' + list.map(function(c) {
+      return '<option value="' + escapeHtml(String(c.id)) + '">' +
+        escapeHtml(c.company || c.name || ('客户 #' + c.id)) + (c.country ? ' · ' + c.country : '') + '</option>';
+    }).join('');
+    var current = select.dataset.inboxValue || '';
+    if (current && list.some(function(c) { return String(c.id) === current; })) select.value = current;
+  } catch (e) {
+    if (select.isConnected && sequence === Number(select.dataset.searchSequence || 0))
+      select.innerHTML = '<option value="">查找失败，请修改关键词重试</option>';
+  }
+}
 async function hydrateInboxPickers() {
   var selects = document.querySelectorAll('#inboxList select[data-inbox-picker]');
   for (var i = 0; i < selects.length; i++) {
@@ -1838,14 +1872,19 @@ async function hydrateInboxPickers() {
             escapeHtml((c.name || '未命名联系人') + (c.email ? ' · ' + c.email : '')) + '</option>';
         }).join('');
       } else {
-        if (!_inboxPickerCustomers) _inboxPickerCustomers = await api('/api/customers?view=all&per_page=100&sort=updated_at&order=desc');
-        var list = (_inboxPickerCustomers && _inboxPickerCustomers.customers) || [];
-        select.innerHTML = '<option value="">选择客户</option>' + list.map(function(c) {
-          return '<option value="' + escapeHtml(String(c.id)) + '">' +
-            escapeHtml(c.company || c.name || ('客户 #' + c.id)) + (c.country ? ' · ' + c.country : '') + '</option>';
-        }).join('');
+        var initialSequence = Number(select.dataset.searchSequence || 0);
+        var query = ((select.dataset.subjectCompany || '').trim().split(/\s+/)[0] || '').replace(/[.,]+$/, '');
+        select.innerHTML = '<option value="">' + (query ? '正在查找相关客户…' : '输入客户名称查找') + '</option>';
+        if (query) await loadInboxCustomerPicker(select, query);
+        if (current && !Array.prototype.some.call(select.options, function(option) { return option.value === current; })) {
+          var chosen = await api('/api/customers/' + encodeURIComponent(current));
+          if (!select.isConnected || initialSequence !== Number(select.dataset.searchSequence || 0)) continue;
+          select.insertAdjacentHTML('beforeend', '<option value="' + escapeHtml(current) + '">' +
+            escapeHtml(chosen.company || chosen.name || ('客户 #' + current)) + '</option>');
+        }
+        if (current && initialSequence === Number(select.dataset.searchSequence || 0)) select.value = current;
       }
-      if (current) select.value = current;
+      if (current && select.dataset.inboxPicker === 'contacts') select.value = current;
     } catch (e) {
       select.innerHTML = '<option value="">加载失败，请重试</option>';
       select.dataset.hydrated = '';

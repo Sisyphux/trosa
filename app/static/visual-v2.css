@@ -1829,6 +1829,7 @@ html.motion-lite #page-dashboard .today-focus-card {
 #page-inbox .inbox-effects { padding-top: 14px; border-top: 1px solid var(--ui-line); color: var(--ui-ink-soft); font-size: 13px; line-height: 1.6; }
 #page-inbox .inbox-inline-error { color: var(--danger); font-size: 13px; }
 #page-inbox .inbox-question-decision select { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-paper-strong); color: var(--ui-ink); font: inherit; font-size: 14px; }
+#page-inbox .inbox-question-decision .inbox-customer-search { margin-bottom: 2px; }
 #page-inbox .inbox-field-block { display: grid; gap: 7px; margin: 14px 0; }
 #page-inbox .inbox-field-label { color: var(--ui-ink-soft); font-size: 13px; font-weight: 600; }
 #page-inbox .inbox-field-help { color: var(--ui-ink-muted); font-size: 12px; font-weight: 400; line-height: 1.5; }
