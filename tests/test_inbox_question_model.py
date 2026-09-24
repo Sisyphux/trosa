@@ -379,7 +379,11 @@ class InboxQuestionModelTest(unittest.TestCase):
             '公司：Boomart\n类型：SEND_APPROVAL\n优先级：AMBER\n\n未核验邮箱要求确认发送。',
             dedupe_key='sela:agent-request:prospect-legacy:send',
         )
-        question = self.client.get('/api/inbox').get_json()['questions'][0]
+        payload = self.client.get('/api/inbox').get_json()
+        self.assertEqual(payload['counts']['all'], 1)
+        self.assertEqual(payload['counts']['actionable'], 0)
+        self.assertEqual(self.client.get('/api/inbox/counts').get_json()['actionable'], 0)
+        question = payload['questions'][0]
         self.assertTrue(question['response_schema']['retired_send_approval'])
         self.assertEqual(question['response_schema']['fields'], [])
         response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={

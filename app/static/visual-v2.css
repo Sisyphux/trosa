@@ -7928,9 +7928,9 @@ html.motion-lite .card {
   }
   #page-inbox .inbox-command-shelf {
     position: absolute !important;
-    top: 0 !important;
+    top: auto !important;
     right: 0 !important;
-    bottom: auto !important;
+    bottom: 0 !important;
     left: auto !important;
     max-width: 124px !important;
     margin: 0 !important;

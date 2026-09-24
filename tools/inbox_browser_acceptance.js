@@ -34,9 +34,9 @@ const choiceContracts = await page.evaluate(() => fetch('/api/inbox').then(r => 
 if (!choiceContracts.length || choiceContracts.some(c => c[1].length < 2)) throw new Error('choice label contract missing: ' + JSON.stringify(choiceContracts));
 const list = page.locator('#inboxList');
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('正在整理 Inbox'), null, {timeout: 15000});
-const selaReceiptIntro = await page.locator('#inboxSelaRuns').innerText();
-if (!selaReceiptIntro.includes('排队不代表已经开始') || !selaReceiptIntro.includes('普通客户回复')) {
-  throw new Error('Inbox does not explain when Sela runs: ' + selaReceiptIntro);
+const initialRunStatuses = await page.locator('#inboxSelaRuns .inbox-sela-run').evaluateAll((rows) => rows.map(row => row.dataset.status));
+if (initialRunStatuses.some(status => status === 'running' || status === 'completed')) {
+  throw new Error('normal Sela background state is occupying the Inbox: ' + initialRunStatuses.join(','));
 }
 // A successful submit (and Undo) re-renders the workspace and closes the open
 // card, so 返回队列 may legitimately already be gone. Never wait 30s for it.
@@ -67,6 +67,10 @@ await page.setViewportSize({width:390,height:844});
 const mobileActionLayout = await page.evaluate(() => {
   const action = document.querySelector('#page-inbox .inbox-command-shelf');
   const actionRect = action?.getBoundingClientRect();
+  const searchRect = document.querySelector('#globalPageSearch')?.getBoundingClientRect();
+  const overlapsSearch = !!actionRect && !!searchRect && actionRect.left < searchRect.right
+    && actionRect.right > searchRect.left && actionRect.top < searchRect.bottom
+    && actionRect.bottom > searchRect.top;
   const rows = Array.from(document.querySelectorAll('#inboxList .inbox-question-row'));
   const overlapsRow = !!actionRect && rows.some((row) => {
     const rect = row.getBoundingClientRect();
@@ -76,11 +80,12 @@ const mobileActionLayout = await page.evaluate(() => {
   return {
     position: action ? getComputedStyle(action).position : '',
     overlapsRow,
+    overlapsSearch,
     scrollWidth: document.documentElement.scrollWidth,
     viewportWidth: window.innerWidth,
   };
 });
-if (mobileActionLayout.position === 'fixed' || mobileActionLayout.overlapsRow
+if (mobileActionLayout.position === 'fixed' || mobileActionLayout.overlapsRow || mobileActionLayout.overlapsSearch
     || mobileActionLayout.scrollWidth > mobileActionLayout.viewportWidth + 1) {
   throw new Error('mobile Inbox action is obscuring content or overflowing: ' + JSON.stringify(mobileActionLayout));
 }
@@ -103,7 +108,7 @@ await page.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + firstCardId).waitFor({state:'detached', timeout:15000});
 if (await inboxCount() !== 9) throw new Error('Inbox count did not update immediately after a response: ' + await inboxCount());
 // A linked Sela decision must persist a durable automatic-run queue entry.
-// The fixture does not run Sela itself, so its visible state should remain queued.
+// The fixture does not run Sela itself, so its state should remain queued without occupying the Inbox.
 await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'Sela 需要确认 prospect 的下一步'}).click();
 const selaCard = page.locator('.inbox-question-active');
@@ -150,10 +155,12 @@ const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + selaCardId).waitFor({state:'detached', timeout:15000});
 await page.getByText('回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
-const linkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'});
-await linkedResume.waitFor({timeout:15000});
-if (await linkedResume.getAttribute('data-status') !== 'queued') throw new Error('linked Sela answer did not appear as queued: ' + await linkedResume.innerText());
-if (!(await linkedResume.innerText()).includes('尚未收到 Sela 已开始的回执')) throw new Error('queued state is being presented as a completed run: ' + await linkedResume.innerText());
+if (await page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'}).count()) {
+  throw new Error('newly queued Sela run is occupying the Inbox');
+}
+const linkedInboxId = Number(String(selaCardId).replace('inbox-question-', ''));
+const linkedReceipt = await page.evaluate(async (id) => fetch('/api/inbox/questions/' + id + '/sela-handoff').then(r => r.json()), linkedInboxId);
+if (linkedReceipt.status !== 'queued' || !linkedReceipt.automatic_run) throw new Error('linked Sela answer was not queued: ' + JSON.stringify(linkedReceipt));
 if (await inboxCount() !== 8) throw new Error('linked Sela answer did not resolve its Inbox request: ' + await inboxCount());
 // An answered request without a unique prospect must be honest about staying
 // manual. It gets a needs_review receipt, but never an automatic-run status.

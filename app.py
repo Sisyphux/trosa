@@ -11219,6 +11219,10 @@ def _inbox_capture_suggestions(conn, items):
 
 def _inbox_question_counts(questions, items):
     counts = {'all': len(questions), 'questions': len(questions), 'items': len(items)}
+    counts['actionable'] = sum(
+        not question.get('response_schema', {}).get('retired_send_approval')
+        for question in questions
+    )
     for question in questions:
         kind = question.get('kind') or ''
         counts[kind] = counts.get(kind, 0) + 1

@@ -1532,7 +1532,7 @@ async function refreshInboxBadge() {
   try {
     var data = await api('/api/inbox/counts');
     var navCount = document.getElementById('inboxNavCount');
-    if (navCount) navCount.textContent = (data && data.all) || '';
+    if (navCount) navCount.textContent = (data && (data.actionable == null ? data.all : data.actionable)) || '';
   } catch (e) {}
 }
 
@@ -1643,20 +1643,19 @@ function renderInboxQuestionWorkspace(counts) {
   var inboxPage = document.getElementById('page-inbox');
   if (inboxPage) inboxPage.classList.toggle('inbox-question-expanded', inboxState.questions.some(function(q) { return q.id === inboxState.expandedQuestionId; }));
   renderSelaInboxRuns(inboxState.selaRuns || []);
-  var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = counts.all || inboxState.questions.length || '';
   var overview = document.getElementById('inboxOverview');
   var retiredCount = inboxState.questions.filter(isRetiredInboxSendApproval).length;
   var activeCount = inboxState.questions.length - retiredCount;
-  if (overview) overview.innerHTML = '<strong>' + inboxState.questions.length + '</strong><span>项未关闭</span>' +
-    (retiredCount ? '<small class="inbox-overview-note">' + activeCount + ' 项待处理；' + retiredCount + ' 条已停用的旧发送请求单独列在下方。</small>' : '');
-  var kinds = ['all'].concat(Array.from(new Set(inboxState.questions.map(function(q) { return q.kind; }))));
+  var actionableQuestions = inboxState.questions.filter(function(q) { return !isRetiredInboxSendApproval(q); });
+  var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = activeCount || '';
+  if (overview) overview.innerHTML = '<strong>' + activeCount + '</strong><span>项待处理</span>';
+  var kinds = ['all'].concat(Array.from(new Set(actionableQuestions.map(function(q) { return q.kind; }))));
   var filters = document.getElementById('inboxFilters');
-  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? inboxState.questions.length : inboxState.questions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + (kind === 'all' ? '' : '<span class="inbox-filter-count">' + n + '</span>') + '</button>'; }).join('');
+  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? activeCount : actionableQuestions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + (kind === 'all' ? '' : '<span class="inbox-filter-count">' + n + '</span>') + '</button>'; }).join('');
   var list = document.getElementById('inboxList'); if (!list) return;
-  var questions = inboxState.questions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
-  var actionable = questions.filter(function(q) { return !isRetiredInboxSendApproval(q); });
-  var retired = questions.filter(isRetiredInboxSendApproval);
-  if (!questions.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>' + (inboxState.activeFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>'; return; }
+  var actionable = actionableQuestions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
+  var retired = inboxState.activeFilter === 'all' ? inboxState.questions.filter(isRetiredInboxSendApproval) : [];
+  if (!actionable.length && !retired.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>' + (inboxState.activeFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>'; return; }
   var activeHtml = actionable.length
     ? '<div class="inbox-workspace">' + actionable.map(renderInboxQuestionCard).join('') + '</div>'
     : '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>以下旧请求只需关闭，不会触发发送或 Sela。</span></div>';
@@ -1673,26 +1672,21 @@ function isRetiredInboxSendApproval(question) {
 function renderSelaInboxRuns(runs) {
   var section = document.getElementById('inboxSelaRuns');
   if (!section) return;
-  var labels = { queued: '排队中', running: '正在续跑', completed: '已完成', failed: '运行失败', needs_review: '需要复核' };
+  var attentionRuns = (Array.isArray(runs) ? runs : []).filter(function(run) {
+    var status = String(run.status || '').toLowerCase();
+    return status === 'failed' || status === 'needs_review' ||
+      (status === 'queued' && Date.now() - Date.parse(run.updated_at || '') > 120000);
+  });
+  section.hidden = !attentionRuns.length;
+  if (!attentionRuns.length) { section.innerHTML = ''; return; }
+  var labels = { queued: '等待过久', failed: '运行失败', needs_review: '需要复核' };
   function renderRun(run) {
     var status = String(run.status || '').toLowerCase();
-    var detail = run.error || run.summary || (status === 'queued' ? '答案已保存并排队，尚未收到 Sela 已开始的回执；Sela 通常每 30 秒检查一次。' : status === 'running' ? 'Sela 已领取，正在研究公开资料或准备未发送草稿。' : status === 'completed' ? '后续研究或未发送草稿准备已完成。' : status === 'needs_review' ? '当前条件不支持自动续跑，需要人工复核。' : 'Sela 未能完成自动续跑；答案仍保留在 Trosa。');
-    var queuedAt = status === 'queued' ? Date.parse(run.updated_at || '') : NaN;
-    if (status === 'queued' && Number.isFinite(queuedAt) && Date.now() - queuedAt > 120000) {
-      detail = '答案已保存并排队，但超过 2 分钟未收到 Sela 领取回执；请检查 Sela 是否暂停或未运行。';
-    }
+    var detail = status === 'queued' ? '答案已保存，但超过 2 分钟未开始；请检查 Sela 是否暂停。' :
+      (run.error || run.summary || (status === 'needs_review' ? '需要人工复核后才能继续。' : 'Sela 未能完成；答案仍保留在 Trosa。'));
     return '<li class="inbox-sela-run" data-status="' + escapeHtml(status) + '"><div><strong>' + escapeHtml(run.company || 'Sela prospect') + '</strong><span class="inbox-sela-run-status">' + escapeHtml(labels[status] || '状态未知') + '</span></div><p>' + escapeHtml(detail) + '</p><small>' + escapeHtml(formatDate(run.updated_at || '')) + '</small></li>';
   }
-  var recent = Array.isArray(runs) ? runs.slice(0, 1) : [];
-  var history = Array.isArray(runs) ? runs.slice(1) : [];
-  var summary = recent.length
-    ? '<ul>' + recent.map(renderRun).join('') + '</ul>'
-    : '<p class="inbox-sela-runs-empty">目前没有已排队的回答。普通客户回复、身份判断和旧发送请求不会启动 Sela。</p>';
-  var olderRuns = history.length
-    ? '<details class="inbox-sela-runs-history"><summary>查看其他最近回执（' + history.length + '）</summary><ul>' + history.map(renderRun).join('') + '</ul></details>'
-    : '';
-  section.innerHTML = '<div class="inbox-sela-runs-heading"><strong>Sela 执行回执</strong><span>只对符合条件的 Sela 请求答案续跑；普通客户回复、身份判断和旧发送请求不会启动 Sela。排队不代表已经开始。</span></div>' + summary + olderRuns +
-    '<details class="inbox-sela-runs-scope"><summary>触发条件与自动范围</summary><p>仅限唯一关联、仍未互动且未停联的冷线索；已有发送或草稿、排除复核、找不到唯一 Prospect 时转人工处理。Sela 只做公开资料研究或准备未发送草稿，不会发送邮件、建立 Gmail 草稿或修改联系人、待办、业务阶段。</p></details>';
+  section.innerHTML = '<div class="inbox-sela-runs-heading"><strong>Sela 需要处理</strong></div><ul>' + attentionRuns.map(renderRun).join('') + '</ul>';
 }
 function renderInboxQuestionCard(q) {
   var open = inboxState.expandedQuestionId === q.id, subjectData = q.subject || {};

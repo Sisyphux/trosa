@@ -89,9 +89,7 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
 (async () => {
   await win.loadInbox();
 
-  const selaReceiptPanel = doc.getElementById('inboxSelaRuns').textContent;
-  assert.ok(selaReceiptPanel.includes('排队不代表已经开始'), selaReceiptPanel);
-  assert.ok(selaReceiptPanel.includes('普通客户回复'), selaReceiptPanel);
+  assert.equal(doc.getElementById('inboxSelaRuns').hidden, true);
 
   // 总量只在摘要出现一次；类别筛选保留各自计数
   const chips = Array.from(doc.querySelectorAll('#inboxFilters .inbox-filter'));
@@ -167,15 +165,17 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
     '相同标题和摘要不应在展开区重复');
   win.closeInboxQuestion();
 
-  // Sela's execution receipt remains visible on the first Inbox screen and
-  // distinguishes a queued answer from a worker that has actually started.
+  // Normal background states stay out of the human queue; only exceptions appear.
   win.inboxState.selaRuns = [{ inbox_id: 13, company: 'Audit Plastics Co', status: 'queued', summary: '', updated_at: new Date().toISOString() }];
   win.renderSelaInboxRuns(win.inboxState.selaRuns);
-  const queuedReceipt = doc.querySelector('#inboxSelaRuns .inbox-sela-run');
-  assert.equal(queuedReceipt.dataset.status, 'queued');
-  assert.ok(queuedReceipt.textContent.includes('尚未收到 Sela 已开始的回执'), queuedReceipt.textContent);
+  assert.equal(doc.getElementById('inboxSelaRuns').hidden, true);
+  win.renderSelaInboxRuns([{ inbox_id: 13, status: 'completed', updated_at: new Date().toISOString() }]);
+  assert.equal(doc.getElementById('inboxSelaRuns').hidden, true);
   win.renderSelaInboxRuns([{ inbox_id: 13, company: 'Audit Plastics Co', status: 'queued', summary: '', updated_at: '2000-01-01 00:00:00' }]);
-  assert.ok(doc.querySelector('#inboxSelaRuns .inbox-sela-run').textContent.includes('超过 2 分钟未收到 Sela 领取回执'));
+  assert.equal(doc.getElementById('inboxSelaRuns').hidden, false);
+  assert.ok(doc.querySelector('#inboxSelaRuns .inbox-sela-run').textContent.includes('超过 2 分钟未开始'));
+  win.renderSelaInboxRuns([{ inbox_id: 13, company: 'Audit Plastics Co', status: 'needs_review', summary: '请复核原因' }]);
+  assert.ok(doc.getElementById('inboxSelaRuns').textContent.includes('请复核原因'));
 
   // Legacy send approvals are kept accessible, but placed after actionable
   // questions and explained once instead of repeating a long warning per row.
@@ -189,7 +189,9 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.equal(doc.querySelectorAll('#inboxList > .inbox-workspace .inbox-question-row').length, 1);
   assert.equal(doc.querySelectorAll('#inboxList .inbox-retired-requests .inbox-question-row').length, 1);
   assert.ok(doc.querySelector('#inboxList .inbox-retired-requests').textContent.includes('关闭后不会发送邮件或启动 Sela'));
-  assert.ok(doc.querySelector('#inboxOverview').textContent.includes('1 项待处理；1 条已停用'));
+  assert.equal(doc.querySelector('#inboxOverview strong').textContent, '1');
+  assert.equal(doc.getElementById('inboxNavCount').textContent, '1');
+  assert.equal(doc.querySelector('[data-inbox-filter="sela_request"] .inbox-filter-count').textContent, '1');
 
   // 空列表显示明确空状态而不是“没有数据”
   setInboxPayload({ items: [], questions: [], counts: { all: 0, questions: 0 } });
