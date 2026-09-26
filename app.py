@@ -116,6 +116,7 @@ from trosa_domain import (
     update_outreach_message as _update_outreach_message,
     merge_open_task as _merge_open_task,
     human_owned_customer_ids as _human_owned_customer_ids,
+    customer_relationship_facts as _customer_relationship_facts,
     record_external_interaction as _record_interaction,
     set_interaction_flag as _set_interaction_flag,
     set_outreach_reported as _set_outreach_reported,
@@ -5512,15 +5513,20 @@ def _sela_prospect_view(conn, profile):
     # ``customer_linked=false`` even though every synced lead has a trosa_id.
     # Bounce text is stored for the record but is not inbound customer evidence.
     observed_inbound_body = '' if reply_status == 'bounced' else (outreach.get('reply_content') or '')
+    relationship = _customer_relationship_facts(conn, {int(customer['id'])}).get(int(customer['id']), {})
+    real_interaction = bool(relationship.get('real_interaction'))
     lead_stage = _sela_prospect_lifecycle_facts({
         'business_stage': str(customer.get('business_stage') or ''),
         'status': str(customer.get('status') or ''),
-        'outcome': outcome,
-        'reply_event': stored_event,
+        'outcome': '' if reply_status == 'replied' and not real_interaction else outcome,
+        'reply_event': stored_event if real_interaction else '',
         'sent_at': outreach.get('sent_date') or '',
-        'last_inbound_at': reply_received_at,
-        'last_reply_body': observed_inbound_body,
+        'last_inbound_at': reply_received_at if real_interaction else '',
+        'last_reply_body': observed_inbound_body if real_interaction else '',
     })
+    if real_interaction and lead_stage['stage'] == 'cold_prospect':
+        lead_stage = {'stage': 'engaged_lead', 'rejected': lead_stage['rejected'],
+                      'signals': [*lead_stage['signals'], 'real_customer_interaction']}
     view = {
         'id': str(profile['source_id']),
         'trosa_id': int(customer['id']),

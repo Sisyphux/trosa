@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import db
+import trosa_domain
 
 
 TOKEN = 'test-sela-v2-service-token'
@@ -1383,6 +1384,77 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertTrue(by_id['opp-1']['customer_linked'])
         self.assertEqual(by_id['won-1']['lifecycle_stage'], 'customer')
         self.assertTrue(by_id['won-1']['customer_linked'])
+
+    def test_manual_inbound_interaction_agrees_across_today_and_sela_projection(self):
+        source_id = 'manual-inbound-boundary'
+        created = self.post_prospect(prospect(source_id), 'sela-v2:manual-inbound:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        task_id = self.add_reminder(customer_id, '处理客户回复', '2026-09-01')
+
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        before = self.client.get('/api/reminders/today').get_json()
+        self.assertNotIn(task_id, [row['id'] for row in before])
+        recorded = self.client.post(
+            f'/api/customers/{customer_id}/follow_history',
+            json={'activity_content': '客户回复：请提供规格资料', 'direction': 'inbound',
+                  'follow_date': '2026-09-02'},
+        )
+        self.assertEqual(recorded.status_code, 200, recorded.get_data(as_text=True))
+        next_task_id = self.add_reminder(customer_id, '回复客户规格问题', '2026-09-03')
+        after = self.client.get('/api/reminders/today').get_json()
+        self.assertIn(next_task_id, [row['id'] for row in after],
+                      {'recorded': recorded.get_json(), 'today': after})
+
+        with self.hamid_db() as conn:
+            facts = trosa_domain.customer_relationship_facts(conn, {customer_id})[customer_id]
+        self.assertTrue(facts['real_interaction'])
+        self.assertTrue(facts['human_owned'])
+        service_client = self.module.app.test_client()
+        listed = service_client.get('/api/integrations/sela/prospects', headers=self.headers())
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        row = next(item for item in listed.get_json()['prospects'] if item['id'] == source_id)
+        self.assertEqual(row['lifecycle_stage'], 'engaged_lead')
+        self.assertTrue(row['customer_linked'])
+        self.assertIn('real_customer_interaction', row['lifecycle_signals'])
+
+    def test_notes_outbound_quote_and_auto_reply_are_not_real_interactions(self):
+        source_id = 'no-inbound-boundary'
+        created = self.post_prospect(prospect(source_id), 'sela-v2:no-inbound:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        conn = self.hamid_db()
+        try:
+            conn.execute('UPDATE customers SET notes=? WHERE id=?',
+                         ('给客户发送报价目录，等待回复', customer_id))
+            conn.commit()
+        finally:
+            conn.close()
+        self.add_follow_log(customer_id, '已发送报价目录，等待回复', direction='outbound')
+        self.add_follow_log(customer_id, 'Automatic reply: out of office', direction='inbound')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                "UPDATE outreach_emails SET reply_status='replied', "
+                "reply_content='Automatic reply: out of office', reply_date='2026-09-02' "
+                "WHERE external_id=?", (source_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        with self.hamid_db() as conn:
+            facts = trosa_domain.customer_relationship_facts(conn, {customer_id})[customer_id]
+        self.assertFalse(facts['real_interaction'])
+        listed = self.client.get('/api/integrations/sela/prospects', headers=self.headers())
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        row = next(item for item in listed.get_json()['prospects'] if item['id'] == source_id)
+        self.assertEqual(row['lifecycle_stage'], 'cold_prospect')
+        task_id = self.add_reminder(customer_id, '冷线索开发', '2026-09-01')
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        # Not an interaction for the Sela projection, but a customer's
+        # auto-reply still needs a human glance, so the task stays in Today.
+        today = self.client.get('/api/reminders/today').get_json()
+        self.assertIn(task_id, [item['id'] for item in today])
 
     def test_customer_row_alone_is_not_a_customer_or_opportunity(self):
         """A synced customer row plus ids must never imply a relationship."""

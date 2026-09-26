@@ -127,6 +127,34 @@ _RE_HR_INTENT = re.compile(r"(询问.{0,12}(价格|报价|样品|目录|规格|�
 _RE_NEG_HR = re.compile(r"(是否|要不要|需不需要|有没有|询问客户|问客户|询问其|询问一下).{0,8}(要|需要)?(样品|报价|价格|目录)")
 
 
+def _has_real_interaction(events: list, mails: list) -> bool:
+    """A customer-side communication fact, excluding delivery and auto replies.
+
+    Notes, Inbox requests and one-way activity text cannot establish an inbound
+    interaction.  Today and the Sela projection consume this same fact.
+    """
+    for event in events:
+        if (str(event.get('direction') or '').lower() not in ('inbound', 'two_way')
+                and str(event.get('activity_type') or '').lower() != 'customer_reply'):
+            continue
+        content = str(event.get('content') or '')
+        result = str(event.get('result') or '')
+        if not (content.strip() or result.strip()):
+            continue
+        evidence = content + ' ' + result
+        if not _RE_SYNC_LABEL.sub('', evidence).strip(' :-'):
+            continue
+        if _RE_AUTO.search(evidence) or _RE_BOUNCE.search(evidence):
+            continue
+        return True
+    for mail in mails:
+        reply = str(mail.get('reply_content') or '')
+        if (str(mail.get('reply_status') or '').lower() == 'replied' and reply.strip()
+                and not _RE_AUTO.search(reply) and not _RE_BOUNCE.search(reply)):
+            return True
+    return False
+
+
 def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sysnotes: str, impsrc: str) -> str:
     """Classify one Customer from content.  Never a single field."""
     note_blob = f"{notes} {sysnotes}"
@@ -134,7 +162,6 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
     event_text = " ".join(" ".join(str(x) for x in (e.get('content'), e.get('result'), e.get('next_plan')) if x) for e in events)
     inbox_text = " ".join(f"{i.get('title')} {i.get('content')}" for i in inbox)
     all_mail_text = " ".join(str(x) for m in mails for x in (m.get('subject'), m.get('body'), m.get('reply_content')) if x)
-
     auto_hit = bool(_RE_AUTO.search(reply_text) or _RE_AUTO.search(event_text)
                     or _RE_AUTO.search(note_blob) or _RE_AUTO.search(inbox_text))
     bounce = bool(_RE_BOUNCE.search(all_mail_text) or _RE_BOUNCE.search(event_text))
@@ -142,7 +169,6 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
     docs = []
     if not _RE_EXPO_PROFILE.search(note_blob) and not _RE_AUTO.search(note_blob):
         docs.append(note_blob)
-    inbound_dir = False
     for e in events:
         txt = " ".join(str(x) for x in (e.get('content'), e.get('result'), e.get('next_plan')) if x)
         if not txt:
@@ -153,10 +179,7 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
                 _RE_REJECT.search(txt) or _RE_STRONG_ORDER.search(txt)
                 or (_RE_HR_INTENT.search(txt) and not _RE_NEG_HR.search(txt))):
             continue
-        if str(e.get('direction') or '').lower() in ('inbound', 'two_way') or str(e.get('activity_type') or '').lower() == 'customer_reply':
-            inbound_dir = True
         docs.append(txt)
-    replied_real = False
     for m in mails:
         rc = str(m.get('reply_content') or '')
         if not rc or _RE_AUTO.search(rc) or _RE_BOUNCE.search(rc):
@@ -164,8 +187,6 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
         if _RE_SYNC_LABEL.search(rc) and len(rc) < 220:
             continue
         docs.append(rc)
-        if str(m.get('reply_status') or '').lower() == 'replied':
-            replied_real = True
     clean_inbox = [i for i in inbox if not _RE_AUTO.search(str(i.get('content') or '')) and not _RE_BOUNCE.search(str(i.get('content') or ''))]
     if clean_inbox:
         docs.append(" ".join(f"{i.get('title')} {i.get('content')}" for i in clean_inbox))
@@ -182,13 +203,14 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
         sample_cust = None
     meet = _RE_MEET.search(trusted)
     reject = _RE_REJECT.search(trusted)
-    genuine = bool(cust_ctx or replied_real or inbound_dir)
+    real_interaction = _has_real_interaction(events, mails)
+    genuine = bool(cust_ctx or real_interaction)
 
     engaged = bool(order_strong or (order_weak and cust_ctx) or quote or sample_cust
                    or (meet and not _RE_MEET_ONEWAY.search(trusted)) or reject)
     if engaged:
         return "engaged"
-    referral_only = bool(_RE_HR_REFERRAL.search(trusted)) and not bool(cust_ctx or order_strong or reject or sample_cust or replied_real)
+    referral_only = bool(_RE_HR_REFERRAL.search(trusted)) and not bool(cust_ctx or order_strong or reject or sample_cust or real_interaction)
     if referral_only:
         return "human_reminder"
     strong_hr = bool(_RE_HR_CONTACT.search(trusted) or _RE_HR_REFERRAL.search(trusted) or _RE_HR_SAMPLE_TAKEN.search(trusted)
@@ -201,8 +223,8 @@ def _relationship_bucket(events: list, mails: list, inbox: list, notes: str, sys
     return "auto_follow"
 
 
-def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
-    """Return Customers whose follow-ups belong to a human (not Sela).
+def customer_relationship_facts(conn: Any, customer_ids: Iterable[int] | None = None) -> dict[int, dict]:
+    """Return the shared real-interaction and Today ownership facts.
 
     Human-owned = engaged, human_reminder or needs_info, decided from content
     (see :func:`_relationship_bucket`).  Pure one-way development (auto_follow)
@@ -211,7 +233,7 @@ def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = Non
     ids = _ids(customer_ids) if customer_ids is not None else None
     wanted = set(ids) if ids is not None else None
     if wanted == set():
-        return set()
+        return {}
     where_ids = sorted(wanted) if wanted is not None else None
 
     def marks(column: str) -> tuple[str, list]:
@@ -249,7 +271,7 @@ def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = Non
             account_to_customer.setdefault(row['account_id'], int(row['customer_id']))
         accounts = sorted(account_to_customer)
         if not accounts:
-            return set()
+            return {}
         amarks = ' IN (' + ','.join('?' for _ in accounts) + ')'
         events = conn.execute('''SELECT account_id, content, result, next_plan, direction, event_type AS activity_type
                                    FROM trosa.timeline_events WHERE account_id''' + amarks, accounts).fetchall()
@@ -272,12 +294,18 @@ def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = Non
         details = conn.execute('''SELECT id AS customer_id, notes, system_notes, import_source FROM customers WHERE 1=1''' + clause, params).fetchall()
         per = gather(events, mails, inbox, details)
 
-    found: set[int] = set()
+    found: dict[int, dict] = {}
     for cid, entry in per.items():
         bucket = _relationship_bucket(entry["events"], entry["mails"], entry["inbox"], entry["notes"], entry["sysnotes"], entry["impsrc"])
-        if bucket != "auto_follow":
-            found.add(cid)
+        found[cid] = {'real_interaction': _has_real_interaction(entry['events'], entry['mails']),
+                      'human_owned': bucket != 'auto_follow', 'bucket': bucket}
     return found
+
+
+def human_owned_customer_ids(conn: Any, customer_ids: Iterable[int] | None = None) -> set[int]:
+    """Return Customers whose follow-ups belong to a human (not Sela)."""
+    return {cid for cid, facts in customer_relationship_facts(conn, customer_ids).items()
+            if facts['human_owned']}
 
 
 

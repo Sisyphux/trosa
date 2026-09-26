@@ -1710,6 +1710,29 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(rows['pg-won-1']['lifecycle_stage'], 'customer')
         self.assertTrue(rows['pg-won-1']['customer_linked'])
 
+        # A manually recorded inbound communication uses the same relationship
+        # fact in Today and in the Sela prospect projection.
+        manual = publish('pg-manual-inbound-boundary').get_json()
+        manual_id = manual['trosa_id']
+        recorded = client.post(f'/api/customers/{manual_id}/follow_history', json={
+            'activity_content': '客户回复：请提供规格资料', 'direction': 'inbound',
+            'follow_date': '2026-09-02',
+        })
+        self.assertEqual(recorded.status_code, 200, recorded.get_json())
+        task = client.post(f'/api/customers/{manual_id}/tasks', json={
+            'title': '回复客户规格问题', 'due_date': '2026-09-03',
+        })
+        self.assertEqual(task.status_code, 201, task.get_json())
+        task_id = task.get_json()['id']
+        today = client.get('/api/reminders/today').get_json()
+        self.assertIn(task_id, [item['id'] for item in today])
+        rows = {
+            row['id']: row
+            for row in client.get('/api/integrations/sela/prospects?limit=100').get_json()['prospects']
+        }
+        self.assertEqual(rows['pg-manual-inbound-boundary']['lifecycle_stage'], 'engaged_lead')
+        self.assertTrue(rows['pg-manual-inbound-boundary']['customer_linked'])
+
         key = 'pg-live:agent-request:1'
         request_body = {'request': {
             'candidate_id': 'pg-cold-1', 'customer_id': cold['trosa_id'], 'company': 'pg-cold-1 Co',
