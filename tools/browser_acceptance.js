@@ -117,12 +117,17 @@ check(customerTaskText.includes('Browser acceptance: send sample quotation'),
   'saved next step is not visible in the Customer workspace');
 
 await customerModal.getByRole('button', {name: '关闭'}).first().click();
+await customerModal.waitFor({state: 'hidden', timeout: 15000});
 
-// Today must show the dated action, not just the communication fact.
+// Today must show the dated action, not just the communication fact. Scope the
+// lookup to the Today container: an unscoped getByText can match the same text
+// in the customer workspace that is still in the DOM while its modal closes,
+// which made this assertion pass (or fail) for the wrong reason.
 await page.locator('[data-page="dashboard"]').first().click();
 await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
-await page.getByText('Browser acceptance: send sample quotation', {exact: true}).first()
-  .waitFor({state: 'visible', timeout: 15000});
+const todayTask = page.locator('#page-dashboard')
+  .getByText('Browser acceptance: send sample quotation', {exact: true}).first();
+await todayTask.waitFor({state: 'visible', timeout: 15000});
 const todayText = await page.locator('#page-dashboard').innerText();
 check(todayText.includes('Browser acceptance: send sample quotation'),
   'dated next step is missing from Today');
