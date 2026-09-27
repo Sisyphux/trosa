@@ -33,6 +33,51 @@ USERS = {
 }
 USERS_LIST = list(USERS.keys())
 
+# Entry-surface palette.  The account-selection page paints one colour field per
+# account, so every member needs a stable, visually distinct, low-saturation
+# tone.  A colour a human actually chose is always honoured; this default map
+# only fills in accounts created without one (the invite flow writes a generic
+# placeholder colour), and it is the single place a future colour picker has to
+# interact with.
+ENTRY_FIELD_PALETTE = (
+    '#D9D0C3',  # sand
+    '#CCB7AB',  # clay
+    '#BEC6B8',  # sage
+    '#BCC3C8',  # slate
+    '#D6CBB4',  # straw
+    '#C4BDC6',  # ash
+    '#C9C3B0',  # loam
+    '#BFBDB2',  # stone
+)
+
+# Colours the database may carry that mean "nobody picked one", not a choice.
+GENERIC_USER_COLORS = frozenset({'#666', '#666666', '#8b7355'})
+
+
+def is_generic_user_color(value):
+    """Return True when a stored colour is a placeholder rather than a choice."""
+    return str(value or '').strip().lower() in GENERIC_USER_COLORS
+
+
+def entry_field_color(user_id, stored=None):
+    """Resolve the entry-surface tone for one account.
+
+    Chosen colours win; placeholders fall back to the palette so invited
+    members never all share the same generic brown field, and so the page never
+    hardcodes a per-name colour.
+    """
+    text = str(stored or '').strip()
+    if text and not is_generic_user_color(text):
+        return text
+    key = str(user_id or '')
+    if not key:
+        return ENTRY_FIELD_PALETTE[0]
+    index = 0
+    for position, char in enumerate(key):
+        index += (position + 1) * ord(char)
+    return ENTRY_FIELD_PALETTE[index % len(ENTRY_FIELD_PALETTE)]
+
+
 # This is the runtime contract, not a feature flag.  The formal Trosa service
 # must never silently fall back to one of the historical SQLite stores.
 FORMAL_RUNTIME_CONTRACT = 'trosa-postgresql-v1'

@@ -47,7 +47,7 @@ from db import (
     init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
     init_user_tables, refresh_users_registry,
     backup_database, cancel_safety_backup, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
-    DB_DIR, run_startup_maintenance,
+    DB_DIR, run_startup_maintenance, entry_field_color,
 )
 from ical_gen import build_icalendar
 from scheduler import start_scheduler, stop_scheduler, get_scheduler_status
@@ -2459,7 +2459,12 @@ def auth_users():
         if not info.get('active', True):
             continue
         record = records.get(uid, {})
-        users_list.append({'id': uid, 'name': info['name'], 'label': info['label'], 'color': info['color'],
+        users_list.append({'id': uid, 'name': info['name'], 'label': info['label'],
+                           # The entry surface paints one field per account, so the
+                           # tone is resolved here (chosen colour wins, placeholder
+                           # colours fall back to the default palette) instead of
+                           # being hardcoded per name in the page.
+                           'color': entry_field_color(uid, info.get('color')),
                            'pin_setup_required': _production_mode and not record.get('password_hash') and _user_needs_pin_setup(uid),
                            'password_login': bool(record.get('password_hash')),
                            'role': info.get('role', 'member')})
@@ -18022,9 +18027,8 @@ def calendar_ical(token):
     return response
 
 
-@app.route('/api/network/ip')
-@login_required
-def get_local_ip():
+def _discover_local_ip():
+    """Best-effort LAN address for this host. Returns (local_ip, all_ips)."""
     import socket as sk
     ips = []
     try:
@@ -18046,8 +18050,18 @@ def get_local_ip():
                 ips.append(ip)
         except Exception:
             pass
-    local_ip = ips[0] if ips else 'localhost'
-    port = request.host.split(':')[1] if ':' in request.host else '8080'
+    return (ips[0] if ips else 'localhost'), ips
+
+
+def _request_port():
+    return request.host.split(':')[1] if ':' in request.host else '8080'
+
+
+@app.route('/api/network/ip')
+@login_required
+def get_local_ip():
+    local_ip, ips = _discover_local_ip()
+    port = _request_port()
     token = _get_calendar_token(g.current_user)
     feed = _calendar_feed_data(g.current_user)
     return jsonify({
@@ -18058,6 +18072,21 @@ def get_local_ip():
         'last_changed_at': feed['last_changed_at'],
         'test_url': f'http://{local_ip}:{port}/api/network/ping',
     })
+
+
+@app.route('/api/network/lan')
+def network_lan():
+    """Address a colleague on the same office network can open.
+
+    The account-selection page runs before any session exists, so this has to be
+    readable anonymously; it is deliberately narrow and never exposes the
+    calendar subscribe token that /api/network/ip carries.  Production is served
+    through the public tunnel, so the LAN hint is switched off there.
+    """
+    if _production_mode:
+        return jsonify({'enabled': False})
+    local_ip, _ips = _discover_local_ip()
+    return jsonify({'enabled': True, 'local_ip': local_ip, 'port': _request_port()})
 
 
 @app.route('/api/calendar/refresh', methods=['POST'])

@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="app-version" content="{{VERSION}}">
-<title>Trade OS · 外贸工作系统</title>
+<title>Trosa</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
 <link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
@@ -15,30 +15,35 @@
 </head>
 <body>
 
-<!-- Login Overlay -->
+<!-- Account selection. The accounts themselves are the page: one colour field per
+     member, rendered from the real registry. No logo, no labels, no explainer. -->
 <div class="login-overlay" id="loginOverlay">
-  <div class="login-card">
-    <div class="login-logo" aria-hidden="true"><span class="ui-icon ui-icon-sparkle"></span></div>
-    <div class="login-title">Trade OS</div>
-    <div class="login-desc" id="loginDesc">选择账号进入</div>
-    <div class="login-users" id="loginUsers"></div>
-    <form class="login-pin-form" id="loginPinForm" hidden>
-      <label class="form-label" id="loginPinLabel" for="loginPin">个人访问码</label>
-      <div class="login-pin-row">
-        <input class="form-control" id="loginPin" type="password" autocomplete="current-password" placeholder="输入访问码或密码">
-        <button class="btn btn-primary" id="loginPinSubmit" type="submit">进入</button>
-      </div>
-      <div class="login-error" id="loginError" role="alert"></div>
-    </form>
-    <div class="login-network" id="loginNetwork"></div>
+  <div class="entry-fields" id="loginUsers"></div>
+  <div class="entry-launch" id="entryLaunch" aria-hidden="true">
+    <div class="entry-launch-inner">
+      <span class="entry-rule"></span>
+      <span class="entry-launch-name" id="entryLaunchName"></span>
+      <form class="entry-gate" id="loginPinForm" hidden>
+        <label class="entry-gate-label" id="loginPinLabel" for="loginPin">个人访问码</label>
+        <div class="entry-gate-row">
+          <input class="entry-gate-input" id="loginPin" type="password" autocomplete="current-password" placeholder="输入 6 位数字">
+          <button class="entry-gate-submit" id="loginPinSubmit" type="submit">进入</button>
+        </div>
+      </form>
+      <div class="entry-error" id="loginError" role="alert"></div>
+    </div>
+    <button type="button" class="entry-launch-back" id="entryLaunchBack" aria-label="返回账号选择">
+      <span aria-hidden="true">←</span>
+    </button>
   </div>
+  <button type="button" class="entry-lan" id="loginNetwork" hidden></button>
 </div>
 
 <!-- Invitation acceptance is deliberately separate from account selection. -->
 <div class="login-overlay" id="invitationOverlay" hidden>
   <div class="login-card">
     <div class="login-logo" aria-hidden="true"><span class="ui-icon ui-icon-sparkle"></span></div>
-    <div class="login-title">加入 Trade OS</div>
+    <div class="login-title">加入 Trosa</div>
     <div class="login-desc" id="invitationDesc">正在验证邀请链接…</div>
     <form class="login-pin-form" id="invitationForm" hidden>
       <label class="form-label" for="invitationName">姓名（登录账号）</label>

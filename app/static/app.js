@@ -9491,6 +9491,352 @@ function switchCustomerCompose(mode) {
   });
 }
 
+/* ========== ENTRY SURFACE (account selection) ==========
+   The accounts are the page. Choosing one grows that account's colour block
+   into the workspace; when a visit code is required the gate waits inside the
+   block instead of on a separate card. Nothing here decides identity or
+   permissions - it only drives the real /api/auth flow. */
+var _entryLaunch = { field: null, entered: false, busy: false, users: [], requiresPin: false };
+var _entryResizeTimer = null;
+
+function entryOverlayEl() { return document.getElementById('loginOverlay'); }
+function entryShellEl() { return document.getElementById('loginUsers'); }
+function entryFieldEls() { return Array.prototype.slice.call(document.querySelectorAll('#loginOverlay .entry-field')); }
+
+function entryCanHover() {
+  return !window.matchMedia || window.matchMedia('(hover: hover)').matches;
+}
+
+// Only a real colour may reach the field's custom property; anything unexpected
+// falls back to the neutral tone instead of leaving the field unstyled.
+function entryTone(color) {
+  var text = String(color || '').trim();
+  if (/^#(?:[0-9a-fA-F]{3,8})$/.test(text)) return text;
+  if (/^rgba?\([0-9.,\s%]+\)$/.test(text)) return text;
+  return '#d9d0c3';
+}
+
+function entrySetActive(target) {
+  entryFieldEls().forEach(function(field) {
+    var active = field === target;
+    field.classList.toggle('is-active', active);
+    field.classList.toggle('is-dimmed', !!target && !active);
+    field.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function entryUserFields() {
+  return entryFieldEls().filter(function(field) {
+    return field.hasAttribute('data-user-id') && field.style.display !== 'none';
+  });
+}
+
+// Keep the account names the loudest thing on the page for any account count.
+// The widest field (the hovered one) sets the available width; a name that still
+// would not fit is shrunk individually rather than clipped.
+function entryFitNames() {
+  var overlay = entryOverlayEl();
+  var shell = entryShellEl();
+  if (!overlay || !shell) return;
+  // Only fields the user can actually see set the proportions; the weekly board
+  // is removed on non-office clients and must not reserve a column.
+  var fields = entryFieldEls().filter(function(field) { return field.style.display !== 'none'; });
+  if (!fields.length) return;
+  var stacked = window.innerWidth <= 760;
+  var count = fields.length;
+  var shellW = overlay.clientWidth || window.innerWidth;
+  var shellH = overlay.clientHeight || window.innerHeight;
+  var gutter = Math.min(35.2, Math.max(19.2, shellW * 0.024));
+  var maxSize = stacked ? 48 : 73.6;
+  var minSize = stacked ? 22 : 26;
+  var activeW = shellW * 2.4 / (count - 1 + 2.4);
+  var size = stacked
+    ? Math.min(maxSize, Math.max(minSize, (shellH / count) * 0.4))
+    : Math.min(maxSize, Math.max(minSize, activeW * 0.135));
+  overlay.style.setProperty('--entry-name', size.toFixed(1) + 'px');
+  var available = (stacked ? shellW : activeW) - 2 * gutter;
+  fields.forEach(function(field) {
+    var name = field.querySelector('.entry-name');
+    if (!name) return;
+    name.style.fontSize = '';
+  });
+  if (available > 60) {
+    fields.forEach(function(field) {
+      var name = field.querySelector('.entry-name');
+      if (!name) return;
+      var width = name.getBoundingClientRect().width;
+      if (width > available) {
+        name.style.fontSize = Math.max(minSize, size * available / width * 0.97).toFixed(1) + 'px';
+      }
+    });
+  }
+}
+
+function entryBindFields() {
+  entryFieldEls().forEach(function(field) {
+    field.addEventListener('mouseenter', function() {
+      if (_entryLaunch.entered || _entryLaunch.busy) return;
+      if (!entryCanHover()) return;
+      entrySetActive(field);
+    });
+    field.addEventListener('focus', function() {
+      if (_entryLaunch.entered || _entryLaunch.busy) return;
+      entrySetActive(field);
+    });
+    if (field.hasAttribute('data-user-id')) {
+      field.addEventListener('click', function() { entryOpen(field, null); });
+    } else if (field.hasAttribute('data-login-overview')) {
+      // The shared weekly board gets the same expand transition; it is still a
+      // different destination, so its click commits to the overview page.
+      field.addEventListener('click', function() { entryOpen(field, enterOverview); });
+    }
+  });
+  var shell = entryShellEl();
+  if (shell && shell.dataset.entryBound !== '1') {
+    shell.dataset.entryBound = '1';
+    shell.addEventListener('mouseleave', function() {
+      if (_entryLaunch.entered || _entryLaunch.busy) return;
+      if (!entryCanHover()) return;
+      entrySetActive(null);
+    });
+  }
+  // The gate is the only place with an exit, so the back control is bound once
+  // and simply does nothing while no account has been chosen.
+  var back = document.getElementById('entryLaunchBack');
+  if (back && back.dataset.entryBound !== '1') {
+    back.dataset.entryBound = '1';
+    back.addEventListener('click', function() { entryClose(); });
+  }
+}
+
+function entryReset() {
+  var overlay = entryOverlayEl();
+  if (overlay) overlay.classList.remove('is-launching');
+  var launch = document.getElementById('entryLaunch');
+  if (launch) {
+    launch.classList.remove('is-active', 'is-grown', 'is-gated');
+    launch.style.transition = 'none';
+    launch.style.left = '';
+    launch.style.top = '';
+    launch.style.width = '';
+    launch.style.height = '';
+    launch.style.removeProperty('--tone');
+    launch.style.removeProperty('--entry-name');
+    launch.setAttribute('aria-hidden', 'true');
+    // Finish the style reset before transitions are allowed back on.
+    void launch.offsetWidth;
+    launch.style.transition = '';
+  }
+  var nameEl = document.getElementById('entryLaunchName');
+  if (nameEl) { nameEl.textContent = ''; nameEl.style.fontSize = ''; }
+  var back = document.getElementById('entryLaunchBack');
+  if (back) back.blur();
+  entryFieldEls().forEach(function(field) {
+    field.classList.remove('is-hidden', 'is-active', 'is-dimmed');
+    field.removeAttribute('aria-pressed');
+  });
+  var gate = document.getElementById('loginPinForm');
+  if (gate) gate.hidden = true;
+  _entryLaunch.field = null;
+  _entryLaunch.entered = false;
+  _entryLaunch.busy = false;
+}
+
+// The clicked field itself becomes the page: the veil starts as that field and
+// grows to full bleed while the name stays anchored to the same corner. `commit`
+// is what the click means (log in, or open the shared board); it runs once the
+// block has finished growing so the transition is never cut short.
+function entryOpen(field, commit) {
+  if (!field || _entryLaunch.entered || _entryLaunch.busy) return;
+  var userId = field.getAttribute('data-user-id');
+  var user = null;
+  _entryLaunch.users.forEach(function(candidate) {
+    if (String(candidate.id) === String(userId)) user = candidate;
+  });
+  if (!user && typeof commit !== 'function') return;
+  var launch = document.getElementById('entryLaunch');
+  var launchName = document.getElementById('entryLaunchName');
+  if (!launch || !launchName) return;
+  var rect = field.getBoundingClientRect();
+  var nameEl = field.querySelector('.entry-name');
+  _entryLaunch.field = field;
+  _entryLaunch.entered = true;
+  _entryLaunch.busy = true;
+  entrySetActive(field);
+  var overlay = entryOverlayEl();
+  if (overlay) overlay.classList.add('is-launching');
+  launch.style.setProperty('--tone', getComputedStyle(field).backgroundColor);
+  if (nameEl) launch.style.setProperty('--entry-name', getComputedStyle(nameEl).fontSize);
+  launchName.textContent = nameEl ? nameEl.textContent : (user.name || user.label || user.id);
+  launch.setAttribute('aria-hidden', 'false');
+  launch.style.transition = 'none';
+  launch.style.left = rect.left + 'px';
+  launch.style.top = rect.top + 'px';
+  launch.style.width = rect.width + 'px';
+  launch.style.height = rect.height + 'px';
+  void launch.offsetWidth;
+  launch.style.transition = '';
+  launch.classList.add('is-active');
+  entryFieldEls().forEach(function(item) { item.classList.add('is-hidden'); });
+  window.requestAnimationFrame(function() {
+    window.requestAnimationFrame(function() { launch.classList.add('is-grown'); });
+  });
+  _entryLaunch.busy = false;
+  var requiresPin = _entryLaunch.requiresPin;
+  window.setTimeout(function() {
+    if (!_entryLaunch.entered) return;
+    if (typeof commit === 'function') { commit(); return; }
+    if (requiresPin) {
+      // The gate lives inside the grown block; the quiet back control only has a
+      // job to do while that gate is open.
+      launch.classList.add('is-gated');
+      selectLoginUser(user, true);
+    } else {
+      loginUser(user.id, '');
+    }
+  }, 620);
+}
+
+function entryClose() {
+  if (!_entryLaunch.entered || _entryLaunch.busy) return;
+  var launch = document.getElementById('entryLaunch');
+  var field = _entryLaunch.field;
+  if (!launch || !field) { entryReset(); entrySetActive(null); return; }
+  var rect = field.getBoundingClientRect();
+  _entryLaunch.busy = true;
+  var gate = document.getElementById('loginPinForm');
+  if (gate) gate.hidden = true;
+  window._selectedLoginUser = null;
+  var errorEl = document.getElementById('loginError');
+  if (errorEl) errorEl.textContent = '';
+  launch.style.transition = 'none';
+  launch.style.left = rect.left + 'px';
+  launch.style.top = rect.top + 'px';
+  launch.style.width = rect.width + 'px';
+  launch.style.height = rect.height + 'px';
+  void launch.offsetWidth;
+  launch.style.transition = '';
+  launch.classList.remove('is-grown', 'is-gated');
+  window.setTimeout(function() {
+    entryFieldEls().forEach(function(item) { item.classList.remove('is-hidden'); });
+  }, 320);
+  window.setTimeout(function() {
+    entryReset();
+    if (field) field.focus({ preventScroll: true });
+    entrySetActive(null);
+  }, 940);
+}
+
+// Other-device address. Quiet by default, stronger on hover, copied on click.
+// The endpoint returns enabled:false in production, so the chip stays away there.
+function entryLoadLan() {
+  var chip = document.getElementById('loginNetwork');
+  if (!chip) return;
+  chip.hidden = true;
+  chip.classList.remove('is-copied');
+  chip.textContent = '';
+  chip.removeAttribute('data-address');
+  fetch('/api/network/lan', { cache: 'no-store' }).then(function(r) {
+    if (!r.ok) throw new Error('no lan hint');
+    return r.json();
+  }).then(function(data) {
+    if (!data || !data.enabled || !data.local_ip) return;
+    var address = data.local_ip + ':' + (data.port || window.location.port || '8080');
+    var arrow = document.createElement('span');
+    arrow.className = 'entry-lan-arrow';
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.textContent = '↗';
+    var text = document.createElement('span');
+    text.className = 'entry-lan-text';
+    text.textContent = address;
+    chip.appendChild(arrow);
+    chip.appendChild(text);
+    chip.dataset.address = address;
+    chip.setAttribute('aria-label', '复制其他设备访问地址 ' + address);
+    chip.hidden = false;
+  }).catch(function() { chip.hidden = true; });
+}
+
+function entryCopyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+    return navigator.clipboard.writeText(text).then(function() { return true; })
+      .catch(function() { return entryCopyTextFallback(text); });
+  }
+  return Promise.resolve(entryCopyTextFallback(text));
+}
+
+// execCommand is the only option on the plain http:// LAN address, where the
+// async clipboard API is unavailable outside a secure context.
+function entryCopyTextFallback(text) {
+  try {
+    var area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    var copied = document.execCommand('copy');
+    document.body.removeChild(area);
+    return copied;
+  } catch (error) {
+    return false;
+  }
+}
+
+function entryBindLan() {
+  var chip = document.getElementById('loginNetwork');
+  if (!chip || chip.dataset.entryBound === '1') return;
+  chip.dataset.entryBound = '1';
+  chip.addEventListener('click', function() {
+    var address = chip.dataset.address;
+    if (!address) return;
+    entryCopyText(address).then(function(copied) {
+      if (!copied) return;
+      chip.classList.add('is-copied');
+      var text = chip.querySelector('.entry-lan-text');
+      if (text) text.textContent = '已复制';
+      window.setTimeout(function() {
+        chip.classList.remove('is-copied');
+        var current = chip.querySelector('.entry-lan-text');
+        if (current) current.textContent = address;
+      }, 1200);
+    });
+  });
+}
+
+document.addEventListener('keydown', function(event) {
+  var overlay = entryOverlayEl();
+  if (!overlay || overlay.style.display === 'none') return;
+  if (event.key === 'Escape') {
+    if (_entryLaunch.entered) { event.preventDefault(); entryClose(); }
+    return;
+  }
+  if (_entryLaunch.entered) return;
+  var candidates = entryUserFields();
+  if (!candidates.length) return;
+  var current = candidates.indexOf(document.activeElement);
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    candidates[current < 0 ? 0 : (current + 1) % candidates.length].focus();
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    candidates[current < 0 ? candidates.length - 1 : (current - 1 + candidates.length) % candidates.length].focus();
+  } else if (/^[1-9]$/.test(event.key)) {
+    var target = candidates[Number(event.key) - 1];
+    if (target) { event.preventDefault(); entryOpen(target); }
+  }
+});
+
+window.addEventListener('resize', function() {
+  if (_entryResizeTimer) window.clearTimeout(_entryResizeTimer);
+  _entryResizeTimer = window.setTimeout(function() {
+    var overlay = entryOverlayEl();
+    if (overlay && overlay.style.display !== 'none') entryFitNames();
+  }, 140);
+});
+
 function showLogin() {
   // Account-specific preferences must not affect the shared weekly overview
   // available from the account-selection screen.
@@ -9505,12 +9851,14 @@ function showLogin() {
   userPreferences = null;
   document.getElementById('loginOverlay').style.display = 'flex';
   document.getElementById('appLayout').style.display = 'none';
+  // The workspace can send the user back here (switch account), so the expand
+  // transition from the previous visit has to be unwound before re-rendering.
+  entryReset();
   var container = document.getElementById('loginUsers');
   container.innerHTML = '';
   var pinInput = document.getElementById('loginPin');
   var pinForm = document.getElementById('loginPinForm');
   var errorEl = document.getElementById('loginError');
-  var description = document.getElementById('loginDesc');
   window._selectedLoginUser = null;
   if (pinInput) pinInput.value = '';
   if (pinForm) pinForm.hidden = true;
@@ -9521,20 +9869,9 @@ function showLogin() {
   if (pinSubmit) pinSubmit.textContent = '进入';
   if (errorEl) errorEl.textContent = '';
   
-  // Show network access URL
-  var netEl = document.getElementById('loginNetwork');
-  if (netEl) {
-    netEl.innerHTML = '<div class="login-network-label">访问地址</div><div class="login-network-url">正在检测...</div>';
-    fetch('/api/network/ip').then(function(r) {
-      if (!r.ok) throw new Error('无法读取访问地址');
-      return r.json();
-    }).then(function(net) {
-      if (!net || !net.local_ip || !net.port) throw new Error('访问地址不完整');
-      netEl.innerHTML = '<div class="login-network-label">其他设备访问地址</div><div class="login-network-url">http://' + net.local_ip + ':' + net.port + '</div>';
-    }).catch(function(){
-      netEl.innerHTML = '<div class="login-network-label">访问地址</div><div class="login-network-url">http://' + window.location.host + '</div>';
-    });
-  }
+  // Other-device address (local/LAN only; the API reports enabled:false in production).
+  entryBindLan();
+  entryLoadLan();
   
   fetch('/api/auth/users', {
     credentials: 'include',
@@ -9549,18 +9886,38 @@ function showLogin() {
     // weekly-report and account cards after the user has already navigated away.
     if (loginViewToken !== _loginViewToken || document.getElementById('loginOverlay').style.display === 'none') return;
     var requiresPin = Boolean(data.requires_pin);
-    if (description) description.textContent = requiresPin ? '选择账号后继续' : '选择账号进入';
     var users = Array.isArray(data.users) ? data.users.slice() : [];
     users.sort(function(a, b) { return a.name.localeCompare(b.name); });
-    container.innerHTML = '<button type="button" class="login-user-btn" data-login-overview="true"><span class="login-user-avatar" style="background:#8B7355">' + uiIcon('star') + '</span><span class="login-user-name">本周工作</span></button>' +
-      users.map(function(u) {
-        return '<button type="button" class="login-user-btn" data-user-id="' + escapeHtml(u.id) + '"><span class="login-user-avatar" style="background:' + escapeHtml(u.color) + '">' + escapeHtml(u.name.charAt(0).toUpperCase()) + '</span><span class="login-user-name">' + escapeHtml(u.name) + '</span></button>';
-      }).join('');
-    container.querySelector('[data-login-overview]').onclick = enterOverview;
-    users.forEach(function(u) {
-      var button = container.querySelector('[data-user-id="' + String(u.id).replace(/"/g, '\\"') + '"]');
-      if (button) button.onclick = function() { selectLoginUser(u, requiresPin); };
+    _entryLaunch.users = users;
+    _entryLaunch.requiresPin = requiresPin;
+    // The weekly board stays first, exactly as before. It is hidden further down
+    // unless this client is an internal viewer.
+    var entries = [{ overview: true }].concat(users);
+    container.innerHTML = entries.map(function(item) {
+      if (item.overview) {
+        return '<button type="button" class="entry-field" data-login-overview="true">' +
+          '<span class="entry-spine" aria-hidden="true">本周工作</span>' +
+          '<span class="entry-body"><span class="entry-rule"></span><span class="entry-name">本周工作</span></span>' +
+        '</button>';
+      }
+      var label = escapeHtml(item.name);
+      return '<button type="button" class="entry-field" data-user-id="' + escapeHtml(item.id) + '">' +
+        '<span class="entry-spine" aria-hidden="true">' + label + '</span>' +
+        '<span class="entry-body"><span class="entry-rule"></span><span class="entry-name">' + label + '</span></span>' +
+      '</button>';
+    }).join('');
+    entryFieldEls().forEach(function(field, index) {
+      field.style.setProperty('--entry-d', (index * 0.07).toFixed(2) + 's');
+      var match = null;
+      users.forEach(function(candidate) {
+        if (String(candidate.id) === String(field.getAttribute('data-user-id'))) match = candidate;
+      });
+      // The field tone is the account's own colour, so the page never hardcodes
+      // a colour per name. entryTone keeps a malformed value out of the style.
+      if (match) field.style.setProperty('--tone', entryTone(match.color));
     });
+    entryBindFields();
+    entryFitNames();
     // The shared weekly board is a LAN-only read-only entry. Hide its button
     // when this client is not an internal viewer, so it cannot fail with a
     // misleading login-expired message from outside the office network.
@@ -9570,7 +9927,12 @@ function showLogin() {
       if (loginViewToken !== _loginViewToken || document.getElementById('loginOverlay').style.display === 'none') return;
       if (!me || !me.internal_viewer) {
         var overviewButton = container.querySelector('[data-login-overview]');
-        if (overviewButton) overviewButton.style.display = 'none';
+        if (overviewButton) {
+          overviewButton.style.display = 'none';
+          // The remaining accounts now own the full width, so their names are
+          // re-fitted instead of keeping the size computed for one field more.
+          entryFitNames();
+        }
       }
     }).catch(function() {});
   }).catch(function(error) {
@@ -9586,7 +9948,7 @@ function selectLoginUser(user, requiresPin) {
     return;
   }
   window._selectedLoginUser = user;
-  document.querySelectorAll('.login-user-btn').forEach(function(button) {
+  document.querySelectorAll('#loginOverlay .entry-field').forEach(function(button) {
     button.classList.toggle('is-selected', button.dataset.userId === user.id);
   });
   var form = document.getElementById('loginPinForm');
