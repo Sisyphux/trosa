@@ -12,8 +12,18 @@
      only when a future text-heavy workspace explicitly needs them. -->
 <link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
 <link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
+<link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-daylight-20260927">
 </head>
-<body>
+<body id="trosa">
+
+<!-- Daylight room: a fixed light layer behind all content.
+     Purely decorative; the pointer light is enabled on desktop only. -->
+<div class="daylight-room" aria-hidden="true">
+  <div class="daylight-room__field"></div>
+  <div class="daylight-room__vig"></div>
+  <div class="daylight-room__pool"></div>
+  <div class="daylight-room__band"></div>
+</div>
 
 <!-- Account selection. The accounts themselves are the page: one colour field per
      member, rendered from the real registry. No logo, no labels, no explainer. -->

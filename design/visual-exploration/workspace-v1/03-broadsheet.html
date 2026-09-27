@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — Workspace 03 · Broadsheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   03 · BROADSHEET — the customer as today's front page
+   newsprint, ink-blue, one masthead sentence.
+   Concepts:
+     · the current state IS the headline; facts read as "in brief"
+     · three columns with vertical rules and a marginal rail
+     · datelines in Space Mono, text in Archivo
+     · transition from Colonnade = "unfold": the other columns
+       fold away, the chosen one unrolls and the masthead draws
+   ============================================================ */
+:root{
+  --news:#ECE9E1;
+  --news-2:#E4E0D5;
+  --ink:#1D1C19;
+  --ink-2:#4E4B43;
+  --ink-3:#7E7A6E;
+  --rule:rgba(29,28,25,.16);
+  --rule-2:rgba(29,28,25,.32);
+  --blue:#2C4A66;
+  --blue-2:#4A6B87;
+  --red:#8E4A3C;
+  --sans:"Archivo",-apple-system,"PingFang SC",system-ui,sans-serif;
+  --mono:"Space Mono",ui-monospace,Menlo,monospace;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --pad:clamp(1.3rem,3.2vw,3rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--news);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.62;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--blue);color:var(--news)}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.mono{font-family:var(--mono)}
+.tnum{font-variant-numeric:tabular-nums}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.55;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");}
+
+/* ================= masthead ================= */
+.sheet{position:relative;z-index:2;max-width:1500px;margin:0 auto;padding:0 var(--pad)}
+.masthead{padding-top:clamp(1.2rem,2.4vw,1.8rem)}
+.mh-top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--ink-2);text-transform:uppercase}
+.mh-top .brand{font-family:var(--sans);font-weight:700;font-size:1rem;letter-spacing:.02em;text-transform:none;color:var(--ink)}
+.mh-rule{height:1px;background:var(--rule-2);margin:.85rem 0}
+.mh-main{padding:clamp(.6rem,1.6vw,1.1rem) 0}
+.kicker{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;color:var(--blue);margin-bottom:1.1rem;display:flex;flex-wrap:wrap;gap:.5rem}
+.kicker span{white-space:nowrap}
+.kicker .sep{color:var(--ink-3)}
+.headline{
+  font-family:var(--sans);font-weight:600;letter-spacing:-.028em;
+  font-size:clamp(1.9rem,5.2vw,3.6rem);line-height:1.08;max-width:34ch;text-wrap:balance
+}
+.headline em{font-style:normal;color:var(--blue)}
+.mh-bottom{display:flex;align-items:center;justify-content:space-between;gap:1rem;border-top:3px solid var(--ink);padding:.7rem 0;margin-top:.4rem}
+.mh-nav{display:flex;gap:clamp(.8rem,2vw,1.6rem);font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;overflow-x:auto}
+.mh-nav button{color:var(--ink-3);padding-bottom:.25rem;border-bottom:2px solid transparent;white-space:nowrap;transition:color .25s,border-color .25s}
+.mh-nav button:hover{color:var(--ink)}
+.mh-nav button.on{color:var(--ink);border-bottom-color:var(--blue)}
+.mh-export{display:flex;gap:1rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;color:var(--ink-3);white-space:nowrap}
+.mh-export button:hover{color:var(--ink)}
+
+/* ================= columns ================= */
+.cols{display:grid;grid-template-columns:minmax(200px,240px) 1fr minmax(220px,270px);gap:0;padding-bottom:clamp(3rem,8vw,5rem)}
+.col{padding:clamp(1.6rem,3vw,2.4rem) clamp(1rem,2.2vw,1.8rem)}
+.col-mid{border-left:1px solid var(--rule);border-right:1px solid var(--rule);padding-left:clamp(1.4rem,2.6vw,2.2rem);padding-right:clamp(1.4rem,2.6vw,2.2rem)}
+.col-left{padding-left:0}
+.col-right{padding-right:0}
+h3.colhead{font-family:var(--mono);font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);padding-bottom:.8rem;border-bottom:1px solid var(--rule-2);margin-bottom:1.4rem;display:flex;justify-content:space-between}
+h3.colhead span{color:var(--blue)}
+
+/* left rail */
+.brief h4{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.7rem}
+.brief p{font-size:1.02rem;font-weight:500;line-height:1.5;margin-bottom:1.6rem}
+.brief p.quote{font-weight:400;color:var(--ink-2);font-size:.94rem;line-height:1.6;padding-left:1rem;border-left:2px solid var(--news-2)}
+.brief p.quote cite{display:block;font-family:var(--mono);font-size:.62rem;font-style:normal;letter-spacing:.08em;color:var(--ink-3);margin-top:.6rem}
+.facted{margin-top:1.6rem;border-top:1px solid var(--rule);padding-top:1.3rem}
+.facted dl{display:grid;gap:.85rem}
+.facted dt{font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.2rem}
+.facted dd{font-size:.9rem}
+.facted dd a{border-bottom:1px solid var(--rule-2)}
+
+/* mid: in brief */
+.items{display:flex;flex-direction:column}
+.item{padding:1.5rem 0;border-bottom:1px solid var(--rule)}
+.item:first-child{padding-top:0}
+.item .dateline{font-family:var(--mono);font-size:.64rem;letter-spacing:.06em;color:var(--blue);text-transform:uppercase;display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.7rem}
+.item .dateline .dir{color:var(--ink-3)}
+.item p{font-size:1.02rem;line-height:1.66}
+.item:first-child p:first-of-type::first-letter{font-family:var(--sans);font-weight:700;font-size:3.1em;line-height:.82;float:left;padding:.06em .1em 0 0;color:var(--ink)}
+.item .note{clear:left}
+.item .note{margin-top:.7rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.02em;color:var(--ink-2)}
+.item .note b{color:var(--red);font-weight:400}
+body.js .item{opacity:0;transform:translateY(16px)}
+body.js .sheet.in .item{opacity:1;transform:none;transition:opacity .7s var(--ease),transform .7s var(--ease-out)}
+body.js .sheet.in .item:nth-child(1){transition-delay:.05s}
+body.js .sheet.in .item:nth-child(2){transition-delay:.11s}
+body.js .sheet.in .item:nth-child(3){transition-delay:.17s}
+body.js .sheet.in .item:nth-child(4){transition-delay:.23s}
+body.js .sheet.in .item:nth-child(5){transition-delay:.29s}
+
+/* compose */
+.compose{margin-top:1.6rem;border:1px solid var(--rule-2)}
+.compose .modes{display:flex;border-bottom:1px solid var(--rule);font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;text-transform:uppercase}
+.compose .modes button{flex:1;padding:.7rem;color:var(--ink-3);border-right:1px solid var(--rule)}
+.compose .modes button:last-child{border-right:0}
+.compose .modes button[aria-pressed=true]{color:var(--blue);background:var(--news-2)}
+.compose textarea{width:100%;border:0;background:none;resize:none;font:inherit;font-size:.98rem;padding:1rem;min-height:4.4rem;outline:none}
+.compose textarea::placeholder{color:var(--ink-3)}
+.compose .foot{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--rule);padding:.6rem 1rem}
+.compose .foot span{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;color:var(--ink-3)}
+.compose .foot button{background:var(--ink);color:var(--news);font-family:var(--mono);font-size:.66rem;letter-spacing:.08em;padding:.5rem 1rem;transition:background .25s}
+.compose .foot button:hover{background:var(--blue)}
+
+/* right rail */
+.lead{border-top:3px solid var(--ink);padding-top:1rem;margin-bottom:2rem}
+.lead h4{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--blue);margin-bottom:.8rem}
+.lead .t{font-size:1.22rem;font-weight:600;line-height:1.36;letter-spacing:-.01em}
+.lead .d{font-family:var(--mono);font-size:.7rem;letter-spacing:.06em;color:var(--ink-2);margin:.8rem 0 1rem}
+.lead .acts{display:flex;flex-direction:column;gap:.5rem}
+.lead .acts button{font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;color:var(--ink-2);padding:.5rem .8rem;border:1px solid var(--rule);transition:.25s}
+.lead .acts button:hover{border-color:var(--ink);color:var(--ink)}
+.lead .acts button.primary{background:var(--blue);color:var(--news);border-color:var(--blue)}
+.lead .acts button.primary:hover{background:var(--ink);border-color:var(--ink)}
+.tasks h4{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.9rem}
+.tasks li{list-style:none;display:flex;gap:.7rem;align-items:baseline;padding:.7rem 0;border-top:1px solid var(--rule);font-size:.9rem}
+.tasks li .tick{flex:0 0 auto;width:11px;height:11px;border:1px solid var(--rule-2)}
+.tasks li.done .tick{background:var(--blue);border-color:var(--blue)}
+.tasks li.done{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--rule-2)}
+.tasks li time{display:block;font-family:var(--mono);font-size:.62rem;color:var(--ink-3);margin-top:.2rem}
+.tasks li.next time{color:var(--red)}
+
+/* full-width views */
+.view{display:none;padding:clamp(2rem,5vw,3rem) 0 clamp(3rem,8vw,5rem)}
+.view.on{display:block}
+.view .vhead{font-family:var(--mono);font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);border-bottom:3px solid var(--ink);padding-bottom:.7rem;margin-bottom:2rem}
+.wide{columns:2;column-gap:clamp(2rem,5vw,4rem);column-rule:1px solid var(--rule)}
+.dl{padding-bottom:1.4rem;break-inside:avoid}
+.dl dt{font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.25rem}
+.dl dd{font-size:.98rem;margin-bottom:1.3rem}
+.dl dd a{border-bottom:1px solid var(--rule-2)}
+.listrow{display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:baseline;padding:1.1rem 0;border-bottom:1px solid var(--rule);break-inside:avoid}
+.listrow b{font-weight:600;font-size:1rem}
+.listrow span{display:block;font-family:var(--mono);font-size:.64rem;letter-spacing:.06em;color:var(--ink-3);margin-top:.3rem}
+.listrow a{border-bottom:1px solid var(--rule-2);font-family:var(--mono);font-size:.76rem}
+.listrow time{font-family:var(--mono);font-size:.7rem;color:var(--ink-3)}
+
+.replay{position:fixed;z-index:50;bottom:1.1rem;right:1.1rem;font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2);border:1px solid var(--rule-2);background:color-mix(in srgb,var(--news) 82%,transparent);backdrop-filter:blur(6px);border-radius:999px;padding:.5rem 1rem;opacity:0;transition:opacity .5s var(--ease) .8s}
+.entered .replay{opacity:1}
+.replay:hover{background:var(--ink);color:var(--news);border-color:var(--ink)}
+
+/* ============================================================
+   INTRO — Colonnade → Broadsheet (unfold)
+   ============================================================ */
+.intro{position:fixed;inset:0;z-index:80;background:var(--news)}
+.intro.gone{opacity:0;pointer-events:none;transition:opacity .7s var(--ease)}
+.ifields{position:absolute;inset:0;display:flex}
+.ifield{position:relative;flex:1 1 0;min-width:0;background:var(--t);display:flex;align-items:flex-end;padding:0 clamp(1.2rem,2.4vw,2.2rem) clamp(2.4rem,5vw,3.6rem);border-right:1px solid rgba(29,28,25,.18);transition:flex-grow .55s var(--ease-out),opacity .5s var(--ease)}
+.ifield:last-child{border-right:0}
+.ifield.active{flex-grow:2.4}
+.ifield.folded{flex-grow:0;opacity:0;border-right:0}
+.ifield .spine{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-weight:700;font-size:clamp(.8rem,1vw,.95rem);letter-spacing:.32em;text-transform:uppercase;color:rgba(29,28,25,.7);white-space:nowrap}
+.ifield.active .spine{opacity:0}
+.ibrand{position:absolute;top:clamp(1rem,2.4vw,1.6rem);left:clamp(1.2rem,2.4vw,2.2rem);font-family:var(--sans);font-weight:700;font-size:1.1rem;color:#1D1C19}
+.veil{position:fixed;z-index:81;overflow:hidden;background:var(--news);opacity:0;pointer-events:none;
+  transition:left .6s var(--ease-out),top .6s var(--ease-out),width .6s var(--ease-out),height .6s var(--ease-out),background-color .8s var(--ease)}
+.veil.on{opacity:1}
+.veil.grown{left:0!important;top:0!important;width:100vw!important;height:100vh!important}
+.veil.washed{background-color:var(--news)}
+.veil .vname{position:absolute;left:clamp(1.2rem,2.4vw,2.2rem);bottom:clamp(2.4rem,5vw,3.6rem);font-family:var(--sans);font-weight:700;font-size:clamp(1.6rem,4.6vw,3.2rem);letter-spacing:-.02em;text-transform:uppercase;color:var(--ink);line-height:1;transition:opacity .5s var(--ease),transform .7s var(--ease-out)}
+.veil.washed .vname{opacity:0;transform:translateY(-.5rem)}
+.veil .mastline{position:absolute;left:0;right:0;top:50%;height:3px;background:var(--ink);transform-origin:left;transform:scaleX(0)}
+.veil.washed .mastline{transform:scaleX(1);transition:transform .8s var(--ease-out)}
+
+@media (max-width:1150px){
+  .cols{grid-template-columns:1fr;gap:0}
+  .col{border-left:0!important;border-right:0!important;padding-left:0;padding-right:0;border-top:1px solid var(--rule)}
+  .col-mid{border-top:1px solid var(--rule-2)}
+  .col-right{display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start}
+  .lead{margin-bottom:0}
+}
+@media (max-width:820px){
+  .wide{columns:1}
+  .mh-nav{order:2;width:100%}
+  .mh-export{display:none}
+  .headline{font-size:clamp(1.7rem,7vw,2.4rem)}
+}
+@media (max-width:600px){
+  .col-right{grid-template-columns:1fr}
+  .item:first-child p:first-of-type::first-letter{font-size:2.6em}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  body.js .item{opacity:1!important;transform:none!important}
+}
+</style>
+</head>
+<body>
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="ifields" id="ifields">
+    <div class="ifield" data-name="Amy" style="--t:#D9D0C3"><span class="spine">Amy</span></div>
+    <div class="ifield" data-name="Emma" style="--t:#CCB7AB"><span class="spine">Emma</span></div>
+    <div class="ifield" data-name="Hamid" style="--t:#BEC6B8"><span class="spine">Hamid</span></div>
+    <div class="ifield" data-name="Kelley" style="--t:#BCC3C8"><span class="spine">Kelley</span></div>
+  </div>
+  <div class="ibrand">Trosa</div>
+  <div class="veil" id="veil"><span class="mastline"></span><span class="vname" id="vname">Amy</span></div>
+</div>
+
+<div class="sheet" id="sheet">
+  <header class="masthead">
+    <div class="mh-top">
+      <span class="brand">Trosa</span>
+      <span class="mono">2026 年 9 月 27 日 · 周日 · 客户工作台 · <span id="mhUser">Amy</span></span>
+    </div>
+    <div class="mh-rule"></div>
+    <div class="mh-main">
+      <p class="kicker">
+        <span>Acryl Innovations GmbH</span><span class="sep">/</span>
+        <span>№ 014</span><span class="sep">/</span>
+        <span>德国</span><span class="sep">/</span>
+        <span>展示器材 · 亚克力</span><span class="sep">/</span>
+        <span>来源 SIGN CHINA 2026</span><span class="sep">/</span>
+        <span>等级 B+</span>
+      </p>
+      <h1 class="headline">等待客户内部确认再生料比例，<em>样品反馈是下一轮报价的钥匙。</em></h1>
+    </div>
+    <div class="mh-bottom">
+      <nav class="mh-nav" id="mhNav" aria-label="分区">
+        <button data-v="front" class="on">头版</button>
+        <button data-v="profile">资料</button>
+        <button data-v="contacts">联系人</button>
+        <button data-v="files">文件</button>
+        <button data-v="tasks">全部待办</button>
+      </nav>
+      <div class="mh-export"><button>导出邮箱</button><button>导出沟通</button></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="view on" id="view-front">
+      <div class="cols">
+        <aside class="col col-left">
+          <div class="brief">
+            <h4>最近沟通</h4>
+            <p class="quote">“三款色板耐候测试通过，请在报价中标注再生料比例与 EU 合规编号。”<cite>Markus Weber · 客户来信 · 9 月 24 日</cite></p>
+            <h4>当前等待</h4>
+            <p>客户内部确认再生料比例</p>
+          </div>
+          <div class="facted">
+            <h4 style="font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;color:var(--ink-3);margin-bottom:.9rem;text-transform:uppercase">客户资料</h4>
+            <dl>
+              <div><dt>来源</dt><dd>SIGN CHINA 2026 · 展会</dd></div>
+              <div><dt>行业</dt><dd>展示器材 / 亚克力</dd></div>
+              <div><dt>主要联系人</dt><dd>Markus Weber</dd></div>
+              <div><dt>网站</dt><dd><a href="https://acryl-innovations.de" target="_blank" rel="noopener">acryl-innovations.de</a></dd></div>
+              <div><dt>沟通对象</dt><dd>共 2 位联系人</dd></div>
+            </dl>
+          </div>
+        </aside>
+
+        <section class="col col-mid">
+          <h3 class="colhead">沟通与时间线 <span id="factsCount"></span></h3>
+          <div class="items" id="items"></div>
+          <form class="compose" id="compose" autocomplete="off">
+            <div class="modes"><button type="button" aria-pressed="true">沟通记录</button><button type="button" aria-pressed="false">开发邮件</button></div>
+            <textarea rows="3" placeholder="粘贴邮件、WhatsApp 对话或会议内容；系统区分双方并整理摘要"></textarea>
+            <div class="foot"><span>保存后可在时间线中确认</span><button type="submit">只保存记录</button></div>
+          </form>
+        </section>
+
+        <aside class="col col-right">
+          <div class="lead">
+            <h4>下一步</h4>
+            <p class="t">确认样品反馈，准备下一轮报价</p>
+            <p class="d tnum">9 月 29 日 · 周二</p>
+            <div class="acts">
+              <button class="primary" data-act="log">记录沟通</button>
+              <button>调整下一步</button>
+              <button>标记完成</button>
+            </div>
+          </div>
+          <div class="tasks">
+            <h4>其他待办</h4>
+            <ul id="tasksRail"></ul>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="view" id="view-profile"><p class="vhead">资料</p><div class="wide" id="profileList"></div></section>
+    <section class="view" id="view-contacts"><p class="vhead">联系人</p><div class="wide" id="contactsList"></div></section>
+    <section class="view" id="view-files"><p class="vhead">文件</p><div class="wide" id="filesList"></div></section>
+    <section class="view" id="view-tasks"><p class="vhead">全部待办</p><div class="wide" id="tasksList"></div></section>
+  </main>
+</div>
+
+<button class="replay" id="replay">重播转场</button>
+
+<script>
+document.documentElement.classList.add('js');document.body.classList.add('js');
+
+var DATA={customer:{
+  company:'Acryl Innovations GmbH',no:'014',country:'德国',industry:'展示器材 / 亚克力',
+  source:'SIGN CHINA 2026 · 展会',level:'B+',website:'acryl-innovations.de',businessRole:'终端',
+  profile:'杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。',
+  waiting:'客户内部确认再生料比例',
+  next:{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29'},
+  contacts:[{name:'Markus Weber',title:'采购经理',email:'m.weber@acryl-innovations.de',primary:true},
+            {name:'Lena Fischer',title:'产品与合规',email:'l.fischer@acryl-innovations.de'}],
+  facts:[
+    {date:'2026-09-24',type:'邮件',dir:'in',source:'客户来信',full:'Markus 回复：三款色板的耐候测试通过，但需要我们在报价中标注再生料比例与 EU 合规编号。',result:'需要在报价单补充材料说明'},
+    {date:'2026-09-22',type:'寄样',dir:'out',source:'我方寄样',full:'寄出 R-PMMA 三款色板（自然、烟灰、琥珀）及基础参数表。'},
+    {date:'2026-09-18',type:'展会现场',dir:'two',source:'SIGN CHINA 2026',full:'展位沟通 25 分钟，对方对再生亚克力系列感兴趣，现场索要样品与 MOQ。',result:'约定回国后寄样并报价'},
+    {date:'2026-09-16',type:'报价',dir:'out',source:'首轮报价 RP-0916',full:'发出首轮报价，MOQ 500 件，交期 25 天。'},
+    {date:'2026-09-10',type:'开发邮件',dir:'out',source:'开发信',full:'通过领英找到采购负责人，发出首封开发邮件。'}
+  ],
+  files:[{name:'报价单_RP-0916.pdf',cat:'报价单',size:'218 KB',date:'2026-09-16'},
+         {name:'色板参数表_R-PMMA.xlsx',cat:'产品资料',size:'64 KB',date:'2026-09-22'},
+         {name:'SIGN_CHINA_展位记录.jpg',cat:'展会资料',size:'1.2 MB',date:'2026-09-18'}],
+  tasks:[{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29',done:false,next:true},
+         {title:'补发 EU 合规文件（REACH / ROHS）',date:'2026-10-02',done:false},
+         {title:'寄出手感样并确认收货',date:'2026-09-22',done:true}]
+}};
+
+function cn(iso){var p=iso.split('-');return Number(p[1])+' 月 '+Number(p[2])+' 日';}
+function wd(iso){return['周日','周一','周二','周三','周四','周五','周六'][new Date(iso+'T00:00:00').getDay()];}
+function ago(iso){var t=new Date();t.setHours(0,0,0,0);var d=new Date(iso+'T00:00:00');var n=Math.round((t-d)/86400000);
+  if(n<0)return'';if(n===0)return'今天';if(n===1)return'昨天';if(n<7)return n+' 天前';return'';}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+(function render(){
+  var c=DATA.customer;
+  document.getElementById('factsCount').textContent=c.facts.length+' 条';
+  document.getElementById('items').innerHTML=c.facts.map(function(f){
+    var dt={in:'客户发给我',out:'我发给客户',two:'双方沟通'}[f.dir];
+    var a=ago(f.date);
+    return '<article class="item">'+
+      '<div class="dateline"><span>'+cn(f.date)+'</span><span>'+wd(f.date)+'</span><span>· '+esc(f.type)+'</span><span class="dir">'+esc(dt)+' · '+esc(f.source)+'</span>'+(a?'<span class="dir">· '+a+'</span>':'')+'</div>'+
+      '<p>'+esc(f.full)+'</p>'+
+      (f.result?'<p class="note"><b>结果 / </b>'+esc(f.result)+'</p>':'')+
+    '</article>';
+  }).join('');
+  document.getElementById('profileList').innerHTML=[
+    ['公司',esc(c.company)],['国家 / 地区',esc(c.country)],['行业领域',esc(c.industry)],
+    ['客户来源',esc(c.source)],['等级',esc(c.level)],['业务角色',esc(c.businessRole)],
+    ['网站','<a href="https://'+esc(c.website)+'" target="_blank" rel="noopener">'+esc(c.website)+'</a>'],
+    ['当前等待',esc(c.waiting)],['简介',esc(c.profile)]
+  ].map(function(r){return '<div class="dl"><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>';}).join('');
+  document.getElementById('contactsList').innerHTML=c.contacts.map(function(p){
+    return '<div class="listrow"><div><b>'+esc(p.name)+'</b><span>'+esc(p.title)+(p.primary?' · 主要联系人':'')+'</span></div><a href="mailto:'+esc(p.email)+'">'+esc(p.email)+'</a></div>';
+  }).join('');
+  document.getElementById('filesList').innerHTML=c.files.map(function(f){
+    return '<div class="listrow"><div><b>'+esc(f.name)+'</b><span>'+esc(f.cat)+' · '+esc(f.size)+'</span></div><time>'+cn(f.date)+'</time></div>';
+  }).join('');
+  document.getElementById('tasksList').innerHTML=c.tasks.map(function(t){
+    return '<div class="listrow"><div><b>'+esc(t.title)+'</b><span>'+(t.done?'已完成':(t.next?'下一步':''))+'</span></div><time class="tnum">'+cn(t.date)+'</time></div>';
+  }).join('');
+  document.getElementById('tasksRail').innerHTML=c.tasks.map(function(t){
+    return '<li class="'+(t.done?'done ':'')+(t.next?'next':'')+'"><span class="tick"></span><div>'+esc(t.title)+'<time class="tnum">'+cn(t.date)+(t.next?' · 下一步':'')+'</time></div></li>';
+  }).join('');
+})();
+
+document.querySelectorAll('#mhNav button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('#mhNav button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    ['front','profile','contacts','files','tasks'].forEach(function(v){
+      document.getElementById('view-'+v).classList.toggle('on',v===b.dataset.v);
+    });
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+document.addEventListener('keydown',function(e){
+  if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
+  var m={'1':'front','2':'profile','3':'contacts','4':'files','5':'tasks'};
+  if(m[e.key])document.querySelector('#mhNav button[data-v="'+m[e.key]+'"]').click();
+});
+document.querySelector('[data-act="log"]').addEventListener('click',function(){document.querySelector('#compose textarea').focus();});
+document.getElementById('compose').addEventListener('submit',function(e){e.preventDefault();document.querySelector('#compose textarea').value='';});
+document.querySelectorAll('#compose .modes button').forEach(function(b){
+  b.addEventListener('click',function(){document.querySelectorAll('#compose .modes button').forEach(function(x){x.setAttribute('aria-pressed','false');});b.setAttribute('aria-pressed','true');});
+});
+
+/* ============================================================
+   INTRO — Colonnade → Broadsheet (unfold)
+   ============================================================ */
+(function(){
+  var intro=document.getElementById('intro'),veil=document.getElementById('veil'),vname=document.getElementById('vname');
+  var ifields=[].slice.call(document.querySelectorAll('.ifield'));
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var T=[],timers=[];function tm(fn,ms){timers.push(setTimeout(fn,ms));}function clr(){timers.forEach(clearTimeout);timers=[];}
+  function pick(el){ifields.forEach(function(f){f.classList.toggle('active',f===el);});}
+  function play(name,el){
+    clr();
+    document.body.classList.remove('entered');document.getElementById('sheet').classList.remove('in');
+    intro.classList.remove('gone');veil.classList.remove('on','grown','washed');
+    veil.style.left=veil.style.top=veil.style.width=veil.style.height='';veil.style.background='';
+    ifields.forEach(function(f){f.style.display='';f.classList.remove('active','folded');});
+    vname.textContent=name;document.getElementById('mhUser').textContent=name;
+    if(reduce){enter(name);return;}
+    pick(el);
+    var r=el.getBoundingClientRect();
+    tm(function(){
+      // fold the other columns away, like pages closing
+      ifields.forEach(function(f){if(f!==el)f.classList.add('folded');});
+      veil.style.transition='none';
+      veil.style.left=r.left+'px';veil.style.top=r.top+'px';veil.style.width=r.width+'px';veil.style.height=r.height+'px';
+      veil.style.background=getComputedStyle(el).backgroundColor;void veil.offsetWidth;veil.style.transition='';
+      veil.classList.add('on');ifields.forEach(function(f){f.style.display='none';});
+      requestAnimationFrame(function(){requestAnimationFrame(function(){veil.classList.add('grown');});});
+    },300);
+    tm(function(){veil.classList.add('washed');},300+700);
+    tm(function(){document.body.classList.add('entered');document.getElementById('sheet').classList.add('in');},300+700+260);
+    tm(function(){intro.classList.add('gone');},300+700+680);
+  }
+  function enter(name){
+    clr();veil.classList.remove('on');ifields.forEach(function(f){f.style.display='none';});
+    document.getElementById('mhUser').textContent=name;
+    document.body.classList.add('entered');document.getElementById('sheet').classList.add('in');intro.classList.add('gone');
+  }
+  var chosen=0,interacted=false;
+  ifields.forEach(function(f,i){
+    f.addEventListener('mouseenter',function(){interacted=true;pick(f);});
+    f.addEventListener('focus',function(){interacted=true;pick(f);});
+    f.addEventListener('click',function(){interacted=true;chosen=i;play(f.dataset.name,f);});
+  });
+  setTimeout(function(){if(!interacted){chosen=0;play('Amy',ifields[0]);}},900);
+  document.getElementById('replay').addEventListener('click',function(){intro.classList.remove('gone');play(ifields[chosen].dataset.name,ifields[chosen]);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!intro.classList.contains('gone')){enter('Amy');}});
+})();
+</script>
+</body>
+</html>

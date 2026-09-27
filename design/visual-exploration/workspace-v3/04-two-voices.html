@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trosa — Workspace 04 · Two Voices</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --base:#EDE9E1; --them:#E7E3DA; --us:#F1EEE7; --paper:#F6F4EF;
+  --ink:#211E19; --ink-2:#514B41; --mut:#8B8477; --faint:#ABA396;
+  --ac-them:#5A6B7A; --ac-us:#9A6A4C; --hair:rgba(33,30,25,.13); --hair-2:rgba(33,30,25,.26);
+  --serif:"EB Garamond","Songti SC",Georgia,serif;
+  --sans:"Inter","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  --gut:clamp(1.3rem,3.6vw,3.4rem);
+  --ease:cubic-bezier(.16,1,.3,1); --ease-out:cubic-bezier(.25,.85,.2,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--sans);background:var(--base);color:var(--ink);overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+.k{font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:var(--mut)}
+:focus-visible{outline:1px solid var(--ac-us);outline-offset:3px}
+
+.app{height:100%;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr auto}
+
+/* ---------- top ---------- */
+.top{display:flex;align-items:center;gap:1.3rem;height:clamp(48px,5.8vh,60px);padding:0 var(--gut);background:var(--paper);border-bottom:1px solid var(--hair)}
+.brand{font-family:var(--serif);font-size:1.06rem;letter-spacing:.02em}
+.top .meta{font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.nav{margin-left:auto;display:flex;gap:1.2rem}
+.nav button{font-size:.75rem;letter-spacing:.05em;color:var(--mut);padding:.25rem 0;border-bottom:1px solid transparent;transition:color .3s var(--ease),border-color .3s var(--ease)}
+.nav button:hover{color:var(--ink)}
+.nav button.on{color:var(--ink);border-color:var(--ac-us)}
+.who{display:flex;align-items:center;gap:.5rem;font-size:.68rem;letter-spacing:.1em;color:var(--mut)}
+.who i{width:5px;height:5px;border-radius:50%;background:var(--ac-us)}
+
+/* ---------- the two columns ---------- */
+.spread{position:relative;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;align-content:stretch;overflow:hidden}
+.spread::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--hair-2);transform:scaleY(0);transform-origin:top;transition:transform 1.1s var(--ease-out)}
+body.entered .spread::before{transform:scaleY(1);transition-delay:.55s}
+.spread #body{display:contents}
+.spread .bgL,.spread .bgR{position:absolute;top:0;bottom:0;width:50%;pointer-events:none}
+.bgL{left:0;background:var(--them)}
+.bgR{right:0;background:var(--us)}
+.ev{position:relative;display:flex;align-items:center;padding:clamp(.7rem,2.1vh,1.1rem) clamp(1.4rem,4vw,3.6rem)}
+.ev.left{grid-column:1;justify-content:flex-end}
+.ev.right{grid-column:2;justify-content:flex-start}
+.ev.both{grid-column:1/-1;justify-content:center;text-align:center}
+.ev::after{content:'';position:absolute;top:50%;width:clamp(1rem,3.6vw,3.2rem);height:1px;background:var(--hair)}
+.ev.left::after{right:0}
+.ev.right::after{left:0}
+.ev .node{position:absolute;top:calc(50% - 2.5px);width:5px;height:5px;border-radius:50%;background:var(--faint)}
+.ev.left .node{right:-3px}
+.ev.right .node{left:-3px}
+.ev.both .node{left:calc(50% - 3px)}
+.bubble{max-width:min(46ch,34vw);text-align:left}
+.ev.left .bubble{text-align:right}
+.ev .who-k{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--faint)}
+.ev .date{display:block;margin-top:.28rem;font-size:.68rem;letter-spacing:.1em;color:var(--mut);font-variant-numeric:tabular-nums}
+.ev .say{margin-top:.5rem;font-size:.9rem;line-height:1.55;color:var(--ink)}
+.ev.them .say{font-family:var(--serif);font-size:1.02rem;font-style:italic;line-height:1.5;color:var(--ink-2)}
+.ev.them .who-k{color:var(--ac-them)}
+.ev.us .who-k{color:var(--ac-us)}
+.ev .rs{display:inline-block;margin-top:.5rem;font-size:.66rem;letter-spacing:.06em;color:var(--ac-us)}
+.ev.them .rs{color:var(--ac-them)}
+.ev.both .bubble{max-width:min(52ch,42vw);text-align:center}
+.ev.both .say{font-family:var(--serif);font-size:1.06rem;font-style:italic;color:var(--ink-2)}
+.ev.both .rs{color:var(--ac-them)}
+
+/* wide (index) view */
+body.wide .bgL,body.wide .bgR{background:var(--paper)}
+body.wide .spread{grid-template-columns:1fr;justify-items:center;overflow:hidden;grid-auto-rows:min-content;align-content:start}
+body.wide .spread::before{display:none}
+body.wide .ev{grid-column:1/-1!important;justify-content:center!important;text-align:left!important}
+body.wide .ev::after,body.wide .ev .node{display:none}
+body.wide .bubble{max-width:min(720px,66vw)!important;text-align:left!important;width:100%}
+.ixhead{grid-column:1/-1;width:min(720px,66vw);display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+  padding:clamp(.6rem,1.8vh,1rem) 0 .7rem;border-bottom:1px solid var(--hair-2)}
+body.wide .ixhead{margin:0 auto}
+.dlg{display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:0 1.2rem;width:100%}
+.dlg dt{font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);padding:.42rem 0}
+.dlg dd{font-size:.86rem;color:var(--ink-2);padding:.42rem 0;border-bottom:1px solid var(--hair);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ixrow{display:flex;align-items:baseline;justify-content:space-between;gap:1.2rem;width:100%;padding:.72rem 0;border-bottom:1px solid var(--hair)}
+.ixrow b{font-weight:400;font-size:.9rem;color:var(--ink)}
+.ixrow .sm{display:block;margin-top:.26rem;font-size:.66rem;letter-spacing:.06em;color:var(--mut)}
+.ixrow a{text-decoration:none;border-bottom:1px solid var(--hair)}
+.ixrow time{font-size:.68rem;letter-spacing:.08em;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ixrow.done b{color:var(--faint);text-decoration:line-through}
+
+/* ---------- bottom: the one accent ---------- */
+.band{display:grid;grid-template-columns:minmax(0,1.1fr) auto;align-items:center;gap:var(--gut);
+  padding:clamp(.85rem,2.3vh,1.4rem) clamp(7rem,9vw,8.5rem) clamp(.85rem,2.3vh,1.4rem) var(--gut);background:var(--paper);border-top:2px solid var(--ink)}
+.band .k{color:var(--ac-us)}
+.band h2{margin-top:.45rem;font-family:var(--serif);font-size:clamp(1.1rem,1.7vw,1.5rem);line-height:1.25;letter-spacing:-.005em}
+.band .when{margin-top:.4rem;font-size:.68rem;letter-spacing:.1em;color:var(--mut)}
+.band .when b{font-weight:400;color:var(--ink-2)}
+.acts{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+.acts button{font-size:.75rem;letter-spacing:.04em;color:var(--ink-2);padding:.4rem 0;border-bottom:1px solid var(--hair);transition:color .3s,border-color .3s}
+.acts button:hover{color:var(--ink);border-color:var(--ink)}
+.acts button.primary{background:var(--ac-us);color:#FBF6EF;padding:.6rem 1.25rem;border:0;border-radius:2px}
+.acts button.primary:hover{background:#AA7756}
+
+/* ---------- intro ---------- */
+.intro{position:fixed;inset:0;z-index:80;background:var(--base);perspective:1500px}
+.intro.gone{opacity:0;pointer-events:none;transition:opacity .8s var(--ease)}
+.ifields{position:absolute;inset:0;display:flex}
+.ifield{position:relative;flex:1 1 0;min-width:0;background:var(--t);display:flex;align-items:flex-end;padding:0 clamp(1.2rem,2.4vw,2.2rem) clamp(2.4rem,5vw,3.6rem);transition:flex-grow .7s var(--ease-out),opacity .5s var(--ease)}
+.ifield.active{flex-grow:2.4}
+.ifield.drained{flex-grow:0;opacity:0}
+.ifield .spine{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--serif);font-size:1rem;letter-spacing:.34em;text-transform:uppercase;color:rgba(33,30,25,.6);white-space:nowrap}
+.ifield.active .spine{opacity:0}
+.ibrand{position:absolute;top:clamp(1rem,2.4vw,1.6rem);left:clamp(1.2rem,2.4vw,2.2rem);font-family:var(--serif);font-size:1.06rem;color:#211E19}
+.veil{position:fixed;inset:0;z-index:81;opacity:0;pointer-events:none;transition:opacity .6s var(--ease) .65s}
+.veil.on{opacity:1}
+.veil .half{position:absolute;top:0;bottom:0;width:50%;background:var(--tone);backface-visibility:hidden;transition:transform 1.25s var(--ease-out)}
+.veil .half.l{left:0;transform-origin:right center}
+.veil .half.r{right:0;transform-origin:left center}
+.veil.open .half.l{transform:rotateY(-99deg)}
+.veil.open .half.r{transform:rotateY(99deg)}
+.veil .vname{position:absolute;left:clamp(1.2rem,2.4vw,2.2rem);bottom:clamp(2.2rem,4.6vw,3.4rem);font-family:var(--serif);font-size:clamp(1.5rem,4.2vw,2.8rem);color:#211E19;transition:opacity .5s var(--ease)}
+.veil.open .vname{opacity:0}
+
+body.js .up{opacity:0;transform:translateY(10px)}
+body.entered .up{opacity:1;transform:none;transition:opacity .9s var(--ease),transform 1.1s var(--ease-out)}
+.replay{position:fixed;z-index:50;bottom:1rem;right:1rem;font-size:.58rem;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);border:1px solid var(--hair);
+  background:color-mix(in srgb,var(--paper) 88%,transparent);border-radius:999px;padding:.42rem .9rem;opacity:0;transition:opacity .7s var(--ease) .8s}
+body.entered .replay{opacity:1}
+
+@media (max-width:1024px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%}
+  .spread{grid-template-columns:1fr;overflow:visible}
+  .spread::before,.bgL,.bgR{display:none}
+  .ev{grid-column:1/-1!important;justify-content:flex-start!important;padding-left:var(--gut);padding-right:var(--gut)}
+  .ev::after{display:none}
+  .ev .node{left:0!important;right:auto!important}
+  .ev .bubble,body.wide .bubble{max-width:none!important;width:100%;text-align:left!important}
+  .bubble{padding-left:.9rem;border-left:1px solid var(--hair)}
+  .ev.both .bubble{border-left-color:var(--hair-2);text-align:left}
+  .band{grid-template-columns:1fr;gap:.9rem}
+  .nav{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  body.js .up{opacity:1!important;transform:none!important}
+  .spread::before{transform:scaleY(1)!important}
+}
+</style>
+</head>
+<body class="js">
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="ifields" id="ifields">
+    <div class="ifield" data-name="Amy" style="--t:#D9D0C3"><span class="spine">Amy</span></div>
+    <div class="ifield" data-name="Emma" style="--t:#CCB7AB"><span class="spine">Emma</span></div>
+    <div class="ifield" data-name="Hamid" style="--t:#BEC6B8"><span class="spine">Hamid</span></div>
+    <div class="ifield" data-name="Kelley" style="--t:#BCC3C8"><span class="spine">Kelley</span></div>
+  </div>
+  <div class="ibrand">Trosa</div>
+  <div class="veil" id="veil">
+    <span class="half l" id="halfL"></span>
+    <span class="half r" id="halfR"></span>
+    <span class="vname" id="vname">Amy</span>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <header class="top">
+    <span class="brand">Trosa</span>
+    <span class="meta">客户工作台 · № 014</span>
+    <nav class="nav" id="nav" aria-label="分区">
+      <button data-v="timeline" class="on">对白</button>
+      <button data-v="profile">资料</button>
+      <button data-v="contacts">联系人</button>
+      <button data-v="files">文件</button>
+      <button data-v="tasks">待办</button>
+    </nav>
+    <span class="who"><i></i><span id="whoUser">Amy</span></span>
+  </header>
+
+  <main class="spread" id="spread">
+    <span class="bgL"></span><span class="bgR"></span>
+    <div id="body"></div>
+  </main>
+
+  <footer class="band">
+    <div class="up">
+      <span class="k" id="bandK">下一步 · 我方</span>
+      <h2 id="bandT">确认样品反馈，准备下一轮报价</h2>
+      <p class="when tnum" id="bandW">9 月 29 日 · 周二 · 2 天后 · <b>当前等待 客户内部确认再生料比例</b></p>
+    </div>
+    <div class="acts up">
+      <button class="primary" id="logBtn">记录沟通</button>
+      <button>调整</button>
+      <button>标记完成</button>
+    </div>
+  </footer>
+</div>
+<button class="replay" id="replay">重播转场</button>
+
+<script>
+document.documentElement.classList.add('js');document.body.classList.add('js');
+
+var DATA={customer:{
+  company:'Acryl Innovations GmbH',no:'014',country:'德国',industry:'展示器材 / 亚克力',
+  source:'SIGN CHINA 2026 · 展会',level:'B+',website:'acryl-innovations.de',businessRole:'终端',
+  profile:'杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。',
+  waiting:'客户内部确认再生料比例',
+  next:{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29'},
+  contacts:[{name:'Markus Weber',title:'采购经理',email:'m.weber@acryl-innovations.de',primary:true},
+            {name:'Lena Fischer',title:'产品与合规',email:'l.fischer@acryl-innovations.de'}],
+  facts:[
+    {date:'2026-09-24',type:'邮件',dir:'in',by:'Markus Weber',full:'三款色板的耐候测试通过，请在报价中标注再生料比例与 EU 合规编号。',result:'需补充材料说明'},
+    {date:'2026-09-22',type:'寄样',dir:'out',by:'我方',full:'寄出 R-PMMA 三款色板（自然、烟灰、琥珀）及基础参数表。'},
+    {date:'2026-09-18',type:'展会现场',dir:'two',by:'双方',full:'展位沟通 25 分钟，对方对再生亚克力系列感兴趣，现场索要样品与 MOQ。',result:'约定寄样并报价'},
+    {date:'2026-09-16',type:'报价',dir:'out',by:'我方',full:'发出首轮报价，MOQ 500 件，交期 25 天。'},
+    {date:'2026-09-10',type:'开发邮件',dir:'out',by:'我方',full:'通过领英找到采购负责人，发出首封开发邮件。'}
+  ],
+  files:[{name:'报价单_RP-0916.pdf',cat:'报价单',size:'218 KB',date:'2026-09-16'},
+         {name:'色板参数表_R-PMMA.xlsx',cat:'产品资料',size:'64 KB',date:'2026-09-22'},
+         {name:'SIGN_CHINA_展位记录.jpg',cat:'展会资料',size:'1.2 MB',date:'2026-09-18'}],
+  tasks:[{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29',done:false,next:true},
+         {title:'补发 EU 合规文件（REACH / ROHS）',date:'2026-10-02',done:false},
+         {title:'寄出手感样并确认收货',date:'2026-09-22',done:true}]
+}};
+function cn(iso){var p=iso.split('-');return Number(p[1])+' 月 '+Number(p[2])+' 日';}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function evHTML(f){
+  var cls=f.dir==='in'?'left them':(f.dir==='out'?'right us':'both them');
+  var k=f.dir==='in'?'客户 · 来信':(f.dir==='out'?('我方 · '+f.type):'双方 · '+f.type);
+  return '<div class="ev '+cls+'"><span class="node"></span><div class="bubble">'+
+    '<span class="who-k">'+esc(k)+'</span><span class="date tnum">'+cn(f.date)+'</span>'+
+    '<p class="say">'+esc(f.full)+'</p>'+(f.result?'<span class="rs">— '+esc(f.result)+'</span>':'')+'</div></div>';
+}
+var VIEW={
+  timeline:{wide:false,band:['下一步 · 我方','确认样品反馈，准备下一轮报价','9 月 29 日 · 周二 · 2 天后 · <b>当前等待 客户内部确认再生料比例</b>'],render:function(c){
+    return c.facts.map(evHTML).join('');}},
+  profile:{wide:true,band:['资料','Acryl Innovations GmbH','德国 · 展示器材 / 亚克力 · B+ · 终端 · SIGN CHINA 2026 · <b>acryl-innovations.de</b>'],render:function(c){
+    return '<div class="ixhead"><span class="k">资料</span><span class="k tnum">客户身份</span></div>'+
+      '<div class="ev"><div class="bubble"><dl class="dlg">'+
+      [['公司',esc(c.company)],['国家 / 地区',esc(c.country)],['行业领域',esc(c.industry)],['客户来源',esc(c.source)],
+       ['等级 · 角色',esc(c.level)+' · '+esc(c.businessRole)],['网站',esc(c.website)],['当前等待',esc(c.waiting)],['简介',esc(c.profile)]]
+      .map(function(r){return '<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>';}).join('')+'</dl></div></div>';}},
+  contacts:{wide:true,band:['联系人','2 位联系人','主要联系人 Markus Weber · 采购经理 · <b>m.weber@acryl-innovations.de</b>'],render:function(c){
+    return '<div class="ixhead"><span class="k">联系人</span><span class="k tnum">2 位</span></div>'+
+      c.contacts.map(function(p){return '<div class="ev"><div class="bubble"><div class="ixrow"><div><b>'+esc(p.name)+'</b>'+
+      '<span class="sm">'+esc(p.title)+(p.primary?' · 主要联系人':'')+'</span></div>'+
+      '<a href="mailto:'+esc(p.email)+'">'+esc(p.email)+'</a></div></div></div>';}).join('');}},
+  files:{wide:true,band:['文件','3 个文件','报价单 · 产品资料 · 展会资料'],render:function(c){
+    return '<div class="ixhead"><span class="k">文件</span><span class="k tnum">3 个</span></div>'+
+      c.files.map(function(f){return '<div class="ev"><div class="bubble"><div class="ixrow"><div><b>'+esc(f.name)+'</b>'+
+      '<span class="sm">'+esc(f.cat)+' · '+esc(f.size)+'</span></div><time>'+cn(f.date)+'</time></div></div></div>';}).join('');}},
+  tasks:{wide:true,band:['待办','2 项未完成','下一步 9 月 29 日 · 确认样品反馈，准备下一轮报价'],render:function(c){
+    return '<div class="ixhead"><span class="k">全部待办</span><span class="k tnum">2 未完成</span></div>'+
+      c.tasks.map(function(t){return '<div class="ev"><div class="bubble"><div class="ixrow'+(t.done?' done':'')+'"><div><b>'+esc(t.title)+'</b>'+
+      '<span class="sm">'+(t.next?'下一步 · ':'')+'待办</span></div><time>'+cn(t.date)+'</time></div></div></div>';}).join('');}}
+};
+function show(key){
+  var v=VIEW[key],c=DATA.customer;
+  document.getElementById('body').innerHTML=v.render(c);
+  document.getElementById('bandK').textContent=v.band[0];
+  document.getElementById('bandT').textContent=v.band[1];
+  document.getElementById('bandW').innerHTML=v.band[2];
+  document.body.classList.toggle('wide',!!v.wide);
+  document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('on',b.dataset.v===key);});
+}
+document.getElementById('nav').addEventListener('click',function(e){var b=e.target.closest('button');if(b)show(b.dataset.v);});
+document.getElementById('logBtn').addEventListener('click',function(){show('timeline');});
+document.addEventListener('keydown',function(e){var m={'1':'timeline','2':'profile','3':'contacts','4':'files','5':'tasks','0':'timeline'};if(m[e.key])show(m[e.key]);});
+show('timeline');
+
+/* intro: open — the colour field folds open like a book */
+(function(){
+  var intro=document.getElementById('intro'),veil=document.getElementById('veil'),vname=document.getElementById('vname');
+  var hl=document.getElementById('halfL'),hr=document.getElementById('halfR');
+  var ifields=[].slice.call(document.querySelectorAll('.ifield'));
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var timers=[];function tm(fn,ms){timers.push(setTimeout(fn,ms));}function clr(){timers.forEach(clearTimeout);timers=[];}
+  function pick(el){ifields.forEach(function(f){f.classList.toggle('active',f===el);});}
+  function tone(el){return el.getAttribute('style').replace(/^.*--t:/,'').replace(/;?$/,'');}
+  function play(name,el){
+    clr();document.body.classList.remove('entered');
+    intro.classList.remove('gone');veil.classList.remove('on','open');
+    ifields.forEach(function(f){f.style.display='';f.classList.remove('active','drained');});
+    var t=tone(el);hl.style.background=t;hr.style.background=t;
+    vname.textContent=name;document.getElementById('whoUser').textContent=name;
+    if(reduce){enter(name);return;}
+    pick(el);
+    tm(function(){
+      ifields.forEach(function(f){if(f!==el)f.classList.add('drained');});
+      veil.classList.add('on');
+      tm(function(){veil.classList.add('open');},640);
+      tm(function(){document.body.classList.add('entered');},640+900);
+      tm(function(){intro.classList.add('gone');},640+900+800);
+    },300);
+  }
+  function enter(name){
+    clr();veil.classList.remove('on','open');ifields.forEach(function(f){f.style.display='none';});
+    document.getElementById('whoUser').textContent=name;
+    document.body.classList.add('entered');intro.classList.add('gone');
+  }
+  var chosen=0,interacted=false;
+  ifields.forEach(function(f,i){
+    f.addEventListener('mouseenter',function(){interacted=true;pick(f);});
+    f.addEventListener('focus',function(){interacted=true;pick(f);});
+    f.addEventListener('click',function(){interacted=true;chosen=i;play(f.dataset.name,f);});
+  });
+  setTimeout(function(){if(!interacted){chosen=0;play('Amy',ifields[0]);}},900);
+  document.getElementById('replay').addEventListener('click',function(){intro.classList.remove('gone');play(ifields[chosen].dataset.name,ifields[chosen]);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!intro.classList.contains('gone')){enter('Amy');}});
+})();
+</script>
+</body>
+</html>

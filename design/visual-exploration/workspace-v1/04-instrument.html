@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — Workspace 04 · Instrument</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   04 · INSTRUMENT — the customer as a measuring instrument
+   cool paper, graphite, one copper reading.
+   Concepts:
+     · a single central vertical time-gauge; the axis is real
+     · readouts around it, not cards; copper marks "now/next"
+     · a bottom signal ribbon of communication density
+     · transition from Colonnade = "converge": the four tints
+       drain to one column, collapse to a needle, ticks extend
+   ============================================================ */
+:root{
+  --paper:#F1F1EE;
+  --paper-2:#E9E9E4;
+  --paper-3:#E0E0DA;
+  --ink:#1B1B19;
+  --ink-2:#55554F;
+  --ink-3:#8A8A83;
+  --line:rgba(27,27,25,.12);
+  --line-2:rgba(27,27,25,.28);
+  --copper:#A9662F;
+  --copper-2:#C68551;
+  --steel:#6E7B84;
+  --sans:"Space Grotesk",-apple-system,"PingFang SC",system-ui,sans-serif;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --gut:clamp(1.2rem,2.6vw,2.4rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--copper);color:var(--paper)}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:2px solid var(--copper);outline-offset:3px}
+.tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.lbl{font-size:.6rem;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-3)}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.45;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");}
+
+.app{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column}
+
+/* top bar */
+.bar{display:flex;align-items:center;gap:clamp(1rem,3vw,2.4rem);padding:clamp(.9rem,1.8vw,1.3rem) var(--gut);border-bottom:1px solid var(--line)}
+.bar .brand{font-weight:600;font-size:1rem;letter-spacing:-.01em;display:flex;align-items:center;gap:.55rem}
+.bar .brand i{width:8px;height:8px;border-radius:50%;background:var(--copper);display:inline-block}
+.bar nav{display:flex;gap:clamp(.9rem,2vw,1.8rem);margin-left:auto}
+.bar nav button{font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);padding:.3rem 0;border-bottom:1px solid transparent;transition:color .25s,border-color .25s}
+.bar nav button:hover{color:var(--ink)}
+.bar nav button.on{color:var(--ink);border-bottom-color:var(--copper)}
+.bar .who{font-size:.66rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2);display:flex;align-items:center;gap:.5rem;padding-left:clamp(.6rem,2vw,1.6rem);border-left:1px solid var(--line)}
+.bar .who i{width:7px;height:7px;border-radius:50%;background:var(--steel)}
+
+/* main canvas */
+.canvas{flex:1;display:grid;grid-template-columns:minmax(210px,.85fr) minmax(420px,1.5fr) minmax(200px,.8fr);gap:0}
+.canvas>*{padding:clamp(1.6rem,3.2vw,2.6rem) clamp(1rem,2.2vw,1.9rem)}
+.readout-l{padding-left:var(--gut)}
+.readout-r{padding-right:var(--gut);border-left:1px solid var(--line)}
+.gauge{position:relative;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+
+/* identity */
+.id .no{display:flex;align-items:baseline;gap:.6rem;margin-bottom:1.4rem}
+.id .no b{font-size:.95rem;font-weight:500;letter-spacing:.02em}
+.id h1{font-size:clamp(1.5rem,2.6vw,2.05rem);font-weight:400;line-height:1.14;letter-spacing:-.02em;margin-bottom:1.6rem}
+.specs{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--line)}
+.specs div{display:flex;justify-content:space-between;gap:1rem;padding:.62rem 0;border-bottom:1px solid var(--line);font-size:.82rem}
+.specs dt{color:var(--ink-3);font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;padding-top:.15rem}
+.specs dd{text-align:right;color:var(--ink-2)}
+.specs dd a{border-bottom:1px solid var(--line-2)}
+.id .note{margin-top:1.6rem;font-size:.86rem;line-height:1.72;color:var(--ink-2)}
+
+/* gauge */
+.gauge .ghead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:clamp(1.6rem,4vw,2.6rem)}
+.axis{position:absolute;left:clamp(1rem,2.2vw,1.9rem);top:clamp(4.6rem,9vw,6.4rem);bottom:2rem;width:1px;background:var(--line-2)}
+.entry{position:relative;padding:0 0 clamp(1.6rem,3.4vw,2.4rem) clamp(2.6rem,4.6vw,3.6rem)}
+.entry .tick{position:absolute;left:0;top:.42rem;width:clamp(1.4rem,2.4vw,2.2rem);height:1px;background:var(--line-2)}
+.entry .tick::after{content:"";position:absolute;right:0;top:-2.5px;width:6px;height:6px;border-radius:50%;background:var(--paper);border:1px solid var(--line-2)}
+.entry .date{font-size:.72rem;color:var(--ink-2);letter-spacing:.02em;margin-bottom:.35rem;display:flex;gap:.7rem;align-items:baseline}
+.entry .date .k{font-size:.6rem;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+.entry p{font-size:1.02rem;line-height:1.6;max-width:46ch}
+.entry .re{margin-top:.5rem;font-size:.74rem;color:var(--ink-3)}
+.entry .re b{color:var(--copper);font-weight:500}
+.entry.is-now .tick::after{background:var(--copper);border-color:var(--copper);width:9px;height:9px;top:-4px}
+.entry.is-now .date{color:var(--copper)}
+body.js .entry{opacity:0;transform:translateX(-8px)}
+body.js .app.in .entry{opacity:1;transform:none;transition:opacity .7s var(--ease),transform .7s var(--ease-out)}
+body.js .app.in .entry:nth-child(1){transition-delay:.06s}
+body.js .app.in .entry:nth-child(2){transition-delay:.12s}
+body.js .app.in .entry:nth-child(3){transition-delay:.18s}
+body.js .app.in .entry:nth-child(4){transition-delay:.24s}
+body.js .app.in .entry:nth-child(5){transition-delay:.30s}
+
+/* right readouts */
+.ro{border-top:1px solid var(--line);padding:1rem 0 1.3rem}
+.ro:first-child{border-top:0;padding-top:0}
+.ro .v{font-size:1rem;line-height:1.5;margin-top:.5rem;color:var(--ink)}
+.ro .v.quote{font-size:.9rem;color:var(--ink-2)}
+.ro .v.quote cite{display:block;font-size:.68rem;color:var(--ink-3);font-style:normal;margin-top:.5rem}
+.ro.next .v{color:var(--copper);font-weight:500}
+.ro.next .d{font-size:.76rem;color:var(--ink-2);margin-top:.4rem}
+.ro .acts{display:flex;flex-direction:column;gap:.45rem;margin-top:.9rem}
+.ro .acts button{font-size:.72rem;letter-spacing:.02em;color:var(--ink-2);border:1px solid var(--line);padding:.5rem .8rem;text-align:center;transition:.25s}
+.ro .acts button:hover{border-color:var(--ink);color:var(--ink)}
+.ro .acts button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.ro .acts button.primary:hover{background:var(--copper);border-color:var(--copper)}
+
+/* signal ribbon */
+.ribbon{border-top:1px solid var(--line-2);padding:clamp(.9rem,2vw,1.3rem) var(--gut) clamp(1rem,2.2vw,1.5rem);display:flex;flex-direction:column;gap:.7rem}
+.ribbon .rhead{display:flex;justify-content:space-between;align-items:baseline}
+.rstrip{display:flex;align-items:flex-end;gap:2px;height:46px}
+.rday{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+.rday .bar{width:14px;background:var(--paper-3);border-radius:1px 1px 0 0;height:4px;transition:background .3s,height .4s var(--ease-out)}
+.rday.has .bar{height:26px;background:var(--steel)}
+.rday.has.two .bar{height:34px}
+.rday.now .bar{background:var(--ink);height:12px}
+.rday.next .bar{height:40px;background:var(--copper)}
+.rday:hover .bar{filter:brightness(.9)}
+.rday .d{font-size:.5rem;letter-spacing:.08em;color:var(--ink-3);white-space:nowrap}
+.rday.has .d,.rday.next .d{color:var(--ink-2)}
+.rlabel{display:flex;gap:1.4rem;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.rlabel span{display:flex;align-items:center;gap:.4rem}
+.rlabel i{width:8px;height:8px;display:inline-block;border-radius:1px;background:var(--steel)}
+.rlabel i.n{background:var(--copper)}.rlabel i.t{background:var(--ink)}
+
+/* drawer */
+.drawer{position:fixed;z-index:45;top:0;right:0;height:100%;width:min(440px,92vw);background:var(--paper);border-left:1px solid var(--line-2);transform:translateX(100%);transition:transform .55s var(--ease-out);display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer .dh{display:flex;justify-content:space-between;align-items:center;padding:1.1rem var(--gut);border-bottom:1px solid var(--line-2)}
+.drawer .dh b{font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;font-weight:500}
+.drawer .dh button{font-size:1.1rem;color:var(--ink-2);line-height:1}
+.drawer .db{padding:var(--gut);overflow-y:auto}
+.scrim{position:fixed;inset:0;z-index:44;background:rgba(27,27,25,.28);opacity:0;pointer-events:none;transition:opacity .5s}
+.scrim.on{opacity:1;pointer-events:auto}
+.dl{display:grid;grid-template-columns:8.5rem 1fr;gap:.9rem 1.4rem;font-size:.88rem}
+.dl dt{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);padding-top:.2rem}
+.dl dd{margin-bottom:1rem;color:var(--ink)}
+.dl dd a{border-bottom:1px solid var(--line-2)}
+.dlist li{list-style:none;display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:baseline;padding:1rem 0;border-bottom:1px solid var(--line)}
+.dlist b{font-weight:500;font-size:.94rem}
+.dlist span{display:block;font-size:.72rem;color:var(--ink-3);margin-top:.25rem}
+.dlist a{border-bottom:1px solid var(--line-2);font-size:.8rem}
+.dlist time{font-size:.74rem;color:var(--ink-3)}
+.dlist .tick{display:inline-block;width:11px;height:11px;border:1px solid var(--line-2);margin-right:.6rem;vertical-align:-1px;border-radius:2px}
+.dlist li.done .tick{background:var(--steel);border-color:var(--steel)}
+.dlist li.done b{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--line-2)}
+.dlist li.next time{color:var(--copper)}
+
+.replay{position:fixed;z-index:50;bottom:1.1rem;left:1.1rem;font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);border:1px solid var(--line-2);background:color-mix(in srgb,var(--paper) 80%,transparent);backdrop-filter:blur(6px);border-radius:999px;padding:.5rem 1rem;opacity:0;transition:opacity .5s var(--ease) .8s}
+.entered .replay{opacity:1}
+.replay:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+
+/* ============================================================
+   INTRO — Colonnade → Instrument (converge → needle)
+   ============================================================ */
+.intro{position:fixed;inset:0;z-index:80;background:var(--paper)}
+.intro.gone{opacity:0;pointer-events:none;transition:opacity .7s var(--ease)}
+.ifields{position:absolute;inset:0;display:flex}
+.ifield{position:relative;flex:1 1 0;min-width:0;background:var(--t);display:flex;align-items:flex-end;padding:0 clamp(1.2rem,2.4vw,2.2rem) clamp(2.4rem,5vw,3.6rem);transition:flex-grow .7s var(--ease-out),opacity .5s var(--ease)}
+.ifield.active{flex-grow:2.4}
+.ifield.drained{flex-grow:0;opacity:0}
+.ifield .spine{writing-mode:vertical-rl;transform:rotate(180deg);font-weight:500;font-size:clamp(.85rem,1.1vw,1rem);letter-spacing:.34em;text-transform:uppercase;color:rgba(27,27,25,.7);white-space:nowrap}
+.ifield.active .spine{opacity:0}
+.ibrand{position:absolute;top:clamp(1rem,2.4vw,1.6rem);left:clamp(1.2rem,2.4vw,2.2rem);font-weight:600;font-size:1.05rem;color:#1B1B19}
+.veil{position:fixed;z-index:81;left:0;top:0;width:100vw;height:100vh;opacity:0;pointer-events:none;background:linear-gradient(90deg,#D9D0C3,#CCB7AB,#BEC6B8,#BCC3C8);transition:background-color .9s var(--ease),opacity .5s var(--ease)}
+.veil.on{opacity:1}
+.veil.washed{background:var(--paper)!important}
+.veil .needle{position:absolute;left:50%;top:50%;width:1px;height:60vh;background:var(--ink);transform:translate(-50%,-50%) scaleY(0);transform-origin:center;transition:transform .7s var(--ease-out)}
+.veil.washed .needle{transform:translate(-50%,-50%) scaleY(1)}
+.veil .ticks{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;gap:14px;opacity:0;transition:opacity .5s var(--ease)}
+.veil.washed .ticks{opacity:1;transition-delay:.25s}
+.veil .ticks i{display:block;height:1px;background:var(--line-2);width:0;margin:0 auto}
+.veil.washed .ticks i{width:var(--w,40px);transition:width .5s var(--ease-out)}
+.veil .vname{position:absolute;left:clamp(1.2rem,2.4vw,2.2rem);bottom:clamp(2.4rem,5vw,3.6rem);font-weight:500;font-size:clamp(1.6rem,4.6vw,3.2rem);letter-spacing:-.01em;text-transform:uppercase;color:var(--ink);line-height:1;transition:opacity .5s var(--ease),transform .7s var(--ease-out)}
+.veil.washed .vname{opacity:0;transform:translateY(-.5rem)}
+
+@media (max-width:1080px){
+  .canvas{grid-template-columns:1fr;}
+  .gauge{border-left:0;border-right:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .readout-l{padding-left:var(--gut)}.readout-r{padding-right:var(--gut);border-left:0;border-top:1px solid var(--line)}
+  .axis{display:none}
+  .entry{padding-left:0}
+  .entry .tick{display:none}
+}
+@media (max-width:700px){
+  .bar nav{display:none}
+  .bar .who{margin-left:auto}
+  .rstrip{height:38px}
+  .rday .d{display:none}
+  .rday.has .bar{height:20px}.rday.has.two .bar{height:26px}.rday.next .bar{height:30px}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  body.js .entry{opacity:1!important;transform:none!important}
+}
+</style>
+</head>
+<body>
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="ifields" id="ifields">
+    <div class="ifield" data-name="Amy" style="--t:#D9D0C3"><span class="spine">Amy</span></div>
+    <div class="ifield" data-name="Emma" style="--t:#CCB7AB"><span class="spine">Emma</span></div>
+    <div class="ifield" data-name="Hamid" style="--t:#BEC6B8"><span class="spine">Hamid</span></div>
+    <div class="ifield" data-name="Kelley" style="--t:#BCC3C8"><span class="spine">Kelley</span></div>
+  </div>
+  <div class="ibrand">Trosa</div>
+  <div class="veil" id="veil">
+    <span class="needle"></span>
+    <span class="ticks" id="vticks"></span>
+    <span class="vname" id="vname">Amy</span>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <header class="bar">
+    <span class="brand"><i></i>Trosa</span>
+    <nav id="topnav" aria-label="分区">
+      <button data-v="timeline" class="on">时间线</button>
+      <button data-v="profile">资料</button>
+      <button data-v="contacts">联系人</button>
+      <button data-v="files">文件</button>
+      <button data-v="tasks">待办</button>
+    </nav>
+    <span class="who"><i></i><span id="whoUser">Amy</span></span>
+  </header>
+
+  <div class="canvas">
+    <aside class="readout-l id">
+      <p class="no"><span class="lbl">客户</span><b class="tnum">№ 014</b></p>
+      <h1>Acryl Innovations GmbH</h1>
+      <dl class="specs">
+        <div><dt>国家</dt><dd>德国</dd></div>
+        <div><dt>行业</dt><dd>展示器材 / 亚克力</dd></div>
+        <div><dt>来源</dt><dd>SIGN CHINA 2026</dd></div>
+        <div><dt>等级</dt><dd>B+</dd></div>
+        <div><dt>联系人</dt><dd>2 位</dd></div>
+        <div><dt>网站</dt><dd><a href="https://acryl-innovations.de" target="_blank" rel="noopener">acryl-innovations.de</a></dd></div>
+      </dl>
+      <p class="note">杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列。</p>
+    </aside>
+
+    <main class="gauge" id="gauge">
+      <div class="ghead">
+        <span class="lbl">沟通与时间线</span>
+        <span class="lbl tnum" id="factsCount"></span>
+      </div>
+      <div class="axis" aria-hidden="true"></div>
+      <div id="entries"></div>
+    </main>
+
+    <aside class="readout-r">
+      <div class="ro">
+        <span class="lbl">最近沟通</span>
+        <p class="v quote">“三款色板耐候测试通过，请在报价中标注再生料比例与 EU 合规编号。”<cite>Markus Weber · 9 月 24 日</cite></p>
+      </div>
+      <div class="ro">
+        <span class="lbl">当前等待</span>
+        <p class="v">客户内部确认再生料比例</p>
+      </div>
+      <div class="ro next">
+        <span class="lbl">下一步</span>
+        <p class="v">确认样品反馈，准备下一轮报价</p>
+        <p class="d tnum">9 月 29 日 · 周二</p>
+        <div class="acts">
+          <button class="primary" data-act="log">记录沟通</button>
+          <button>调整</button>
+          <button>标记完成</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="ribbon">
+    <div class="rhead">
+      <span class="lbl">近三周沟通信号</span>
+      <div class="rlabel"><span><i></i>双方</span><span><i class="t"></i>今天</span><span><i class="n"></i>下一步</span></div>
+    </div>
+    <div class="rstrip" id="rstrip"></div>
+  </footer>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="资料">
+  <div class="dh"><b id="drawerTitle">资料</b><button id="drawerClose" aria-label="关闭">×</button></div>
+  <div class="db" id="drawerBody"></div>
+</aside>
+
+<button class="replay" id="replay">重播转场</button>
+
+<script>
+document.documentElement.classList.add('js');document.body.classList.add('js');
+
+var DATA={customer:{
+  company:'Acryl Innovations GmbH',no:'014',country:'德国',industry:'展示器材 / 亚克力',
+  source:'SIGN CHINA 2026 · 展会',level:'B+',website:'acryl-innovations.de',businessRole:'终端',
+  profile:'杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。',
+  waiting:'客户内部确认再生料比例',
+  next:{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29'},
+  contacts:[{name:'Markus Weber',title:'采购经理',email:'m.weber@acryl-innovations.de',primary:true},
+            {name:'Lena Fischer',title:'产品与合规',email:'l.fischer@acryl-innovations.de'}],
+  facts:[
+    {date:'2026-09-24',type:'邮件',dir:'in',source:'客户来信',full:'Markus 回复：三款色板的耐候测试通过，但需要我们在报价中标注再生料比例与 EU 合规编号。',result:'需要在报价单补充材料说明'},
+    {date:'2026-09-22',type:'寄样',dir:'out',source:'我方寄样',full:'寄出 R-PMMA 三款色板（自然、烟灰、琥珀）及基础参数表。'},
+    {date:'2026-09-18',type:'展会现场',dir:'two',source:'SIGN CHINA 2026',full:'展位沟通 25 分钟，对方对再生亚克力系列感兴趣，现场索要样品与 MOQ。',result:'约定回国后寄样并报价'},
+    {date:'2026-09-16',type:'报价',dir:'out',source:'首轮报价 RP-0916',full:'发出首轮报价，MOQ 500 件，交期 25 天。'},
+    {date:'2026-09-10',type:'开发邮件',dir:'out',source:'开发信',full:'通过领英找到采购负责人，发出首封开发邮件。'}
+  ],
+  files:[{name:'报价单_RP-0916.pdf',cat:'报价单',size:'218 KB',date:'2026-09-16'},
+         {name:'色板参数表_R-PMMA.xlsx',cat:'产品资料',size:'64 KB',date:'2026-09-22'},
+         {name:'SIGN_CHINA_展位记录.jpg',cat:'展会资料',size:'1.2 MB',date:'2026-09-18'}],
+  tasks:[{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29',done:false,next:true},
+         {title:'补发 EU 合规文件（REACH / ROHS）',date:'2026-10-02',done:false},
+         {title:'寄出手感样并确认收货',date:'2026-09-22',done:true}]
+}};
+
+function cn(iso){var p=iso.split('-');return Number(p[1])+' 月 '+Number(p[2])+' 日';}
+function wd(iso){return['周日','周一','周二','周三','周四','周五','周六'][new Date(iso+'T00:00:00').getDay()];}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+(function render(){
+  var c=DATA.customer;
+  document.getElementById('factsCount').textContent=c.facts.length+' 条记录';
+  document.getElementById('entries').innerHTML=c.facts.map(function(f,i){
+    var dt={in:'客户发给我',out:'我发给客户',two:'双方沟通'}[f.dir];
+    return '<article class="entry'+(i===0?' is-now':'')+'">'+
+      '<span class="tick" aria-hidden="true"></span>'+
+      '<div class="date tnum"><span>'+cn(f.date)+'</span><span class="k">'+esc(f.type)+' · '+esc(dt)+'</span></div>'+
+      '<p>'+esc(f.full)+'</p>'+
+      (f.result?'<p class="re"><b>结果</b> — '+esc(f.result)+'</p>':'')+
+    '</article>';
+  }).join('');
+
+  /* signal ribbon: last 21 days */
+  var today=new Date('2026-09-27T00:00:00');
+  var days=[];
+  for(var i=20;i>=0;i--){var d=new Date(today);d.setDate(d.getDate()-i);days.push(d);}
+  var nextD=new Date('2026-09-29T00:00:00');
+  var byDay={};
+  c.facts.forEach(function(f){byDay[f.date]=(byDay[f.date]||0)+1;});
+  var html=days.map(function(d){
+    var iso=d.toISOString().slice(0,10);
+    var has=byDay[iso];
+    var cls='rday'+(has?' has':'')+(has>1?' two':'')+(iso==='2026-09-27'?' now':'');
+    var label=(d.getMonth()+1)+'/'+d.getDate();
+    return '<div class="'+cls+'" title="'+iso+(has?' · '+has+' 条沟通':'')+'"><span class="bar"></span><span class="d">'+(d.getDate()===1||i===0?label:'')+'</span></div>';
+  }).join('');
+  var nextCell='<div class="rday next" title="2026-09-29 · 下一步"><span class="bar"></span><span class="d">9/29</span></div>';
+  document.getElementById('rstrip').innerHTML=html+nextCell;
+  document.getElementById('rstrip').querySelectorAll('.rday').forEach(function(el){
+    if(el.classList.contains('has')||el.classList.contains('now')){
+      el.addEventListener('click',function(){document.getElementById('gauge').scrollIntoView({behavior:'smooth',block:'start'});});
+    }
+  });
+})();
+
+/* drawer */
+var DRAWER={
+  profile:function(){var c=DATA.customer;return {t:'资料',h:[['公司',esc(c.company)],['国家 / 地区',esc(c.country)],['行业领域',esc(c.industry)],['客户来源',esc(c.source)],['等级',esc(c.level)],['业务角色',esc(c.businessRole)],['网站','<a href="https://'+esc(c.website)+'" target="_blank" rel="noopener">'+esc(c.website)+'</a>'],['当前等待',esc(c.waiting)],['简介',esc(c.profile)]].map(function(r){return '<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>';}).join('')};},
+  contacts:function(){return {t:'联系人',h:DATA.customer.contacts.map(function(p){return '<li><div><b>'+esc(p.name)+'</b><span>'+esc(p.title)+(p.primary?' · 主要联系人':'')+'</span></div><a href="mailto:'+esc(p.email)+'">'+esc(p.email)+'</a></li>';}).join('')};},
+  files:function(){return {t:'文件',h:DATA.customer.files.map(function(f){return '<li><div><b>'+esc(f.name)+'</b><span>'+esc(f.cat)+' · '+esc(f.size)+'</span></div><time>'+cn(f.date)+'</time></li>';}).join('')};},
+  tasks:function(){return {t:'全部待办',h:DATA.customer.tasks.map(function(t){return '<li class="'+(t.done?'done ':'')+(t.next?'next':'')+'"><div><span class="tick"></span><b style="display:inline">'+esc(t.title)+'</b></div><time class="tnum">'+cn(t.date)+(t.next?' · 下一步':'')+'</time></li>';}).join('')};}
+};
+function openDrawer(k){
+  var d=DRAWER[k]();document.getElementById('drawerTitle').textContent=d.t;
+  var body=document.getElementById('drawerBody');
+  body.className='db '+(k==='profile'?'dl':'dlist');
+  body.innerHTML=d.h;
+  document.getElementById('drawer').classList.add('open');document.getElementById('scrim').classList.add('on');
+}
+function closeDrawer(){document.getElementById('drawer').classList.remove('open');document.getElementById('scrim').classList.remove('on');}
+document.getElementById('drawerClose').addEventListener('click',closeDrawer);
+document.getElementById('scrim').addEventListener('click',closeDrawer);
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeDrawer();});
+document.querySelectorAll('#topnav button').forEach(function(b){
+  b.addEventListener('click',function(){
+    if(b.dataset.v==='timeline'){closeDrawer();document.querySelectorAll('#topnav button').forEach(function(x){x.classList.remove('on');});b.classList.add('on');document.getElementById('gauge').scrollIntoView({behavior:'smooth',block:'start'});return;}
+    openDrawer(b.dataset.v);
+  });
+});
+document.querySelector('[data-act="log"]').addEventListener('click',function(){document.querySelectorAll('#topnav button').forEach(function(x){x.classList.toggle('on',x.dataset.v==='timeline');});document.getElementById('gauge').scrollIntoView({behavior:'smooth',block:'start'});});
+
+/* ============================================================
+   INTRO — Colonnade → Instrument (converge → needle)
+   ============================================================ */
+(function(){
+  var intro=document.getElementById('intro'),veil=document.getElementById('veil'),vname=document.getElementById('vname');
+  var ifields=[].slice.call(document.querySelectorAll('.ifield'));
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var timers=[];function tm(fn,ms){timers.push(setTimeout(fn,ms));}function clr(){timers.forEach(clearTimeout);timers=[];}
+  document.getElementById('vticks').innerHTML=(function(){var s='';var w=[26,40,58,40,26,16,40,58,40,16,26,40];for(var i=0;i<w.length;i++)s+='<i style="--w:'+w[i]+'px"></i>';return s;})();
+  function pick(el){ifields.forEach(function(f){f.classList.toggle('active',f===el);});}
+  function play(name,el){
+    clr();
+    document.body.classList.remove('entered');document.getElementById('app').classList.remove('in');
+    intro.classList.remove('gone');veil.classList.remove('on','washed');
+    ifields.forEach(function(f){f.style.display='';f.classList.remove('active','drained');});
+    vname.textContent=name;document.getElementById('whoUser').textContent=name;
+    if(reduce){enter(name);return;}
+    pick(el);
+    tm(function(){
+      ifields.forEach(function(f){if(f!==el)f.classList.add('drained');});
+      veil.classList.add('on');
+      tm(function(){veil.classList.add('washed');},520);
+      tm(function(){document.body.classList.add('entered');document.getElementById('app').classList.add('in');},520+520);
+      tm(function(){intro.classList.add('gone');},520+520+640);
+    },300);
+  }
+  function enter(name){
+    clr();veil.classList.remove('on');ifields.forEach(function(f){f.style.display='none';});
+    document.getElementById('whoUser').textContent=name;
+    document.body.classList.add('entered');document.getElementById('app').classList.add('in');intro.classList.add('gone');
+  }
+  var chosen=0,interacted=false;
+  ifields.forEach(function(f,i){
+    f.addEventListener('mouseenter',function(){interacted=true;pick(f);});
+    f.addEventListener('focus',function(){interacted=true;pick(f);});
+    f.addEventListener('click',function(){interacted=true;chosen=i;play(f.dataset.name,f);});
+  });
+  setTimeout(function(){if(!interacted){chosen=0;play('Amy',ifields[0]);}},900);
+  document.getElementById('replay').addEventListener('click',function(){intro.classList.remove('gone');play(ifields[chosen].dataset.name,ifields[chosen]);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!intro.classList.contains('gone')){enter('Amy');}});
+})();
+</script>
+</body>
+</html>

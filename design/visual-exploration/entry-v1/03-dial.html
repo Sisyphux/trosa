@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — 03 Dial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* ---- Concept 03 · Dial — 环绕刻度 ---- */
+    --bg:#EFF1EB;
+    --bg-2:#F6F7F3;
+    --ink:#191C18;
+    --ink-soft:#40453E;
+    --muted:#868D81;
+    --line:rgba(25,28,24,.13);
+    --line-2:rgba(25,28,24,.26);
+    --moss:#64775B;
+    --moss-soft:rgba(100,119,91,.12);
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --sans:"Manrope", -apple-system, "PingFang SC", system-ui, sans-serif;
+    --ui:"Inter", -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:
+      radial-gradient(120% 90% at 78% 42%, var(--bg-2) 0%, var(--bg) 58%);
+    color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;overflow:hidden;
+  }
+  ::selection{background:var(--moss);color:var(--bg-2)}
+
+  .shell{position:fixed;inset:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr)}
+
+  /* ---------- detail side ---------- */
+  .detail{
+    position:relative;padding:clamp(1.6rem,3.4vw,3.4rem);
+    display:flex;flex-direction:column;justify-content:space-between;min-width:0;
+  }
+  .brand{display:flex;align-items:center;gap:.8rem}
+  .brand .word{font-weight:600;letter-spacing:.02em;font-size:1.15rem}
+  .brand .ring{width:.85rem;height:.85rem;border-radius:50%;border:1.5px solid var(--moss);position:relative}
+  .brand .ring::after{content:"";position:absolute;inset:2.5px;border-radius:50%;background:var(--moss);opacity:.18}
+  .brand .cap{font-family:var(--ui);font-size:.6rem;letter-spacing:.3em;text-transform:uppercase;color:var(--muted)}
+
+  .focus{max-width:34rem}
+  .focus .eyebrow{font-family:var(--ui);font-size:.64rem;letter-spacing:.34em;text-transform:uppercase;color:var(--muted);margin-bottom:1.4rem;display:flex;align-items:center;gap:.7rem}
+  .focus .eyebrow::after{content:"";height:1px;flex:1;background:var(--line)}
+  .big{
+    font-weight:200;
+    font-size:clamp(3.4rem,9.5vw,8rem);
+    letter-spacing:-.045em;line-height:.9;
+  }
+  .big.swap{animation:swap .5s var(--ease-out)}
+  @keyframes swap{from{opacity:0;transform:translateY(.5rem)}to{opacity:1;transform:none}}
+  .sub{margin-top:1.5rem;font-family:var(--ui);font-size:.8rem;letter-spacing:.02em;color:var(--muted);line-height:1.9}
+  .sub b{color:var(--ink-soft);font-weight:500}
+
+  .enter{
+    margin-top:2.2rem;display:inline-flex;align-items:center;gap:.85rem;
+    font-family:var(--ui);font-size:.76rem;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--ink);background:none;border:0;cursor:pointer;padding:.5rem 0;
+    border-bottom:1px solid var(--line-2);
+    transition:gap .45s var(--ease-out), color .3s, border-color .3s;
+  }
+  .enter .dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--moss);transition:transform .45s var(--ease-out)}
+  .enter:hover{gap:1.2rem;color:var(--moss);border-color:var(--moss)}
+  .enter:hover .dot{transform:scale(1.35)}
+  .enter:active{transform:translateY(1px)}
+  .enter:focus-visible{outline:1.5px solid var(--moss);outline-offset:6px}
+
+  .foot{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;font-family:var(--ui);font-size:.66rem;letter-spacing:.06em;color:var(--muted);line-height:1.8}
+  .foot kbd{font-family:var(--ui);font-size:.6rem;border:1px solid var(--line-2);border-radius:.28rem;padding:.05rem .35rem;color:var(--ink-soft)}
+  .foot .idx{font-variant-numeric:tabular-nums;letter-spacing:.24em}
+
+  /* ---------- dial side ---------- */
+  .dialwrap{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;overflow:hidden}
+  .dial{
+    --size:min(66vh, 46vw);
+    width:var(--size);height:var(--size);position:relative;
+  }
+  .ring-outer{position:absolute;inset:0;border-radius:50%;border:1px solid var(--line)}
+  .ring-mid{position:absolute;inset:12%;border-radius:50%;border:1px solid var(--line)}
+  .ring-dash{position:absolute;inset:24%;border-radius:50%;border:1px dashed var(--line)}
+  .hub{
+    position:absolute;inset:38%;border-radius:50%;
+    background:var(--bg-2);border:1px solid var(--line-2);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;
+    box-shadow:0 0 0 12px color-mix(in srgb,var(--bg) 65%, transparent);
+  }
+  .hub .t{font-weight:600;letter-spacing:.02em;font-size:clamp(.9rem,1.5vw,1.15rem)}
+  .hub .n{font-family:var(--ui);font-size:.58rem;letter-spacing:.26em;color:var(--muted);font-variant-numeric:tabular-nums}
+
+  .indicator{
+    position:absolute;inset:0;transform:rotate(0deg);
+    transition:transform .85s var(--ease-out);
+  }
+  .indicator .blip{
+    position:absolute;left:50%;top:-.28rem;width:.55rem;height:.55rem;border-radius:50%;
+    background:var(--moss);transform:translateX(-50%);
+    box-shadow:0 0 0 6px var(--moss-soft);
+  }
+  .indicator .spoke{
+    position:absolute;left:50%;top:0;width:1px;height:12%;
+    background:linear-gradient(var(--moss), transparent);transform:translateX(-50%);
+  }
+
+  .node{
+    position:absolute;width:2.4rem;height:2.4rem;margin:-1.2rem 0 0 -1.2rem;
+    border-radius:50%;border:1px solid var(--line-2);background:var(--bg);
+    cursor:pointer;font:inherit;padding:0;color:var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    transition:transform .6s var(--ease-out), border-color .4s, background .4s, box-shadow .4s;
+  }
+  .node::after{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--line-2);transition:background .4s, transform .5s var(--ease-out)}
+  .node .label{
+    position:absolute;white-space:nowrap;
+    font-family:var(--ui);font-size:.68rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);
+    transition:color .4s, transform .5s var(--ease-out);
+  }
+  .node:hover{transform:scale(1.12);border-color:var(--line-2);background:var(--bg-2)}
+  .node:focus-visible{outline:1.5px solid var(--moss);outline-offset:5px}
+  .node.is-active{border-color:var(--moss);background:var(--bg-2);transform:scale(1.16);box-shadow:0 0 0 8px var(--moss-soft)}
+  .node.is-active::after{background:var(--moss);transform:scale(1.25)}
+  .node.is-active .label{color:var(--ink)}
+
+  /* node positions + label sides */
+  .node[data-pos="top"]{left:50%;top:0}
+  .node[data-pos="top"] .label{bottom:calc(100% + .7rem);left:50%;transform:translateX(-50%)}
+  .node[data-pos="right"]{left:100%;top:50%}
+  .node[data-pos="right"] .label{left:calc(100% + .8rem);top:50%;transform:translateY(-50%)}
+  .node[data-pos="bottom"]{left:50%;top:100%}
+  .node[data-pos="bottom"] .label{top:calc(100% + .7rem);left:50%;transform:translateX(-50%)}
+  .node[data-pos="left"]{left:0;top:50%}
+  .node[data-pos="left"] .label{right:calc(100% + .8rem);top:50%;transform:translateY(-50%)}
+
+  /* tick marks around outer ring */
+  .ticks{position:absolute;inset:-14px;border-radius:50%;pointer-events:none}
+  .ticks i{position:absolute;left:50%;top:50%;width:1px;height:6px;background:var(--line);
+    transform-origin:50% 0;transform:translate(-50%,0) rotate(var(--a)) translateY(calc(-1 * (var(--r))))}
+
+  /* ---------- veil + workspace ---------- */
+  .veil{position:fixed;inset:0;background:var(--moss);z-index:40;pointer-events:none;opacity:0;transition:opacity .5s var(--ease)}
+  .veil.on{opacity:.14}
+  .workspace{
+    position:fixed;inset:0;z-index:50;background:var(--bg-2);
+    display:flex;flex-direction:column;padding:clamp(1.6rem,3.4vw,3.4rem);
+    opacity:0;visibility:hidden;transition:opacity .45s var(--ease) .1s, visibility 0s linear .55s;
+  }
+  .workspace.on{opacity:1;visibility:visible;transition-delay:.12s,0s}
+  .ws-top{display:flex;justify-content:space-between;align-items:center;font-family:var(--ui);font-size:.62rem;letter-spacing:.28em;text-transform:uppercase;color:var(--muted)}
+  .ws-back{font:inherit;background:none;border:0;color:var(--muted);cursor:pointer;letter-spacing:.24em;text-transform:uppercase;padding:.4rem 0;transition:color .3s}
+  .ws-back:hover{color:var(--moss)}
+  .ws-back:focus-visible{outline:1.5px solid var(--moss);outline-offset:5px;color:var(--ink)}
+  .ws-main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1rem}
+  .ws-main .eyebrow{font-family:var(--ui);font-size:.64rem;letter-spacing:.34em;text-transform:uppercase;color:var(--moss)}
+  .ws-main .who{font-weight:200;font-size:clamp(3.4rem,14vw,9.5rem);letter-spacing:-.05em;line-height:.88}
+  .ws-nav{display:flex;flex-wrap:wrap;gap:1.5rem;margin-top:1.4rem;font-family:var(--ui);font-size:.7rem;letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+  .ws-nav span{border-bottom:1px solid var(--line-2);padding-bottom:.4rem}
+
+  .tag{position:fixed;left:50%;bottom:.9rem;transform:translateX(-50%);z-index:60;
+    display:flex;align-items:center;gap:.6rem;font-family:var(--ui);font-size:.58rem;letter-spacing:.26em;text-transform:uppercase;color:var(--muted);
+    background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(6px);
+    border:1px solid var(--line);border-radius:999px;padding:.34rem .85rem;transition:opacity .3s}
+  .tag b{color:var(--ink);font-weight:600}
+  .hidden-chrome .tag{opacity:0;pointer-events:none}
+
+  @media (max-width:900px){
+    .shell{grid-template-columns:1fr;grid-template-rows:1fr auto}
+    .dialwrap{order:2;padding:2.9rem 1.4rem 2rem;overflow:visible}
+    .dial{--size:min(58vw,20rem)}
+    .detail{order:1;justify-content:center;gap:2rem}
+    .detail .brand{position:absolute;top:1.4rem;left:1.4rem}
+    .detail .foot{position:absolute;bottom:1.2rem;left:1.4rem;right:1.4rem}
+    .node .label{font-size:.6rem;letter-spacing:.16em}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition-duration:.001s !important;animation:none !important}}
+</style>
+</head>
+<body>
+  <div class="shell">
+    <section class="detail">
+      <div class="brand">
+        <span class="ring" aria-hidden="true"></span>
+        <span class="word">Trosa</span>
+        <span class="cap">Account dial</span>
+      </div>
+
+      <div class="focus">
+        <div class="eyebrow">Selected account</div>
+        <div class="big" id="big">Amy</div>
+        <div class="sub"><b id="subName">Amy</b> 的工作台 · 恢复上下文，继续未完成的动作。</div>
+        <button class="enter" id="enter"><span class="dot" aria-hidden="true"></span>Enter workspace</button>
+      </div>
+
+      <div class="foot">
+        <div><kbd>←</kbd> <kbd>→</kbd> 旋转 &nbsp; <kbd>↵</kbd> 进入 &nbsp; <kbd>1</kbd>–<kbd>4</kbd> 选择</div>
+        <div class="idx"><span id="idx">01</span> / 04</div>
+      </div>
+    </section>
+
+    <section class="dialwrap">
+      <div class="dial" id="dial">
+        <div class="ring-outer"></div>
+        <div class="ring-mid"></div>
+        <div class="ring-dash"></div>
+        <div class="ticks" id="ticks" aria-hidden="true"></div>
+        <div class="indicator" id="indicator"><span class="spoke"></span><span class="blip"></span></div>
+        <div class="hub"><span class="t">Trosa</span><span class="n" id="hubIdx">01 / 04</span></div>
+
+        <button class="node" data-pos="top"    data-name="Amy"   ><span class="label">Amy</span></button>
+        <button class="node" data-pos="right"  data-name="Emma"  ><span class="label">Emma</span></button>
+        <button class="node" data-pos="bottom" data-name="Hamid" ><span class="label">Hamid</span></button>
+        <button class="node" data-pos="left"   data-name="Kelley"><span class="label">Kelley</span></button>
+      </div>
+    </section>
+  </div>
+
+  <div class="veil" id="veil"></div>
+
+  <section class="workspace" id="workspace" aria-hidden="true">
+    <div class="ws-top"><span>Trosa</span><button class="ws-back" id="back">← Switch account</button></div>
+    <div class="ws-main">
+      <div class="eyebrow">Workspace ready</div>
+      <div class="who" id="wsName">Amy</div>
+      <nav class="ws-nav"><span>Today</span><span>Inbox</span><span>Customers</span><span>Calendar</span></nav>
+    </div>
+  </section>
+
+  <div class="tag"><b>03</b> · Dial</div>
+
+<script>
+(function(){
+  var nodes = Array.prototype.slice.call(document.querySelectorAll('.node'));
+  var angles = {top:0, right:90, bottom:180, left:270};
+  var indicator = document.getElementById('indicator');
+  var big = document.getElementById('big');
+  var subName = document.getElementById('subName');
+  var idxEl = document.getElementById('idx');
+  var hubIdx = document.getElementById('hubIdx');
+  var ws = document.getElementById('workspace');
+  var veil = document.getElementById('veil');
+  var back = document.getElementById('back');
+  var current = 0, entered = false;
+
+  /* ticks */
+  var ticks = document.getElementById('ticks');
+  for(var a=0;a<360;a+=15){
+    var t=document.createElement('i');
+    t.style.setProperty('--a', a+'deg');
+    t.style.setProperty('--r', 'calc(-50% - 0px)');
+    ticks.appendChild(t);
+  }
+  /* radius via JS-free trick: set translate distance in px using parent size on resize */
+  function layoutTicks(){
+    var r = document.getElementById('dial').clientWidth/2 + 14;
+    Array.prototype.forEach.call(ticks.children, function(t){
+      t.style.setProperty('--r', r+'px');
+      t.style.transform = 'translate(-50%,0) rotate(var(--a)) translateY(-'+r+'px)';
+    });
+  }
+
+  function setActive(i, animate){
+    current = i;
+    var n = nodes[i];
+    nodes.forEach(function(x,j){ x.classList.toggle('is-active', j===i); });
+    var ang = angles[n.dataset.pos];
+    indicator.style.transform = 'rotate('+ang+'deg)';
+    var num = String(i+1).padStart(2,'0');
+    idxEl.textContent = num; hubIdx.textContent = num+' / 04';
+    if(animate){
+      big.textContent = n.dataset.name; subName.textContent = n.dataset.name;
+      big.classList.remove('swap'); void big.offsetWidth; big.classList.add('swap');
+    }
+  }
+  nodes.forEach(function(n,i){
+    n.addEventListener('mouseenter', function(){ if(i!==current) setActive(i,true); });
+    n.addEventListener('focus', function(){ if(i!==current) setActive(i,true); });
+    n.addEventListener('click', function(){ enter(i); });
+  });
+  var enterBtn = document.getElementById('enter');
+  enterBtn.addEventListener('click', function(){ enter(current); });
+  enterBtn.addEventListener('mouseenter', function(){ nodes[current].classList.add('is-active'); });
+  enterBtn.addEventListener('mouseleave', function(){ if(!entered) nodes[current].classList.add('is-active'); });
+
+  function enter(i){
+    if(entered) return; entered=true;
+    setActive(i,false);
+    veil.classList.add('on');
+    setTimeout(function(){
+      document.getElementById('wsName').textContent = nodes[i].dataset.name;
+      ws.classList.add('on'); ws.setAttribute('aria-hidden','false'); back.focus({preventScroll:true});
+    }, 260);
+    setTimeout(function(){ veil.classList.remove('on'); }, 620);
+  }
+  function leave(){
+    entered=false; ws.classList.remove('on'); ws.setAttribute('aria-hidden','true');
+    setTimeout(function(){ nodes[current].focus({preventScroll:true}); }, 380);
+  }
+  back.addEventListener('click', leave);
+
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape' && entered){ leave(); return; }
+    if(entered) return;
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'){ e.preventDefault(); setActive((current+1)%nodes.length, true); }
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){ e.preventDefault(); setActive((current-1+nodes.length)%nodes.length, true); }
+    else if(e.key==='Enter'){ e.preventDefault();
+      if(document.activeElement && document.activeElement.classList.contains('node')){
+        var k = nodes.indexOf(document.activeElement); if(k>=0){ enter(k); return; }
+      }
+      enter(current);
+    }
+    else if(/^[1-4]$/.test(e.key)){ e.preventDefault(); setActive(parseInt(e.key,10)-1,true); enter(current); }
+    else if(e.key==='h'||e.key==='H'){ document.body.classList.toggle('hidden-chrome'); }
+  });
+
+  setActive(0,false);
+  layoutTicks();
+  window.addEventListener('resize', layoutTicks);
+})();
+</script>
+</body>
+</html>

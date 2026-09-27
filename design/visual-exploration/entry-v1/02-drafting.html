@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — 02 Drafting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..600&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* ---- Concept 02 · Drafting — 制图纸 ---- */
+    --bg:#E7EAEB;
+    --ink:#12171A;
+    --ink-soft:#3B444A;
+    --muted:#7E878D;
+    --line:rgba(18,23,26,.13);
+    --line-2:rgba(18,23,26,.30);
+    --grid:rgba(18,23,26,.032);
+    --steel:#54697A;
+    --steel-tint:rgba(84,105,122,.10);
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --sans:"Space Grotesk", -apple-system, "PingFang SC", system-ui, sans-serif;
+    --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:9px 9px;
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  ::selection{background:var(--steel);color:var(--bg)}
+
+  .sheet{position:fixed;inset:0;display:flex;flex-direction:column;padding:clamp(1rem,2.2vw,1.9rem)}
+
+  /* ---- header ---- */
+  .top{
+    display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+    padding-bottom:.9rem;border-bottom:1px solid var(--line-2);
+  }
+  .mark{display:flex;align-items:baseline;gap:.75rem}
+  .mark .word{font-family:var(--sans);font-weight:500;font-size:1.05rem;letter-spacing:.16em;text-transform:uppercase}
+  .mark .sub{font-family:var(--mono);font-size:.62rem;letter-spacing:.22em;color:var(--muted);text-transform:uppercase}
+  .top .meta{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;color:var(--muted);text-transform:uppercase;display:flex;gap:1.6rem;white-space:nowrap}
+  .top .meta b{color:var(--ink);font-weight:500}
+
+  /* ---- mosaic ---- */
+  .field{
+    flex:1;min-height:0;margin-top:clamp(.8rem,1.6vw,1.4rem);
+    display:grid;
+    grid-template-columns:repeat(12,1fr);
+    grid-template-rows:repeat(8,1fr);
+    gap:1px;
+    background:var(--line);      /* gap lines */
+    border:1px solid var(--line);
+    position:relative;
+  }
+  .cell{
+    position:relative;
+    background:var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size:9px 9px;
+    border:0;
+    color:inherit;font:inherit;text-align:left;cursor:pointer;
+    padding:clamp(.9rem,1.6vw,1.6rem);
+    display:flex;flex-direction:column;
+    justify-content:space-between;
+    overflow:hidden;
+    outline:none;
+    transition:background .5s var(--ease);
+  }
+  .cell-a{grid-column:1/6;grid-row:1/5}
+  .cell-b{grid-column:6/13;grid-row:1/4}
+  .cell-c{grid-column:6/13;grid-row:4/9}
+  .cell-d{grid-column:1/6;grid-row:5/9}
+
+  .cell::before{ /* hover wash */
+    content:"";position:absolute;inset:0;background:var(--steel-tint);
+    opacity:0;transition:opacity .5s var(--ease);pointer-events:none;
+  }
+  .cell::after{ /* inset focus frame */
+    content:"";position:absolute;inset:.55rem;border:1px solid var(--steel);
+    opacity:0;transform:scale(.985);transition:opacity .4s var(--ease), transform .5s var(--ease-out);
+    pointer-events:none;
+  }
+  .cell:hover::before,.cell:focus-visible::before{opacity:1}
+  .cell:focus-visible::after{opacity:1;transform:none}
+  .cell:active{background:#E1E5E7}
+
+  .cell-top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;position:relative;z-index:1}
+  .code{font-family:var(--mono);font-size:.6rem;letter-spacing:.22em;color:var(--muted);text-transform:uppercase}
+  .pin{display:flex;align-items:center;gap:.4rem;font-family:var(--mono);font-size:.58rem;letter-spacing:.18em;color:var(--muted)}
+  .pin i{width:.4rem;height:.4rem;border:1px solid var(--line-2);border-radius:50%;display:block;transition:background .4s,border-color .4s}
+  .cell:hover .pin i,.cell:focus-visible .pin i{background:var(--steel);border-color:var(--steel)}
+  .cell:hover .code,.cell:focus-visible .code{color:var(--steel)}
+
+  .cell-body{position:relative;z-index:1}
+  .name{
+    font-family:var(--sans);font-weight:400;
+    font-size:clamp(2rem,5.4vw,4.4rem);letter-spacing:-.03em;line-height:.95;
+    transition:transform .6s var(--ease-out);
+  }
+  .cell-b .name,.cell-c .name{font-size:clamp(2.2rem,6.4vw,5.4rem)}
+  .cell:hover .name,.cell:focus-visible .name{transform:translateX(.5rem)}
+
+  /* dimension line */
+  .dim{
+    margin-top:.9rem;display:flex;align-items:center;gap:.6rem;
+    font-family:var(--mono);font-size:.6rem;letter-spacing:.2em;color:var(--muted);text-transform:uppercase;
+    opacity:0;transform:translateY(.4rem);
+    transition:opacity .45s var(--ease), transform .55s var(--ease-out);
+  }
+  .dim .rule{flex:1;height:1px;background:var(--line-2);position:relative}
+  .dim .rule::before,.dim .rule::after{content:"";position:absolute;top:-3px;width:1px;height:7px;background:var(--line-2)}
+  .dim .rule::before{left:0}.dim .rule::after{right:0}
+  .cell:hover .dim,.cell:focus-visible .dim{opacity:1;transform:none}
+
+  /* ---- rulers + registration ---- */
+  .ruler-y{position:absolute;top:0;bottom:0;left:-1.35rem;width:.8rem;border-right:1px solid var(--line);pointer-events:none}
+  .ruler-x{position:absolute;left:-1.35rem;right:0;bottom:-1.35rem;height:.8rem;border-top:1px solid var(--line);pointer-events:none}
+  .reg{position:absolute;width:11px;height:11px;pointer-events:none;opacity:.5}
+  .reg::before,.reg::after{content:"";position:absolute;background:var(--line-2)}
+  .reg::before{left:50%;top:0;width:1px;height:100%}
+  .reg::after{top:50%;left:0;height:1px;width:100%}
+  .reg.tl{top:-6px;left:-6px}.reg.tr{top:-6px;right:-6px}
+  .reg.bl{bottom:-6px;left:-6px}.reg.br{bottom:-6px;right:-6px}
+
+  /* ---- cursor readout ---- */
+  .readout{
+    position:fixed;right:clamp(1rem,2.2vw,1.9rem);bottom:.7rem;
+    font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);
+    display:flex;gap:1.2rem;text-transform:uppercase;z-index:20;
+  }
+  .readout b{color:var(--ink);font-weight:500}
+  @media (hover:none){.readout{display:none}}
+
+  /* ---- veil + workspace ---- */
+  .veil{position:fixed;inset:0;background:var(--ink);transform:scaleX(0);transform-origin:left;z-index:40;pointer-events:none;transition:transform .6s var(--ease-out)}
+  .veil.on{transform:scaleX(1)}
+  .workspace{
+    position:fixed;inset:0;z-index:50;background-color:var(--bg);
+    background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:9px 9px;
+    display:flex;flex-direction:column;padding:clamp(1rem,2.2vw,1.9rem);
+    opacity:0;visibility:hidden;transform:translateY(.6rem);
+    transition:opacity .45s var(--ease) .1s, transform .6s var(--ease-out) .1s, visibility 0s linear .6s;
+  }
+  .workspace.on{opacity:1;visibility:visible;transform:none;transition-delay:.16s,.16s,0s}
+  .ws-top{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line-2);padding-bottom:.9rem;font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  .ws-back{font:inherit;background:none;border:0;color:var(--muted);cursor:pointer;padding:.3rem 0;letter-spacing:.2em;transition:color .3s}
+  .ws-back:hover{color:var(--ink)}
+  .ws-back:focus-visible{outline:1px solid var(--steel);outline-offset:4px;color:var(--ink)}
+  .ws-main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1rem}
+  .ws-main .code{color:var(--steel)}
+  .ws-main .who{font-family:var(--sans);font-weight:400;font-size:clamp(3.2rem,13vw,9rem);letter-spacing:-.045em;line-height:.9}
+  .ws-nav{display:flex;flex-wrap:wrap;gap:1.4rem;margin-top:1.2rem;font-family:var(--mono);font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+  .ws-nav span{border-bottom:1px solid var(--line-2);padding-bottom:.35rem}
+
+  .tag{
+    position:fixed;left:50%;bottom:.7rem;transform:translateX(-50%);z-index:60;
+    display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.58rem;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);
+    background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(6px);
+    border:1px solid var(--line-2);border-radius:999px;padding:.32rem .85rem;transition:opacity .3s
+  }
+  .tag b{color:var(--ink);font-weight:500}
+  .hidden-chrome .tag,.hidden-chrome .readout{opacity:0}
+
+  @media (max-width:900px){
+    .field{grid-template-columns:1fr;grid-template-rows:repeat(4,minmax(26vh,1fr));overflow:auto;background:transparent;border-color:transparent;gap:0}
+    .cell{border-bottom:1px solid var(--line-2);border-left:1px solid var(--line-2);border-right:1px solid var(--line-2)}
+    .cell-a,.cell-b,.cell-c,.cell-d{grid-column:auto;grid-row:auto}
+    .cell:first-child{border-top:1px solid var(--line-2)}
+    .ruler-y,.ruler-x,.reg{display:none}
+    .cell .dim{opacity:1;transform:none}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition-duration:.001s !important}}
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <header class="top">
+      <div class="mark"><span class="word">Trosa</span><span class="sub">Workspace registry</span></div>
+      <div class="meta"><span>Sheet <b>01</b></span><span>Accounts <b>04</b></span><span>Rev <b>A</b></span></div>
+    </header>
+
+    <div class="field" id="field">
+      <span class="ruler-y"></span><span class="ruler-x"></span>
+      <span class="reg tl"></span><span class="reg tr"></span><span class="reg bl"></span><span class="reg br"></span>
+
+      <button class="cell cell-a" data-name="Amy" data-code="AC-01"><span class="cell-top"><span class="code">AC-01 / 04</span><span class="pin"><i></i>idle</span></span><span class="cell-body"><span class="name">Amy</span><span class="dim"><span class="rule"></span><span>Enter</span></span></span></button>
+      <button class="cell cell-b" data-name="Emma" data-code="AC-02"><span class="cell-top"><span class="code">AC-02 / 04</span><span class="pin"><i></i>idle</span></span><span class="cell-body"><span class="name">Emma</span><span class="dim"><span class="rule"></span><span>Enter</span></span></span></button>
+      <button class="cell cell-c" data-name="Hamid" data-code="AC-03"><span class="cell-top"><span class="code">AC-03 / 04</span><span class="pin"><i></i>idle</span></span><span class="cell-body"><span class="name">Hamid</span><span class="dim"><span class="rule"></span><span>Enter</span></span></span></button>
+      <button class="cell cell-d" data-name="Kelley" data-code="AC-04"><span class="cell-top"><span class="code">AC-04 / 04</span><span class="pin"><i></i>idle</span></span><span class="cell-body"><span class="name">Kelley</span><span class="dim"><span class="rule"></span><span>Enter</span></span></span></button>
+    </div>
+  </div>
+
+  <div class="readout"><span>X <b id="rx">000</b></span><span>Y <b id="ry">000</b></span><span id="rc">—</span></div>
+  <div class="veil" id="veil"></div>
+
+  <section class="workspace" id="workspace" aria-hidden="true">
+    <div class="ws-top"><span>Trosa / Registry</span><button class="ws-back" id="back">← Switch account</button></div>
+    <div class="ws-main">
+      <div class="code" id="wsCode">AC-01</div>
+      <div class="who" id="wsName">Amy</div>
+      <nav class="ws-nav"><span>Today</span><span>Inbox</span><span>Customers</span><span>Calendar</span></nav>
+    </div>
+  </section>
+
+  <div class="tag"><b>02</b> · Drafting</div>
+
+<script>
+(function(){
+  var cells = Array.prototype.slice.call(document.querySelectorAll('.cell'));
+  var ws = document.getElementById('workspace');
+  var veil = document.getElementById('veil');
+  var back = document.getElementById('back');
+  var current = 0, entered = false;
+
+  cells.forEach(function(c,i){
+    c.addEventListener('mouseenter', function(){ current=i; setReadout(c.dataset.code); });
+    c.addEventListener('mouseleave', function(){ setReadout('—'); });
+    c.addEventListener('focus', function(){ current=i; setReadout(c.dataset.code); });
+    c.addEventListener('click', function(){ enter(i); });
+  });
+
+  function enter(i){
+    if(entered) return; entered=true;
+    veil.classList.add('on');
+    setTimeout(function(){
+      document.getElementById('wsName').textContent = cells[i].dataset.name;
+      document.getElementById('wsCode').textContent = cells[i].dataset.code;
+      ws.classList.add('on'); ws.setAttribute('aria-hidden','false');
+      back.focus({preventScroll:true});
+    }, 300);
+    setTimeout(function(){ veil.classList.remove('on'); }, 660);
+  }
+  function leave(){
+    entered=false; ws.classList.remove('on'); ws.setAttribute('aria-hidden','true');
+    setTimeout(function(){ cells[current] && cells[current].focus({preventScroll:true}); }, 400);
+  }
+  back.addEventListener('click', leave);
+
+  function setReadout(t){ document.getElementById('rc').textContent = t; }
+  document.addEventListener('keydown', function(e){
+    if(e.key==='Escape' && entered){ leave(); return; }
+    if(entered) return;
+    if(e.key==='ArrowRight'||e.key==='ArrowDown'){ e.preventDefault(); current=(current+1)%cells.length; cells[current].focus(); }
+    else if(e.key==='ArrowLeft'||e.key==='ArrowUp'){ e.preventDefault(); current=(current-1+cells.length)%cells.length; cells[current].focus(); }
+    else if(e.key==='Enter'){ if(document.activeElement && document.activeElement.classList.contains('cell')){ e.preventDefault(); enter(current); } }
+    else if(/^[1-4]$/.test(e.key)){ e.preventDefault(); enter(parseInt(e.key,10)-1); }
+    else if(e.key==='h'||e.key==='H'){ document.body.classList.toggle('hidden-chrome'); }
+  });
+
+  var rx=document.getElementById('rx'), ry=document.getElementById('ry');
+  window.addEventListener('pointermove', function(e){ rx.textContent=String(Math.round(e.clientX)).padStart(3,'0'); ry.textContent=String(Math.round(e.clientY)).padStart(3,'0'); });
+})();
+</script>
+</body>
+</html>

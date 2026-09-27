@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — 04 Colonnade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..600&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    /* ---- Concept 04 · Colonnade — 竖列色场 (refined) ---- */
+    --bg:#EDEAE4;
+    --ink:#1E1B17;
+    --ink-soft:#4A453E;
+    --line:rgba(30,27,23,.16);
+    --line-2:rgba(30,27,23,.32);
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --display:"Instrument Sans","Inter",-apple-system,"PingFang SC",system-ui,sans-serif;
+    --ui:"Inter",-apple-system,"PingFang SC",system-ui,sans-serif;
+    /* shared type geometry: keeps the column name and the expanding block perfectly aligned */
+    --px:clamp(1.2rem,2.4vw,2.2rem);
+    --pb:clamp(2.6rem,6vw,4.2rem);
+    --name-size:clamp(2rem,5.6vw,4.6rem);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--ui);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow:hidden;cursor:default;
+  }
+  ::selection{background:var(--ink);color:var(--bg)}
+
+  /* ============ the four fields ============ */
+  .shell{position:fixed;inset:0;display:flex;z-index:10}
+
+  .col{
+    position:relative;flex:1 1 0;min-width:0;
+    display:flex;align-items:flex-end;
+    padding:0 var(--px) var(--pb);
+    background:var(--tone);
+    border:0;border-right:1px solid var(--line);
+    cursor:pointer;font:inherit;color:inherit;text-align:left;outline:none;
+    transition:flex-grow .95s var(--ease-out), filter .8s var(--ease), opacity .5s var(--ease);
+    will-change:flex-grow;
+    animation:fieldIn .95s var(--ease-out) backwards;
+    animation-delay:var(--d,0s);
+  }
+  .col:last-child{border-right:0}
+  .col-a{--tone:#D9D0C3;--d:0s}
+  .col-b{--tone:#CCB7AB;--d:.07s}
+  .col-c{--tone:#BEC6B8;--d:.14s}
+  .col-d{--tone:#BCC3C8;--d:.21s}
+
+  /* the chosen field leans forward */
+  .col.is-active{flex-grow:2.4}
+
+  /* the field deepens very slightly when it takes the lead */
+  .col::after{
+    content:"";position:absolute;inset:0;background:var(--ink);
+    opacity:0;mix-blend-mode:multiply;pointer-events:none;
+    transition:opacity .8s var(--ease);
+  }
+  .col.is-active::after{opacity:.05}
+
+  /* the others step back — barely */
+  .col.is-dimmed{filter:brightness(1.025) saturate(.9)}
+
+  /* resting state: the name stands as a spine */
+  .spine{
+    position:absolute;left:var(--px);bottom:var(--pb);z-index:2;
+    writing-mode:vertical-rl;transform:rotate(180deg);
+    font-family:var(--display);font-weight:500;
+    font-size:clamp(.98rem,1.25vw,1.2rem);
+    letter-spacing:.42em;text-transform:uppercase;color:var(--ink-soft);
+    white-space:nowrap;
+    transition:opacity .6s var(--ease), transform .9s var(--ease-out);
+    animation:spineIn 1.05s var(--ease-out) backwards;
+    animation-delay:calc(var(--d,0s) + .05s);
+  }
+  .col.is-active .spine{opacity:0;transform:translateY(.9rem) rotate(180deg)}
+
+  /* leading state: the name opens out */
+  .body{
+    position:relative;z-index:2;
+    display:block;width:100%;
+    opacity:0;transform:translateY(1.25rem);pointer-events:none;
+    transition:opacity .55s var(--ease), transform .85s var(--ease-out);
+  }
+  .col.is-active .body{opacity:1;transform:none}
+
+  .rule{
+    display:block;height:1px;background:var(--line-2);
+    margin-bottom:1.15rem;
+    transform:scaleX(0);transform-origin:left center;
+    transition:transform 1s var(--ease-out) .04s;
+  }
+  .col.is-active .rule{transform:scaleX(1)}
+
+  .name{
+    display:block;
+    font-family:var(--display);font-weight:600;text-transform:uppercase;
+    font-size:var(--name-size);letter-spacing:-.015em;line-height:.9;
+    transition:transform .7s var(--ease-out), font-weight .7s var(--ease), letter-spacing .7s var(--ease);
+  }
+  /* a further, very small presence shift on direct hover */
+  .col.is-active:hover .name{font-weight:680;letter-spacing:-.006em;transform:translateY(-3px)}
+
+  .col:focus-visible{
+    outline:none;
+    box-shadow:inset 0 0 0 1.5px var(--ink);
+  }
+  .col.is-hidden{opacity:0}
+
+  /* ============ the block that grows into the workspace ============ */
+  .expand{
+    position:fixed;z-index:40;pointer-events:none;opacity:0;
+    transition:left .9s var(--ease-out), top .9s var(--ease-out),
+               width .9s var(--ease-out), height .9s var(--ease-out),
+               opacity .4s var(--ease);
+  }
+  .expand.is-active{opacity:1}
+  .expand.is-active.grown{
+    left:0 !important;top:0 !important;
+    width:100vw !important;height:100vh !important;
+  }
+  .expand::after{
+    content:"";position:absolute;inset:0;background:var(--ink);
+    opacity:.05;mix-blend-mode:multiply;pointer-events:none;
+  }
+  .expand-inner{
+    position:absolute;inset:0;z-index:2;
+    display:flex;flex-direction:column;justify-content:flex-end;
+    padding:0 var(--px) var(--pb);
+  }
+  .expand-inner .rule{transform:scaleX(1)}
+  /* once the field has become the page, the name settles a little larger (font-size, so it stays crisp) */
+  .expand-inner .name{transition:font-size 1.15s var(--ease-out)}
+  .expand.grown .expand-inner .name{font-size:calc(var(--name-size) * 1.12)}
+
+  /* ============ brand ============ */
+  .brand{
+    position:fixed;top:calc(var(--px) - .35rem);left:var(--px);z-index:60;
+    display:inline-flex;align-items:center;gap:.4rem;
+    background:none;border:0;padding:.35rem 0;cursor:default;
+    font-family:var(--display);font-weight:700;
+    font-size:clamp(1.25rem,1.9vw,1.7rem);letter-spacing:-.02em;color:var(--ink);
+    mix-blend-mode:multiply;
+    animation:fieldIn .9s var(--ease-out) .3s backwards;
+    transition:transform .6s var(--ease-out);
+  }
+  .brand .back{
+    font-size:.8em;font-weight:500;line-height:1;
+    opacity:0;transform:translateX(-.4rem);
+    transition:opacity .4s var(--ease), transform .55s var(--ease-out);
+  }
+  body.entered .brand{cursor:pointer}
+  body.entered .brand:hover .back{opacity:.7;transform:none}
+  body.entered .brand:hover{transform:translateX(-.15rem)}
+  .brand:focus-visible{outline:1.5px solid var(--ink);outline-offset:5px}
+
+  /* ============ workspace surface ============ */
+  .wsnav{
+    position:fixed;top:calc(var(--px) + .05rem);right:var(--px);z-index:60;
+    display:flex;gap:clamp(1rem,2vw,1.9rem);
+    font-size:.68rem;letter-spacing:.26em;text-transform:uppercase;color:var(--ink-soft);
+    mix-blend-mode:multiply;
+    opacity:0;transform:translateY(-.45rem);visibility:hidden;pointer-events:none;
+    transition:opacity .5s var(--ease), transform .7s var(--ease-out), visibility 0s linear .5s;
+  }
+  .wsnav.on{
+    opacity:1;transform:none;visibility:visible;
+    transition-delay:.34s,.34s,0s;
+  }
+  .wsnav span{border-bottom:1px solid var(--line-2);padding-bottom:.32rem}
+
+  /* ============ narrow ============ */
+  @media (max-width:760px){
+    .shell{flex-direction:column}
+    .col{
+      flex:1 1 0 !important;align-items:center;
+      padding:1.15rem var(--px);
+      border-right:0;border-bottom:1px solid var(--line);
+      filter:none !important;
+    }
+    .col::after{opacity:0 !important}
+    .col:last-child{border-bottom:0}
+    .spine{display:none}
+    .body{opacity:1;transform:none;pointer-events:auto}
+    .name{font-size:var(--name-size)}
+    .rule{display:none}
+    .expand-inner{justify-content:center}
+    :root{--name-size:clamp(2.2rem,10.5vw,3rem)}
+    .wsnav{gap:1rem;font-size:.6rem;letter-spacing:.18em}
+  }
+
+  /* ============ motion ============ */
+  @keyframes fieldIn{from{opacity:0}to{opacity:1}}
+  @keyframes spineIn{
+    from{opacity:0;transform:translateY(.85rem) rotate(180deg)}
+    to{opacity:1;transform:rotate(180deg)}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.001s !important;animation-delay:0s !important;transition-duration:.001s !important}
+  }
+</style>
+</head>
+<body>
+  <div class="shell" id="shell">
+    <button class="col col-a" data-name="Amy" aria-label="Amy">
+      <span class="spine" aria-hidden="true">Amy</span>
+      <span class="body">
+        <span class="rule"></span>
+        <span class="name">Amy</span>
+      </span>
+    </button>
+    <button class="col col-b" data-name="Emma" aria-label="Emma">
+      <span class="spine" aria-hidden="true">Emma</span>
+      <span class="body">
+        <span class="rule"></span>
+        <span class="name">Emma</span>
+      </span>
+    </button>
+    <button class="col col-c" data-name="Hamid" aria-label="Hamid">
+      <span class="spine" aria-hidden="true">Hamid</span>
+      <span class="body">
+        <span class="rule"></span>
+        <span class="name">Hamid</span>
+      </span>
+    </button>
+    <button class="col col-d" data-name="Kelley" aria-label="Kelley">
+      <span class="spine" aria-hidden="true">Kelley</span>
+      <span class="body">
+        <span class="rule"></span>
+        <span class="name">Kelley</span>
+      </span>
+    </button>
+  </div>
+
+  <div class="expand" id="expand" aria-hidden="true">
+    <div class="expand-inner">
+      <span class="rule"></span>
+      <span class="name" id="expandName"></span>
+    </div>
+  </div>
+
+  <button class="brand" id="brand" aria-label="Trosa">
+    <span class="back" aria-hidden="true">←</span><span>Trosa</span>
+  </button>
+
+  <nav class="wsnav" id="wsnav" aria-hidden="true">
+    <span>Today</span><span>Inbox</span><span>Customers</span>
+  </nav>
+
+<script>
+(function(){
+  var cols = Array.prototype.slice.call(document.querySelectorAll('.col'));
+  var shell = document.getElementById('shell');
+  var expand = document.getElementById('expand');
+  var expandName = document.getElementById('expandName');
+  var brand = document.getElementById('brand');
+  var wsnav = document.getElementById('wsnav');
+
+  var active = -1, opened = -1, entered = false, busy = false;
+
+  function setActive(i){
+    if(i === active) return;
+    active = i;
+    cols.forEach(function(c,j){
+      c.classList.toggle('is-active', j === i);
+      c.classList.toggle('is-dimmed', i >= 0 && j !== i);
+      c.setAttribute('aria-pressed', j === i ? 'true' : 'false');
+    });
+  }
+  function rest(){ setActive(-1); }
+
+  cols.forEach(function(c,i){
+    c.addEventListener('mouseenter', function(){ if(!entered && !busy) setActive(i); });
+    c.addEventListener('focus',      function(){ if(!entered && !busy) setActive(i); });
+    c.addEventListener('click',      function(){ open(i); });
+  });
+  shell.addEventListener('mouseleave', function(){ if(!entered && !busy) rest(); });
+
+  function open(i){
+    if(entered || busy) return;
+    busy = true; opened = i;
+    setActive(i);
+
+    var col = cols[i];
+    var r = col.getBoundingClientRect();
+
+    expand.style.background = getComputedStyle(col).backgroundColor;
+    expandName.textContent = col.dataset.name;
+
+    /* seed the block exactly over the field the user chose */
+    expand.style.transition = 'none';
+    expand.style.left = r.left + 'px';
+    expand.style.top = r.top + 'px';
+    expand.style.width = r.width + 'px';
+    expand.style.height = r.height + 'px';
+    void expand.offsetWidth;
+    expand.style.transition = '';
+
+    expand.classList.add('is-active');
+    cols.forEach(function(c){ c.classList.add('is-hidden'); });
+
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){ expand.classList.add('grown'); });
+    });
+
+    setTimeout(function(){
+      document.body.classList.add('entered');
+      wsnav.classList.add('on');
+      wsnav.setAttribute('aria-hidden','false');
+      entered = true; busy = false;
+    }, 600);
+  }
+
+  function close(){
+    if(!entered || busy) return;
+    busy = true;
+    var col = cols[opened];
+    var r = col.getBoundingClientRect();
+
+    document.body.classList.remove('entered');
+    wsnav.classList.remove('on');
+    wsnav.setAttribute('aria-hidden','true');
+
+    /* re-anchor to the field rect without animating, then release it back */
+    expand.style.transition = 'none';
+    expand.style.left = r.left + 'px';
+    expand.style.top = r.top + 'px';
+    expand.style.width = r.width + 'px';
+    expand.style.height = r.height + 'px';
+    void expand.offsetWidth;
+    expand.style.transition = '';
+    expand.classList.remove('grown');
+
+    setTimeout(function(){
+      cols.forEach(function(c){ c.classList.remove('is-hidden'); });
+    }, 320);
+
+    setTimeout(function(){
+      expand.classList.remove('is-active');
+      expand.style.left = expand.style.top = expand.style.width = expand.style.height = '';
+      entered = false; busy = false; opened = -1;
+      /* return the keyboard to the field the user came from, without re-opening it */
+      col.focus({preventScroll:true});
+      rest();
+    }, 940);
+  }
+
+  brand.addEventListener('click', function(){ if(entered) close(); });
+
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape' && entered){ e.preventDefault(); close(); return; }
+    if(entered) return;
+    if(e.key === 'ArrowRight' || e.key === 'ArrowDown'){
+      e.preventDefault(); setActive((active + 1 + cols.length) % cols.length);
+      cols[active].focus({preventScroll:true});
+    } else if(e.key === 'ArrowLeft' || e.key === 'ArrowUp'){
+      e.preventDefault(); setActive((active - 1 + cols.length) % cols.length);
+      cols[active].focus({preventScroll:true});
+    } else if(/^[1-4]$/.test(e.key)){
+      e.preventDefault(); open(parseInt(e.key,10) - 1);
+    }
+  });
+})();
+</script>
+</body>
+</html>

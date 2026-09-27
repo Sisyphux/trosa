@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — Workspace 01 · Folio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   01 · FOLIO — Customer Workspace as a bound reading folio
+   warm paper, deep ink, one oxidized-green mark.
+   Concepts here:
+     · single continuous reading column, no cards
+     · the customer is the title page; timeline is the body
+     · next step is a ribbon bookmark
+     · transition from Colonnade = "wash": the chosen colour
+       bleaches into paper while the big word settles into place
+   ============================================================ */
+:root{
+  --paper:#F3F0E8;
+  --paper-2:#ECE8DD;
+  --paper-3:#E4DFD1;
+  --ink:#22201B;
+  --ink-2:#575246;
+  --ink-3:#8C8778;
+  --line:rgba(34,32,27,.14);
+  --line-2:rgba(34,32,27,.30);
+  --moss:#5C6A54;
+  --clay:#9C6A4E;
+  --serif:"Fraunces",Georgia,"Songti SC","STSong",serif;
+  --sans:"Inter",-apple-system,"PingFang SC",system-ui,sans-serif;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --col:min(760px,calc(100vw - clamp(3rem,12vw,14rem)));
+  --gut:clamp(1.5rem,7vw,7rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:16px;line-height:1.7;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+}
+::selection{background:var(--ink);color:var(--paper)}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--moss);outline-offset:3px;border-radius:3px}
+.num{font-variant-numeric:tabular-nums}
+
+/* paper grain */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.045'/%3E%3C/svg%3E");
+}
+
+/* ================= running header ================= */
+.top{
+  position:fixed;top:0;left:0;right:0;z-index:30;
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:clamp(1rem,2.4vw,1.6rem) var(--gut);
+  mix-blend-mode:multiply;
+  transition:transform .6s var(--ease-out),opacity .5s var(--ease);
+}
+.top .mark{font-family:var(--serif);font-weight:600;font-size:1.15rem;letter-spacing:-.01em}
+.top .who{margin-left:.7rem;font-size:.72rem;letter-spacing:.14em;color:var(--ink-3)}
+.top nav{display:flex;gap:clamp(.9rem,2vw,1.6rem);font-size:.68rem;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-2)}
+.top nav a{position:relative;padding-bottom:.3rem}
+.top nav a[aria-current]{color:var(--ink)}
+.top nav a[aria-current]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--ink)}
+body.entered .top{opacity:1}
+.top{opacity:0;transform:translateY(-.4rem)}
+@media (prefers-reduced-motion:no-preference){body.entered .top{transition-delay:.5s}}
+
+/* ================= folio column ================= */
+.folio{
+  position:relative;z-index:2;
+  width:var(--col);margin:0 auto;
+  padding:clamp(7rem,14vh,10rem) 0 clamp(6rem,12vh,9rem);
+}
+
+/* --- title page --- */
+.kicker{font-size:.7rem;letter-spacing:.34em;text-transform:uppercase;color:var(--moss);margin-bottom:1.4rem}
+.company{
+  font-family:var(--serif);font-weight:500;letter-spacing:-.025em;
+  font-size:clamp(2.6rem,7.4vw,4.9rem);line-height:1.0;text-wrap:balance;
+}
+.identity{
+  margin-top:1.5rem;font-size:.86rem;color:var(--ink-2);
+  display:flex;flex-wrap:wrap;align-items:baseline;gap:.55rem 1rem;
+}
+.identity .dot{color:var(--line-2)}
+.identity b{font-weight:500;color:var(--ink)}
+.profile{
+  margin-top:1.6rem;max-width:56ch;color:var(--ink-2);font-size:.98rem;line-height:1.85;
+  font-family:var(--serif);font-weight:400;
+}
+.titlepage{position:relative;padding-bottom:clamp(2.4rem,6vw,3.6rem)}
+.titlepage::after{content:"";display:block;width:100%;height:1px;background:var(--line-2);margin-top:clamp(2.2rem,5vw,3.2rem)}
+
+/* --- the two slips: now / next --- */
+.slips{
+  display:grid;grid-template-columns:1fr 1fr;gap:clamp(2rem,6vw,4.5rem);
+  padding:clamp(2.2rem,5vw,3.4rem) 0;
+  border-bottom:1px solid var(--line);
+}
+.slip h2{font-size:.7rem;font-weight:600;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-3);margin-bottom:1.1rem;display:flex;align-items:center;gap:.6rem}
+.slip.now h2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--moss)}
+.slip.next h2::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--clay)}
+.pull{font-family:var(--serif);font-size:clamp(1.15rem,2.4vw,1.5rem);line-height:1.5;font-weight:400;letter-spacing:-.01em;text-wrap:pretty}
+.pull .meta{display:block;margin-top:.9rem;font-family:var(--sans);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.slip .body{margin-top:.9rem;color:var(--ink-2);font-size:.92rem;line-height:1.8}
+.waiting{display:flex;align-items:baseline;gap:.7rem;margin-top:1.2rem;padding-top:1.1rem;border-top:1px solid var(--line)}
+.waiting span{font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.waiting strong{font-weight:500;font-size:.92rem}
+.next-title{font-family:var(--serif);font-size:clamp(1.15rem,2.4vw,1.5rem);line-height:1.45;font-weight:500;letter-spacing:-.01em}
+.next-date{margin-top:1rem;display:inline-flex;align-items:center;gap:.5rem;font-size:.86rem;color:var(--clay);font-weight:500}
+.next-date::before{content:"";width:14px;height:1px;background:var(--clay)}
+.next-actions{margin-top:1.4rem;display:flex;gap:1.4rem;font-size:.8rem}
+.next-actions button{color:var(--ink-2);border-bottom:1px solid transparent;padding-bottom:.15rem;transition:border-color .25s,color .25s}
+.next-actions button:hover{color:var(--ink);border-color:var(--line-2)}
+
+/* --- timeline as body text --- */
+.timeline{padding:clamp(2.6rem,6vw,4rem) 0 0}
+.timeline > h2{font-size:.7rem;font-weight:600;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-3);margin-bottom:clamp(1.8rem,4vw,2.8rem)}
+.entry{
+  position:relative;
+  display:grid;grid-template-columns:5.6rem 1fr;gap:clamp(1.2rem,4vw,2.6rem);
+  padding:clamp(1.5rem,3.4vw,2.2rem) 0;
+  border-top:1px solid var(--line);
+}
+.entry:last-child{border-bottom:1px solid var(--line)}
+.entry .when{font-size:.78rem;color:var(--ink-3);letter-spacing:.04em;padding-top:.25rem}
+.entry .when b{display:block;color:var(--ink-2);font-weight:500}
+.entry .full{font-size:.86rem}
+.entry .meta{display:flex;align-items:center;gap:.7rem;font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:.7rem}
+.entry .meta .dir{letter-spacing:0;text-transform:none;font-size:.72rem}
+.dir-in{color:var(--moss)}.dir-out{color:var(--ink-3)}.dir-two{color:var(--clay)}
+.entry p{color:var(--ink);font-size:1rem;line-height:1.75;text-wrap:pretty}
+.entry .result{margin-top:.9rem;padding-left:1rem;border-left:2px solid var(--paper-3);color:var(--ink-2);font-size:.9rem}
+.entry .result b{font-weight:600;font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);display:block;margin-bottom:.25rem}
+.entry .sub{margin-top:.6rem;color:var(--ink-3);font-size:.8rem}
+body.js .entry{opacity:0;transform:translateY(14px)}
+body.js .entry.in{opacity:1;transform:none;transition:opacity .8s var(--ease),transform .8s var(--ease-out)}
+
+/* --- compose --- */
+.compose{margin-top:clamp(2.6rem,6vw,4rem)}
+.compose-trigger{
+  width:100%;text-align:left;font-family:var(--serif);font-size:clamp(1.05rem,2.2vw,1.35rem);
+  color:var(--ink-3);padding:1.3rem 0;border-top:1px solid var(--line-2);border-bottom:1px solid var(--line-2);
+  display:flex;align-items:center;justify-content:space-between;transition:color .3s
+}
+.compose-trigger:hover{color:var(--ink)}
+.compose-trigger .plus{font-family:var(--sans);font-size:1.2rem;font-weight:300}
+.compose-panel{overflow:hidden;max-height:0;opacity:0;transition:max-height .6s var(--ease-out),opacity .4s var(--ease)}
+.compose.open .compose-panel{max-height:520px;opacity:1}
+.compose-field{margin:1.6rem 0;border-bottom:1px solid var(--line-2);padding-bottom:.6rem}
+.compose-field textarea{
+  width:100%;border:0;background:none;resize:none;font:inherit;font-family:var(--serif);
+  font-size:1.1rem;line-height:1.6;color:var(--ink);min-height:3.4rem;outline:none
+}
+.compose-field textarea::placeholder{color:var(--ink-3)}
+.compose-modes{display:flex;gap:1.2rem;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.compose-modes button[aria-pressed="true"]{color:var(--ink);border-bottom:1px solid var(--ink);padding-bottom:.2rem}
+.compose-foot{display:flex;justify-content:flex-end;margin-top:1rem}
+.btn-primary{background:var(--ink);color:var(--paper);padding:.7rem 1.4rem;border-radius:2px;font-size:.8rem;letter-spacing:.06em;transition:background .25s}
+.btn-primary:hover{background:var(--moss)}
+
+/* --- sections (资料/联系人/文件/待办) --- */
+.section{display:none;padding:clamp(2.4rem,6vw,3.6rem) 0}
+.section.on{display:block}
+.section > h2{font-size:.7rem;font-weight:600;letter-spacing:.28em;text-transform:uppercase;color:var(--ink-3);margin-bottom:2rem}
+.deflist{display:grid;grid-template-columns:8rem 1fr;gap:1rem 2rem;font-size:.95rem}
+.deflist dt{color:var(--ink-3);font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;padding-top:.2rem}
+.deflist dd{color:var(--ink);margin-bottom:1.1rem}
+.deflist dd .sub{color:var(--ink-3);font-size:.82rem}
+.people li{list-style:none;display:grid;grid-template-columns:1fr auto;gap:1rem;padding:1.3rem 0;border-top:1px solid var(--line);align-items:baseline}
+.people li:last-child{border-bottom:1px solid var(--line)}
+.people b{font-weight:500;font-size:1rem}
+.people span{display:block;color:var(--ink-3);font-size:.8rem;margin-top:.25rem}
+.people a{color:var(--ink-2);font-size:.86rem;border-bottom:1px solid var(--line-2)}
+.people a:hover{color:var(--ink)}
+.files li{list-style:none;display:grid;grid-template-columns:1fr auto;gap:1rem;padding:1.15rem 0;border-top:1px solid var(--line);align-items:baseline}
+.files li:last-child{border-bottom:1px solid var(--line)}
+.files b{font-weight:500;font-size:.95rem}
+.files span{display:block;color:var(--ink-3);font-size:.78rem;margin-top:.25rem}
+.files time{color:var(--ink-3);font-size:.8rem}
+.tasklist li{list-style:none;display:grid;grid-template-columns:auto 1fr auto;gap:1.1rem;padding:1.3rem 0;border-top:1px solid var(--line);align-items:baseline}
+.tasklist li:last-child{border-bottom:1px solid var(--line)}
+.tasklist .box{width:14px;height:14px;border:1px solid var(--line-2);border-radius:2px;position:relative;top:.15rem}
+.tasklist li.done .box{background:var(--moss);border-color:var(--moss)}
+.tasklist li.done .t{color:var(--ink-3);text-decoration:line-through;text-decoration-color:var(--line-2)}
+.tasklist .t{font-size:.98rem}
+.tasklist .t small{display:block;color:var(--ink-3);font-size:.78rem;margin-top:.3rem}
+.tasklist time{color:var(--ink-3);font-size:.82rem}
+.tasklist li.is-next time{color:var(--clay);font-weight:500}
+
+/* --- ribbon bookmark --- */
+.ribbon{
+  position:fixed;z-index:20;right:clamp(.7rem,2.2vw,1.9rem);top:0;
+  width:34px;padding:0;border:0;transform:translateY(0);
+  opacity:0;transition:opacity .6s var(--ease)
+}
+body.entered .ribbon{opacity:1}
+.ribbon .tail{
+  display:block;background:var(--clay);color:#FBF9F3;
+  writing-mode:vertical-rl;font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;
+  padding:1.1rem .55rem 1.6rem;
+  clip-path:polygon(0 0,100% 0,100% 100%,50% calc(100% - 10px),0 100%);
+  transition:transform .45s var(--ease-out)
+}
+.ribbon:hover .tail{transform:translateY(.4rem)}
+@media (max-width:1100px){.ribbon{display:none}}
+
+/* --- marginal dates rail --- */
+.marginal{
+  position:fixed;z-index:1;left:var(--gut);top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:1.1rem;
+  font-size:.62rem;letter-spacing:.14em;color:var(--ink-3);text-transform:uppercase;
+  opacity:0;transition:opacity .8s var(--ease) .6s;pointer-events:none
+}
+body.entered .marginal{opacity:.75}
+.marginal b{color:var(--moss);font-weight:600}
+@media (max-width:1400px){.marginal{display:none}}
+
+/* --- replay --- */
+.replay{
+  position:fixed;z-index:40;bottom:1.2rem;left:1.2rem;
+  font-size:.62rem;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-2);
+  border:1px solid var(--line-2);background:color-mix(in srgb,var(--paper) 80%,transparent);
+  backdrop-filter:blur(6px);border-radius:999px;padding:.5rem 1rem;
+  opacity:0;transition:opacity .5s var(--ease) .8s
+}
+body.entered .replay{opacity:1}
+.replay:hover{color:var(--ink);border-color:var(--ink)}
+
+/* ============================================================
+   INTRO — Colonnade → Folio
+   ============================================================ */
+.intro{position:fixed;inset:0;z-index:80;background:var(--paper)}
+.intro.gone{opacity:0;pointer-events:none;transition:opacity .6s var(--ease)}
+.ifields{position:absolute;inset:0;display:flex}
+.ifield{
+  position:relative;flex:1 1 0;min-width:0;background:var(--t);
+  display:flex;align-items:flex-end;padding:0 clamp(1.2rem,2.4vw,2.2rem) clamp(2.6rem,6vw,4.2rem);
+  border-right:1px solid rgba(30,27,23,.16);
+  transition:flex-grow .8s var(--ease-out),opacity .5s var(--ease)
+}
+.ifield:last-child{border-right:0}
+.ifield.active{flex-grow:2.4}
+.ifield .spine{
+  writing-mode:vertical-rl;transform:rotate(180deg);
+  font-family:var(--sans);font-weight:500;font-size:clamp(.9rem,1.2vw,1.1rem);
+  letter-spacing:.4em;text-transform:uppercase;color:rgba(30,27,23,.72);white-space:nowrap
+}
+.ifield.active .spine{opacity:0}
+.ibrand{position:absolute;top:clamp(1rem,2.4vw,1.6rem);left:clamp(1.2rem,2.4vw,2.2rem);font-family:var(--sans);font-weight:700;font-size:1.3rem;letter-spacing:-.02em;color:#1E1B17}
+.veil{
+  position:fixed;z-index:81;overflow:hidden;background:var(--tone,#D9D0C3);
+  transition:left .85s var(--ease-out),top .85s var(--ease-out),width .85s var(--ease-out),height .85s var(--ease-out),background-color .8s var(--ease);
+  opacity:0;pointer-events:none
+}
+.veil.on{opacity:1}
+.veil.grown{left:0!important;top:0!important;width:100vw!important;height:100vh!important}
+.veil.washed{background-color:var(--paper)}
+.veil .vname{
+  position:absolute;left:clamp(1.2rem,2.4vw,2.2rem);bottom:clamp(2.6rem,6vw,4.2rem);
+  font-family:var(--sans);font-weight:600;font-size:clamp(2rem,5.6vw,4.6rem);letter-spacing:-.015em;
+  text-transform:uppercase;color:#1E1B17;line-height:.9;
+  transition:opacity .45s var(--ease),transform .6s var(--ease-out)
+}
+.veil.washed .vname{opacity:0;transform:translateY(-.6rem)}
+
+/* title page enters from the veil name position */
+body.js:not(.entered) .titlepage .kicker,
+body.js:not(.entered) .titlepage .company,
+body.js:not(.entered) .titlepage .identity,
+body.js:not(.entered) .titlepage .profile{opacity:0;transform:translateY(18px)}
+body.entered .titlepage .kicker{transition:opacity .7s var(--ease) .1s,transform .8s var(--ease-out) .1s}
+body.entered .titlepage .company{transition:opacity .9s var(--ease) .16s,transform 1s var(--ease-out) .16s}
+body.entered .titlepage .identity{transition:opacity .8s var(--ease) .34s,transform .9s var(--ease-out) .34s}
+body.entered .titlepage .profile{transition:opacity .8s var(--ease) .44s,transform .9s var(--ease-out) .44s}
+body.entered .titlepage .kicker,
+body.entered .titlepage .company,
+body.entered .titlepage .identity,
+body.entered .titlepage .profile{opacity:1;transform:none}
+
+/* --- responsive --- */
+@media (max-width:900px){
+  .slips{grid-template-columns:1fr;gap:2.4rem}
+}
+@media (max-width:700px){
+  :root{--col:calc(100vw - 2.6rem);--gut:1.3rem}
+  body{font-size:15px}
+  .top>div{min-width:0}
+  .top .who{display:inline-block;max-width:8.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  .top nav{gap:.85rem;font-size:.6rem;letter-spacing:.16em}
+  .entry{grid-template-columns:1fr;gap:.5rem}
+  .entry .when{display:flex;gap:.7rem;align-items:baseline}
+  .entry .when b{display:inline}
+  .deflist{grid-template-columns:1fr;gap:.2rem 0}
+  .deflist dt{margin-top:.9rem}
+  .veil .vname{font-size:clamp(2rem,12vw,3rem)}
+}
+@media (max-width:560px){ .top nav{display:none} }
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  body.js:not(.entered) .titlepage *{opacity:1!important;transform:none!important}
+}
+</style>
+</head>
+<body>
+<!-- ================= intro: Colonnade → Folio (wash) ================= -->
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="ifields" id="ifields">
+    <div class="ifield" data-name="Amy" style="--t:#D9D0C3"><span class="spine">Amy</span></div>
+    <div class="ifield" data-name="Emma" style="--t:#CCB7AB"><span class="spine">Emma</span></div>
+    <div class="ifield" data-name="Hamid" style="--t:#BEC6B8"><span class="spine">Hamid</span></div>
+    <div class="ifield" data-name="Kelley" style="--t:#BCC3C8"><span class="spine">Kelley</span></div>
+  </div>
+  <div class="ibrand">Trosa</div>
+  <div class="veil" id="veil"><span class="vname" id="vname">Amy</span></div>
+</div>
+
+<!-- ================= workspace ================= -->
+<header class="top">
+  <div><span class="mark">Trosa</span><span class="who" id="whoLabel">客户工作台 · Amy</span></div>
+  <nav aria-label="一级导航">
+    <a href="#">Today</a><a href="#">Inbox</a><a href="#" aria-current="page">Customers</a>
+  </nav>
+</header>
+
+<button class="ribbon" id="ribbon" title="跳到下一步"><span class="tail">下一步 · 9 月 29 日</span></button>
+
+<div class="marginal" id="marginal" aria-hidden="true"></div>
+
+<main class="folio">
+  <!-- title page -->
+  <section class="titlepage">
+    <p class="kicker">客户档案 · № 014</p>
+    <h1 class="company">Acryl Innovations GmbH</h1>
+    <p class="identity">
+      <span>德国</span><i class="dot">·</i>
+      <span>展示器材 / 亚克力</span><i class="dot">·</i>
+      <span>SIGN CHINA 2026 展会</span><i class="dot">·</i>
+      <span>等级 <b>B+</b></span>
+    </p>
+    <p class="profile">杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。</p>
+  </section>
+
+  <!-- now / next -->
+  <section class="slips" id="overview">
+    <article class="slip now">
+      <h2>最近沟通</h2>
+      <p class="pull">“三款色板耐候测试通过，请在报价中标注再生料比例与 EU 合规编号。”<span class="meta">Markus Weber · 客户来信 · 9 月 24 日</span></p>
+      <div class="waiting"><span>当前等待</span><strong>客户内部确认再生料比例</strong></div>
+    </article>
+    <article class="slip next" id="nextStep">
+      <h2>下一步</h2>
+      <p class="next-title">确认样品反馈，准备下一轮报价</p>
+      <p class="next-date">9 月 29 日 · 周二</p>
+      <div class="next-actions">
+        <button>记录沟通</button>
+        <button>调整</button>
+        <button>完成</button>
+      </div>
+    </article>
+  </section>
+
+  <!-- view: timeline -->
+  <section class="section on" id="view-timeline">
+    <div class="timeline">
+      <h2>沟通与时间线</h2>
+      <div id="timelineList"></div>
+      <div class="compose" id="compose">
+        <button class="compose-trigger" id="composeTrigger">记录这次沟通…<span class="plus">+</span></button>
+        <div class="compose-panel">
+          <div class="compose-modes">
+            <button aria-pressed="true">沟通记录</button><button aria-pressed="false">开发邮件</button>
+          </div>
+          <div class="compose-field"><textarea rows="2" placeholder="粘贴邮件、WhatsApp 对话或会议内容；系统会区分双方并整理摘要"></textarea></div>
+          <div class="compose-foot"><button class="btn-primary">只保存记录</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- view: profile -->
+  <section class="section" id="view-profile">
+    <h2>资料</h2>
+    <dl class="deflist" id="profileList"></dl>
+  </section>
+
+  <!-- view: contacts -->
+  <section class="section" id="view-contacts">
+    <h2>联系人</h2>
+    <ul class="people" id="contactsList"></ul>
+  </section>
+
+  <!-- view: files -->
+  <section class="section" id="view-files">
+    <h2>文件</h2>
+    <ul class="files" id="filesList"></ul>
+  </section>
+
+  <!-- view: tasks -->
+  <section class="section" id="view-tasks">
+    <h2>全部待办</h2>
+    <ul class="tasklist" id="tasksList"></ul>
+  </section>
+</main>
+
+<button class="replay" id="replay">重播转场</button>
+
+<script>
+document.documentElement.classList.add('js');
+document.body.classList.add('js');
+
+/* ---------- data (shared across all four concepts) ---------- */
+var DATA = {
+  customer: {
+    no:'014', company:'Acryl Innovations GmbH', country:'德国',
+    industry:'展示器材 / 亚克力', source:'SIGN CHINA 2026 · 展会', level:'B+',
+    website:'acryl-innovations.de', businessRole:'终端',
+    profile:'杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。',
+    waiting:'客户内部确认再生料比例',
+    next:{title:'确认样品反馈，准备下一轮报价', date:'2026-09-29'},
+    contacts:[
+      {name:'Markus Weber', title:'采购经理', email:'m.weber@acryl-innovations.de', primary:true},
+      {name:'Lena Fischer', title:'产品与合规', email:'l.fischer@acryl-innovations.de'}
+    ],
+    facts:[
+      {date:'2026-09-24', type:'邮件', dir:'in', source:'客户来信', full:'Markus 回复：三款色板的耐候测试通过，但需要我们在报价中标注再生料比例与 EU 合规编号。', result:'需要在报价单补充材料说明'},
+      {date:'2026-09-22', type:'寄样', dir:'out', source:'我方寄样', full:'寄出 R-PMMA 三款色板（自然、烟灰、琥珀）及基础参数表。'},
+      {date:'2026-09-18', type:'展会现场', dir:'two', source:'SIGN CHINA 2026', full:'展位沟通 25 分钟，对方对再生亚克力系列感兴趣，现场索要样品与 MOQ。', result:'约定回国后寄样并报价'},
+      {date:'2026-09-16', type:'报价', dir:'out', source:'首轮报价 RP-0916', full:'发出首轮报价，MOQ 500 件，交期 25 天。'},
+      {date:'2026-09-10', type:'开发邮件', dir:'out', source:'开发信', full:'通过领英找到采购负责人，发出首封开发邮件。'}
+    ],
+    files:[
+      {name:'报价单_RP-0916.pdf', cat:'报价单', size:'218 KB', date:'2026-09-16'},
+      {name:'色板参数表_R-PMMA.xlsx', cat:'产品资料', size:'64 KB', date:'2026-09-22'},
+      {name:'SIGN_CHINA_展位记录.jpg', cat:'展会资料', size:'1.2 MB', date:'2026-09-18'}
+    ],
+    tasks:[
+      {title:'确认样品反馈，准备下一轮报价', date:'2026-09-29', done:false, next:true},
+      {title:'补发 EU 合规文件（REACH / ROHS）', date:'2026-10-02', done:false},
+      {title:'寄出手感样并确认收货', date:'2026-09-22', done:true}
+    ]
+  }
+};
+
+/* ---------- helpers ---------- */
+function cn(iso){ if(!iso) return ''; var p=iso.split('-'); return Number(p[1])+' 月 '+Number(p[2])+' 日'; }
+function rel(iso){
+  if(!iso) return '';
+  var t=new Date(); t.setHours(0,0,0,0);
+  var d=new Date(iso+'T00:00:00'); var n=Math.round((d-t)/86400000);
+  if(n===0) return '今天'; if(n===1) return '明天';
+  if(n===-1) return '昨天'; if(n<0) return '逾期 '+(-n)+' 天'; if(n<=6) return n+' 天后';
+  return cn(iso);
+}
+function ago(iso){
+  if(!iso) return '';
+  var t=new Date(); t.setHours(0,0,0,0);
+  var d=new Date(iso+'T00:00:00'); var n=Math.round((t-d)/86400000);
+  if(n<=0) return n===0?'今天':'';
+  if(n===1) return '昨天'; if(n<7) return n+' 天前'; if(n<14) return '1 周前';
+  return '';
+}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function weekday(iso){var w=['周日','周一','周二','周三','周四','周五','周六'];return w[new Date(iso+'T00:00:00').getDay()];}
+
+/* ---------- render ---------- */
+(function render(){
+  var c=DATA.customer;
+  document.getElementById('whoLabel').textContent='客户工作台 · Amy';
+
+  document.getElementById('timelineList').innerHTML=c.facts.map(function(f){
+    var dirTxt={in:'客户发给我',out:'我发给客户',two:'双方沟通'}[f.dir]||'';
+    return '<article class="entry">'+
+      '<div class="when"><b>'+cn(f.date)+'</b><span>'+ago(f.date)+'</span></div>'+
+      '<div>'+
+        '<div class="meta"><span>'+esc(f.type)+'</span><span class="dot">·</span><span class="dir dir-'+f.dir+'">'+esc(dirTxt)+'</span><span class="dot">·</span><span>'+esc(f.source)+'</span></div>'+
+        '<p>'+esc(f.full)+'</p>'+
+        (f.result?'<div class="result"><b>结果</b>'+esc(f.result)+'</div>':'')+
+      '</div></article>';
+  }).join('');
+
+  document.getElementById('profileList').innerHTML=[
+    ['公司',c.company],['国家 / 地区',c.country],['行业领域',c.industry],
+    ['客户来源',c.source],['等级',c.level],['业务角色',c.businessRole],
+    ['网站','<a href="https://'+esc(c.website)+'" target="_blank" rel="noopener" style="border-bottom:1px solid var(--line-2)">'+esc(c.website)+'</a>'],
+    ['当前等待',c.waiting],
+    ['简介',esc(c.profile)]
+  ].map(function(r){return '<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>';}).join('');
+
+  document.getElementById('contactsList').innerHTML=c.contacts.map(function(p){
+    return '<li><div><b>'+esc(p.name)+'</b><span>'+esc(p.title)+(p.primary?' · 主要联系人':'')+'</span></div><a href="mailto:'+esc(p.email)+'">'+esc(p.email)+'</a></li>';
+  }).join('');
+
+  document.getElementById('filesList').innerHTML=c.files.map(function(f){
+    return '<li><div><b>'+esc(f.name)+'</b><span>'+esc(f.cat)+' · '+esc(f.size)+'</span></div><time>'+cn(f.date)+'</time></li>';
+  }).join('');
+
+  document.getElementById('tasksList').innerHTML=c.tasks.map(function(t){
+    return '<li class="'+(t.done?'done ':'')+(t.next?'is-next':'')+'"><span class="box" aria-hidden="true"></span><div class="t">'+esc(t.title)+(t.next?'<small>下一步</small>':'')+'</div><time>'+cn(t.date)+'</time></li>';
+  }).join('');
+
+  document.getElementById('marginal').innerHTML=c.facts.slice(0,5).map(function(f,i){
+    return '<span'+(i===0?' style="color:var(--ink-2)"':'')+'>'+cn(f.date)+'</span>';
+  }).join('');
+
+  document.getElementById('ribbon').innerHTML='<span class="tail">下一步 · '+cn(c.next.date)+'</span>';
+})();
+
+/* ---------- section views ---------- */
+(function views(){
+  var ids=['overview','view-timeline','view-profile','view-contacts','view-files','view-tasks'];
+  function show(id){
+    document.querySelectorAll('.section[data-view]').forEach(function(s){});
+    document.getElementById('overview').style.display=(id==='overview')?'':'none';
+    ['view-timeline','view-profile','view-contacts','view-files','view-tasks'].forEach(function(v){
+      document.getElementById(v).classList.toggle('on', v===id);
+    });
+    window.scrollTo({top:0,behavior:'auto'});
+  }
+  window._showView=show;
+})();
+/* nav: use the running header links as view switches is out of scope;
+   keyboard 1–5 switches views for review purposes */
+document.addEventListener('keydown',function(e){
+  if(e.target && /INPUT|TEXTAREA/.test(e.target.tagName)) return;
+  var map={'1':'view-timeline','2':'view-profile','3':'view-contacts','4':'view-files','5':'view-tasks','0':'overview'};
+  if(map[e.key]) window._showView(map[e.key]);
+  if(e.key==='Escape') window._showView('overview');
+});
+
+/* ---------- compose ---------- */
+document.getElementById('composeTrigger').addEventListener('click',function(){
+  document.getElementById('compose').classList.toggle('open');
+});
+document.querySelectorAll('.compose-modes button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.compose-modes button').forEach(function(x){x.setAttribute('aria-pressed','false');});
+    b.setAttribute('aria-pressed','true');
+  });
+});
+document.getElementById('ribbon').addEventListener('click',function(){
+  document.getElementById('nextStep').scrollIntoView({behavior:'smooth',block:'center'});
+});
+document.querySelectorAll('.next-actions button').forEach(function(b,i){
+  b.addEventListener('click',function(){
+    if(i===0){document.getElementById('compose').classList.add('open');document.getElementById('composeTrigger').scrollIntoView({behavior:'smooth',block:'center'});}
+  });
+});
+
+/* ---------- timeline reveal ---------- */
+(function reveal(){
+  var entries=[].slice.call(document.querySelectorAll('.entry'));
+  if(!('IntersectionObserver' in window)||matchMedia('(prefers-reduced-motion:reduce)').matches){
+    entries.forEach(function(e){e.classList.add('in');}); return;
+  }
+  var io=new IntersectionObserver(function(list){
+    list.forEach(function(en){ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target);} });
+  },{rootMargin:'0px 0px -8% 0px',threshold:.05});
+  entries.forEach(function(e){io.observe(e);});
+})();
+
+/* ============================================================
+   INTRO — reproduce the Colonnade beat, then wash into paper
+   ============================================================ */
+(function intro(){
+  var intro=document.getElementById('intro');
+  var veil=document.getElementById('veil');
+  var vname=document.getElementById('vname');
+  var ifields=[].slice.call(document.querySelectorAll('.ifield'));
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var timers=[];
+
+  function clearTimers(){timers.forEach(clearTimeout);timers=[];}
+  function T(fn,ms){timers.push(setTimeout(fn,ms));}
+
+  function selectField(el){
+    ifields.forEach(function(f){f.classList.toggle('active',f===el);});
+  }
+
+  function play(userName, fieldEl){
+    clearTimers();
+    document.body.classList.remove('entered');
+    intro.classList.remove('gone');
+    veil.classList.remove('on','grown','washed');
+    [veil].forEach(function(v){v.style.left=v.style.top=v.style.width=v.style.height='';v.style.background='';});
+    ifields.forEach(function(f){f.style.display='';f.classList.remove('active');});
+    vname.textContent=userName;
+    document.getElementById('whoLabel').textContent='客户工作台 · '+userName;
+
+    if(reduce){ enterNow(userName); return; }
+
+    // 1) settle on the chosen field like Colonnade does
+    selectField(fieldEl);
+    var r=fieldEl.getBoundingClientRect();
+    T(function(){
+      // 2) seed the veil exactly over the field and grow it to full screen
+      veil.style.transition='none';
+      veil.style.left=r.left+'px';veil.style.top=r.top+'px';veil.style.width=r.width+'px';veil.style.height=r.height+'px';
+      veil.style.background=getComputedStyle(fieldEl).backgroundColor;
+      void veil.offsetWidth;
+      veil.style.transition='';
+      veil.classList.add('on');
+      ifields.forEach(function(f){f.style.display='none';});
+      requestAnimationFrame(function(){requestAnimationFrame(function(){veil.classList.add('grown');});});
+    },340);
+
+    // 3) the block bleaches into paper; the big word settles away
+    T(function(){veil.classList.add('washed');},340+950);
+    // 4) reveal the workspace beneath, then drop the veil
+    T(function(){document.body.classList.add('entered');},340+950+120);
+    T(function(){intro.classList.add('gone');},340+950+520);
+  }
+
+  function enterNow(userName){
+    clearTimers();
+    veil.classList.remove('on');ifields.forEach(function(f){f.style.display='none';});
+    document.getElementById('whoLabel').textContent='客户工作台 · '+userName;
+    document.body.classList.add('entered');
+    intro.classList.add('gone');
+  }
+
+  // auto-play: choose Amy unless the person touches the fields first
+  var chosen=0; var interacted=false;
+  ifields.forEach(function(f,i){
+    f.addEventListener('mouseenter',function(){interacted=true;selectField(f);});
+    f.addEventListener('focus',function(){interacted=true;selectField(f);});
+    f.addEventListener('click',function(){interacted=true;chosen=i;play(f.dataset.name,f);});
+  });
+  setTimeout(function(){ if(!interacted){ chosen=0; play('Amy',ifields[0]); } },900);
+
+  document.getElementById('replay').addEventListener('click',function(){
+    intro.classList.remove('gone');
+    play(ifields[chosen].dataset.name,ifields[chosen]);
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&!intro.classList.contains('gone')){ enterNow('Amy'); }
+  });
+})();
+</script>
+</body>
+</html>

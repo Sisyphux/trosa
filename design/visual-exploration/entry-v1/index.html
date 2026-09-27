@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trosa — Entry 视觉探索 v1 · 四方案对比</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#101011;
+    --panel:#17171a;
+    --ink:#EDEDEC;
+    --muted:#8B8B90;
+    --line:rgba(255,255,255,.10);
+    --line-2:rgba(255,255,255,.22);
+    --accent:#C8B49B;
+    --ease-out:cubic-bezier(.16,1,.3,1);
+    --sans:"Inter",-apple-system,"PingFang SC",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{min-height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+
+  header.top{
+    position:sticky;top:0;z-index:20;
+    display:flex;align-items:center;justify-content:space-between;gap:1.2rem;flex-wrap:wrap;
+    padding:1.05rem clamp(1rem,3vw,2rem);
+    background:color-mix(in srgb,var(--bg) 86%,transparent);
+    backdrop-filter:blur(14px);border-bottom:1px solid var(--line);
+  }
+  .lead{display:flex;align-items:baseline;gap:.9rem;min-width:0}
+  .lead .word{font-weight:600;letter-spacing:.02em;font-size:1.05rem}
+  .lead .t{font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .controls{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+  .seg{display:flex;border:1px solid var(--line-2);border-radius:999px;overflow:hidden}
+  .seg button{
+    font:inherit;font-size:.7rem;letter-spacing:.1em;color:var(--muted);background:none;border:0;
+    padding:.42rem .85rem;cursor:pointer;transition:background .25s,color .25s;
+  }
+  .seg button + button{border-left:1px solid var(--line)}
+  .seg button:hover{color:var(--ink)}
+  .seg button[aria-pressed="true"]{background:var(--ink);color:#111}
+  .seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .btn{
+    font:inherit;font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--ink);background:none;border:1px solid var(--line-2);border-radius:999px;
+    padding:.45rem 1rem;cursor:pointer;transition:background .25s,color .25s,border-color .25s;
+  }
+  .btn:hover{background:var(--ink);color:#111;border-color:var(--ink)}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:clamp(.8rem,2vw,1.4rem);
+    padding:clamp(.9rem,2.4vw,1.6rem);
+  }
+  .card{display:flex;flex-direction:column;gap:.6rem;min-width:0}
+  .cap{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:0 .2rem}
+  .cap .id{display:flex;align-items:baseline;gap:.7rem;min-width:0}
+  .cap .num{font-size:.68rem;letter-spacing:.2em;color:var(--accent);font-variant-numeric:tabular-nums}
+  .cap .nm{font-size:.82rem;font-weight:500;letter-spacing:.02em}
+  .cap .kw{font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+  .cap .open{font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);text-decoration:none;border-bottom:1px solid transparent;transition:color .2s,border-color .2s;white-space:nowrap}
+  .cap .open:hover{color:var(--ink);border-color:var(--line-2)}
+
+  .stage{
+    position:relative;width:100%;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    transition:border-color .3s var(--ease-out);
+  }
+  .stage:hover{border-color:var(--line-2)}
+  .stage iframe{
+    border:0;display:block;transform-origin:top left;background:#fff;
+  }
+  .stage .badge{
+    position:absolute;left:.7rem;top:.7rem;z-index:2;pointer-events:none;
+    font-size:.58rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+    background:rgba(0,0,0,.42);backdrop-filter:blur(6px);border-radius:999px;padding:.25rem .6rem;
+    opacity:0;transition:opacity .3s;
+  }
+  .stage:hover .badge{opacity:1}
+
+  footer.foot{padding:1rem clamp(1rem,3vw,2rem) 3rem;color:var(--muted);font-size:.68rem;line-height:2;letter-spacing:.04em}
+  footer.foot b{color:var(--ink);font-weight:500}
+  footer.foot code{font-size:.68rem;color:var(--ink)}
+
+  @media (max-width:1000px){ .grid{grid-template-columns:1fr} }
+  @media (min-width:1000px){
+    .grid.is-narrow{grid-template-columns:repeat(4,1fr)}
+    .grid.is-narrow .cap .kw{display:none}
+  }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="lead">
+      <span class="word">Trosa</span>
+      <span class="t">Entry surface · visual exploration v1</span>
+    </div>
+    <div class="controls">
+      <div class="seg" id="seg">
+        <button data-w="1440" data-h="900" aria-pressed="true">Desktop</button>
+        <button data-w="1024" data-h="768" aria-pressed="false">iPad</button>
+        <button data-w="390" data-h="844" aria-pressed="false">iPhone</button>
+      </div>
+      <button class="btn" id="openAll">Open all 4 tabs</button>
+    </div>
+  </header>
+
+  <main class="grid" id="grid">
+    <div class="card" data-src="01-index.html">
+      <div class="cap"><span class="id"><span class="num">01</span><span class="nm">Index</span></span><span class="kw">编辑目录</span><a class="open" href="01-index.html" target="_blank" rel="noopener">Open ↗</a></div>
+      <div class="stage"><span class="badge">01 · Index</span><iframe title="01 Index" loading="lazy" src="01-index.html"></iframe></div>
+    </div>
+    <div class="card" data-src="02-drafting.html">
+      <div class="cap"><span class="id"><span class="num">02</span><span class="nm">Drafting</span></span><span class="kw">制图网格</span><a class="open" href="02-drafting.html" target="_blank" rel="noopener">Open ↗</a></div>
+      <div class="stage"><span class="badge">02 · Drafting</span><iframe title="02 Drafting" loading="lazy" src="02-drafting.html"></iframe></div>
+    </div>
+    <div class="card" data-src="03-dial.html">
+      <div class="cap"><span class="id"><span class="num">03</span><span class="nm">Dial</span></span><span class="kw">环绕刻度</span><a class="open" href="03-dial.html" target="_blank" rel="noopener">Open ↗</a></div>
+      <div class="stage"><span class="badge">03 · Dial</span><iframe title="03 Dial" loading="lazy" src="03-dial.html"></iframe></div>
+    </div>
+    <div class="card" data-src="04-colonnade.html">
+      <div class="cap"><span class="id"><span class="num">04</span><span class="nm">Colonnade</span></span><span class="kw">竖列色场</span><a class="open" href="04-colonnade.html" target="_blank" rel="noopener">Open ↗</a></div>
+      <div class="stage"><span class="badge">04 · Colonnade</span><iframe title="04 Colonnade" loading="lazy" src="04-colonnade.html"></iframe></div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div><b>操作</b>：悬停/方向键切换，<code>Enter</code> 或点击进入 workspace，<code>Esc</code> 返回，数字 <code>1</code>–<code>4</code> 直接选择，<code>H</code> 隐藏角标。</div>
+    <div><b>预览</b>：上方切换 Desktop / iPad / iPhone，四种概念会各自进入对应断点；预览框可直接交互。「Open all 4 tabs」若被浏览器拦截，请允许弹出窗口。</div>
+  </footer>
+
+<script>
+(function(){
+  var device = { w:1440, h:900 };
+  var cells = Array.prototype.slice.call(document.querySelectorAll('.card'));
+
+  function apply(){
+    var ar = device.w + ' / ' + device.h;
+    document.getElementById('grid').classList.toggle('is-narrow', device.w < 600);
+    cells.forEach(function(card){
+      var stage = card.querySelector('.stage');
+      var frame = card.querySelector('iframe');
+      stage.style.aspectRatio = ar;
+      frame.style.width  = device.w + 'px';
+      frame.style.height = device.h + 'px';
+      var w = stage.clientWidth || stage.offsetWidth;
+      var s = w / device.w;
+      frame.style.transform = 'scale(' + s + ')';
+    });
+  }
+
+  document.querySelectorAll('#seg button').forEach(function(b){
+    b.addEventListener('click', function(){
+      document.querySelectorAll('#seg button').forEach(function(x){ x.setAttribute('aria-pressed','false'); });
+      b.setAttribute('aria-pressed','true');
+      device = { w:parseInt(b.dataset.w,10), h:parseInt(b.dataset.h,10) };
+      apply();
+    });
+  });
+
+  document.getElementById('openAll').addEventListener('click', function(){
+    cells.forEach(function(c){ window.open(c.dataset.src, '_blank', 'noopener'); });
+  });
+
+  var t;
+  window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(apply, 120); });
+  window.addEventListener('load', apply);
+  apply();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Trosa — Workspace 02 · Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   02 · LEDGER — the customer as a night ledger
+   warm near-black, bone ink, one brass mark.
+   Concepts:
+     · a fixed index gutter (identity + sections) beside a ruled pane
+     · the timeline is a ruled account book, not cards
+     · every fact is one line of the ledger; results hang in the margin
+     · transition from Colonnade = "dusk→ink": the chosen colour
+       deepens to ink while the ruling hairlines draw themselves
+   ============================================================ */
+:root{
+  --bg:#171512;
+  --bg-2:#1D1B17;
+  --bg-3:#232019;
+  --bone:#E9E4D9;
+  --bone-2:#B4AC9C;
+  --bone-3:#837B6C;
+  --rule:rgba(233,228,217,.13);
+  --rule-2:rgba(233,228,217,.26);
+  --brass:#C29A5B;
+  --brass-2:#8E6F3F;
+  --moss:#8FA07E;
+  --serif:"Newsreader",Georgia,"Songti SC",serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ease:cubic-bezier(.22,.61,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --gut:clamp(15rem,19vw,17.5rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--bone);
+  font-family:var(--serif);font-size:16px;line-height:1.62;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+::selection{background:var(--brass);color:#171512}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:1px solid var(--brass);outline-offset:3px}
+.mono{font-family:var(--mono)}
+.tnum{font-variant-numeric:tabular-nums}
+
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");}
+
+/* ================= app frame ================= */
+.app{position:relative;z-index:2;display:grid;grid-template-columns:var(--gut) 1fr;min-height:100vh}
+
+/* ---- index gutter ---- */
+.gutter{
+  position:sticky;top:0;height:100vh;align-self:start;
+  border-right:1px solid var(--rule);
+  display:flex;flex-direction:column;
+  padding:clamp(1.4rem,2.4vw,2rem) clamp(1.2rem,2vw,1.7rem);
+  gap:2rem;
+}
+.g-brand{font-family:var(--mono);font-size:.78rem;letter-spacing:.24em;text-transform:uppercase;color:var(--bone)}
+.g-brand b{color:var(--brass)}
+.g-cust .no{font-family:var(--mono);font-size:.68rem;letter-spacing:.2em;color:var(--bone-3);display:block;margin-bottom:.7rem}
+.g-cust h1{font-family:var(--serif);font-weight:400;font-size:clamp(1.2rem,1.6vw,1.5rem);line-height:1.2;letter-spacing:-.01em}
+.g-cust .loc{font-family:var(--mono);font-size:.66rem;letter-spacing:.14em;color:var(--bone-3);display:block;margin-top:.7rem}
+.g-nav{display:flex;flex-direction:column;gap:.15rem;margin-top:.4rem}
+.g-nav button{
+  display:flex;gap:.7rem;align-items:baseline;
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;color:var(--bone-3);
+  padding:.62rem .6rem;border-left:1px solid transparent;
+  transition:color .3s var(--ease),border-color .3s var(--ease),background .3s var(--ease)
+}
+.g-nav button i{font-style:normal;font-size:.6rem;color:var(--bone-3);opacity:.7;transition:color .3s}
+.g-nav button:hover{color:var(--bone-2)}
+.g-nav button.on{color:var(--bone);border-left-color:var(--brass);background:linear-gradient(90deg,rgba(194,154,91,.08),transparent)}
+.g-nav button.on i{color:var(--brass)}
+.g-foot{margin-top:auto;display:flex;flex-direction:column;gap:1.2rem}
+.g-wait{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;color:var(--bone-3);line-height:1.7}
+.g-wait b{display:block;color:var(--bone-2);font-size:.7rem;letter-spacing:.04em;margin-top:.35rem}
+.g-user{display:flex;align-items:center;gap:.6rem;font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;color:var(--bone-2)}
+.g-user::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--brass)}
+
+/* ---- pane ---- */
+.pane{position:relative;min-width:0;display:flex;flex-direction:column;min-height:100vh}
+
+/* metadata band */
+.band{
+  display:flex;flex-wrap:wrap;align-items:stretch;
+  border-bottom:1px solid var(--rule);
+  font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;color:var(--bone-3)
+}
+.band div{padding:.9rem clamp(1rem,2vw,1.6rem);border-right:1px solid var(--rule);display:flex;flex-direction:column;gap:.35rem;flex:1 1 auto}
+.band div:last-child{border-right:0}
+.band b{color:var(--bone-2);font-weight:400;font-size:.72rem;letter-spacing:.04em}
+
+/* headline */
+.head{padding:clamp(2.2rem,5vw,3.4rem) clamp(1.4rem,3vw,2.6rem) clamp(1.6rem,3vw,2.2rem);border-bottom:1px solid var(--rule)}
+.head .k{font-family:var(--mono);font-size:.64rem;letter-spacing:.24em;text-transform:uppercase;color:var(--brass);margin-bottom:1.1rem}
+.head h2{font-family:var(--serif);font-weight:300;font-size:clamp(1.5rem,3.4vw,2.35rem);line-height:1.3;letter-spacing:-.015em;max-width:34ch}
+.head h2 em{font-style:italic;color:var(--bone-2)}
+.head .sub{margin-top:1rem;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;color:var(--bone-3)}
+
+/* ledger */
+.book{padding:0 clamp(1.4rem,3vw,2.6rem) 7rem}
+.book-head,.row{display:grid;grid-template-columns:6.6rem 8.5rem 1fr 11rem;gap:clamp(.8rem,2vw,1.6rem);align-items:baseline}
+.book-head{font-family:var(--mono);font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:var(--bone-3);padding:1rem 0 .8rem;border-bottom:1px solid var(--rule-2)}
+.row{padding:1.25rem 0;border-bottom:1px solid var(--rule);position:relative;transition:background .35s var(--ease)}
+.row::before{content:"";position:absolute;left:0;top:0;bottom:0;width:0;background:var(--brass);transition:width .3s var(--ease)}
+.row:hover{background:linear-gradient(90deg,rgba(233,228,217,.03),transparent)}
+.row:hover::before{width:2px}
+.row .date{font-family:var(--mono);font-size:.72rem;color:var(--bone-2);letter-spacing:.02em}
+.row .date small{display:block;color:var(--bone-3);font-size:.6rem;letter-spacing:.1em;margin-top:.2rem}
+.row .kind{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;color:var(--bone-3)}
+.row .kind .dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:.45rem;vertical-align:.05em}
+.k-in .dot{background:var(--moss)}.k-out .dot{background:var(--bone-3)}.k-two .dot{background:var(--brass)}
+.row .body{font-size:1rem;line-height:1.68;color:var(--bone)}
+.row .body .src{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;color:var(--bone-3);display:block;margin-bottom:.45rem;text-transform:uppercase}
+.row .aside{font-family:var(--mono);font-size:.64rem;line-height:1.7;color:var(--bone-3)}
+.row .aside b{color:var(--brass);font-weight:400;display:block;letter-spacing:.14em;text-transform:uppercase;font-size:.58rem;margin-bottom:.3rem}
+
+/* next-step band inside book */
+.nextrow{display:grid;grid-template-columns:6.6rem 1fr auto;gap:1.4rem;align-items:center;padding:1.5rem clamp(1.4rem,3vw,2.6rem);border-bottom:1px solid var(--rule-2);background:linear-gradient(90deg,rgba(194,154,91,.07),transparent 60%)}
+.nextrow .lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.2em;text-transform:uppercase;color:var(--brass)}
+.nextrow .t{font-family:var(--serif);font-size:clamp(1.1rem,2.2vw,1.45rem);letter-spacing:-.01em}
+.nextrow .t small{display:block;font-family:var(--mono);font-size:.64rem;letter-spacing:.12em;color:var(--bone-3);margin-top:.5rem}
+.nextrow .acts{display:flex;gap:1.2rem;font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;color:var(--bone-2)}
+.nextrow .acts button{border-bottom:1px solid transparent;padding-bottom:.2rem;transition:border-color .25s,color .25s}
+.nextrow .acts button:hover{color:var(--bone);border-color:var(--rule-2)}
+
+/* post entry strip */
+.post{position:sticky;bottom:0;margin-top:auto;border-top:1px solid var(--rule-2);background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px)}
+.post-bar{display:flex;align-items:center;gap:1rem;padding:.95rem clamp(1.4rem,3vw,2.6rem)}
+.post-bar .prompt{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;color:var(--brass);text-transform:uppercase;white-space:nowrap}
+.post-bar input{flex:1;background:none;border:0;outline:none;font-family:var(--serif);font-size:1rem;color:var(--bone);min-width:0}
+.post-bar input::placeholder{color:var(--bone-3)}
+.post-bar .save{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;border:1px solid var(--rule-2);padding:.45rem .9rem;color:var(--bone-2);transition:.25s}
+.post-bar .save:hover{color:var(--bg);background:var(--brass);border-color:var(--brass)}
+
+/* simple views */
+.view{display:none;padding:clamp(1.6rem,4vw,2.6rem) clamp(1.4rem,3vw,2.6rem) 7rem}
+.view.on{display:block}
+.vhead{font-family:var(--mono);font-size:.62rem;letter-spacing:.24em;text-transform:uppercase;color:var(--bone-3);padding-bottom:1rem;border-bottom:1px solid var(--rule-2);margin-bottom:1.6rem}
+.dl{display:grid;grid-template-columns:9rem 1fr;gap:.9rem 2rem;font-size:.95rem}
+.dl dt{font-family:var(--mono);font-size:.62rem;letter-spacing:.14em;text-transform:uppercase;color:var(--bone-3);padding-top:.25rem}
+.dl dd{margin-bottom:1.1rem;color:var(--bone)}
+.dl dd a{border-bottom:1px solid var(--rule-2)}
+.list li{list-style:none;display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:baseline;padding:1.15rem 0;border-bottom:1px solid var(--rule)}
+.list li:last-child{border-bottom:0}
+.list b{font-weight:400;font-size:1rem;font-family:var(--serif)}
+.list span{display:block;font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;color:var(--bone-3);margin-top:.35rem}
+.list a{border-bottom:1px solid var(--rule-2);font-family:var(--mono);font-size:.75rem;color:var(--bone-2)}
+.list time{font-family:var(--mono);font-size:.7rem;color:var(--bone-3)}
+.list .tick{display:inline-block;width:12px;height:12px;border:1px solid var(--rule-2);margin-right:.7rem;vertical-align:-1px}
+.list li.done .tick{background:var(--moss);border-color:var(--moss)}
+.list li.done b{color:var(--bone-3);text-decoration:line-through;text-decoration-color:var(--rule-2)}
+.list li.next b{color:var(--bone)}
+.list li.next time{color:var(--brass)}
+
+/* reveal */
+body.js .row,body.js .nextrow{opacity:0;transform:translateY(10px)}
+body.js .app.in .row,body.js .app.in .nextrow{opacity:1;transform:none;transition:opacity .8s var(--ease),transform .8s var(--ease-out)}
+body.js .app.in .nextrow{transition-delay:.04s}
+body.js .app.in .row:nth-of-type(1){transition-delay:.10s}
+body.js .app.in .row:nth-of-type(2){transition-delay:.16s}
+body.js .app.in .row:nth-of-type(3){transition-delay:.22s}
+body.js .app.in .row:nth-of-type(4){transition-delay:.28s}
+body.js .app.in .row:nth-of-type(5){transition-delay:.34s}
+body.js .app.in .row:nth-of-type(6){transition-delay:.40s}
+
+/* hairlines draw-in */
+body.js:not(.entered) .gutter{border-right-color:transparent}
+body.js:not(.entered) .band,body.js:not(.entered) .book-head,body.js:not(.entered) .post{border-color:transparent}
+.gutter,.band,.book-head,.post{transition:border-color .9s var(--ease)}
+
+/* replay */
+.replay{position:fixed;z-index:50;bottom:1.1rem;right:1.1rem;font-family:var(--mono);font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--bone-2);border:1px solid var(--rule-2);border-radius:999px;padding:.5rem 1rem;opacity:0;transition:opacity .5s var(--ease) .8s}
+.entered .replay{opacity:1}
+.replay:hover{color:var(--bg);background:var(--brass);border-color:var(--brass)}
+
+/* ============================================================
+   INTRO — Colonnade → Ledger (dusk → ink)
+   ============================================================ */
+.intro{position:fixed;inset:0;z-index:80;background:var(--bg)}
+.intro.gone{opacity:0;pointer-events:none;transition:opacity .7s var(--ease)}
+.ifields{position:absolute;inset:0;display:flex}
+.ifield{position:relative;flex:1 1 0;min-width:0;background:var(--t);display:flex;align-items:flex-end;padding:0 clamp(1.2rem,2.4vw,2.2rem) clamp(2.4rem,5vw,3.6rem);border-right:1px solid rgba(20,18,15,.2);transition:flex-grow .8s var(--ease-out),opacity .5s var(--ease)}
+.ifield:last-child{border-right:0}
+.ifield.active{flex-grow:2.4}
+.ifield .spine{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--mono);font-weight:500;font-size:clamp(.85rem,1.1vw,1rem);letter-spacing:.36em;text-transform:uppercase;color:rgba(32,29,24,.72);white-space:nowrap}
+.ifield.active .spine{opacity:0}
+.ibrand{position:absolute;top:clamp(1rem,2.4vw,1.6rem);left:clamp(1.2rem,2.4vw,2.2rem);font-family:var(--mono);font-weight:500;font-size:1rem;letter-spacing:.24em;text-transform:uppercase;color:#241F19}
+.veil{position:fixed;z-index:81;overflow:hidden;background:var(--bg);opacity:0;pointer-events:none;
+  transition:left .9s var(--ease-out),top .9s var(--ease-out),width .9s var(--ease-out),height .9s var(--ease-out),background-color 1s var(--ease)}
+.veil.on{opacity:1}
+.veil.grown{left:0!important;top:0!important;width:100vw!important;height:100vh!important}
+.veil.washed{background-color:var(--bg)}
+.veil .vname{position:absolute;left:clamp(1.2rem,2.4vw,2.2rem);bottom:clamp(2.4rem,5vw,3.6rem);font-family:var(--mono);font-weight:500;font-size:clamp(1.6rem,4.6vw,3.4rem);letter-spacing:.06em;text-transform:uppercase;color:var(--bone);line-height:1;transition:opacity .5s var(--ease),transform .7s var(--ease-out)}
+.veil.washed .vname{opacity:0;transform:translateY(-.6rem)}
+/* ruling lines that draw across the ink */
+.veil .rules{position:absolute;inset:0;opacity:0;transition:opacity .4s var(--ease)}
+.veil.washed .rules{opacity:1}
+.veil .rules i{position:absolute;left:0;right:0;height:1px;background:var(--rule);transform:scaleX(0);transform-origin:left;transition:transform .9s var(--ease-out)}
+.veil.washed .rules i{transform:scaleX(1)}
+
+@media (max-width:1024px){
+  .app{grid-template-columns:1fr}
+  .gutter{position:static;height:auto;border-right:0;border-bottom:1px solid var(--rule);flex-direction:row;flex-wrap:wrap;align-items:center;gap:1rem 1.6rem}
+  .g-cust{flex:1 1 100%}
+  .g-nav{flex-direction:row;flex-wrap:wrap;margin:0}
+  .g-nav button{border-left:0;border-bottom:1px solid transparent;padding:.4rem .2rem}
+  .g-nav button.on{border-left:0;border-bottom-color:var(--brass);background:none}
+  .g-foot{margin:0;flex-direction:row;align-items:center;gap:1.4rem;flex:1 1 100%}
+}
+@media (max-width:700px){
+  .replay{bottom:4.6rem;right:1rem}
+  .band div{flex:1 1 45%}
+  .book-head{display:none}
+  .row{grid-template-columns:1fr;gap:.5rem}
+  .row .date{display:flex;gap:.7rem;align-items:baseline}
+  .row .date small{margin:0}
+  .row .aside{grid-column:1}
+  .nextrow{grid-template-columns:1fr;gap:.8rem}
+  .dl{grid-template-columns:1fr;gap:.1rem 0}
+  .dl dt{margin-top:.9rem}
+  .head h2{font-size:1.5rem}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  body.js .row,body.js .nextrow{opacity:1!important;transform:none!important}
+}
+</style>
+</head>
+<body>
+<!-- intro -->
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="ifields" id="ifields">
+    <div class="ifield" data-name="Amy" style="--t:#D9D0C3"><span class="spine">Amy</span></div>
+    <div class="ifield" data-name="Emma" style="--t:#CCB7AB"><span class="spine">Emma</span></div>
+    <div class="ifield" data-name="Hamid" style="--t:#BEC6B8"><span class="spine">Hamid</span></div>
+    <div class="ifield" data-name="Kelley" style="--t:#BCC3C8"><span class="spine">Kelley</span></div>
+  </div>
+  <div class="ibrand">Trosa</div>
+  <div class="veil" id="veil">
+    <div class="rules" id="rules"></div>
+    <span class="vname" id="vname">Amy</span>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <!-- index gutter -->
+  <aside class="gutter">
+    <div class="g-brand">Tro<b>sa</b></div>
+    <div class="g-cust">
+      <span class="no">客户档案 № 014</span>
+      <h1>Acryl Innovations GmbH</h1>
+      <span class="loc">德国 · 展示器材／亚克力 · 等级 B+</span>
+    </div>
+    <nav class="g-nav" id="gnav" aria-label="分区">
+      <button data-v="timeline" class="on"><i>01</i>沟通与时间线</button>
+      <button data-v="profile"><i>02</i>资料</button>
+      <button data-v="contacts"><i>03</i>联系人</button>
+      <button data-v="files"><i>04</i>文件</button>
+      <button data-v="tasks"><i>05</i>全部待办</button>
+    </nav>
+    <div class="g-foot">
+      <div class="g-wait">当前等待<b>客户内部确认再生料比例</b></div>
+      <div class="g-user" id="gUser">Amy</div>
+    </div>
+  </aside>
+
+  <!-- pane -->
+  <main class="pane">
+    <div class="band">
+      <div>来源<b>SIGN CHINA 2026 · 展会</b></div>
+      <div>行业<b>展示器材 / 亚克力</b></div>
+      <div>主要联系人<b>Markus Weber</b></div>
+      <div>网站<b>acryl-innovations.de</b></div>
+      <div>下次跟进<b data-next>9 月 29 日</b></div>
+    </div>
+
+    <section class="view on" id="view-timeline">
+      <div class="head">
+        <p class="k">当前状态</p>
+        <h2>等待客户内部确认再生料比例，<em>样品反馈是下一轮的钥匙。</em></h2>
+        <p class="sub">最近沟通 · 9 月 24 日 · Markus Weber</p>
+      </div>
+      <div class="nextrow">
+        <span class="lbl">下一步</span>
+        <div class="t">确认样品反馈，准备下一轮报价<small class="tnum" data-next>9 月 29 日 · 周二</small></div>
+        <div class="acts"><button data-act="log">记录沟通</button><button>调整</button><button>完成</button></div>
+      </div>
+      <div class="book">
+        <div class="book-head"><span>日期</span><span>方式</span><span>事实</span><span>结果</span></div>
+        <div id="rows"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-profile"><p class="vhead">资料</p><dl class="dl" id="profileList"></dl></section>
+    <section class="view" id="view-contacts"><p class="vhead">联系人</p><ul class="list" id="contactsList"></ul></section>
+    <section class="view" id="view-files"><p class="vhead">文件</p><ul class="list" id="filesList"></ul></section>
+    <section class="view" id="view-tasks"><p class="vhead">全部待办</p><ul class="list" id="tasksList"></ul></section>
+
+    <form class="post" id="post" autocomplete="off">
+      <div class="post-bar">
+        <span class="prompt">记一笔</span>
+        <input id="postInput" placeholder="粘贴邮件或对话，回车整理为一条账目" />
+        <button class="save" type="submit">保存</button>
+      </div>
+    </form>
+  </main>
+</div>
+
+<button class="replay" id="replay">重播转场</button>
+
+<script>
+document.documentElement.classList.add('js');document.body.classList.add('js');
+
+var DATA={customer:{
+  company:'Acryl Innovations GmbH',no:'014',country:'德国',industry:'展示器材 / 亚克力',
+  source:'SIGN CHINA 2026 · 展会',level:'B+',website:'acryl-innovations.de',businessRole:'终端',
+  profile:'杜塞尔多夫零售陈列供应商，为连锁品牌定制亚克力陈列件。在测试我们的再生料系列，关注再生比例与欧盟合规文件。',
+  waiting:'客户内部确认再生料比例',
+  next:{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29'},
+  contacts:[{name:'Markus Weber',title:'采购经理',email:'m.weber@acryl-innovations.de',primary:true},
+            {name:'Lena Fischer',title:'产品与合规',email:'l.fischer@acryl-innovations.de'}],
+  facts:[
+    {date:'2026-09-24',type:'邮件',dir:'in',source:'客户来信',full:'Markus 回复：三款色板的耐候测试通过，但需要我们在报价中标注再生料比例与 EU 合规编号。',result:'需要在报价单补充材料说明'},
+    {date:'2026-09-22',type:'寄样',dir:'out',source:'我方寄样',full:'寄出 R-PMMA 三款色板（自然、烟灰、琥珀）及基础参数表。'},
+    {date:'2026-09-18',type:'展会现场',dir:'two',source:'SIGN CHINA 2026',full:'展位沟通 25 分钟，对方对再生亚克力系列感兴趣，现场索要样品与 MOQ。',result:'约定回国后寄样并报价'},
+    {date:'2026-09-16',type:'报价',dir:'out',source:'首轮报价 RP-0916',full:'发出首轮报价，MOQ 500 件，交期 25 天。'},
+    {date:'2026-09-10',type:'开发邮件',dir:'out',source:'开发信',full:'通过领英找到采购负责人，发出首封开发邮件。'}
+  ],
+  files:[{name:'报价单_RP-0916.pdf',cat:'报价单',size:'218 KB',date:'2026-09-16'},
+         {name:'色板参数表_R-PMMA.xlsx',cat:'产品资料',size:'64 KB',date:'2026-09-22'},
+         {name:'SIGN_CHINA_展位记录.jpg',cat:'展会资料',size:'1.2 MB',date:'2026-09-18'}],
+  tasks:[{title:'确认样品反馈，准备下一轮报价',date:'2026-09-29',done:false,next:true},
+         {title:'补发 EU 合规文件（REACH / ROHS）',date:'2026-10-02',done:false},
+         {title:'寄出手感样并确认收货',date:'2026-09-22',done:true}]
+}};
+
+function cn(iso){var p=iso.split('-');return Number(p[1])+' 月 '+Number(p[2])+' 日';}
+function rel(iso){var t=new Date();t.setHours(0,0,0,0);var d=new Date(iso+'T00:00:00');var n=Math.round((d-t)/86400000);
+  if(n===0)return'今天';if(n===1)return'明天';if(n===-1)return'昨天';if(n<0)return'逾期 '+(-n)+' 天';if(n<=6)return n+' 天后';return cn(iso);}
+function ago(iso){var t=new Date();t.setHours(0,0,0,0);var d=new Date(iso+'T00:00:00');var n=Math.round((t-d)/86400000);
+  if(n<0)return'';if(n===0)return'今天';if(n===1)return'昨天';if(n<7)return n+' 天前';if(n<14)return'1 周前';return'';}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function wd(iso){return['周日','周一','周二','周三','周四','周五','周六'][new Date(iso+'T00:00:00').getDay()];}
+
+(function render(){
+  var c=DATA.customer;
+  document.getElementById('rows').innerHTML=c.facts.map(function(f){
+    var dt={in:'客户发给我',out:'我发给客户',two:'双方沟通'}[f.dir];
+    return '<article class="row k-'+f.dir+'">'+
+      '<div class="date tnum">'+cn(f.date)+'<small>'+ago(f.date)+'</small></div>'+
+      '<div class="kind"><span class="dot"></span>'+esc(f.type)+'</div>'+
+      '<div class="body"><span class="src">'+esc(dt)+' · '+esc(f.source)+'</span>'+esc(f.full)+'</div>'+
+      '<div class="aside">'+(f.result?'<b>结果</b>'+esc(f.result):'—')+'</div>'+
+    '</article>';
+  }).join('');
+  document.getElementById('profileList').innerHTML=[
+    ['公司',esc(c.company)],['国家 / 地区',esc(c.country)],['行业领域',esc(c.industry)],
+    ['客户来源',esc(c.source)],['等级',esc(c.level)],['业务角色',esc(c.businessRole)],
+    ['网站','<a href="https://'+esc(c.website)+'" target="_blank" rel="noopener">'+esc(c.website)+'</a>'],
+    ['当前等待',esc(c.waiting)],['简介',esc(c.profile)]
+  ].map(function(r){return '<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>';}).join('');
+  document.getElementById('contactsList').innerHTML=c.contacts.map(function(p){
+    return '<li><div><b>'+esc(p.name)+'</b><span>'+esc(p.title)+(p.primary?' · 主要联系人':'')+'</span></div><a href="mailto:'+esc(p.email)+'">'+esc(p.email)+'</a></li>';
+  }).join('');
+  document.getElementById('filesList').innerHTML=c.files.map(function(f){
+    return '<li><div><b>'+esc(f.name)+'</b><span>'+esc(f.cat)+' · '+esc(f.size)+'</span></div><time>'+cn(f.date)+'</time></li>';
+  }).join('');
+  document.getElementById('tasksList').innerHTML=c.tasks.map(function(t){
+    return '<li class="'+(t.done?'done ':'')+(t.next?'next':'')+'"><div><span class="tick"></span><b style="display:inline">'+esc(t.title)+'</b></div><time class="tnum">'+cn(t.date)+(t.next?' · 下一步':'')+'</time></li>';
+  }).join('');
+})();
+
+/* section switch */
+document.querySelectorAll('#gnav button').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('#gnav button').forEach(function(x){x.classList.remove('on');});
+    b.classList.add('on');
+    ['timeline','profile','contacts','files','tasks'].forEach(function(v){
+      document.getElementById('view-'+v).classList.toggle('on',v===b.dataset.v);
+    });
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+});
+document.addEventListener('keydown',function(e){
+  if(e.target&&/INPUT|TEXTAREA/.test(e.target.tagName))return;
+  var map={'1':'timeline','2':'profile','3':'contacts','4':'files','5':'tasks'};
+  if(map[e.key]){document.querySelector('#gnav button[data-v="'+map[e.key]+'"]').click();}
+});
+document.querySelector('[data-act="log"]').addEventListener('click',function(){document.getElementById('postInput').focus();});
+document.getElementById('post').addEventListener('submit',function(e){e.preventDefault();document.getElementById('postInput').value='';});
+
+/* ============================================================
+   INTRO — Colonnade beat, then the colour deepens into ink
+   ============================================================ */
+(function(){
+  var intro=document.getElementById('intro'),veil=document.getElementById('veil'),vname=document.getElementById('vname');
+  var ifields=[].slice.call(document.querySelectorAll('.ifield'));
+  var reduce=matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var timers=[];function T(fn,ms){timers.push(setTimeout(fn,ms));}function clearT(){timers.forEach(clearTimeout);timers=[];}
+
+  /* build ruling lines covering the ink */
+  var rules=document.getElementById('rules');
+  rules.innerHTML=(function(){var s='';for(var i=1;i<=11;i++){s+='<i style="top:'+(i*8.3)+'%"></i>';}return s;})();
+
+  function pick(el){ifields.forEach(function(f){f.classList.toggle('active',f===el);});}
+
+  function play(name,el){
+    clearT();
+    document.body.classList.remove('entered');document.getElementById('app').classList.remove('in');
+    intro.classList.remove('gone');
+    veil.classList.remove('on','grown','washed');
+    veil.style.left=veil.style.top=veil.style.width=veil.style.height='';veil.style.background='';
+    ifields.forEach(function(f){f.style.display='';f.classList.remove('active');});
+    vname.textContent=name;document.getElementById('gUser').textContent=name;
+    if(reduce){enter(name);return;}
+    pick(el);
+    var r=el.getBoundingClientRect();
+    T(function(){
+      veil.style.transition='none';
+      veil.style.left=r.left+'px';veil.style.top=r.top+'px';veil.style.width=r.width+'px';veil.style.height=r.height+'px';
+      veil.style.background=getComputedStyle(el).backgroundColor;
+      void veil.offsetWidth;veil.style.transition='';
+      veil.classList.add('on');ifields.forEach(function(f){f.style.display='none';});
+      requestAnimationFrame(function(){requestAnimationFrame(function(){veil.classList.add('grown');});});
+    },340);
+    T(function(){veil.classList.add('washed');},340+980);
+    T(function(){document.body.classList.add('entered');document.getElementById('app').classList.add('in');},340+980+240);
+    T(function(){intro.classList.add('gone');},340+980+640);
+  }
+  function enter(name){
+    clearT();veil.classList.remove('on');ifields.forEach(function(f){f.style.display='none';});
+    document.getElementById('gUser').textContent=name;
+    document.body.classList.add('entered');document.getElementById('app').classList.add('in');intro.classList.add('gone');
+  }
+  var chosen=0,interacted=false;
+  ifields.forEach(function(f,i){
+    f.addEventListener('mouseenter',function(){interacted=true;pick(f);});
+    f.addEventListener('focus',function(){interacted=true;pick(f);});
+    f.addEventListener('click',function(){interacted=true;chosen=i;play(f.dataset.name,f);});
+  });
+  setTimeout(function(){if(!interacted){chosen=0;play('Amy',ifields[0]);}},900);
+  document.getElementById('replay').addEventListener('click',function(){intro.classList.remove('gone');play(ifields[chosen].dataset.name,ifields[chosen]);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!intro.classList.contains('gone')){enter('Amy');}});
+})();
+</script>
+</body>
+</html>

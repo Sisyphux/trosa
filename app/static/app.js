@@ -199,6 +199,7 @@ const USER_LABELS = { 'hamid': 'Hamid', 'amy': 'Amy', 'kelley': 'Kelley' };
 document.addEventListener('DOMContentLoaded', function() {
   initMotionSystem();
   initMotionDiagnostics();
+  initDaylightRoom();
   checkLogin();
   initLiquidGlassPrototype();
   initIconButtons();
@@ -255,6 +256,87 @@ function initMotionSystem() {
   else reducedQuery.addListener(syncMotionPreference);
   document.documentElement.classList.toggle('supports-view-transitions', !!document.startViewTransition);
   applyInterfacePerformance('auto');
+}
+
+// ========== Daylight room ==========
+// The picked design's signature: a soft light that follows the pointer and marks
+// where attention currently is. It is decoration only — the layout never depends
+// on it, it never runs on touch or in reduced/performance modes, and it writes at
+// most one transform per frame while the pointer is actually moving.
+function initDaylightRoom() {
+  var pool = document.querySelector('.daylight-room__pool');
+  if (!pool) return;
+  var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+  var REST_X = 0.68;
+  var REST_Y = 0.42;
+  var currentX = window.innerWidth * REST_X;
+  var currentY = window.innerHeight * REST_Y;
+  var targetX = currentX;
+  var targetY = currentY;
+  var frameId = null;
+  var visible = false;
+
+  function roomEnabled() {
+    return finePointer.matches && !isMotionLite() && !_motionReduced &&
+      !document.documentElement.classList.contains('performance-probe') &&
+      !document.hidden;
+  }
+
+  function step() {
+    frameId = null;
+    if (!roomEnabled()) {
+      if (visible) { visible = false; pool.style.opacity = '0'; }
+      return;
+    }
+    currentX += (targetX - currentX) * 0.055;
+    currentY += (targetY - currentY) * 0.055;
+    pool.style.setProperty('--pool-x', currentX.toFixed(1) + 'px');
+    pool.style.setProperty('--pool-y', currentY.toFixed(1) + 'px');
+    if (Math.abs(targetX - currentX) > 0.4 || Math.abs(targetY - currentY) > 0.4) {
+      frameId = requestAnimationFrame(step);
+    }
+  }
+
+  function schedule() {
+    if (frameId === null) frameId = requestAnimationFrame(step);
+  }
+
+  document.addEventListener('pointermove', function(event) {
+    if (!finePointer.matches) return;
+    if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+    // The first movement places the light where the pointer already is: the pool
+    // should reveal the current attention, not travel across the screen to it.
+    if (!visible) {
+      currentX = targetX = event.clientX;
+      currentY = targetY = event.clientY;
+      visible = true;
+      pool.style.setProperty('--pool-x', currentX.toFixed(1) + 'px');
+      pool.style.setProperty('--pool-y', currentY.toFixed(1) + 'px');
+    } else {
+      targetX = event.clientX;
+      targetY = event.clientY;
+    }
+    if (roomEnabled()) {
+      pool.style.opacity = '1';
+      schedule();
+    }
+  }, { passive: true });
+
+  document.addEventListener('mouseleave', function() {
+    visible = false;
+    pool.style.opacity = '0';
+  });
+  window.addEventListener('blur', function() {
+    visible = false;
+    pool.style.opacity = '0';
+  });
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      visible = false;
+      pool.style.opacity = '0';
+      if (frameId !== null) { cancelAnimationFrame(frameId); frameId = null; }
+    }
+  });
 }
 
 // Sample a representative, off-screen list for less than one second.  Hardware

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trosa · Customer Workspace 探索 (v1)</title>
+<style>
+  :root{
+    --bg:#101010; --panel:#171717; --line:rgba(255,255,255,.10);
+    --fg:#EDEDED; --fg2:#9B9B9B; --fg3:#6A6A6A; --accent:#C29A5B;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.55;padding:clamp(1.2rem,3vw,2.6rem)}
+  a{color:inherit}
+  header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:1rem;padding-bottom:1.2rem;border-bottom:1px solid var(--line)}
+  h1{font-size:1.15rem;font-weight:600;letter-spacing:-.01em}
+  h1 small{display:block;font-size:.72rem;font-weight:400;color:var(--fg3);letter-spacing:.05em;margin-top:.35rem}
+  .ctrls{display:flex;flex-wrap:wrap;align-items:center;gap:.7rem}
+  .seg{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .seg button{background:none;border:0;color:var(--fg2);font:inherit;font-size:.72rem;letter-spacing:.04em;padding:.5rem .9rem;cursor:pointer}
+  .seg button.on{background:var(--fg);color:var(--bg)}
+  .btn{background:none;border:1px solid var(--line);color:var(--fg2);font:inherit;font-size:.72rem;padding:.5rem .9rem;border-radius:999px;cursor:pointer}
+  .btn:hover{color:var(--fg);border-color:var(--fg3)}
+  .grid{display:grid;grid-template-columns:1fr;gap:clamp(1.2rem,2.4vw,2rem);margin-top:clamp(1.2rem,2.4vw,2rem)}
+  @media (min-width:1080px){.grid{grid-template-columns:1fr 1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .card .head{display:flex;align-items:baseline;gap:.7rem;padding:.85rem 1rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .card .no{font-size:.68rem;letter-spacing:.2em;color:var(--accent);font-variant-numeric:tabular-nums}
+  .card .nm{font-weight:600;font-size:.95rem}
+  .card .nm span{color:var(--fg3);font-weight:400;margin-left:.4rem}
+  .card .tl{margin-left:auto;font-size:.68rem;color:var(--fg3)}
+  .card .acts{display:flex;gap:.5rem;padding:.55rem 1rem;border-bottom:1px solid var(--line);font-size:.68rem;color:var(--fg3)}
+  .card .acts button{background:none;border:0;color:var(--accent);font:inherit;cursor:pointer;padding:0}
+  .card .acts button:hover{text-decoration:underline}
+  .card .acts .tr{margin-right:auto;color:var(--fg3)}
+  .card .fallback{padding:.5rem 1rem;font-size:.66rem;color:var(--fg3);border-bottom:1px solid var(--line);display:flex;gap:.6rem;flex-wrap:wrap}
+  .card .fallback a{color:var(--accent);text-decoration:none}
+  .card .fallback a:hover{text-decoration:underline}
+  .card .fallback code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.64rem;color:var(--fg2);word-break:break-all}
+  .viewport{position:relative;background:
+      linear-gradient(45deg,rgba(255,255,255,.02) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.02) 75%),
+      linear-gradient(45deg,rgba(255,255,255,.02) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.02) 75%);
+    background-size:22px 22px;background-position:0 0,11px 11px;overflow:hidden}
+  .viewport iframe{border:0;display:block;transform-origin:top left;background:#fff}
+  footer{margin-top:2rem;padding-top:1.2rem;border-top:1px solid var(--line);color:var(--fg3);font-size:.74rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+  footer b{color:var(--fg2);font-weight:500}
+</style>
+</head>
+<body>
+<header>
+  <h1>Trosa · Customer Workspace 探索<small>四个独立方向 · 每个都自带「Colonnade 点击用户 → 进入工作台」的转场</small></h1>
+  <div class="ctrls">
+    <div class="seg" id="seg">
+      <button data-w="1440" data-h="900" class="on">Desktop 1440</button>
+      <button data-w="1024" data-h="768">iPad 1024</button>
+      <button data-w="390" data-h="844">iPhone 390</button>
+    </div>
+    <button class="btn" id="openAll">打开四个标签页</button>
+    <button class="btn" id="replayAll">重播全部转场</button>
+  </div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  <span><b>说明</b> 四张同一份数据的实时页面，可交互（切换分区、记录、重播转场）。</span>
+  <span>键盘：1–5 切换分区 · Esc 重播/返回</span>
+  <span>低饱和 · 无实物图片 · 尊重 reduced-motion</span>
+</footer>
+
+<script>
+const CONCEPTS=[
+  {file:'01-folio.html', no:'01', nm:'Folio', cn:'纸上长卷', tl:'一栏阅读 · 装订成册', tr:'转场：wash — 色块漂白成纸，标题落位'},
+  {file:'02-ledger.html', no:'02', nm:'Ledger', cn:'夜账', tl:'索引栏 + 横格账本', tr:'转场：dusk→ink — 颜色变深为墨，横线画出'},
+  {file:'03-broadsheet.html',no:'03',nm:'Broadsheet',cn:'报刊',tl:'报头 + 三栏竖线',tr:'转场：unfold — 其余分栏折拢，报头展开'},
+  {file:'04-instrument.html',no:'04',nm:'Instrument',cn:'仪器',tl:'中央时轴 + 信号带',tr:'转场：converge — 四色聚为一针，刻度弹出'}
+];
+
+let dev={w:1440,h:900};
+
+/* Preview panes may sandbox the page (srcdoc/blob), where relative URLs cannot
+   resolve. Resolve to absolute URLs whenever the protocol allows it, and always
+   expose a direct link + the real file path so nothing depends on the sandbox. */
+const ABSOLUTE_OK=/^(https?|file):$/.test(location.protocol);
+const HERE=location.href.replace(/[^/]*$/,'');
+const FILE_DIR='design/visual-exploration/workspace-v1/';
+function url(file){ return ABSOLUTE_OK ? new URL(file,location.href).href : file; }
+
+function build(){
+  const grid=document.getElementById('grid');
+  grid.innerHTML=CONCEPTS.map(c=>`
+    <section class="card" data-file="${c.file}">
+      <div class="head">
+        <span class="no">${c.no}</span>
+        <span class="nm">${c.nm}<span>${c.cn}</span></span>
+        <span class="tl">${c.tl}</span>
+      </div>
+      <div class="acts">
+        <span class="tr">${c.tr}</span>
+        <button data-act="replay">重播转场</button>
+        <button data-act="open">新标签打开</button>
+      </div>
+      <div class="fallback">${ABSOLUTE_OK
+        ? `<a href="${url(c.file)}" target="_blank" rel="noopener">若此处空白 → 在新标签打开 ${c.file}</a>`
+        : `<span>预览被沙箱拦截，无法内嵌。请直接打开：</span><code>${FILE_DIR}${c.file}</code>`}</div>
+      <div class="viewport"><iframe title="${c.nm}" loading="lazy" src="${url(c.file)}"></iframe></div>
+    </section>`).join('');
+  layout();
+  grid.querySelectorAll('.card').forEach(card=>{
+    const f=card.querySelector('iframe'), file=card.dataset.file;
+    card.querySelector('[data-act="replay"]').onclick=()=>{f.src=url(file)+'?t='+Date.now();};
+    card.querySelector('[data-act="open"]').onclick=()=>window.open(url(file),'_blank');
+  });
+}
+
+function layout(){
+  document.querySelectorAll('.card').forEach(card=>{
+    const vp=card.querySelector('.viewport'), f=card.querySelector('iframe');
+    const w=vp.clientWidth;
+    const k=w/dev.w;
+    f.style.width=dev.w+'px'; f.style.height=dev.h+'px';
+    f.style.transform='scale('+k+')';
+    vp.style.height=(dev.h*k)+'px';
+  });
+}
+
+document.getElementById('seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  dev={w:+b.dataset.w,h:+b.dataset.h};
+  layout();
+});
+document.getElementById('openAll').onclick=()=>CONCEPTS.forEach(c=>window.open(url(c.file),'_blank'));
+document.getElementById('replayAll').onclick=()=>document.querySelectorAll('.card iframe').forEach((f,i)=>{f.src=url(CONCEPTS[i].file)+'?t='+Date.now();});
+window.addEventListener('resize',layout);
+
+build();
+// fonts/layout settle
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(layout);
+setTimeout(layout,300);
+</script>
+</body>
+</html>
