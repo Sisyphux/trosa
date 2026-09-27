@@ -1322,7 +1322,21 @@ function statusBadge(status) {
   };
   return '<span class="badge ' + (map[status] || 'badge-status-pending') + '">' + (status || '-') + '</span>';
 }
-function formatDate(d) { return d ? d.substring(0, 10) : '-'; }
+// Normalizes a date-ish value to a local calendar date (YYYY-MM-DD).
+// The backend can send either a plain date ("2026-09-20") or an RFC 1123
+// timestamp ("Sun, 20 Sep 2026 11:48:06 GMT") depending on the column type,
+// so both must be handled instead of blindly slicing the first 10 characters.
+function normalizeDateString(value) {
+  if (value === null || value === undefined) return '';
+  var text = String(value).trim();
+  if (!text) return '';
+  var iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(text);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+  var parsed = new Date(text);
+  if (!isNaN(parsed.getTime())) return localDateString(parsed);
+  return text.substring(0, 10);
+}
+function formatDate(d) { return normalizeDateString(d) || '-'; }
 function isOverdue(d) { return d ? d < localDateString() : false; }
 
 // ========== DASHBOARD ==========
@@ -9936,7 +9950,7 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
   var websiteUrl = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
   var facts = [
     ['归属成员', customer.owner_label || customer.owner], ['国家 / 地区', customer.country], ['行业 / 领域', customer.industry || customer.field],
-    ['业务角色', customer.business_role || '未标记'], ['业务阶段', customer.business_stage || '未标记'], ['来源', customer.source || customer.import_source], ['建立日期', customer.created_at],
+    ['业务角色', customer.business_role || '未标记'], ['业务阶段', customer.business_stage || '未标记'], ['来源', customer.source || customer.import_source], ['建立日期', customer.created_at ? formatDate(customer.created_at) : ''],
     ['最近实际联系', customer.last_actual_contact]
   ].filter(function(item) { return item[1]; });
   var h = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace"><div class="modal-header ov-customer-header"><div><div class="workspace-kicker">客户工作区 · 只读</div><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3><div class="workspace-meta">' +
@@ -9952,6 +9966,13 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
   
   var div = document.createElement('div');
   div.innerHTML = h;
+  // showOverviewCustomerLoading() already put a placeholder with the same id in
+  // the body. Remove it before appending the real content, otherwise two
+  // #ovDetailModal elements coexist and overviewCloseCustDetail() deletes the
+  // hidden placeholder instead: the visible modal then ignores the first X /
+  // overlay click and the duplicate ids stay in the DOM.
+  var placeholder = document.getElementById('ovDetailModal');
+  if (placeholder) placeholder.remove();
   document.body.appendChild(div.firstElementChild);
   document.getElementById('ovDetailModal').querySelector('.modal-close').focus({preventScroll:true});
 }
