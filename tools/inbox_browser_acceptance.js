@@ -154,7 +154,7 @@ await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}
 const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + selaCardId).waitFor({state:'detached', timeout:15000});
-await page.getByText('回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
+await page.getByText('回答已保存并排入 Sela 续跑；Sela 会从原阻塞点继续，不会发送邮件或修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
 if (await page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'}).count()) {
   throw new Error('newly queued Sela run is occupying the Inbox');
 }

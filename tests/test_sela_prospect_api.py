@@ -677,11 +677,11 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(question['kind'], 'sela_request')
         self.assertEqual(question['subject']['label'], 'Trosa 客户')
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
-        self.assertEqual(email_field['label'], '联系邮箱（仅供本次 Sela 请求/未发送草稿）')
-        self.assertIn('不会写入或验证 Trosa 联系人', email_field['help'])
-        self.assertTrue(any('不会写入或验证 Trosa 联系人' in effect
+        self.assertEqual(email_field['label'], '联系邮箱（将写入 Trosa 联系人）')
+        self.assertIn('会写入该 prospect 的 Trosa 联系人', email_field['help'])
+        self.assertTrue(any('会写入该 prospect 的 Trosa 联系人' in effect
                             for effect in question['completion_effects']))
-        self.assertTrue(any('不会发送邮件、验证邮箱' in effect for effect in question['will_not_do']))
+        self.assertTrue(any('不会发送邮件' in effect for effect in question['will_not_do']))
 
         answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},
@@ -689,10 +689,13 @@ class SelaProspectApiTest(unittest.TestCase):
         })
         self.assertEqual(answered.status_code, 200, answered.get_data(as_text=True))
         result = answered.get_json()
+        # Non-cold prospect: the email is still committed, but research/draft
+        # auto-resume keeps the existing safety gate (human review).
         self.assertFalse(result['sela_handoff']['automatic_run'])
         self.assertEqual(result['sela_handoff']['status'], 'needs_review')
+        self.assertEqual(result['sela_handoff']['action'], 'verify_email')
         self.assertIn('Sela 未自动续跑', result['next_system_step'])
-        self.assertIn('不会写入或验证 Trosa 联系人', result['next_system_step'])
+        self.assertIn('联系人邮箱已写入', result['next_system_step'])
 
         resolved = self.client.get(
             f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}', headers=self.headers(),
@@ -726,7 +729,11 @@ class SelaProspectApiTest(unittest.TestCase):
 
         conn = self.hamid_db()
         try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            # The confirmed email is a real contact fact even when auto-resume
+            # is gated; verification itself stays Sela's follow-up step.
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM contacts WHERE customer_id=? AND lower(trim(email))=?",
+                (customer_id, 'buyer@acrilicos.example')).fetchone()[0], 1)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_verifications WHERE lower(email)=?',
                                           ('buyer@acrilicos.example',)).fetchone()[0], 0)
         finally:
@@ -885,7 +892,10 @@ class SelaProspectApiTest(unittest.TestCase):
             research = json.loads(profile['research_json'])
             self.assertEqual(research['research_reason'], '官网确认主营亚克力板材加工。')
             self.assertEqual(research['evidence'][0]['url'], 'https://acrilicos.example/about')
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM contacts WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
+            # The human-confirmed email is committed as a real contact fact.
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM contacts WHERE customer_id=? AND lower(trim(email))=?",
+                (customer_id, 'buyer@acrilicos.example')).fetchone()[0], 1)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM reminders WHERE customer_id=?', (customer_id,)).fetchone()[0], 0)
             outreach = conn.execute(
                 'SELECT * FROM outreach_emails WHERE external_source=? AND external_id=?',
@@ -894,7 +904,9 @@ class SelaProspectApiTest(unittest.TestCase):
             self.assertIsNotNone(outreach)
             self.assertEqual(outreach['recipient_email'], 'buyer@acrilicos.example')
             self.assertEqual(outreach['sent_date'], '')
-            self.assertIsNone(outreach['contact_id'])
+            # The unsent draft is linked to the human-confirmed contact, but it
+            # still has no sent date, message id or delivery event.
+            self.assertIsNotNone(outreach['contact_id'])
             self.assertEqual(outreach['message_id'], '')
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM email_delivery_events').fetchone()[0], 0)
         finally:

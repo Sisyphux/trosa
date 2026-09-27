@@ -97,6 +97,7 @@ from trosa_domain import (
     create_inbox_item as _create_inbox_item,
     resolve_inbox_item as _resolve_inbox_item,
     save_sela_inbox_response as _save_sela_inbox_response,
+    save_inbox_response as _save_inbox_response,
     set_inbox_status as _set_inbox_status,
     set_customer_judgment as _set_customer_judgment,
     set_customer_deleted as _set_customer_deleted,
@@ -118,6 +119,7 @@ from trosa_domain import (
     weekly_interactions as _weekly_interactions,
 )
 import identity_link
+import sela_continuation as _continuation
 
 # ========== 配置 ==========
 logging.basicConfig(
@@ -341,6 +343,7 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/exclusions',
             '/api/integrations/sela/prospects',
             '/api/integrations/sela/needs',
+            '/api/integrations/sela/continuations',
         })
         or (request.method == 'POST' and request.path in {
             '/api/integrations/sela/reply',
@@ -1198,12 +1201,15 @@ def _agent_proposal_update(conn, proposal_id, *, customer_id=_UNSET,
 def _agent_gateway_receipt_read(conn, action, idempotency_key):
     """Read one Agent Gateway idempotency receipt from canonical audit."""
     if not postgres_mode():
-        return conn.execute(
+        row = conn.execute(
             '''SELECT request_sha256, response_json, proposal_id
                  FROM agent_gateway_idempotency
                 WHERE action=? AND idempotency_key=? LIMIT 1''',
             (action, idempotency_key),
         ).fetchone()
+        # Return a plain dict on SQLite too so every caller can read fields by
+        # name; a replayed Inbox answer must not crash on ``sqlite3.Row``.
+        return dict(row) if row else None
     row = conn.execute(
         '''SELECT request_sha256, response_json, proposal_id
              FROM audit.agent_gateway_idempotency
@@ -3264,6 +3270,21 @@ def _sela_match_customers(conn, payload):
         return [], ''
 
     customer_ids = [row['id'] for row in rows]
+    # A human-confirmed source identity fact wins over fuzzy company/domain
+    # matching.  This is what makes a same/different Inbox decision reusable:
+    # the next sync resolves deterministically instead of asking again.
+    if candidate_id:
+        confirmed = identity_link.active_facts_for_identifier(
+            conn, 'source', f'{_SELA_PROSPECT_SOURCE}:{candidate_id}')
+        confirmed_ids = {int(fact['customer_id']) for fact in confirmed
+                         if fact.get('customer_id') is not None}
+        if len(confirmed_ids) == 1:
+            chosen = next(iter(confirmed_ids))
+            row = next((item for item in rows if int(item['id']) == chosen), None)
+            if row:
+                item = dict(row)
+                item['matched_by'] = ['confirmed_source']
+                return [item], ''
     if postgres_mode():
         contact_rows = [contact for customer_id in customer_ids
                         for contact in _customer_contacts(conn, customer_id)]
@@ -4224,6 +4245,14 @@ def _sela_request_structured(value):
         'decision': decision,
         'evidence': evidence,
         'resume': _sela_prospect_text(value.get('resume'), 2000),
+        # What Sela will do once the human answers.  It is a bounded action
+        # label, never a send authorization, and lets Trosa commit the matching
+        # business fact instead of only storing the answer in Inbox JSON.
+        'resume_action': _continuation.normalize_action(
+            value.get('resume_action')) if _sela_prospect_text(value.get('resume_action'), 40) else '',
+        'resume_decision': _sela_prospect_text(value.get('resume_decision'), 40).lower(),
+        'resume_target_id': _sela_prospect_text(value.get('resume_target_id'), 128),
+        'website': _sela_prospect_text(value.get('website') or value.get('domain'), 2000),
     }
 
 
@@ -4364,7 +4393,12 @@ def _sela_agent_request_view(conn, row):
         'decision': decision,
         'evidence': structured.get('evidence') if isinstance(structured.get('evidence'), list) else [],
         'resume': str(structured.get('resume') or ''),
+        'resume_action': str(structured.get('resume_action') or ''),
+        'resume_decision': str(structured.get('resume_decision') or ''),
+        'resume_target_id': str(structured.get('resume_target_id') or ''),
+        'website': str(structured.get('website') or ''),
         'human_response': structured.get('human_response') if isinstance(structured.get('human_response'), dict) else None,
+        'continuation': _continuation.view(structured.get('resume_run')) if isinstance(structured.get('resume_run'), dict) else None,
         'resume_run': structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else None,
         'resolution_action': str(row.get('resolution_reason') or ''),
         'status': 'OPEN' if status == 'open' else 'RESOLVED' if status == 'resolved' else 'SKIPPED',
@@ -4429,14 +4463,15 @@ def _inbox_sela_resume_runs(conn, limit=8):
         resume_run = request.get('resume_run')
         if not isinstance(resume_run, dict):
             continue
-        status = str(resume_run.get('status') or '').lower()
-        if status not in {'queued', 'running', 'completed', 'failed', 'needs_review'}:
+        status = _continuation.normalize_status(resume_run.get('status'))
+        if not status or status in (_continuation.WAITING_FOR_HUMAN, _continuation.ANSWERED):
             continue
         display = _sela_request_display(row)
         runs.append({
             'inbox_id': int(row.get('id') or 0),
             'company': str(request.get('company') or display.get('company') or 'Sela prospect')[:500],
             'status': status,
+            'action': _continuation.normalize_action(resume_run.get('action')),
             'summary': str(resume_run.get('summary') or '')[:500],
             'error': str(resume_run.get('error') or '')[:200],
             'updated_at': str(resume_run.get('updated_at') or row.get('resolved_at') or row.get('created_at') or ''),
@@ -6095,58 +6130,38 @@ def sela_integration_agent_needs():
     })
 
 
-def _save_sela_inbox_resume_status(conn, *, inbox_item_id, request_json):
-    """Persist the bounded execution receipt beside a resolved Sela request."""
-    request_json = str(request_json or '')[:40000]
-    if not postgres_mode():
-        changed = conn.execute(
-            '''UPDATE inbox_items SET request_json=?
-                 WHERE id=? AND item_type='sela_agent_request' AND status='resolved' ''',
-            (request_json, inbox_item_id),
-        )
-    else:
-        changed = conn.execute(
-            '''UPDATE trosa.inbox_items item
-                  SET legacy_payload=coalesce(item.legacy_payload, '{}'::jsonb)
-                      || jsonb_build_object('sela_request_json', ?::text)
-                 FROM trosa.legacy_row_refs ref
-                WHERE ref.organization_id=trosa.compat_org_id()
-                  AND ref.legacy_user_id=trosa.compat_current_user()
-                  AND ref.table_name='inbox_items' AND ref.legacy_id=?
-                  AND item.id=ref.target_id
-                  AND item.item_type='sela_agent_request' AND item.status='resolved' ''',
-            (request_json, inbox_item_id),
-        )
-    if not changed.rowcount:
-        raise ValueError('Sela Inbox request is not resolved or visible')
-
-
 @app.route('/api/integrations/sela/needs/<int:item_id>/resume-status', methods=['POST'])
 @login_required
 def sela_integration_update_resume_status(item_id):
-    """Store execution state for an already answered Sela Inbox request."""
+    """Store execution state for an already answered Sela Inbox request.
+
+    This is the write-back half of the continuation loop: Sela reports
+    ``resumed`` when it continues from the original block, then ``completed`` /
+    ``failed`` / ``needs_review``.  It is idempotent — the answer hash is the
+    job key, and stale/duplicate reports return the stored state instead of
+    applying a second transition.
+    """
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({'success': False, 'error': '续跑状态必须是 JSON 对象'}), 400
-    status = _sela_prospect_text(payload.get('status'), 30).lower()
-    if status not in {'queued', 'running', 'completed', 'failed', 'needs_review'}:
+    status = _continuation.normalize_status(payload.get('status'))
+    if not status or status in (_continuation.WAITING_FOR_HUMAN, _continuation.ANSWERED):
         return jsonify({'success': False, 'error': '续跑状态无效'}), 400
     answer_sha256 = _sela_prospect_text(payload.get('answer_sha256'), 64).lower()
     if not re.fullmatch(r'[a-f0-9]{64}', answer_sha256):
         return jsonify({'success': False, 'error': '回答校验值无效'}), 400
     run_session_id = _sela_prospect_text(payload.get('run_session_id'), 128)
     summary = _sela_prospect_text(payload.get('summary'), 500)
-    error = _sela_prospect_text(payload.get('error'), 200)
+    error = _sela_prospect_text(payload.get('error'), 500)
+    error_code = _sela_prospect_text(payload.get('error_code'), 80)
+    facts_applied = payload.get('facts_applied') if isinstance(payload.get('facts_applied'), list) else []
     conn = get_db()
     try:
         conn.execute('BEGIN IMMEDIATE')
         if postgres_mode():
-            row = next(iter(_modern_inbox_rows(conn, item_type=_SELA_AGENT_REQUEST_TYPE, item_id=item_id)), None)
+            row = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)
         else:
-            row = conn.execute(
-                'SELECT * FROM inbox_items WHERE id=? AND item_type=? LIMIT 1',
-                (item_id, _SELA_AGENT_REQUEST_TYPE),
-            ).fetchone()
+            row = conn.execute('SELECT * FROM inbox_items WHERE id=? LIMIT 1', (item_id,)).fetchone()
         row_status = row.get('status') if isinstance(row, dict) else (row['status'] if row else '')
         if not row or str(row_status or '').lower() != 'resolved':
             conn.rollback()
@@ -6154,40 +6169,35 @@ def sela_integration_update_resume_status(item_id):
         row = dict(row)
         structured = _sela_agent_request_structured(row)
         human_response = structured.get('human_response') if isinstance(structured.get('human_response'), dict) else {}
-        if human_response.get('status') != 'answered' or _sela_hash(human_response) != answer_sha256:
+        current = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
+        if (human_response.get('status') != 'answered'
+                or str(current.get('answer_sha256') or '') != answer_sha256):
             conn.rollback()
             return jsonify({'success': False, 'error': '回答已变化或尚未提交'}), 409
-        current = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
-        current_status = str(current.get('status') or 'queued').lower()
-        terminal = {'completed', 'failed', 'needs_review'}
+        current_status = _continuation.normalize_status(current.get('status')) or _continuation.QUEUED
         current_run = str(current.get('run_session_id') or '')
-        transitions = {
-            'queued': {'queued', 'running', 'completed', 'failed', 'needs_review'},
-            'running': {'running', 'queued', 'completed', 'failed', 'needs_review'},
-            'completed': {'completed'}, 'failed': {'failed'}, 'needs_review': {'needs_review'},
-        }
-        if current_status in terminal and status in {'queued', 'running'}:
+        terminal = _continuation.TERMINAL_STATUSES
+        # ``completed`` is the only irreversible terminal; failed / needs_review
+        # keep their reason and may be requeued for another attempt.
+        if current_status == _continuation.COMPLETED and status != _continuation.COMPLETED:
             conn.commit()
-            return jsonify({
-                'success': True, 'status': 'SYNCED', 'stale': True,
-                'resume_run': current,
-            })
-        if current_status == 'queued' and status == 'running' and current_run and run_session_id == current_run:
+            return jsonify({'success': True, 'status': 'SYNCED', 'stale': True, 'resume_run': current})
+        if (current_status == _continuation.QUEUED and status == _continuation.RUNNING
+                and current_run and run_session_id == current_run):
             conn.commit()
-            return jsonify({
-                'success': True, 'status': 'SYNCED', 'stale': True,
-                'resume_run': current,
-            })
-        if status not in transitions.get(current_status, set()):
+            return jsonify({'success': True, 'status': 'SYNCED', 'stale': True, 'resume_run': current})
+        if (current_status == status and status in (_continuation.RUNNING, _continuation.RESUMED)
+                and current_run and run_session_id == current_run):
+            conn.commit()
+            return jsonify({'success': True, 'status': 'SYNCED', 'stale': True, 'resume_run': current})
+        if not _continuation.can_transition(current_status, status):
             conn.rollback()
             return jsonify({'success': False, 'error': '续跑状态不能回退或跨越'}), 409
-        if current_status == 'running' and current_run and status in {'queued', 'running', 'completed', 'failed', 'needs_review'} and run_session_id != current_run:
-            if status == 'queued':
+        if (current_status in (_continuation.RUNNING, _continuation.RESUMED) and current_run
+                and run_session_id != current_run):
+            if status == _continuation.QUEUED:
                 conn.commit()
-                return jsonify({
-                    'success': True, 'status': 'SYNCED', 'stale': True,
-                    'resume_run': current,
-                })
+                return jsonify({'success': True, 'status': 'SYNCED', 'stale': True, 'resume_run': current})
             conn.rollback()
             return jsonify({'success': False, 'error': '续跑 session 不匹配'}), 409
         now = _calendar_now_text()
@@ -6196,16 +6206,22 @@ def sela_integration_update_resume_status(item_id):
             'status': status,
             'answer_sha256': answer_sha256,
             'run_session_id': run_session_id or current_run,
-            'summary': summary,
+            'summary': summary or str(current.get('summary') or ''),
             'error': error,
+            'error_code': error_code,
             'updated_at': now,
         })
-        if status == 'running' and not updated.get('started_at'):
+        if facts_applied:
+            merged = current.get('facts_applied') if isinstance(current.get('facts_applied'), list) else []
+            updated['facts_applied'] = (merged + facts_applied)[:40]
+        if status in (_continuation.RUNNING, _continuation.RESUMED) and not updated.get('started_at'):
             updated['started_at'] = now
         if status in terminal:
             updated['completed_at'] = now
+        if status == _continuation.FAILED:
+            updated['attempt'] = int(current.get('attempt') or 0) + 1
         structured['resume_run'] = updated
-        _save_sela_inbox_resume_status(
+        _save_inbox_response(
             conn, inbox_item_id=item_id,
             request_json=json.dumps(structured, ensure_ascii=False),
         )
@@ -6219,6 +6235,62 @@ def sela_integration_update_resume_status(item_id):
         return jsonify({'success': False, 'error': '续跑状态未保存'}), 500
     finally:
         conn.close()
+
+
+@app.route('/api/integrations/sela/continuations', methods=['GET'])
+@login_required
+def sela_integration_continuations():
+    """Return answered continuations Sela still has to consume.
+
+    This is the explicit "resume" surface: one row per answered question whose
+    business fact is already committed and whose continuation is queued,
+    running or resumed.  Sela consumes it, continues from the original block,
+    and reports back through ``/needs/<id>/resume-status``.
+    """
+    wanted = _continuation.normalize_status(request.args.get('status') or _continuation.QUEUED)
+    include_all = str(request.args.get('status') or '').strip().lower() == 'all'
+    conn = get_db()
+    try:
+        rows = []
+        for status in ('resolved',):
+            for raw in _modern_inbox_rows(conn, status=status) if postgres_mode() else conn.execute(
+                    "SELECT * FROM inbox_items WHERE status=? ORDER BY COALESCE(resolved_at, created_at) DESC",
+                    (status,)).fetchall():
+                row = dict(raw)
+                if str(row.get('item_type') or '') not in (
+                        _SELA_AGENT_REQUEST_TYPE, 'sela_identity_review', 'sela_exclusion_review'):
+                    continue
+                structured = _sela_agent_request_structured(row)
+                run = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else None
+                human_response = structured.get('human_response') if isinstance(structured.get('human_response'), dict) else None
+                if not run or not human_response or human_response.get('status') != 'answered':
+                    continue
+                state = _continuation.normalize_status(run.get('status')) or _continuation.QUEUED
+                if not include_all and state not in _continuation.OPEN_STATUSES:
+                    continue
+                if not include_all and wanted and state != wanted:
+                    continue
+                rows.append({
+                    'inbox_id': int(row.get('id') or 0),
+                    'source_id': str(run.get('source_id') or structured.get('source_id') or ''),
+                    'action': _continuation.normalize_action(run.get('action')),
+                    'answer_sha256': str(run.get('answer_sha256') or ''),
+                    'continuation_key': str(run.get('continuation_key') or ''),
+                    'status': state,
+                    'facts_applied': run.get('facts_applied') if isinstance(run.get('facts_applied'), list) else [],
+                    'summary': str(run.get('summary') or '')[:500],
+                    'error': str(run.get('error') or '')[:200],
+                    'updated_at': str(run.get('updated_at') or ''),
+                })
+        rows.sort(key=lambda item: item['updated_at'], reverse=True)
+    finally:
+        conn.close()
+    return jsonify({
+        'success': True,
+        'status': 'all' if include_all else (wanted or _continuation.QUEUED),
+        'continuations': rows,
+        'inbox_api': 'trosa-v1',
+    })
 
 
 @app.route('/api/integrations/sela/needs', methods=['POST'])
@@ -10967,7 +11039,7 @@ def _question_completion_effects(kind, primary=None):
         missing = request.get('missing_facts') if isinstance(request.get('missing_facts'), list) else []
         if any(str(fact.get('field') or '').lower() == 'contact_email'
                for fact in missing if isinstance(fact, dict)):
-            effects.append('补充邮箱只记录在本次 Sela 请求中，不会写入或验证 Trosa 联系人。')
+            effects.append('补充邮箱会写入该 prospect 的 Trosa 联系人，并由 Sela 按现有规则验证后继续。')
         return effects
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['保存主体判断并更新 Trosa 中的 Sela 排除状态。']
@@ -10988,7 +11060,7 @@ def _question_will_not_do(kind, primary=None):
         request = _sela_agent_request_structured(primary or {})
         if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
             return ['不会发送邮件，也不会创建客户、联系人或待办。']
-        return ['不会发送邮件、验证邮箱，或创建/修改客户、联系人、待办和业务阶段。']
+        return ['不会发送邮件、创建客户或待办，也不会修改业务阶段；邮箱会写入该 prospect 的联系人。']
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['不会新建客户或联系人；不会发送邮件。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -11005,10 +11077,10 @@ def _sela_missing_fact_response_fields(missing):
         label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
         help_text = _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'
         if fact_name == 'contact_email':
-            help_text += (' 该邮箱只作为本次 Sela 请求的事实；不会写入或验证 Trosa 联系人。'
-                          '符合续跑条件时可用于准备未发送草稿；要保存到联系人请使用下方单独确认入口，目标不明确时不会显示该入口。')
+            help_text += (' 该邮箱会写入该 prospect 的 Trosa 联系人，并由 Sela 按现有规则继续验证。'
+                          '目标不明确时不会写入，也不会自动发送邮件。')
         fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
-                       'label': '联系邮箱（仅供本次 Sela 请求/未发送草稿）' if fact_name == 'contact_email' else label,
+                       'label': '联系邮箱（将写入 Trosa 联系人）' if fact_name == 'contact_email' else label,
                        'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
                        'required': False, 'validation': {}, 'help': help_text})
     return fields
@@ -11466,13 +11538,18 @@ def get_inbox_sela_handoff_status(item_id):
             return jsonify({'success': False, 'error': '找不到已解决的 Sela Inbox 请求'}), 404
         structured = _sela_agent_request_structured(row)
         resume_run = structured.get('resume_run') if isinstance(structured.get('resume_run'), dict) else {}
-        status = str(resume_run.get('status') or 'awaiting_agent').lower()
+        status = _continuation.normalize_status(resume_run.get('status')) or 'awaiting_agent'
         return jsonify({
             'success': True,
             'status': status,
-            'automatic_run': status in {'queued', 'running', 'completed', 'failed'},
+            'automatic_run': status in {'queued', 'running', 'resumed', 'completed', 'failed'},
+            'action': _continuation.normalize_action(resume_run.get('action')),
+            'facts_applied': resume_run.get('facts_applied')
+            if isinstance(resume_run.get('facts_applied'), list) else [],
+            'continuation_key': str(resume_run.get('continuation_key') or ''),
             'summary': str(resume_run.get('summary') or '')[:500],
             'error': str(resume_run.get('error') or '')[:200],
+            'error_code': str(resume_run.get('error_code') or '')[:80],
             'updated_at': str(resume_run.get('updated_at') or ''),
             'run_session_id': str(resume_run.get('run_session_id') or ''),
         })
@@ -12269,6 +12346,357 @@ def _sela_resume_eligibility(conn, request_payload):
     return {'eligible': True, 'reason': '', 'summary': ''}
 
 
+# ---------------------------------------------------------------------------
+# 人工回答 → 业务事实落库
+#
+# 回答 Sela 问题不等于问题「处理完成」。这个区块把人补充的事实真正写进
+# 后续 Sela 能读取的业务数据（联系人邮箱、排除状态、可复用身份事实），
+# 并给出一个明确的续跑动作；只有这些事实落库后，才创建 continuation。
+# ---------------------------------------------------------------------------
+
+def _sela_answer_email(answer, structured):
+    """Return the human-supplied contact email for one Sela request, or ''."""
+    answer = answer if isinstance(answer, dict) else {}
+    missing = structured.get('missing_facts') if isinstance(structured.get('missing_facts'), list) else []
+    for index, fact in enumerate(missing[:20]):
+        if not isinstance(fact, dict):
+            continue
+        if str(fact.get('field') or '').lower() != 'contact_email':
+            continue
+        value = _sela_prospect_text(answer.get(f'fact_{index}'), 320)
+        if value:
+            return value
+    for key in ('confirmed_email', 'email'):
+        value = _sela_prospect_text(answer.get(key), 320)
+        if value:
+            return value
+    return ''
+
+
+def _sela_linked_prospect(conn, source_id):
+    """Return (profile, prospect view) for a linked Sela source, or (None, None)."""
+    source_id = str(source_id or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+        return None, None
+    profile = _sela_profile_by_source(conn, source_id)
+    if not profile:
+        return None, None
+    return dict(profile), _sela_prospect_view(conn, profile)
+
+
+def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
+    """Create or refresh one contact email on the prospect's Trosa customer.
+
+    This is the single audited write path for a human-confirmed Sela email; the
+    standalone save endpoint and the unified Inbox answer both use it, so an
+    answered email is a real contact fact Sela can verify afterwards.
+    """
+    try:
+        email = _canonical_email(validate_email_address(email, check_deliverability=False).normalized)
+    except EmailNotValidError:
+        raise CrmWriteError('请输入有效邮箱', 400)
+    customer_id = int(customer_id)
+    if postgres_mode():
+        contacts = [dict(row) for row in _customer_contacts(conn, customer_id)]
+    else:
+        contacts = [dict(row) for row in conn.execute(
+            'SELECT * FROM contacts WHERE customer_id=? '
+            'ORDER BY is_primary DESC, created_at ASC, id ASC', (customer_id,)).fetchall()]
+    same = next((row for row in contacts if _canonical_email(row.get('email')) == email), None)
+    if same:
+        return {'contact_id': int(same['id']), 'created': False, 'already_present': True}
+    duplicate = None
+    if postgres_mode():
+        for owner in _active_customers(conn):
+            if int(owner['id']) == customer_id:
+                continue
+            if any(_canonical_email(contact.get('email')) == email
+                   for contact in _customer_contacts(conn, int(owner['id']))):
+                duplicate = owner
+                break
+    else:
+        row = conn.execute(
+            '''SELECT c.company, c.name FROM contacts ct
+                 JOIN customers c ON c.id=ct.customer_id
+                WHERE lower(trim(ct.email))=? AND ct.customer_id<>? LIMIT 1''',
+            (email, customer_id),
+        ).fetchone()
+        if row:
+            duplicate = {'company': row['company'] or row['name']}
+    if duplicate:
+        company = (duplicate.get('company') or duplicate.get('name') or '其他客户') if isinstance(duplicate, dict) else '其他客户'
+        raise CrmWriteError(f'该邮箱已属于其他客户：{company}', 409)
+    if contacts:
+        primary = contacts[0]
+        contact_id = int(primary['id'])
+        before = _snapshot_entity(conn, 'contacts', contact_id)
+        values = dict(before); values['email'] = email
+        _update_contact(conn, contact_id=contact_id, values=values)
+        after = _snapshot_entity(conn, 'contacts', contact_id)
+        _record_operation_log(conn, 'UPDATE', 'contact', contact_id,
+                              f'Sela Inbox 人工回答确认邮箱 {email}', now)
+        return {'contact_id': contact_id, 'created': False, 'already_present': False,
+                'undo': ('UPDATE_CONTACT', contact_id, before, after)}
+    contact_id = int(_create_contact(conn, customer_id=customer_id, values={
+        'name': '', 'email': email, 'preferred_channel': 'email',
+        'contact_type': 'person', 'is_primary': 0,
+        'notes': '由 Sela Inbox 人工回答确认；邮箱尚未验证。',
+    }, created_at=now))
+    after = _snapshot_entity(conn, 'contacts', contact_id)
+    _record_operation_log(conn, 'CREATE', 'contact', contact_id,
+                          f'Sela Inbox 人工回答确认邮箱 {email}', now)
+    return {'contact_id': contact_id, 'created': True, 'already_present': False,
+            'undo': ('CREATE_CONTACT', contact_id, None, after)}
+
+
+def _sela_mark_prospect_excluded(conn, profile, reason, now):
+    """Set the real do-not-contact business state for a human-confirmed exclusion."""
+    profile = dict(profile)
+    research = _sela_json_value(profile.get('research_json'), {})
+    state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
+    state.pop('exclusion_review', None)
+    state['exclusion_resolution'] = 'HUMAN_CONFIRMED_EXCLUDE'
+    state['exclusion_resolved_at'] = now
+    if reason:
+        state['exclusion_resolution_note'] = _sela_prospect_text(reason, 4000)
+    research['agent_state'] = state
+    relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    scope = ('organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND '
+             if postgres_mode() else '')
+    conn.execute(
+        f'''UPDATE {relation}
+              SET research_json=?, contact_permission='do_not_contact',
+                  suppression_reason=?, suppression_at=?, updated_at=?
+            WHERE {scope}id=?''',
+        (json.dumps(research, ensure_ascii=False), _sela_prospect_text(reason, 2000) or '人工确认加入排除 / DNC',
+         now, now, profile['id']),
+    )
+    customer = _sela_profile_customer(conn, int(profile['customer_id']))
+    customer = dict(customer) if customer else {}
+    try:
+        _sela_upsert_business_exclusion(conn, {
+            'source': _SELA_PROSPECT_SOURCE,
+            'source_id': str(profile['source_id']),
+            'canonical_name': customer.get('company') or customer.get('name') or str(profile['source_id']),
+            'status': 'confirmed_exclude',
+            'match_policy': 'hard',
+            'reason': _sela_prospect_text(reason, 2000) or '人工确认加入排除 / DNC',
+        }, now)
+    except Exception:
+        logger.warning('Sela exclusion record write failed for %s', profile.get('source_id'), exc_info=True)
+
+
+def _sela_answer_excludes(structured, answer):
+    """Whether a human decision answer means "add to exclusion / DNC"."""
+    structured = structured if isinstance(structured, dict) else {}
+    answer = answer if isinstance(answer, dict) else {}
+    requested = _sela_prospect_text(structured.get('resume_decision'), 40).lower()
+    if requested == 'clear':
+        return False
+    selected = _sela_prospect_text(answer.get('selected_option'), 500)
+    if not selected:
+        return False
+    decision = structured.get('decision') if isinstance(structured.get('decision'), dict) else {}
+    options = [_sela_prospect_text(option, 500) for option in (decision.get('options') or [])]
+    recommended = _sela_prospect_text(decision.get('recommended'), 500)
+    if recommended and selected == recommended:
+        return True
+    if options and selected == options[0]:
+        return True
+    return False
+
+
+def _sela_identity_identifiers(source_id, payload):
+    """Reusable identity keys carried by a Sela request/review."""
+    payload = payload if isinstance(payload, dict) else {}
+    identifiers = []
+    source_id = str(source_id or '').strip()
+    if source_id:
+        identifiers.append(('source', f'{_SELA_PROSPECT_SOURCE}:{source_id}'))
+    email = _canonical_email(payload.get('email')
+                             or (payload.get('contact') or {}).get('email')
+                             if isinstance(payload.get('contact'), dict) else payload.get('email'))
+    if email and identity_link.email_domain(email) not in identity_link.PUBLIC_EMAIL_DOMAINS:
+        identifiers.append(('email', email))
+    domain = _canonical_website_domain(payload.get('website') or payload.get('domain'))
+    if domain:
+        identifiers.append(('domain', domain))
+    return identifiers
+
+
+def _sela_record_identity_decision(conn, *, decision, customer_id, identifiers, source_id,
+                                   now, actor, inbox_item_id, own_customer_id=None):
+    """Persist a human same/different decision as reusable identity facts.
+
+    ``same`` records the identifiers against the confirmed customer.  ``different``
+    revokes any conflicting active fact and pins the Sela source to its own record
+    (when it has one) so a later sync matches deterministically instead of asking
+    the same question again.
+    """
+    decision = str(decision or '').strip().lower()
+    applied = []
+    if decision == 'same' and customer_id:
+        for identifier_type, value in identifiers:
+            method = {'source': 'confirmed_source', 'email': 'confirmed_email',
+                      'domain': 'confirmed_domain'}.get(identifier_type, '')
+            identity_link.record_identity_fact(
+                conn, identifier_type=identifier_type, identifier_value=value,
+                customer_id=int(customer_id), origin='human_confirmed', method=method,
+                resolution='Inbox 人工确认同一业务主体', source_inbox_item_id=inbox_item_id,
+                created_by=actor,
+            )
+            applied.append({'field': 'identity', 'target': 'customer', 'decision': 'same',
+                            'customer_id': int(customer_id),
+                            'value': f'{identifier_type}:{value}'})
+    elif decision == 'different':
+        for identifier_type, value in identifiers:
+            identity_link.revoke_identity_facts(
+                conn, identifier_type=identifier_type, identifier_value=value)
+        applied.append({'field': 'identity', 'target': 'prospect', 'decision': 'different',
+                        'value': f'{_SELA_PROSPECT_SOURCE}:{source_id}'})
+        if own_customer_id:
+            identity_link.record_identity_fact(
+                conn, identifier_type='source',
+                identifier_value=f'{_SELA_PROSPECT_SOURCE}:{source_id}',
+                customer_id=int(own_customer_id), origin='human_confirmed',
+                method='confirmed_source', resolution='Inbox 人工确认不同业务主体',
+                source_inbox_item_id=inbox_item_id, created_by=actor,
+            )
+    return applied
+
+
+def _sela_create_review_prospect_customer(conn, review, now):
+    """Create the prospect's own record when a human says it is a different entity.
+
+    Used when an identity review had no existing Sela profile (for example
+    ``MULTIPLE_TROSA_MATCHES``).  The new record carries the Sela source id, so
+    the recorded source identity fact and later syncs resolve deterministically
+    instead of asking the same identity question again.
+    """
+    source_id = str(review.get('source_id') or '').strip()
+    company = _sela_prospect_text(review.get('company'), 500)
+    if not source_id or not company:
+        return None
+    website = normalize_website(review.get('website'))
+    notes = 'Inbox 人工确认与候选客户不是同一主体后建立。'
+    if postgres_mode():
+        customer_id = int(_create_customer_record(conn, values={
+            'name': company, 'company': company, 'website': website, 'level': 'C',
+            'field': 'PMMA / Acrylic', 'import_source': _SELA_PROSPECT_INTEGRATION,
+            'external_source': _SELA_PROSPECT_SOURCE, 'external_id': source_id,
+            'source': 'Sela', 'notes': notes,
+        }))
+    else:
+        # SQLite keeps its local aggregate adapter; mirror the prospect creation
+        # path instead of routing through the PostgreSQL record writer.
+        cursor = conn.execute(
+            '''INSERT INTO customers
+               (name, company, country, level, website, profile, field,
+                notes, industry, import_source, external_source,
+                external_id, source, source_detail, created_at, updated_at)
+               VALUES (?, ?, ?, 'C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (company, company, '', website, '', 'PMMA / Acrylic', notes, '',
+             _SELA_PROSPECT_INTEGRATION, _SELA_PROSPECT_SOURCE, source_id, 'Sela', '', now, now),
+        )
+        customer_id = int(cursor.lastrowid)
+    email = _canonical_email(review.get('email'))
+    if email:
+        try:
+            _sela_resolve_contact_email(conn, customer_id, email, now, actor='')
+        except CrmWriteError:
+            pass
+    _sela_upsert_profile(conn, customer_id, source_id, {
+        'source_id': source_id, 'company': company, 'website': website,
+        'contact': {'email': email} if email else {},
+        'research_reason': '人工确认不是候选客户中的任何一家，建立独立记录。',
+    }, now)
+    _record_operation_log(conn, 'CREATE', 'sela_prospect', customer_id,
+                          f'Inbox 身份确认不同主体：{source_id}', now)
+    return customer_id
+
+
+def _sela_apply_answer_facts(conn, row, kind, answer, structured, *, now, actor):
+    """Commit the business fact(s) a Sela answer resolves.
+
+    Returns ``{'applied', 'action', 'summary', 'blocked', 'undo'}``.  It never
+    treats the answer itself as completion: it only records facts and names the
+    continuation action Sela should run next.
+    """
+    structured = structured if isinstance(structured, dict) else {}
+    answer = answer if isinstance(answer, dict) else {}
+    applied = []
+    undo_pending = None
+    source_id = str(structured.get('source_id') or '').strip()
+    action = _sela_prospect_text(structured.get('resume_action'), 40).lower()
+    profile, prospect = _sela_linked_prospect(conn, source_id)
+
+    email = _sela_answer_email(answer, structured)
+    if email:
+        if not prospect:
+            raise CrmWriteError('这条 Sela 请求没有可写入的联系人目标，未保存邮箱', 409)
+        saved = _sela_resolve_contact_email(
+            conn, int(prospect['trosa_id']), email, now, actor=actor)
+        applied.append({
+            'field': 'contact_email', 'target': 'contact', 'value': email,
+            'contact_id': saved.get('contact_id'),
+            'already_present': bool(saved.get('already_present')),
+        })
+        undo_pending = saved.get('undo')
+        if not action:
+            action = _continuation.ACTION_VERIFY_EMAIL
+
+    if action == _continuation.ACTION_RESOLVE_EXCLUSION or \
+            _sela_prospect_text(structured.get('resume_decision'), 40).lower() in ('exclude', 'clear'):
+        if not profile:
+            raise CrmWriteError('找不到对应的 Sela prospect，未保存排除决定', 409)
+        if _sela_answer_excludes(structured, answer):
+            reason = _sela_prospect_text(answer.get('note') or answer.get('answer'), 2000)
+            _sela_mark_prospect_excluded(conn, profile, reason, now)
+            applied.append({'field': 'exclusion', 'target': 'prospect',
+                            'value': 'do_not_contact', 'source_id': source_id})
+        else:
+            applied.append({'field': 'exclusion', 'target': 'prospect',
+                            'value': 'cleared', 'source_id': source_id})
+        action = _continuation.ACTION_RESOLVE_EXCLUSION
+
+    request_kind = str(structured.get('kind') or '').upper()
+    if request_kind in ('IDENTITY', 'CONFLICT') or action == _continuation.ACTION_RESOLVE_NEED:
+        decision = _sela_prospect_text(answer.get('decision'), 40).lower()
+        chosen_customer = None
+        for key in ('customer_id', 'resume_target_id'):
+            try:
+                chosen_customer = int(answer.get(key) or structured.get(key) or 0) or None
+            except (TypeError, ValueError):
+                chosen_customer = None
+            if chosen_customer:
+                break
+        if decision in ('same', 'different'):
+            identifiers = _sela_identity_identifiers(source_id, structured)
+            own_customer_id = int(profile['customer_id']) if profile else None
+            applied.extend(_sela_record_identity_decision(
+                conn, decision=decision, customer_id=chosen_customer, identifiers=identifiers,
+                source_id=source_id, now=now, actor=actor, inbox_item_id=row.get('id'),
+                own_customer_id=own_customer_id))
+
+    if not action:
+        action = _continuation.ACTION_CONTINUE_DEVELOPMENT
+    summary_parts = []
+    for fact in applied:
+        if fact.get('field') == 'contact_email':
+            summary_parts.append('联系人邮箱已写入 Trosa 联系人：' + str(fact.get('value')))
+        elif fact.get('field') == 'exclusion':
+            summary_parts.append('排除状态已更新为：' + str(fact.get('value')))
+        elif fact.get('field') == 'identity':
+            summary_parts.append('身份判断已沉淀：' + str(fact.get('decision')))
+    return {
+        'applied': applied,
+        'action': action,
+        'summary': '；'.join(summary_parts),
+        'blocked': False,
+        'undo': undo_pending,
+    }
+
+
 def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
     """Validate and persist a machine-readable answer for a Sela request."""
     payload = _sela_agent_request_structured(row)
@@ -12324,26 +12752,36 @@ def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
         'responded_at': responded_at,
         'responded_by': responded_by,
     }
+    # The answer is not completion: first commit the business fact it resolves,
+    # then create one continuation that tells Sela how to continue the original
+    # work.  Both are idempotent on the answer hash.
+    answer_facts = _sela_apply_answer_facts(
+        conn, row, request_kind, answer, payload, now=responded_at, actor=responded_by)
+    action = answer_facts['action']
+    eligibility = _sela_resume_eligibility(conn, payload)
+    # A human decision Sela must obey (exclusion / close) is always queued so it
+    # is consumed from the original block.  Research/draft continuations keep the
+    # existing cold-prospect safety gate and fall back to human review otherwise.
+    forced_actions = {_continuation.ACTION_RESOLVE_EXCLUSION, _continuation.ACTION_RESOLVE_NEED}
+    if action in forced_actions or eligibility['eligible']:
+        resume_status = _continuation.QUEUED
+    else:
+        resume_status = _continuation.NEEDS_REVIEW
+    resume_summary = '；'.join(part for part in (
+        answer_facts.get('summary'), eligibility.get('summary')) if part)
+    if not resume_summary:
+        resume_summary = '业务事实已写入 Trosa；等待 Sela 从原阻塞点继续。'
     updated = dict(payload)
     updated['human_response'] = human_response
-    eligibility = _sela_resume_eligibility(conn, payload)
-    resume_status = 'queued' if eligibility['eligible'] else 'needs_review'
-    resume_summary = eligibility['summary']
-    has_email_gap = any(
-        isinstance(fact, dict) and str(fact.get('field') or '').lower() == 'contact_email'
-        for fact in raw_missing[:20]
+    updated['resume_run'] = _continuation.build_resume_run(
+        status=resume_status, answer_sha256=_sela_hash(human_response),
+        inbox_item_id=row.get('id'), action=action,
+        source_id=str(payload.get('source_id') or ''),
+        session_id=str(payload.get('session_id') or ''),
+        summary=resume_summary, error='', reason=eligibility['reason'],
+        facts_applied=answer_facts.get('applied'),
+        updated_at=responded_at,
     )
-    if has_email_gap and not eligibility['eligible']:
-        resume_summary += ' 补充邮箱只保存在本次 Sela 请求中，不会写入或验证 Trosa 联系人；请在客户联系人工作区人工确认并登记。'
-    updated['resume_run'] = {
-        'status': resume_status,
-        'answer_sha256': _sela_hash(human_response),
-        'run_session_id': '',
-        'summary': resume_summary,
-        'error': '',
-        'reason': eligibility['reason'],
-        'updated_at': responded_at,
-    }
     summary = []
     if selected_option:
         summary.append('选择：' + selected_option)
@@ -12353,10 +12791,15 @@ def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
         summary.append('回答：' + free_answer)
     if note:
         summary.append('说明：' + note)
+    if answer_facts.get('summary'):
+        summary.append(answer_facts['summary'])
     return {
         'payload': updated,
         'reason': 'answered',
         'note': '\n'.join(summary)[:4000],
+        'action': action,
+        'facts_applied': answer_facts.get('applied') or [],
+        'undo': answer_facts.get('undo'),
     }
 
 
@@ -12401,6 +12844,7 @@ def respond_to_inbox_question(item_id):
         customer_id = answer.get('customer_id')
         undo_pending = None
         sela_response = None
+        continuation_payload = None
         if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
             if decision not in ('accept', 'reject'):
                 return jsonify({'error': '请选择主体判断结果'}), 400
@@ -12409,7 +12853,32 @@ def respond_to_inbox_question(item_id):
             if not profile:
                 return jsonify({'error': '找不到对应的 Sela prospect，未保存决定'}), 404
             note = _sela_prospect_text(answer.get('note'), 4000)
-            _sela_resolve_exclusion_review(conn, profile, decision, note, _calendar_now_text(), resolve_inbox=False)
+            now_review, actor_review = _calendar_now_text(), getattr(g, 'current_user', '')
+            _sela_resolve_exclusion_review(conn, profile, decision, note, now_review, resolve_inbox=False)
+            # "reject" means the prospect is the already-excluded entity, so the
+            # business state (do_not_contact) is now set and Sela must obey it.
+            identity_decision = 'different' if decision == 'reject' else 'same'
+            applied = _sela_record_identity_decision(
+                conn, decision=identity_decision, customer_id=int(profile['customer_id']),
+                identifiers=_sela_identity_identifiers(review.get('source_id'), review),
+                source_id=review.get('source_id'), now=now_review, actor=actor_review,
+                inbox_item_id=row.get('id'), own_customer_id=int(profile['customer_id']))
+            action = (_continuation.ACTION_RESOLVE_EXCLUSION if decision == 'reject'
+                      else _continuation.ACTION_CONTINUE_DEVELOPMENT)
+            continuation_payload = {
+                **review,
+                'human_response': {
+                    'status': 'answered', 'request_kind': 'EXCLUSION_REVIEW',
+                    'selected_option': decision, 'facts': [], 'answer': '', 'note': note,
+                    'responded_at': now_review, 'responded_by': actor_review,
+                },
+                'resume_run': _continuation.build_resume_run(
+                    status=_continuation.QUEUED, inbox_item_id=row.get('id'),
+                    answer_sha256=_sela_hash({'item_id': row.get('id'), 'decision': decision, 'note': note}),
+                    action=action, source_id=review.get('source_id'),
+                    summary='排除身份已确认：' + decision, facts_applied=applied,
+                    updated_at=now_review),
+            }
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
             now, actor = _calendar_now_text(), getattr(g, 'current_user', '')
             sela_response = _sela_human_response(conn, row, answer, responded_at=now, responded_by=actor)
@@ -12425,6 +12894,34 @@ def respond_to_inbox_question(item_id):
                 return jsonify({'error': '请选择身份判断结果'}), 400
             if decision == 'same' and not customer_id:
                 return jsonify({'error': '确认同一主体时必须选择具体客户'}), 400
+            review = _inbox_sela_review_payload(row)
+            now_review, actor_review = _calendar_now_text(), getattr(g, 'current_user', '')
+            chosen = _normalize_positive_id(customer_id, '客户编号') if decision == 'same' else None
+            own_profile = (_sela_profile_by_source(conn, review.get('source_id'))
+                           if review.get('source_id') else None)
+            own_customer_id = int(own_profile['customer_id']) if own_profile else None
+            if decision == 'different' and not own_customer_id:
+                own_customer_id = _sela_create_review_prospect_customer(conn, review, now_review)
+            applied = _sela_record_identity_decision(
+                conn, decision=decision, customer_id=chosen,
+                identifiers=_sela_identity_identifiers(review.get('source_id'), review),
+                source_id=review.get('source_id'), now=now_review, actor=actor_review,
+                inbox_item_id=row.get('id'), own_customer_id=own_customer_id)
+            continuation_payload = {
+                **review,
+                'human_response': {
+                    'status': 'answered', 'request_kind': 'IDENTITY_REVIEW',
+                    'selected_option': decision, 'facts': [], 'answer': '', 'note': note,
+                    'responded_at': now_review, 'responded_by': actor_review,
+                },
+                'resume_run': _continuation.build_resume_run(
+                    status=_continuation.QUEUED, inbox_item_id=row.get('id'),
+                    answer_sha256=_sela_hash({'item_id': row.get('id'), 'decision': decision}),
+                    action=_continuation.ACTION_CONTINUE_DEVELOPMENT,
+                    source_id=review.get('source_id'),
+                    summary=('身份判断已沉淀为可复用事实：' + decision),
+                    facts_applied=applied, updated_at=now_review),
+            }
         elif kind == _inbox_questions.QUESTION_APPROVAL:
             if decision not in ('approve', 'skip') or (decision == 'approve' and not note):
                 return jsonify({'error': '批准前必须填写处理结果'}), 400
@@ -12448,9 +12945,22 @@ def respond_to_inbox_question(item_id):
             _assign_inbox_customer(conn, inbox_item_id=item_id, customer_id=customer_id)
         _resolve_inbox_question_group(conn, item_id, resolved_at=now, reason=decision or 'answered',
                                       note=note, resolution_source='human', resolved_by=actor)
-        undo_token = ''
-        if undo_pending:
+        if continuation_payload is not None:
+            # Identity/exclusion reviews store their continuation beside the
+            # resolved Inbox fact, so Sela can read it without a second queue.
+            _save_inbox_response(conn, inbox_item_id=item_id,
+                                 request_json=json.dumps(continuation_payload, ensure_ascii=False))
+        sela_undo = sela_response.get('undo') if isinstance(sela_response, dict) else None
+        if sela_undo:
+            undo_op, contact_id, before, after = sela_undo
+            undo_description = '撤销 Inbox 保存联系人邮箱'
+        elif undo_pending:
+            undo_op, undo_description = 'UPDATE_CONTACT', '撤销 Inbox 邮箱更正'
             contact_id, before, after = undo_pending
+        else:
+            undo_op = undo_description = ''
+        undo_token = ''
+        if undo_op:
             inbox_entities = []
             for undo_item_id in item_ids:
                 current = _snapshot_entity(conn, 'inbox_items', undo_item_id)
@@ -12459,46 +12969,51 @@ def respond_to_inbox_question(item_id):
                     restored['resolution_reason'] = ''; restored['resolution_note'] = ''
                     restored['resolution_source'] = ''; restored['resolved_by'] = ''
                     inbox_entities.append(_undo_entity('inbox_items', undo_item_id, restored, current))
-            undo_token = _create_undo_action(conn, 'UPDATE_CONTACT', 'contact', contact_id,
-                [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, '撤销 Inbox 邮箱更正')
+            undo_token = _create_undo_action(conn, undo_op, 'contact', contact_id,
+                [_undo_entity('contacts', contact_id, before, after)] + inbox_entities, undo_description)
         structured_sela_request = sela_response.get('payload', {}) if isinstance(sela_response, dict) else {}
-        resume_run = structured_sela_request.get('resume_run') if isinstance(structured_sela_request.get('resume_run'), dict) else {}
-        auto_resume = bool(
-            sela_response and sela_response.get('reason') == 'answered'
-            and resume_run.get('status') == 'queued'
-        )
-        resume_status = str(resume_run.get('status') or '').lower()
-        human_response = structured_sela_request.get('human_response') if isinstance(structured_sela_request.get('human_response'), dict) else {}
-        human_facts = human_response.get('facts') if isinstance(human_response.get('facts'), list) else []
-        confirmed_email = any(
-            isinstance(fact, dict) and str(fact.get('field') or '').lower() == 'contact_email'
-            for fact in human_facts
-        )
-        next_system_step = (
-            '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
-            if sela_response and sela_response.get('reason') == 'retired_send_approval' else
-            str(resume_run.get('summary') or '当前条件不支持自动续跑，请人工处理。')
-            if kind == _inbox_questions.QUESTION_SELA_REQUEST and resume_status == 'needs_review' else
-            '回答已保存并排入 Sela 自动续跑；补充邮箱只作为本次请求事实，不会写入或验证 Trosa 联系人。'
-            if kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume and confirmed_email else
-            '回答已保存并排入 Sela 自动续跑；Sela 会研究公开资料或准备未发送草稿，不会发送邮件或修改客户、联系人、待办。'
-            if kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume else
-            '回答已保存；Sela 不会自动续跑，请在 Trosa 人工处理。'
-            if kind == _inbox_questions.QUESTION_SELA_REQUEST else
-            '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
-            if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW else
-            '回答已记录，问题已关闭。'
-        )
+        continuation = None
+        if isinstance(structured_sela_request, dict) and isinstance(structured_sela_request.get('resume_run'), dict):
+            continuation = structured_sela_request.get('resume_run')
+        elif continuation_payload is not None:
+            continuation = continuation_payload.get('resume_run')
+        continuation = continuation if isinstance(continuation, dict) else {}
+        continuation_status = _continuation.normalize_status(continuation.get('status'))
+        continuation_action = str(continuation.get('action') or '')
+        auto_resume = continuation_status == _continuation.QUEUED
+        if sela_response and sela_response.get('reason') == 'retired_send_approval':
+            next_system_step = '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
+        elif continuation_action == _continuation.ACTION_VERIFY_EMAIL and auto_resume:
+            next_system_step = '补充邮箱已写入 Trosa 联系人；Sela 将按现有规则验证该邮箱后继续。'
+        elif continuation_action == _continuation.ACTION_RESOLVE_EXCLUSION and auto_resume:
+            next_system_step = '排除决定已写入 Trosa；Sela 会看到该 prospect 已停止联系，不会重复询问。'
+        elif kind == _inbox_questions.QUESTION_SELA_REQUEST and continuation_status == _continuation.NEEDS_REVIEW:
+            next_system_step = str(continuation.get('summary') or '当前条件不支持自动续跑，请人工处理。')
+        elif kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume:
+            next_system_step = '回答已保存并排入 Sela 续跑；Sela 会从原阻塞点继续，不会发送邮件或修改客户、联系人、待办。'
+        elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
+            next_system_step = '回答已保存；Sela 不会自动续跑，请在 Trosa 人工处理。'
+        elif kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
+            next_system_step = '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
+        elif kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
+            next_system_step = '身份判断已沉淀为可复用事实；Trosa 与 Sela 后续都会复用该判断。'
+        else:
+            next_system_step = '回答已记录，问题已关闭。'
         response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
                     'resolved_item_ids': item_ids, 'effects': _question_completion_effects(kind, row),
                     'next_system_step': next_system_step,
                     'undo_token': undo_token,
                     'undo_scope': '仅恢复本次联系人资料修改，不会删除历史投递事实。', 'counts': {}}
-        if sela_response:
+        if continuation or sela_response or continuation_payload is not None:
             response['sela_handoff'] = {
-                'status': ('queued' if auto_resume else resume_status or 'awaiting_agent'),
+                'status': continuation_status or 'awaiting_agent',
                 'automatic_run': auto_resume,
-                'session_id': structured_sela_request.get('session_id') or '',
+                'action': continuation_action,
+                'facts_applied': continuation.get('facts_applied')
+                if isinstance(continuation.get('facts_applied'), list) else [],
+                'continuation_key': str(continuation.get('continuation_key') or ''),
+                'session_id': str(structured_sela_request.get('session_id')
+                                  or continuation.get('session_id') or ''),
                 'trosa_inbox_id': int(item_id),
             }
         remaining_items = _load_open_inbox_items(conn)

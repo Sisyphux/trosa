@@ -1,3 +1,12 @@
+## 2026-09-27 — Inbox 回答真正改变业务事实并驱动 Sela 续跑闭环
+
+- 现象：在 Inbox 回答 Sela 问题后，回答只存进 Inbox JSON：补充的邮箱不会进入 Trosa 联系人，确认加入排除也不会真正修改业务状态，same/different 身份判断不沉淀，Sela 续跑只是状态字段，问题并没有从原阻塞点继续。
+- 修复：回答先落库业务事实，再创建一条明确的 continuation（每个「问题 + 回答哈希」只有一条），Sela 消费后从原阻塞点继续并回写执行结果。区分 waiting_for_human、answered、queued/waiting_for_sela、resumed、completed、failed/needs_review；completed 不可逆，failed/needs_review 保留原因且可重排。
+- FACT_GAP 邮箱：人工确认的邮箱写入该 prospect 的 Trosa 联系人（复用同一审计、去重、撤销路径），continuation 动作是 `verify_email`，由 Sela 按现有规则继续核验后解除阻塞；不再有「只保存在本次请求」的第二套机制。
+- DECISION 排除：确认加入排除会真正写入 `contact_permission=do_not_contact` 和业务排除清单；Sela 读取后停止联系，不会重复询问同一问题。
+- IDENTITY：same/different 判断通过 `identity_link` 沉淀为可复用身份事实；Trosa 后续同步优先使用该事实解析，不再重复弹出身份待确认。
+- 接口：`/api/integrations/sela/continuations` 返回待消费的续跑；`resume-status` 支持 `resumed` 与失败原因/错误码回写，并保持幂等。修正 SQLite 下 Inbox 回答幂等回执读取会崩溃的旧问题。
+- 验证：新增 SQLite 端到端场景（补充邮箱、加入排除、same/different 身份）与续跑状态机回归；既有 SQLite、PostgreSQL rehearsal 与 Inbox Chromium 验收同步更新文案与断言；不需要迁移。
 ## 2026-09-24 — 同一官网域名的重复客户不再要求人工确认身份
 
 - 现象：Trosa 里同一家公司存在两条客户记录（同一官网域名）时，Sela prospect 会被判为“多个客户都匹配到这个来源”，要求人工回答“是否同一主体”——但同一域名就是同一家公司，答案其实系统已经知道。

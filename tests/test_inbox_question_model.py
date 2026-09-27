@@ -337,7 +337,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual([choice['value'] for choice in decision['choices']], ['板材', '展示架'])
         email = next(field for field in question['response_schema']['fields'] if field.get('fact_field') == 'contact_email')
         self.assertEqual(email['key'], 'fact_0')
-        self.assertIn('单独确认入口', email['help'])
+        self.assertIn('会写入该 prospect 的 Trosa 联系人', email['help'])
 
     def test_sela_agent_request_evidence_is_structured(self):
         self._insert_question(
@@ -458,7 +458,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(row['resolution_reason'], 'retired_send_approval')
         self.assertIn('没有发送邮件', row['resolution_note'])
 
-    def test_sela_fact_answer_is_structured_and_queues_resume_without_contact_write(self):
+    def test_sela_fact_answer_commits_email_and_queues_verify_continuation(self):
         customer_id, contact_id = self._insert_customer_with_contact('old@example.com')
         conn = self._conn()
         try:
@@ -498,13 +498,16 @@ class InboxQuestionModelTest(unittest.TestCase):
         body = response.get_json()
         self.assertTrue(body['sela_handoff']['automatic_run'])
         self.assertEqual(body['sela_handoff']['status'], 'queued')
+        self.assertEqual(body['sela_handoff']['action'], 'verify_email')
         self.assertEqual(body['sela_handoff']['session_id'], 'session-123')
         conn = self._conn()
         try:
+            # The answer must change real business data, not only Inbox JSON:
+            # the confirmed email is written to the prospect's Trosa contact.
             self.assertEqual(conn.execute(
-                'SELECT COUNT(*) FROM contacts WHERE lower(trim(email))=?',
-                ('fixed@example.com',),
-            ).fetchone()[0], 0)
+                'SELECT email FROM contacts WHERE id=?', (contact_id,),
+            ).fetchone()['email'], 'fixed@example.com')
+            # Verification itself stays Sela's follow-up step, per existing rules.
             self.assertEqual(conn.execute(
                 'SELECT COUNT(*) FROM email_verifications WHERE lower(trim(email))=?',
                 ('fixed@example.com',),
@@ -516,6 +519,10 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(need['human_response']['facts'][0]['field'], 'contact_email')
         self.assertEqual(need['human_response']['facts'][0]['value'], 'fixed@example.com')
         self.assertEqual(need['session_id'], 'session-123')
+        self.assertEqual(need['continuation']['action'], 'verify_email')
+        self.assertEqual(need['continuation']['status'], 'queued')
+        self.assertEqual(need['continuation']['facts_applied'][0]['field'], 'contact_email')
+        self.assertTrue(need['continuation']['continuation_key'])
         answer_hash = self.module._sela_hash(need['human_response'])
         running = self.client.post(
             f'/api/integrations/sela/needs/{item_id}/resume-status', json={
@@ -583,7 +590,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         conn = self._conn()
         try:
             self.assertEqual(conn.execute('SELECT email FROM contacts WHERE id=?', (contact_id,)).fetchone()['email'],
-                             'old@example.com')
+                             'fixed@example.com')
             self.assertEqual(conn.execute('SELECT status FROM inbox_items WHERE id=?', (item_id,)).fetchone()['status'],
                              'resolved')
         finally:

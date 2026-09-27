@@ -1673,9 +1673,12 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             (source_id,),
         ).fetchone()
         self.assertEqual(profile['reason'], '官网公开资料确认其加工亚克力板材。')
+        # The human answer commits the email to the Trosa contact before the
+        # continuation runs; the draft itself still must not be sent.
         self.assertEqual(self.connection.execute(
-            'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=?', (customer_id,),
-        ).fetchone()[0], 0)
+            'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=? '
+            "AND lower(trim(email))='buyer@auto-resume.example'", (customer_id,),
+        ).fetchone()[0], 1)
         outreach = self.connection.execute(
             '''SELECT message.sent_at, message.contact_method_id, message.subject, message.body,
                       message.legacy_payload->>'recipient_email' AS recipient
@@ -1687,7 +1690,9 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         ).fetchone()
         self.assertIsNotNone(outreach)
         self.assertIsNone(outreach['sent_at'])
-        self.assertIsNone(outreach['contact_method_id'])
+        # The unsent draft is linked to the human-confirmed contact, but it
+        # still has no sent date or delivery event.
+        self.assertIsNotNone(outreach['contact_method_id'])
         self.assertEqual(outreach['recipient'], 'buyer@auto-resume.example')
         self.assertEqual(self.connection.execute(
             '''SELECT count(*) FROM trosa.email_delivery_events event
@@ -1824,8 +1829,8 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(question['subject']['label'], 'Trosa 客户')
         self.assertIn('未互动冷线索', question['why'])
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
-        self.assertEqual(email_field['label'], '联系邮箱（仅供本次 Sela 请求/未发送草稿）')
-        self.assertIn('不会写入或验证 Trosa 联系人', email_field['help'])
+        self.assertEqual(email_field['label'], '联系邮箱（将写入 Trosa 联系人）')
+        self.assertIn('会写入该 prospect 的 Trosa 联系人', email_field['help'])
 
         answered = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@review-plastics.example'},
@@ -1834,8 +1839,9 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(answered.status_code, 200, answered.get_json())
         self.assertEqual(answered.get_json()['sela_handoff']['status'], 'needs_review')
         self.assertFalse(answered.get_json()['sela_handoff']['automatic_run'])
+        self.assertEqual(answered.get_json()['sela_handoff']['action'], 'verify_email')
         self.assertIn('Sela 未自动续跑', answered.get_json()['next_system_step'])
-        self.assertIn('不会写入或验证 Trosa 联系人', answered.get_json()['next_system_step'])
+        self.assertIn('联系人邮箱已写入', answered.get_json()['next_system_step'])
 
         need_view = client.get(
             f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}'
@@ -1860,8 +1866,9 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(handoff['status'], 'needs_review')
         self.assertFalse(handoff['automatic_run'])
         self.assertEqual(self.connection.execute(
-            'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=?', (customer_id,),
-        ).fetchone()[0], 0)
+            "SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=? AND lower(trim(email))=?",
+            (customer_id, 'buyer@review-plastics.example'),
+        ).fetchone()[0], 1)
         self.assertEqual(self.connection.execute(
             "SELECT count(*) FROM trosa.email_verifications WHERE lower(trim(email))=?",
             ('buyer@review-plastics.example',),
