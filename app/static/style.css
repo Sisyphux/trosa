@@ -560,7 +560,16 @@ select.form-control {
 .log-item:last-child { border-bottom: none; }
 .log-time { font-size: 0.72rem; color: var(--muted-foreground); white-space: nowrap; min-width: 130px; }
 .log-action { font-weight: 600; color: var(--brand-500); min-width: 80px; }
-.log-detail { color: var(--secondary-foreground); flex: 1; }
+/* min-width:0 lets the detail shrink instead of forcing the row wider than the
+   viewport (a long unbroken value such as an agent hash would otherwise set the
+   row's minimum width); overflow-wrap keeps such values inside the row. */
+.log-detail { color: var(--secondary-foreground); flex: 1; min-width: 0; overflow-wrap: break-word; overflow-wrap: anywhere; }
+@media (max-width: 620px) {
+  /* Narrow screens: give the detail its own line instead of squeezing it into a
+     few characters next to the timestamp and badge. */
+  .log-item { flex-wrap: wrap; gap: 6px 12px; }
+  .log-detail { flex: 1 1 100%; }
+}
 
 /* ========== Empty State ========== */
 .empty-state { text-align: center; padding: 60px 20px; color: var(--muted-foreground); }

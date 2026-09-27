@@ -7303,13 +7303,15 @@ html.motion-lite .card {
   #page-customers .customer-row-card > [data-customer-column] {
     grid-column: auto !important;
     display: inline-flex !important;
+    flex-wrap: wrap !important;
     align-items: baseline !important;
     gap: 6px !important;
     min-width: 0 !important;
     padding: 0 !important;
     font-size: 12px !important;
     line-height: 1.45 !important;
-    white-space: nowrap !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
   }
 
   #page-customers .customer-row-card > [data-customer-column]::before {
