@@ -995,7 +995,7 @@ function openTodayPrimaryAction() {
 }
 
 function updateSidebarIdentity() {
-  var name = currentUser && (currentUser.name || currentUser.label || currentUser.id) || 'Trade OS';
+  var name = currentUser && (currentUser.name || currentUser.label || currentUser.id) || 'Trosa';
   var avatar = document.getElementById('sidebarAvatar');
   var label = document.getElementById('sidebarUserName');
   var role = document.getElementById('sidebarUserRole');
@@ -8359,7 +8359,7 @@ function showIcalHelp() {
     '<li>粘贴上方链接，轻点 <strong>下一步</strong></li>' +
     '</ol>' +
     '<p style="margin-top:14px;font-size:0.82rem;color:var(--danger);">如果以前订阅过不带个人令牌的旧链接，请先在日历账户中取消旧订阅，再添加当前个人链接，避免手机继续显示旧缓存。</p>' +
-    '<p style="margin-top:14px;font-size:0.82rem;color:var(--fg-muted);">这是当前账号的私有只读链接，请勿转发。完成、新建或改期待办后，Trade OS 会立即更新订阅源；iPhone 会在下一次获取时同步，也可以在日历中下拉刷新。</p>' +
+    '<p style="margin-top:14px;font-size:0.82rem;color:var(--fg-muted);">这是当前账号的私有只读链接，请勿转发。完成、新建或改期待办后，Trosa 会立即更新订阅源；iPhone 会在下一次获取时同步，也可以在日历中下拉刷新。</p>' +
     '<p style="font-size:0.82rem;color:var(--fg-muted);">如验证失败：先在 iPhone Safari 浏览器中打开链接测试能否访问，如无法访问请检查防火墙设置（需放行 TCP 8080 端口）。</p>' +
     '</div>';
   
@@ -9677,7 +9677,8 @@ function entryOpen(field, commit) {
   void launch.offsetWidth;
   launch.style.transition = '';
   launch.classList.add('is-active');
-  entryFieldEls().forEach(function(item) { item.classList.add('is-hidden'); });
+  // The fields are deliberately left visible: the launch block (z-index 2) grows
+  // on top of them, so the paper background never flashes through at the edges.
   window.requestAnimationFrame(function() {
     window.requestAnimationFrame(function() { launch.classList.add('is-grown'); });
   });

@@ -171,7 +171,10 @@ await unlinkedCard.getByRole('button', {name:'继续整理公开来源', exact:t
 const unlinkedCardId = await unlinkedCard.getAttribute('id');
 await unlinkedCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + unlinkedCardId).waitFor({state:'detached', timeout:15000});
-await page.getByText('这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。', {exact:true}).waitFor({timeout:15000});
+// Scope to the Sela receipt panel: the same sentence is also rendered as a
+// transient toast in #toastContainer, so an unscoped exact-text wait races
+// with the toast when both are mounted at once.
+await page.locator('#inboxSelaRuns').getByText('这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。', {exact:true}).waitFor({timeout:15000});
 const unlinkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Unlinked Inbox Prospect'});
 await unlinkedResume.waitFor({timeout:15000});
 if (await unlinkedResume.getAttribute('data-status') !== 'needs_review') throw new Error('unlinked Sela answer did not stay in review: ' + await unlinkedResume.innerText());
