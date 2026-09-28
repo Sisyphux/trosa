@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
 <link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-daylight-20260927">
 <link rel="stylesheet" href="/visual-v4.css?v={{VERSION}}-daylight-perpage-20260928">
+<link rel="stylesheet" href="/visual-v5.css?v={{VERSION}}-daylight-room-20260928">
 </head>
 <body id="trosa">
 
@@ -75,77 +76,67 @@
 <div class="connection-status" id="connectionStatus" role="status" aria-live="polite" hidden><span class="connection-status-spinner" aria-hidden="true"></span><span id="connectionStatusText">正在连接…</span></div>
 <div class="action-status" id="actionStatus" role="status" aria-live="polite" hidden><span class="action-status-spinner" aria-hidden="true"></span><span id="actionStatusText">正在保存…</span><button type="button" class="action-status-retry" id="actionStatusRetry" hidden>重试</button></div>
 
-<!-- Sidebar Toggle (Mobile) -->
-<button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="打开导航" title="打开导航" aria-expanded="false" aria-controls="sidebar">
-  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-</button>
-<div class="sidebar-scrim" id="sidebarScrim" hidden aria-hidden="true"></div>
+<!-- Daylight room shell. There is no resident navigation: a thin top bar, the room
+     itself, and a thin status bar. Pages are reached through the summoned index
+     layer (brand click, Ctrl/Cmd-K or "/"), which also holds the global search. -->
+<div class="app-layout app-room" id="appLayout">
+  <header class="room-top" id="roomTop">
+    <button type="button" class="room-brand" id="roomBrand" onclick="openRoomIndex()" aria-haspopup="dialog" aria-expanded="false" aria-controls="roomIndex" aria-label="打开导航与搜索" title="导航与搜索">Trosa</button>
+    <span class="room-page" id="roomPageName" aria-live="polite">今天</span>
+    <span class="room-top-spacer"></span>
+    <button type="button" class="room-key" onclick="openRoomIndex()" aria-label="搜索与导航" title="搜索与导航"><span class="room-key-label">搜索与导航</span><kbd id="roomKeyHint">Ctrl K</kbd></button>
+    <span class="room-who" id="sidebarIdentity"><i aria-hidden="true"></i><span id="sidebarUserName">Trosa</span></span>
+  </header>
 
-<div class="app-layout" id="appLayout">
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-brand">
-      <h1>Trosa</h1>
-      <div class="subtitle">客户关系工作台</div>
-    </div>
-    <nav class="sidebar-nav">
-      <div class="nav-personal">
-        <div class="nav-section">工作空间</div>
-        <div class="nav-item active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')" role="button" tabindex="0" aria-label="今天" title="今天">
-          <span class="nav-icon"><span class="ui-icon ui-icon-clock" aria-hidden="true"></span></span><span>今天</span>
-        </div>
-        <div class="nav-item" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
-          <span class="nav-icon"><span class="ui-icon ui-icon-mail" aria-hidden="true"></span></span><span>Inbox</span><span class="nav-count" id="inboxNavCount"></span>
-        </div>
-        <div class="nav-item" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
-          <span class="nav-icon"><span class="ui-icon ui-icon-users" aria-hidden="true"></span></span><span>客户</span>
-        </div>
+  <!-- Index layer: summoned, full screen, closed with Esc. -->
+  <div class="room-index" id="roomIndex" role="dialog" aria-modal="true" aria-labelledby="roomIndexTitle" hidden>
+    <div class="room-index-inner">
+      <div class="room-index-head">
+        <span class="micro" id="roomIndexTitle">Trosa · 导航与搜索</span>
+        <button type="button" class="room-index-close" onclick="closeRoomIndex()" aria-label="关闭导航"><kbd>Esc</kbd></button>
       </div>
-      <div class="nav-overview" style="display:none;">
-        <div class="nav-section">总览</div>
-        <div class="nav-item active" data-page="overview" onclick="switchPage('overview')" role="button" tabindex="0" aria-label="本周工作" title="本周工作">
-          <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
-        </div>
-      </div>
-    </nav>
-    <details class="sidebar-tools">
-      <summary aria-label="更多工具" title="更多工具"><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
-      <div class="sidebar-tools-menu">
-        <button type="button" data-module="weekly_overview" onclick="switchPage('overview')" aria-label="打开本周工作" title="打开本周工作"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">本周工作</span></button>
-        <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">未建立真实沟通</span></button>
-        <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
-        <button type="button" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">沟通记录</span></button>
-        <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">操作日志</span></button>
-      </div>
-    </details>
-    <div class="account-section">
-      <div class="nav-item account-item" onclick="switchPage('settings')" role="button" tabindex="0" aria-label="设置" title="设置">
-        <span class="nav-icon"><span class="ui-icon ui-icon-settings" aria-hidden="true"></span></span><span>设置</span>
-      </div>
-      <div class="nav-item account-item" onclick="showLogin()" role="button" tabindex="0" aria-label="切换账号" title="切换账号">
-        <span class="nav-icon"><span class="ui-icon ui-icon-sign-out" aria-hidden="true"></span></span><span>切换账号</span>
-      </div>
-      <div class="sidebar-identity" id="sidebarIdentity">
-        <span class="sidebar-avatar" id="sidebarAvatar">T</span>
-        <span><strong id="sidebarUserName">Trosa</strong><small id="sidebarUserRole">个人工作区</small></span>
-      </div>
-    </div>
-  </aside>
-
-  <!-- Main Content -->
-  <main class="main-content">
-    <div class="global-page-tools" aria-label="全局搜索与当前页面操作">
-      <form class="global-page-search liquid-option" onsubmit="submitGlobalPageSearch(event)">
-        <button type="button" onclick="document.getElementById('globalPageSearch').focus()" aria-label="打开全局搜索" title="搜索">
-          <span class="ui-icon ui-icon-search" aria-hidden="true"></span>
-        </button>
+      <form class="global-page-search" role="search" onsubmit="submitGlobalPageSearch(event)">
         <input id="globalPageSearch" type="search" autocomplete="off" placeholder="搜索公司、客户资料、沟通或待办" aria-label="搜索公司、客户资料、沟通或待办" aria-autocomplete="list" aria-controls="globalSearchPreview" aria-expanded="false">
         <div class="global-search-preview" id="globalSearchPreview" role="listbox" aria-label="搜索结果预览"></div>
       </form>
+      <nav class="room-index-nav" aria-label="页面">
+        <div class="nav-personal lit-group lit-group--focus">
+          <div class="nav-item lit-row active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')" role="button" tabindex="0" aria-label="今天" title="今天" aria-current="page">
+            <span class="nav-index tnum">01</span><span class="nav-name">今天</span>
+          </div>
+          <div class="nav-item lit-row" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
+            <span class="nav-index tnum">02</span><span class="nav-name">Inbox</span><span class="nav-count" id="inboxNavCount"></span>
+          </div>
+          <div class="nav-item lit-row" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
+            <span class="nav-index tnum">03</span><span class="nav-name">客户</span>
+          </div>
+        </div>
+        <div class="nav-overview" style="display:none;">
+          <div class="nav-item active" data-page="overview" onclick="switchPage('overview')" role="button" tabindex="0" aria-label="本周工作" title="本周工作">
+            <span class="nav-name">本周工作</span>
+          </div>
+        </div>
+        <div class="sidebar-tools-menu room-index-more">
+          <button type="button" data-module="weekly_overview" onclick="switchPage('overview')" aria-label="打开本周工作" title="打开本周工作"><span class="sidebar-tool-label">本周工作</span></button>
+          <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="sidebar-tool-label">完整日历</span></button>
+          <button type="button" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="sidebar-tool-label">沟通记录</span></button>
+          <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="sidebar-tool-label">未建立真实沟通</span></button>
+          <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="sidebar-tool-label">操作日志</span></button>
+          <button type="button" onclick="switchPage('settings')" aria-label="设置" title="设置"><span class="sidebar-tool-label">设置</span></button>
+          <button type="button" onclick="showLogin()" aria-label="切换账号" title="切换账号"><span class="sidebar-tool-label">切换账号</span></button>
+        </div>
+      </nav>
     </div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content" id="roomMain">
 
     <!-- ==================== DASHBOARD ==================== -->
     <div class="page-section active" id="page-dashboard">
+      <!-- The room: one customer, one next step, the recent facts beside it. The
+           queue of other due customers is a drawer, not a list on the page. -->
+      <div class="today-room" id="todayRoom">
       <div class="page-header today-page-header">
         <div class="today-masthead">
           <div class="today-eyebrow" id="dashDate"></div>
@@ -168,10 +159,10 @@
           </button>
         </div>
       </div>
-      <div class="page-body today-page-body">
         <div class="today-fullscreen-shell is-empty">
+        <button type="button" class="today-queue-toggle" id="todayQueueToggle" onclick="toggleTodayQueue()" aria-expanded="false" aria-controls="todayQueue"><span id="todayQueueLabel">今天的下一步</span> <span class="today-queue-caret" aria-hidden="true">▾</span></button>
         <div class="today-workspace is-empty">
-          <section class="today-task-section">
+          <section class="today-task-section" id="todayQueue">
             <div class="today-section-header"><div><h3>今天的下一步</h3><div class="section-caption">按到期时间排列 · 拖动调整顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
             <div class="today-task-list" id="todayReminders"><div class="empty-state" role="status"><p>正在加载今日跟进…</p></div></div>
             <div class="today-dashboard-error" id="todayDashboardError" hidden role="alert"></div>
@@ -184,11 +175,12 @@
           </section>
         </div>
         <div class="today-context-stack">
-          <aside class="today-focus-card" id="todayFocus"><div class="empty-state"><p>今天没有到期的下一步</p></div></aside>
+          <aside class="today-room-focus lit-anchor" id="todayFocus"><div class="empty-state"><p>今天没有到期的下一步</p></div></aside>
           <section class="today-wide-detail" id="todayWideDetail" aria-label="客户档案工作区"></section>
         </div>
         </div>
-
+      </div>
+      <div class="page-body today-page-body">
         <section class="today-future-section">
           <div class="today-section-header">
             <div><h3>接下来</h3><div class="section-caption">未来 14 天</div></div>
@@ -468,7 +460,7 @@
         <div class="page-heading">
           <div class="page-eyebrow">团队工作台</div>
           <h2>本周沟通</h2>
-          <p class="page-lede">三个人各自确认过的沟通事实，按客户排开；颜色只表达内容层级，不评价个人。</p>
+          <p class="page-lede">团队成员各自确认过的沟通事实，按客户排开；颜色只表达内容层级，不评价个人。</p>
         </div>
         <div class="ov-header-meta">
           <div class="ov-header-date" id="overviewDateLabel"></div>
@@ -607,6 +599,12 @@
     </div>
 
   </main>
+
+  <footer class="room-bot" id="roomBot">
+    <span class="micro" id="roomBotLabel">今天</span>
+    <span class="room-bot-value" id="roomBotValue"></span>
+    <span class="room-bot-date tnum" id="roomBotDate"></span>
+  </footer>
 </div>
 
 <!-- ==================== MODALS ==================== -->

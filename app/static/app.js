@@ -259,13 +259,17 @@ function initMotionSystem() {
 }
 
 // ========== Daylight room ==========
-// The picked design's signature: a soft light that follows the pointer and marks
-// where attention currently is. It is decoration only — the layout never depends
-// on it, it never runs on touch or in reduced/performance modes, and it writes at
-// most one transform per frame while the pointer is actually moving.
+// The light is attention. It rests on the one thing the page wants you to do
+// (`.lit-anchor`, e.g. the next step), follows the pointer, and when a record row
+// (`.lit-row`) is hovered or keyboard-focused it moves onto that row and the row
+// is marked `.is-lit` — inside a `.lit-group--dim` every other row stays dim.
+//
+// The hierarchy never depends on the light itself: `.is-lit` is plain class
+// state, so touch, keyboard, reduced-motion and performance modes still see the
+// same lit row. Only the moving pool is skipped there. The pool writes at most
+// one pair of custom properties per frame while it is travelling.
 function initDaylightRoom() {
   var pool = document.querySelector('.daylight-room__pool');
-  if (!pool) return;
   var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
   var REST_X = 0.68;
   var REST_Y = 0.42;
@@ -274,20 +278,36 @@ function initDaylightRoom() {
   var targetX = currentX;
   var targetY = currentY;
   var frameId = null;
-  var visible = false;
+  var shown = false;
+  var litRow = null;
+  var lastPointerAt = 0;
 
   function roomEnabled() {
-    return finePointer.matches && !isMotionLite() && !_motionReduced &&
+    return !!pool && finePointer.matches && !isMotionLite() && !_motionReduced &&
       !document.documentElement.classList.contains('performance-probe') &&
       !document.hidden;
   }
 
+  // Where attention rests when nothing is hovered: the page's own focal element.
+  function restPoint() {
+    var anchor = document.querySelector('.page-section.active .lit-anchor');
+    if (anchor) {
+      var box = anchor.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < window.innerHeight) {
+        return { x: box.left + box.width * 0.5, y: box.top + box.height * 0.5 };
+      }
+    }
+    return { x: window.innerWidth * REST_X, y: window.innerHeight * REST_Y };
+  }
+
+  function hidePool() {
+    shown = false;
+    if (pool) pool.style.opacity = '0';
+  }
+
   function step() {
     frameId = null;
-    if (!roomEnabled()) {
-      if (visible) { visible = false; pool.style.opacity = '0'; }
-      return;
-    }
+    if (!roomEnabled()) { if (shown) hidePool(); return; }
     currentX += (targetX - currentX) * 0.055;
     currentY += (targetY - currentY) * 0.055;
     pool.style.setProperty('--pool-x', currentX.toFixed(1) + 'px');
@@ -297,46 +317,102 @@ function initDaylightRoom() {
     }
   }
 
-  function schedule() {
+  function moveTo(x, y) {
+    targetX = x;
+    targetY = y;
+    if (!roomEnabled()) return;
+    if (!shown) {
+      // First appearance: the light is simply already there, it does not travel.
+      currentX = x;
+      currentY = y;
+      pool.style.setProperty('--pool-x', currentX.toFixed(1) + 'px');
+      pool.style.setProperty('--pool-y', currentY.toFixed(1) + 'px');
+      shown = true;
+      pool.style.opacity = '1';
+    }
     if (frameId === null) frameId = requestAnimationFrame(step);
   }
 
+  function moveToRest() {
+    var rest = restPoint();
+    moveTo(rest.x, rest.y);
+  }
+
+  function rowOf(node) {
+    return node && node.closest ? node.closest('.lit-row') : null;
+  }
+
+  function clearLit(row) {
+    if (!litRow || (row && row !== litRow)) return false;
+    litRow.classList.remove('is-lit');
+    var group = litRow.closest('.lit-group');
+    if (group) group.classList.remove('has-lit');
+    litRow = null;
+    return true;
+  }
+
+  function setLit(row) {
+    if (litRow === row) return;
+    clearLit();
+    litRow = row;
+    row.classList.add('is-lit');
+    var group = row.closest('.lit-group');
+    if (group) group.classList.add('has-lit');
+    var box = row.getBoundingClientRect();
+    moveTo(box.left + box.width * 0.3, box.top + box.height * 0.5);
+  }
+
+  function isMousePointer(event) {
+    return !event.pointerType || event.pointerType === 'mouse' || event.pointerType === 'pen';
+  }
+
   document.addEventListener('pointermove', function(event) {
-    if (!finePointer.matches) return;
-    if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
-    // The first movement places the light where the pointer already is: the pool
-    // should reveal the current attention, not travel across the screen to it.
-    if (!visible) {
-      currentX = targetX = event.clientX;
-      currentY = targetY = event.clientY;
-      visible = true;
-      pool.style.setProperty('--pool-x', currentX.toFixed(1) + 'px');
-      pool.style.setProperty('--pool-y', currentY.toFixed(1) + 'px');
-    } else {
-      targetX = event.clientX;
-      targetY = event.clientY;
-    }
-    if (roomEnabled()) {
-      pool.style.opacity = '1';
-      schedule();
-    }
+    if (!finePointer.matches || !isMousePointer(event)) return;
+    lastPointerAt = Date.now();
+    if (litRow) return;
+    moveTo(event.clientX, event.clientY);
   }, { passive: true });
 
-  document.addEventListener('mouseleave', function() {
-    visible = false;
-    pool.style.opacity = '0';
+  document.addEventListener('pointerover', function(event) {
+    if (!isMousePointer(event)) return;
+    var row = rowOf(event.target);
+    if (row) setLit(row);
   });
-  window.addEventListener('blur', function() {
-    visible = false;
-    pool.style.opacity = '0';
+  document.addEventListener('pointerout', function(event) {
+    if (!isMousePointer(event)) return;
+    var row = rowOf(event.target);
+    if (row && !row.contains(event.relatedTarget) && clearLit(row)) moveToRest();
   });
+  // Keyboard focus lights a row exactly as hover does.
+  document.addEventListener('focusin', function(event) {
+    var row = rowOf(event.target);
+    if (row) setLit(row);
+  });
+  document.addEventListener('focusout', function(event) {
+    var row = rowOf(event.target);
+    if (row && !row.contains(event.relatedTarget) && clearLit(row)) moveToRest();
+  });
+
+  document.addEventListener('mouseleave', function() { if (!litRow) moveToRest(); });
+  window.addEventListener('blur', hidePool);
   document.addEventListener('visibilitychange', function() {
     if (document.hidden) {
-      visible = false;
-      pool.style.opacity = '0';
+      hidePool();
       if (frameId !== null) { cancelAnimationFrame(frameId); frameId = null; }
+    } else if (!litRow) {
+      moveToRest();
     }
   });
+  window.addEventListener('resize', function() { if (!litRow && Date.now() - lastPointerAt > 1500) moveToRest(); });
+
+  // Pages call this after they render or become active, so the light settles on
+  // the new focal element unless the pointer is actively steering it.
+  window.refreshDaylightRest = function() {
+    if (litRow || Date.now() - lastPointerAt < 1500) return;
+    moveToRest();
+  };
+  window.clearDaylightLit = function() { if (clearLit()) moveToRest(); };
+  moveToRest();
 }
 
 // Sample a representative, off-screen list for less than one second.  Hardware
@@ -990,11 +1066,20 @@ function switchPage(page) {
     document.querySelectorAll('.page-section').forEach(function(s) { s.classList.remove('active'); });
     var nextSection = document.getElementById('page-' + nextPage);
     if (nextSection) nextSection.classList.add('active');
-    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+    document.querySelectorAll('.nav-item').forEach(function(n) {
+      n.classList.remove('active');
+      n.removeAttribute('aria-current');
+    });
     var activeNav = document.querySelector('.nav-item[data-page="' + nextPage + '"]');
-    if (activeNav) activeNav.classList.add('active');
-    closeSidebar();
+    if (activeNav) {
+      activeNav.classList.add('active');
+      activeNav.setAttribute('aria-current', 'page');
+    }
+    closeRoomIndex({ skipFocus: true });
+    updateRoomChrome(nextPage);
     window.scrollTo({ top: 0, behavior: 'auto' });
+    if (window.clearDaylightLit) window.clearDaylightLit();
+    if (window.refreshDaylightRest) window.refreshDaylightRest();
   };
   if (nextPage === currentPage) updatePageState();
   else runViewUpdate(updatePageState, 'page');
@@ -1016,44 +1101,125 @@ function switchPage(page) {
   }, 80);
 }
 
-function setSidebarOpen(isOpen) {
-  var sidebar = document.getElementById('sidebar');
-  var toggle = document.getElementById('sidebarToggle');
-  var scrim = document.getElementById('sidebarScrim');
-  var main = document.querySelector('.main-content');
-  if (!sidebar) return;
-  sidebar.classList.toggle('open', isOpen);
-  if (scrim) {
-    scrim.hidden = !isOpen;
-    scrim.classList.toggle('show', isOpen);
-  }
-  // A drawer is a navigation surface: while it is open the page behind it must
-  // not receive clicks or keyboard focus, so it can never be edited by mistake.
-  if (main) {
-    if (isOpen) main.setAttribute('inert', '');
-    else main.removeAttribute('inert');
-  }
-  if (toggle) {
-    toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    var label = isOpen ? '关闭导航' : '打开导航';
-    toggle.setAttribute('aria-label', label);
-    toggle.setAttribute('title', label);
+// ========== Room chrome: thin top bar, status bar, summoned index ==========
+// There is no resident navigation. Pages, the global search and account actions
+// live in one full-screen index layer that the user summons and dismisses.
+var ROOM_PAGE_NAMES = {
+  dashboard: '今天', inbox: 'Inbox', customers: '客户', overview: '本周工作',
+  calendar: '跟进日历', history: '沟通记录', logs: '操作日志', settings: '设置'
+};
+var _roomIndexReturnFocus = null;
+
+function roomDateText() {
+  var weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  return '今天 ' + localDateString() + ' · ' + weekdays[new Date().getDay()];
+}
+
+// The status bar carries one quiet line: what the current page is waiting on.
+function setRoomStatus(label, value) {
+  var labelEl = document.getElementById('roomBotLabel');
+  var valueEl = document.getElementById('roomBotValue');
+  var dateEl = document.getElementById('roomBotDate');
+  if (labelEl) labelEl.textContent = label || '';
+  if (valueEl) valueEl.textContent = value || '';
+  if (dateEl) dateEl.textContent = roomDateText();
+}
+
+function updateRoomChrome(page) {
+  var nameEl = document.getElementById('roomPageName');
+  if (nameEl) nameEl.textContent = ROOM_PAGE_NAMES[page] || '';
+  document.documentElement.dataset.roomPage = page || '';
+  if (page !== 'dashboard') setRoomStatus(ROOM_PAGE_NAMES[page] || '', '');
+  else updateTodayRoomStatus();
+}
+
+function isRoomIndexOpen() {
+  var layer = document.getElementById('roomIndex');
+  return !!layer && !layer.hidden;
+}
+
+function setRoomIndexOpen(isOpen, options) {
+  var layer = document.getElementById('roomIndex');
+  if (!layer || !!isOpen === !layer.hidden) return;
+  var brand = document.getElementById('roomBrand');
+  layer.hidden = !isOpen;
+  layer.classList.toggle('is-open', !!isOpen);
+  document.documentElement.classList.toggle('room-index-open', !!isOpen);
+  // While the index is up the room behind it must not take clicks or focus.
+  ['roomMain', 'roomTop', 'roomBot'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (isOpen) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  });
+  if (brand) brand.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  if (isOpen) {
+    _roomIndexReturnFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : brand;
+    var input = document.getElementById('globalPageSearch');
+    if (input) { input.focus(); input.select(); }
+  } else {
+    hideGlobalSearchPreview();
+    var target = _roomIndexReturnFocus;
+    _roomIndexReturnFocus = null;
+    if (!(options && options.skipFocus) && target && target.isConnected && target.focus) target.focus({ preventScroll: true });
   }
 }
 
-function closeSidebar() {
-  setSidebarOpen(false);
+function openRoomIndex() { setRoomIndexOpen(true); }
+function closeRoomIndex(options) { setRoomIndexOpen(false, options); }
+function toggleRoomIndex() { setRoomIndexOpen(!isRoomIndexOpen()); }
+// Older call sites and tests still use the drawer names.
+function closeSidebar() { closeRoomIndex(); }
+function toggleSidebar() { toggleRoomIndex(); }
+
+function isTypingTarget(node) {
+  if (!node || !node.tagName) return false;
+  var tag = node.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || !!node.isContentEditable;
 }
 
-function toggleSidebar() {
-  var sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-  setSidebarOpen(!sidebar.classList.contains('open'));
-}
+document.addEventListener('keydown', function(e) {
+  var key = e.key;
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && key && key.toLowerCase() === 'k') {
+    e.preventDefault();
+    toggleRoomIndex();
+    return;
+  }
+  if (key === '/' && !e.metaKey && !e.ctrlKey && !e.altKey && !isTypingTarget(e.target) &&
+      !isRoomIndexOpen() && !document.querySelector('.modal-overlay.show')) {
+    e.preventDefault();
+    openRoomIndex();
+    return;
+  }
+  if (key === 'Escape' && isRoomIndexOpen()) {
+    // The index sits above every modal, so it is dismissed first.
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    closeRoomIndex();
+    return;
+  }
+  // Keep focus inside the index while it is open.
+  if (key === 'Tab' && isRoomIndexOpen()) {
+    var layer = document.getElementById('roomIndex');
+    var focusable = Array.prototype.slice.call(layer.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])'))
+      .filter(function(el) { return !el.disabled && el.offsetParent !== null; });
+    if (!focusable.length) return;
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
 
-(function bindSidebarScrim() {
-  var scrim = document.getElementById('sidebarScrim');
-  if (scrim) scrim.addEventListener('click', closeSidebar);
+(function bindRoomIndexChrome() {
+  var hint = document.getElementById('roomKeyHint');
+  if (hint && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '')) hint.textContent = '⌘ K';
+  var layer = document.getElementById('roomIndex');
+  // Clicking the empty paper around the index closes it, like the room's own dim.
+  if (layer) layer.addEventListener('click', function(event) {
+    if (event.target === layer || event.target.classList.contains('room-index-inner')) closeRoomIndex();
+  });
+  setRoomStatus('今天', '');
 })();
 
 document.addEventListener('keydown', function(e) {
@@ -1108,8 +1274,8 @@ function initSettingsSectionNav() {
 }
 
 function openGlobalSearch() {
-  var input = document.getElementById('globalPageSearch');
-  if (input) input.focus();
+  // The search box lives in the summoned index layer; opening it focuses the box.
+  openRoomIndex();
 }
 
 function openTodayPrimaryAction() {
@@ -1122,12 +1288,8 @@ function openTodayPrimaryAction() {
 
 function updateSidebarIdentity() {
   var name = currentUser && (currentUser.name || currentUser.label || currentUser.id) || 'Trosa';
-  var avatar = document.getElementById('sidebarAvatar');
   var label = document.getElementById('sidebarUserName');
-  var role = document.getElementById('sidebarUserRole');
-  if (avatar) avatar.textContent = String(name).substring(0, 2).toUpperCase();
   if (label) label.textContent = name;
-  if (role) role.textContent = currentUser ? '个人工作区' : '团队工作区';
 }
 
 // ========== API Helper ==========
@@ -3236,6 +3398,7 @@ function arrangeOverdueReminders(button) {
 
 async function loadDashboard() {
   _pageDataLoadedAt = Date.now();
+  _todayFactsCache = {};
   var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
@@ -3309,6 +3472,7 @@ async function loadDashboard() {
 
 function renderTodayError() {
   setTodayWorkspaceEmpty(true);
+  updateTodayQueueLabel([]);
   var remEl = document.getElementById('todayReminders');
   if (remEl) remEl.innerHTML = '';
   var focus = document.getElementById('todayFocus');
@@ -3332,9 +3496,13 @@ function renderTodayTasks(reminders) {
   var remEl = document.getElementById('todayReminders');
   var isEmpty = !reminders || reminders.length === 0;
   setTodayWorkspaceEmpty(isEmpty);
+  updateTodayQueueLabel(reminders);
   if (isEmpty) {
+    toggleTodayQueue(false);
     remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong></div>';
     document.getElementById('todayFocus').innerHTML = '<div class="empty-state"><p>今天没有待处理事项</p></div>';
+    delete document.getElementById('todayFocus').dataset.reminderId;
+    updateTodayRoomStatus();
     var wideEmpty = document.getElementById('todayWideDetail');
     if (wideEmpty) {
       wideEmpty.innerHTML = '';
@@ -3736,6 +3904,7 @@ function selectTodayReminder(reminderId) {
     row.classList.toggle('selected', Number(row.dataset.reminderId) === Number(reminderId));
   });
   renderTodayFocus(selected);
+  toggleTodayQueue(false);
 }
 
 function renderTodayFocus(r) {
@@ -3749,17 +3918,147 @@ function renderTodayFocus(r) {
   var meta = [r.country, r.field].filter(Boolean).join(' · ');
   var website = r.website || '';
   if (website && !/^https?:\/\//i.test(website)) website = 'https://' + website;
-  el.innerHTML = '<div class="today-focus-label">下一步</div>' +
-    '<h3>' + escapeHtml(name) + '</h3>' +
-    (meta ? '<div class="today-focus-meta">' + escapeHtml(meta) + '</div>' : '') +
-    '<div class="today-focus-task">' + escapeHtml(r.task_title || r.title || r.content || '联系客户') + '</div>' +
-    '<div class="today-focus-context"><div><span>为什么今天</span><strong>' + escapeHtml(r.why_today || '今天到期') + '</strong></div>' +
-    '<div><span>最近动态</span><strong>' + renderRichText(r.last_activity || '暂无沟通记录') + '</strong></div></div>' +
-    (contact ? '<div class="today-focus-contact"><span class="contact-avatar">' + escapeHtml(contact.substring(0, 1).toUpperCase()) + '</span><span>' + escapeHtml(contact) + '</span></div>' : '') +
-    '<div class="today-focus-actions"><button class="btn btn-primary today-focus-primary" onclick="openTodayCommunicationConfirm()">完成并记录</button>' +
-    '<div class="today-focus-links"><button class="text-action" onclick="openEditModal(' + r.customer_id + ')">查看客户</button>' +
-    (website ? '<a class="text-action" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') + '</div></div>';
+  // The room holds one sentence and one solid button: what happens next, and the
+  // way to record that it happened. Everything else is a quiet secondary action.
+  el.innerHTML = '<span class="room-k micro">下一步</span>' +
+    '<h2 class="room-next">' + escapeHtml(r.task_title || r.title || r.content || '联系客户') + '</h2>' +
+    '<p class="room-when tnum">' + escapeHtml(todayWhenText(r.remind_date)) + '</p>' +
+    '<div class="room-acts">' +
+      '<button type="button" class="room-act primary" onclick="openTodayCommunicationConfirm()">记录沟通</button>' +
+      '<button type="button" class="room-act" onclick="openEditModal(' + Number(r.customer_id) + ')">查看客户</button>' +
+      (website ? '<a class="room-act" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') +
+    '</div>' +
+    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
   renderTodayWideDetail(r, name, meta, website);
+  updateTodayRoomStatus();
+  if (window.refreshDaylightRest) window.refreshDaylightRest();
+}
+
+// "9 月 29 日 · 2 天后" — the date and how far away it is, on one line.
+function todayWhenText(dateValue) {
+  var date = String(dateValue || '').substring(0, 10);
+  if (!date) return '';
+  var diff = Math.round((new Date(date + 'T00:00:00') - new Date(localDateString() + 'T00:00:00')) / 86400000);
+  var base = formatChineseDate(date);
+  if (isNaN(diff)) return base;
+  if (diff < 0) return base + ' · 已逾期 ' + (-diff) + ' 天';
+  if (diff === 0) return base + ' · 今天';
+  return base + ' · ' + diff + ' 天后';
+}
+
+function updateTodayRoomStatus() {
+  if (currentPage !== 'dashboard') return;
+  var focus = document.getElementById('todayFocus');
+  var reminderId = focus && focus.dataset.reminderId;
+  var reminder = reminderId ? (dashboardReminders || []).find(function(item) { return Number(item.id) === Number(reminderId); }) : null;
+  if (reminder) setRoomStatus('当前等待', reminder.why_today || '今天到期');
+  else setRoomStatus('今天', '');
+}
+
+function updateTodayQueueLabel(reminders) {
+  var label = document.getElementById('todayQueueLabel');
+  var toggle = document.getElementById('todayQueueToggle');
+  var count = (reminders || []).length;
+  var today = localDateString();
+  var overdue = (reminders || []).filter(function(item) { return String(item.remind_date || '').substring(0, 10) < today; }).length;
+  if (label) label.textContent = count ? ('今天 ' + count + ' 项' + (overdue ? ' · 逾期 ' + overdue : '')) : '今天没有到期事项';
+  if (toggle) toggle.disabled = !count;
+}
+
+function toggleTodayQueue(force) {
+  var section = document.getElementById('todayQueue');
+  var toggle = document.getElementById('todayQueueToggle');
+  if (!section || !toggle) return;
+  var open = typeof force === 'boolean' ? force : !section.classList.contains('is-open');
+  section.classList.toggle('is-open', open);
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.classList.toggle('is-open', open);
+}
+
+// [ and ] step through today's due customers without opening the queue.
+function stepTodayReminder(direction) {
+  var ids = todayTaskIdsFromDom();
+  if (ids.length < 2) return;
+  var focus = document.getElementById('todayFocus');
+  var current = ids.indexOf(Number(focus && focus.dataset.reminderId));
+  var next = ids[(current + direction + ids.length) % ids.length];
+  selectTodayReminder(next);
+}
+
+document.addEventListener('keydown', function(e) {
+  if (currentPage !== 'dashboard' || e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
+  if (isRoomIndexOpen() || document.querySelector('.modal-overlay.show')) return;
+  if (e.key === '[') { e.preventDefault(); stepTodayReminder(-1); }
+  else if (e.key === ']') { e.preventDefault(); stepTodayReminder(1); }
+  else if (e.key === 'Escape') toggleTodayQueue(false);
+});
+
+var _todayFactsToken = 0;
+var _todayFactsCache = {};
+var _TODAY_FACTS_TTL = 60000;
+var _TODAY_FACTS_LIMIT = 6;
+
+function richPlainText(value, limit) {
+  var holder = document.createElement('div');
+  holder.innerHTML = renderRichText(value || '');
+  var text = (holder.textContent || '').replace(/\s+/g, ' ').trim();
+  return limit && text.length > limit ? text.substring(0, limit).trim() + '…' : text;
+}
+
+function todayFactDate(value) {
+  var date = normalizeDateString(value || '');
+  return date ? date.substring(5).replace('-', '/') : '';
+}
+
+function renderTodayFacts(items, customerId) {
+  var body = document.getElementById('todayFacts');
+  var meta = document.getElementById('todayFactsMeta');
+  if (!body) return;
+  if (!items.length) {
+    body.classList.remove('lit-group--dim', 'has-lit');
+    body.innerHTML = '<div class="room-note">还没有沟通记录。第一次沟通发生后，会先出现在这里。</div>';
+    if (meta) meta.textContent = '';
+    return;
+  }
+  body.classList.add('lit-group--dim');
+  body.innerHTML = items.slice(0, _TODAY_FACTS_LIMIT).map(function(item) {
+    var text = richPlainText(item.content || item.subject || '', 150);
+    var result = richPlainText(item.result || item.reply_content || '', 60);
+    var kind = item.activity_type || (item.type === 'outreach' ? '开发邮件' : '沟通');
+    return '<button type="button" class="room-row lit-row" onclick="openEditModal(' + Number(customerId) + ')">' +
+      '<span class="room-dt tnum">' + escapeHtml(todayFactDate(item.date || item.follow_date || item.sent_date)) + '</span>' +
+      '<span class="room-row-copy"><span class="room-tx">' + escapeHtml(text || '（无正文）') + '</span>' +
+      '<span class="room-rs">' + escapeHtml(kind) + (result ? ' · 结果 — ' + escapeHtml(result) : '') + '</span></span></button>';
+  }).join('');
+  if (meta) meta.textContent = items.length > _TODAY_FACTS_LIMIT ? '最近 ' + _TODAY_FACTS_LIMIT + ' 条' : items.length + ' 条记录';
+}
+
+// Recent communications for the customer the room is holding. Loading, empty and
+// failed are three different states; a failure never reads as "no records".
+async function loadTodayFacts(customerId) {
+  var id = Number(customerId);
+  var body = document.getElementById('todayFacts');
+  if (!id || !body) return;
+  var token = ++_todayFactsToken;
+  var cached = _todayFactsCache[id];
+  if (cached && Date.now() - cached.at < _TODAY_FACTS_TTL) {
+    renderTodayFacts(cached.items, id);
+    return;
+  }
+  body.classList.remove('lit-group--dim', 'has-lit');
+  body.innerHTML = '<div class="room-note" role="status">正在读取最近沟通…</div>';
+  try {
+    var data = await api('/api/customers/' + id + '/timeline?page=1&per_page=' + _TODAY_FACTS_LIMIT, { silentError: true });
+    if (token !== _todayFactsToken) return;
+    var items = normalizeCustomerTimelineItems((data && data.items) || []);
+    _todayFactsCache[id] = { at: Date.now(), items: items };
+    renderTodayFacts(items, id);
+  } catch (error) {
+    if (token !== _todayFactsToken || (error && error.name === 'AbortError')) return;
+    var meta = document.getElementById('todayFactsMeta');
+    if (meta) meta.textContent = '';
+    body.innerHTML = '<div class="room-note is-error" role="alert"><span>最近沟通暂时无法读取，客户数据没有被清空。</span> <button type="button" class="room-act" onclick="loadTodayFacts(' + id + ')">重新加载</button></div>';
+  }
 }
 
 function renderTodayWideDetail(r, name, meta, website) {
@@ -3768,29 +4067,14 @@ function renderTodayWideDetail(r, name, meta, website) {
   el.dataset.reminderId = r.id;
   el.dataset.customerId = r.customer_id;
   el.dataset.customerName = name;
-  var action = r.task_title || r.title || r.content || '联系客户';
-  var need = r.why_today || '今天到期，需要推进下一步';
-  var activity = r.last_activity || '暂无沟通记录';
   el.innerHTML =
-    '<div class="today-wide-detail-head">' +
-      '<div class="today-wide-kicker">客户档案 · 今日焦点</div>' +
-      '<div class="today-wide-head-row"><div><h2>' + escapeHtml(name) + '</h2>' + (meta ? '<p>' + escapeHtml(meta) + '</p>' : '') + '</div></div>' +
-      '<div class="today-wide-actions">' +
-        '<button type="button" class="today-wide-icon" onclick="focusTodayWideComposer()" aria-label="记录沟通" title="记录沟通"><span class="ui-icon ui-icon-message" aria-hidden="true"></span></button>' +
-        '<button type="button" class="today-wide-icon" onclick="openEditModal(' + r.customer_id + ')" aria-label="查看客户" title="查看客户"><span class="ui-icon ui-icon-open" aria-hidden="true"></span></button>' +
-        (website ? '<a class="today-wide-icon" href="' + escapeHtml(website) + '" target="_blank" rel="noopener" aria-label="访问官网" title="访问官网"><span class="ui-icon ui-icon-external" aria-hidden="true"></span></a>' : '') +
-      '</div>' +
-    '</div>' +
-    '<div class="today-wide-facts">' +
-      '<div><span>当前等待</span><strong>' + escapeHtml(need) + '</strong></div>' +
-      '<div><span>下一步</span><strong class="is-clay">' + escapeHtml(action) + '</strong></div>' +
-      '<div><span>关键需求</span><strong>' + escapeHtml(r.field || '待补充客户需求') + '</strong></div>' +
-      '<div><span>最近发生</span><strong>' + renderRichText(activity) + '</strong></div>' +
-    '</div>' +
-    '<div class="today-wide-compose">' +
-      '<div class="today-wide-compose-title"><span>沟通记录</span></div>' +
-      '<div class="today-wide-compose-footer"><span>当前待办会在确认后完成</span><button type="button" class="btn btn-primary" onclick="openTodayCommunicationConfirm()"><span class="ui-icon ui-icon-check" aria-hidden="true"></span><span>完成并记录</span></button></div>' +
-    '</div>';
+    '<div class="room-ident"><h3 class="room-company">' + escapeHtml(name) + '</h3>' +
+      (meta ? '<p class="room-lines">' + escapeHtml(meta) + '</p>' : '') + '</div>' +
+    '<section class="room-panel" aria-label="最近沟通">' +
+      '<div class="room-panel-head"><span class="micro">最近沟通</span><span class="micro tnum" id="todayFactsMeta"></span></div>' +
+      '<div class="room-panel-body lit-group" id="todayFacts" aria-live="polite"></div>' +
+    '</section>';
+  loadTodayFacts(r.customer_id);
 }
 
 function focusTodayWideComposer() {
@@ -4721,7 +5005,19 @@ function clearCustomerFilters() {
 function renderCustomerActiveFilters(filters) {
   var element = document.getElementById('customerActiveFilters');
   if (!element) return;
-  element.innerHTML = (filters || []).map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('');
+  var query = getCustomerSearchQuery();
+  var searchChip = query
+    ? '<span class="customer-search-chip">搜索：' + escapeHtml(query) +
+      '<button type="button" class="customer-search-chip-clear" aria-label="清除搜索" onclick="clearCustomerSearch()">×</button></span>'
+    : '';
+  element.innerHTML = searchChip + (filters || []).map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('');
+}
+
+function clearCustomerSearch() {
+  var input = document.getElementById('globalPageSearch');
+  if (input) input.value = '';
+  customerPage = 1;
+  loadCustomers();
 }
 
 async function loadCustomers(options) {
@@ -7423,7 +7719,7 @@ function timelineItemHtml(item) {
     ? '<span class="tl-weekly-status" aria-label="已纳入本周工作" title="已纳入本周工作">' + reportIcon + '<span>已纳入本周</span></span>'
     : '';
 
-  var html = '<div class="tl-item ' + typeClass + '"><div class="tl-dot"></div><div class="tl-card">';
+  var html = '<div class="tl-item lit-row ' + typeClass + '"><div class="tl-dot"></div><div class="tl-card">';
   var showDirection = item.type === 'activity' && item.activity_type !== 'task_completed';
   var directionClass = communicationDirectionClass(item.direction);
   var directionTitle = '用于快速查看沟通脉络，并帮助系统判断后续工作重点';
@@ -9504,13 +9800,6 @@ document.addEventListener('keydown', function(e) {
     if (top.id === 'unsavedChangesModal') continueEditingCustomerForm();
     else if (top.classList.contains('ephemeral-modal')) closeEphemeralModal(top);
     else closeModal(top.id);
-    return;
-  }
-  var sidebar = document.getElementById('sidebar');
-  if (sidebar && sidebar.classList.contains('open')) {
-    closeSidebar();
-    var toggle = document.getElementById('sidebarToggle');
-    if (toggle) toggle.focus({ preventScroll: true });
   }
 });
 window.addEventListener('beforeunload', function(e) {
