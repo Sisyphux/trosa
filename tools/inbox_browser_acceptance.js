@@ -233,7 +233,8 @@ for (const spec of uploads) {
 // keyboard and empty-state checks run against fresh server state.
 await page.reload({waitUntil:'domcontentloaded'});
 await page.locator('#loginOverlay').waitFor({state:'hidden', timeout:15000}).catch(() => {});
-await page.locator('[data-page="inbox"]').first().click();
+await page.locator('#roomBrand').click();
+await page.locator('#roomIndex [data-page="inbox"]').first().click();
 await page.locator('#page-inbox.active').waitFor({timeout:15000});
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('正在整理 Inbox'), null, {timeout:15000});
 // Responsive and reduced-motion inspection use the same rendered fixture.
