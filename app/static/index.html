@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
 <link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
 <link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-daylight-20260927">
+<link rel="stylesheet" href="/visual-v4.css?v={{VERSION}}-daylight-perpage-20260928">
 </head>
 <body id="trosa">
 
@@ -85,7 +86,7 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <h1>Trosa</h1>
-      <div class="subtitle">Relationship<br>Workspace</div>
+      <div class="subtitle">客户关系工作台</div>
     </div>
     <nav class="sidebar-nav">
       <div class="nav-personal">
@@ -99,9 +100,6 @@
         <div class="nav-item" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
           <span class="nav-icon"><span class="ui-icon ui-icon-users" aria-hidden="true"></span></span><span>客户</span>
         </div>
-        <div class="nav-item" data-page="overview" data-nav-page="overview" data-module="weekly_overview" onclick="switchPage('overview')" role="button" tabindex="0" aria-label="本周工作" title="本周工作">
-          <span class="nav-icon"><span class="ui-icon ui-icon-list" aria-hidden="true"></span></span><span>本周工作</span>
-        </div>
       </div>
       <div class="nav-overview" style="display:none;">
         <div class="nav-section">总览</div>
@@ -113,6 +111,7 @@
     <details class="sidebar-tools">
       <summary aria-label="更多工具" title="更多工具"><span class="nav-icon"><span class="ui-icon ui-icon-more" aria-hidden="true"></span></span><span>更多工具</span></summary>
       <div class="sidebar-tools-menu">
+        <button type="button" data-module="weekly_overview" onclick="switchPage('overview')" aria-label="打开本周工作" title="打开本周工作"><span class="ui-icon ui-icon-list" aria-hidden="true"></span><span class="sidebar-tool-label">本周工作</span></button>
         <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="ui-icon ui-icon-plus" aria-hidden="true"></span><span class="sidebar-tool-label">未建立真实沟通</span></button>
         <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="ui-icon ui-icon-calendar" aria-hidden="true"></span><span class="sidebar-tool-label">完整日历</span></button>
         <button type="button" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="ui-icon ui-icon-message" aria-hidden="true"></span><span class="sidebar-tool-label">沟通记录</span></button>
@@ -148,10 +147,10 @@
     <!-- ==================== DASHBOARD ==================== -->
     <div class="page-section active" id="page-dashboard">
       <div class="page-header today-page-header">
-        <div>
-          <div class="today-date" id="dashDate"></div>
+        <div class="today-masthead">
+          <div class="today-eyebrow" id="dashDate"></div>
           <h2>今天</h2>
-          <div class="today-summary"><strong id="statPending">-</strong> 个客户需要跟进 · <span id="statOverdue">-</span> 项逾期</div>
+          <p class="today-summary today-lede"><strong id="statPending">-</strong> 个客户需要跟进，其中 <strong id="statOverdue">-</strong> 项已逾期。</p>
         </div>
         <div class="command-shelf is-collapsible" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
@@ -173,7 +172,7 @@
         <div class="today-fullscreen-shell is-empty">
         <div class="today-workspace is-empty">
           <section class="today-task-section">
-            <div class="today-section-header"><div><h3>今日跟进</h3><div class="section-caption">拖动卡片调整顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
+            <div class="today-section-header"><div><h3>今天的下一步</h3><div class="section-caption">按到期时间排列 · 拖动调整顺序</div></div><div class="today-sort-tools"><div class="today-sort-status" id="todaySortStatus" role="status" aria-live="polite"></div><button class="text-action" onclick="batchCompleteToday()">批量记录</button></div></div>
             <div class="today-task-list" id="todayReminders"><div class="empty-state" role="status"><p>正在加载今日跟进…</p></div></div>
             <div class="today-dashboard-error" id="todayDashboardError" hidden role="alert"></div>
             <div class="batch-bar today-batch-bar" id="todayBatchBar">
@@ -183,9 +182,11 @@
               <button class="btn btn-sm" onclick="exitTodaySelectionMode()" style="margin-left:auto;">取消</button>
             </div>
           </section>
-          <aside class="today-focus-card" id="todayFocus"><div class="empty-state"><p>选择一个客户查看下一步</p></div></aside>
         </div>
-        <section class="today-wide-detail" id="todayWideDetail" aria-label="客户档案工作区"></section>
+        <div class="today-context-stack">
+          <aside class="today-focus-card" id="todayFocus"><div class="empty-state"><p>今天没有到期的下一步</p></div></aside>
+          <section class="today-wide-detail" id="todayWideDetail" aria-label="客户档案工作区"></section>
+        </div>
         </div>
 
         <section class="today-future-section">
@@ -213,7 +214,11 @@
     <!-- ==================== INBOX ==================== -->
     <div class="page-section" id="page-inbox">
       <div class="page-header inbox-page-header">
-        <div><h2>Inbox</h2></div>
+        <div class="page-heading">
+          <div class="page-eyebrow">待判断</div>
+          <h2>Inbox</h2>
+          <p class="inbox-overview page-lede" id="inboxOverview"></p>
+        </div>
         <div class="command-shelf is-collapsible inbox-command-shelf" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="refreshInboxManually()" aria-label="刷新 Inbox" title="刷新 Inbox">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 16"/><path d="M4 20v-4h4"/></svg>
@@ -225,17 +230,22 @@
         </div>
       </div>
       <div class="page-body inbox-page-body">
-        <div class="inbox-overview" id="inboxOverview"></div>
         <section class="inbox-sela-runs" id="inboxSelaRuns" aria-live="polite" aria-label="Sela 执行回执"></section>
-        <div class="inbox-filters" id="inboxFilters"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
-        <div class="inbox-list" id="inboxList"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
+        <div class="inbox-triage">
+          <div class="inbox-filters" id="inboxFilters"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
+          <div class="inbox-list" id="inboxList"><div class="empty-state"><p>正在整理 Inbox...</p></div></div>
+        </div>
       </div>
     </div>
 
     <!-- ==================== EXISTING CUSTOMERS ==================== -->
     <div class="page-section" id="page-customers">
       <div class="page-header customer-page-workbar">
-        <div><h2>客户</h2></div>
+        <div class="page-heading">
+          <div class="page-eyebrow">关系索引</div>
+          <h2>客户</h2>
+          <p class="page-lede">搜索框是找客户的第一入口；下面的视图按真实沟通自动计算，无需手工维护。</p>
+        </div>
         <div class="command-shelf is-collapsible customer-command-shelf" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
@@ -253,8 +263,8 @@
         </div>
       </div>
       <div class="page-body">
-        <div class="customer-findbar">
-          <div class="customer-view-chips">
+        <div class="customer-index-bar">
+          <div class="customer-view-chips" role="tablist" aria-label="客户视图">
             <button class="customer-view-chip active" data-view="all" onclick="setCustomerView('all')">全部</button>
             <button class="customer-view-chip" data-view="priority" onclick="setCustomerView('priority')">手动排序</button>
             <button class="customer-view-chip" data-view="uncontacted" onclick="setCustomerView('uncontacted')">未获回复</button>
@@ -263,8 +273,10 @@
             <button class="customer-view-chip" data-view="silent" onclick="setCustomerView('silent')">长期未联系</button>
             <button class="customer-view-chip" data-view="no_next" onclick="setCustomerView('no_next')">尚无下一步</button>
             <button class="customer-view-chip" data-view="archived" onclick="setCustomerView('archived')">已归档</button>
-            <button class="customer-view-chip" type="button" onclick="toggleCustomerFilters()">更多筛选</button>
-            <button class="customer-view-chip save-view" onclick="saveCurrentCustomerView()">+ 保存当前视图</button>
+          </div>
+          <div class="customer-index-actions">
+            <button class="customer-view-chip ghost" type="button" onclick="toggleCustomerFilters()">更多筛选</button>
+            <button class="customer-view-chip ghost save-view" onclick="saveCurrentCustomerView()">保存当前视图</button>
           </div>
         </div>
         <div class="customer-advanced-filters" id="customerAdvancedFilters" hidden>
@@ -293,9 +305,9 @@
           <button class="btn btn-sm" onclick="clearCustomerSelection()" style="margin-left:auto;">取消</button>
         </div>
         <div class="customer-card-workspace" id="customerCardWorkspace">
-          <div class="customer-card-header" aria-hidden="true">
-            <span><input type="checkbox" class="table-checkbox" id="customerSelectAll" onchange="toggleAllCustomers(this)"></span>
-            <span>公司与联系人</span><span data-customer-column="country">国家</span><span data-customer-column="type">类型</span><span data-customer-column="field">行业</span><span data-customer-column="level">等级</span><span data-customer-column="last_activity">最近发生</span><span data-customer-column="next_step">下一步</span><span data-customer-column="website">网站</span><span>操作</span>
+          <div class="customer-card-header">
+            <span class="customer-select-cell"><input type="checkbox" class="table-checkbox" id="customerSelectAll" onchange="toggleAllCustomers(this)" aria-label="全选当前列表"></span>
+            <span class="customer-index-caption" id="customerIndexCaption">客户索引</span>
           </div>
           <div class="customer-card-list" id="customerTableBody"><div class="empty-state"><p>加载中...</p></div></div>
         </div>
@@ -391,7 +403,11 @@
     <!-- ==================== CALENDAR ==================== -->
     <div class="page-section" id="page-calendar">
       <div class="page-header">
-        <h2>跟进日历</h2>
+        <div class="page-heading">
+          <div class="page-eyebrow">时间视图</div>
+          <h2>跟进日历</h2>
+          <p class="page-lede">按日期查看下一步安排；日历只读订阅，不会回写 CRM。</p>
+        </div>
       </div>
       <div class="page-body">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">
@@ -419,10 +435,14 @@
     <!-- ==================== FOLLOW-UP HISTORY ==================== -->
     <div class="page-section" id="page-history">
       <div class="page-header">
-        <h2>沟通记录</h2>
+        <div class="page-heading">
+          <div class="page-eyebrow">事实记录</div>
+          <h2>沟通记录</h2>
+          <p class="page-lede">已确认的沟通事实，按时间倒序。记录可以没有下一步。</p>
+        </div>
       </div>
       <div class="page-body">
-        <div class="card"><div class="card-body" id="historyTimeline"><div class="empty-state"><p>正在加载...</p></div></div></div>
+        <div class="record-sheet" id="historyTimeline"><div class="empty-state"><p>正在加载...</p></div></div>
       </div>
     </div>
 
@@ -431,30 +451,31 @@
     <!-- ==================== ACTIVITY LOGS ==================== -->
     <div class="page-section" id="page-logs">
       <div class="page-header">
-        <h2>操作日志</h2>
+        <div class="page-heading">
+          <div class="page-eyebrow">审计</div>
+          <h2>操作日志</h2>
+          <p class="page-lede">系统内的写入与改动轨迹，用于核对来源。</p>
+        </div>
       </div>
       <div class="page-body">
-        <div class="card"><div class="card-body" id="logsList"><div class="empty-state"><p>正在加载...</p></div></div></div>
+        <div class="record-sheet" id="logsList"><div class="empty-state"><p>正在加载...</p></div></div>
       </div>
     </div>
 
     <!-- ==================== OVERVIEW ==================== -->
     <div class="page-section" id="page-overview">
-      <div class="ov-hero">
-        <div class="ov-hero-inner">
-          <div class="ov-hero-top">
-            <div>
-              <div class="ov-hero-kicker">团队工作台</div>
-              <div class="ov-hero-title">本周沟通</div>
-            </div>
-            <div class="ov-hero-date" id="overviewDateLabel"></div>
-          </div>
-          <div class="ov-hero-bottom">
-            <div class="ov-hero-week" aria-label="周报切换">
-              <button class="ov-week-nav" onclick="overviewPrevWeek()" aria-label="上一周"><span class="ui-icon ui-icon-left" aria-hidden="true"></span><span>上一周</span></button>
-              <button class="ov-week-current" onclick="overviewWeekOffset=0;loadOverview()">回到本周</button>
-              <button class="ov-week-nav" onclick="overviewNextWeek()" aria-label="下一周"><span>下一周</span><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
-            </div>
+      <div class="page-header ov-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">团队工作台</div>
+          <h2>本周沟通</h2>
+          <p class="page-lede">三个人各自确认过的沟通事实，按客户排开；颜色只表达内容层级，不评价个人。</p>
+        </div>
+        <div class="ov-header-meta">
+          <div class="ov-header-date" id="overviewDateLabel"></div>
+          <div class="ov-week-switch" role="group" aria-label="周报切换">
+            <button class="ov-week-nav" onclick="overviewPrevWeek()" aria-label="上一周"><span class="ui-icon ui-icon-left" aria-hidden="true"></span><span>上一周</span></button>
+            <button class="ov-week-current" onclick="overviewWeekOffset=0;loadOverview()">本周</button>
+            <button class="ov-week-nav" onclick="overviewNextWeek()" aria-label="下一周"><span>下一周</span><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
           </div>
         </div>
       </div>
@@ -466,10 +487,34 @@
     <!-- ==================== SETTINGS ==================== -->
     <div class="page-section" id="page-settings">
       <div class="page-header">
-        <h2>设置</h2>
+        <div class="page-heading">
+          <div class="page-eyebrow">配置</div>
+          <h2>设置</h2>
+          <p class="page-lede">按主题分组。日常设置即时生效；维护类操作放在最后，技术细节默认收起。</p>
+        </div>
       </div>
       <div class="page-body">
-        <div class="card personalization-card" style="margin-bottom:22px;">
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="设置分区">
+            <div class="settings-nav-group">
+              <div class="settings-nav-title">日常</div>
+              <button type="button" class="settings-nav-item is-active" data-settings-target="personal" onclick="scrollToSettingsSection('personal')">账户与界面</button>
+              <button type="button" class="settings-nav-item" data-settings-target="ai" onclick="scrollToSettingsSection('ai')">AI 接口</button>
+              <button type="button" class="settings-nav-item" data-settings-target="team" onclick="scrollToSettingsSection('team')">团队成员</button>
+            </div>
+            <div class="settings-nav-group">
+              <div class="settings-nav-title">数据与同步</div>
+              <button type="button" class="settings-nav-item" data-settings-target="gmail" onclick="scrollToSettingsSection('gmail')">邮件同步</button>
+              <button type="button" class="settings-nav-item" data-settings-target="excel" onclick="scrollToSettingsSection('excel')">导入与恢复</button>
+            </div>
+            <div class="settings-nav-group">
+              <div class="settings-nav-title">维护</div>
+              <button type="button" class="settings-nav-item" data-settings-target="health" onclick="scrollToSettingsSection('health')">系统健康</button>
+              <button type="button" class="settings-nav-item" data-settings-target="system" onclick="scrollToSettingsSection('system')">系统信息</button>
+            </div>
+          </nav>
+          <div class="settings-sections">
+        <div class="card personalization-card" data-settings-section="personal" id="settings-section-personal">
           <div class="card-header"><div><h3>个人使用设置</h3></div><button class="btn btn-sm btn-primary" onclick="savePersonalSettings()">保存设置</button></div>
           <div class="card-body">
             <div class="settings-group"><h4>固定核心</h4><p class="settings-help">始终启用：今天、Inbox、客户、沟通、待办、搜索、数据安全</p></div>
@@ -481,7 +526,7 @@
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
         </div>
-        <div class="card ai-integration-card" id="aiIntegrationSettingsCard" style="margin-bottom:22px;" aria-labelledby="aiIntegrationTitle">
+        <div class="card ai-integration-card" id="aiIntegrationSettingsCard" data-settings-section="ai" aria-labelledby="aiIntegrationTitle">
           <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>AI 功能共用此接口。截图识别需使用支持图片的模型；连接测试不发送客户资料。</p></div></div>
           <div class="card-body">
             <div class="ai-config-status" id="aiConfigStatus" aria-live="polite">正在读取 AI 配置…</div>
@@ -519,7 +564,7 @@
             </div>
           </div>
         </div>
-        <div class="card" id="teamMembersSettingsCard" style="margin-bottom:22px; display:none;">
+        <div class="card" id="teamMembersSettingsCard" data-settings-section="team" style="display:none;">
           <div class="card-header"><div><h3>团队成员</h3><p>邀请链接需手动转发，单次有效，7 天后失效。</p></div></div>
           <div class="card-body">
             <form id="teamInvitationForm" class="settings-inline-field" style="align-items:end; flex-wrap:wrap; gap:12px;" onsubmit="createTeamInvitation(event)">
@@ -529,11 +574,11 @@
             <div id="teamMembersList" class="settings-help" style="margin-top:18px;"></div>
           </div>
         </div>
-        <div class="card gmail-integration-card" style="margin-bottom:22px;" aria-labelledby="gmailIntegrationTitle">
+        <div class="card gmail-integration-card" data-settings-section="gmail" id="settings-section-gmail" aria-labelledby="gmailIntegrationTitle">
           <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>同步收发邮件；唯一邮箱匹配自动关联客户，其余进入 Inbox 确认。</p></div></div>
           <div class="card-body" id="gmailIntegrationStatus" aria-live="polite"><div class="settings-help">正在检查 Gmail 连接状态…</div></div>
         </div>
-        <div class="card" id="excelImportSettingsCard" data-module="excel_import" style="margin-bottom:22px;">
+        <div class="card" id="excelImportSettingsCard" data-settings-section="excel" data-module="excel_import">
           <div class="card-header"><h3>Excel 导入</h3></div>
           <div class="card-body">
             <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">支持 .xlsx、.xls，上传后自动识别列名。</p>
@@ -548,13 +593,15 @@
             </div>
           </div>
         </div>
-        <div class="card" style="margin-bottom:22px;">
+        <div class="card" data-settings-section="health" id="settings-section-health">
           <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">一键诊断</button></div>
           <div class="card-body" id="healthCheckPanel"><div class="empty-state"><p style="color:var(--fg-muted);">尚未检测</p></div></div>
         </div>
-        <div class="card">
+        <div class="card" data-settings-section="system" id="settings-section-system">
           <div class="card-header"><h3>系统信息</h3></div>
           <div class="card-body" id="systemInfo"><div class="empty-state"><p>正在加载...</p></div></div>
+        </div>
+          </div>
         </div>
       </div>
     </div>

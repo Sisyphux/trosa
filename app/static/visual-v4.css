@@ -1,0 +1,3375 @@
+/* ============================================================================
+   Trade OS · Daylight, per-page (visual-v4)
+   ----------------------------------------------------------------------------
+   Loaded after style.css, visual-v2.css and visual-v3.css. v3 introduced the
+   Daylight *language* (warm paper, hairline structure, editorial type, one gold
+   accent). v4 keeps that language and rebuilds each page's *composition* so the
+   product stops being one template applied eight times:
+
+     · Today      — a dated agenda rail (grouped by 逾期/今天/稍后) beside one
+                    customer context sheet, plus a near-future time band
+     · Inbox      — a judgement centre: a category rail with counts on the left,
+                    a grouped queue on the right
+     · Customers  — a relationship index: segmented views, no table skeleton,
+                    each row is a company identity with quiet meta
+     · 本周工作    — an editorial page header and a week switcher, not a hero
+     · Settings   — a sticky themed section rail beside hairline sections
+     · 日历/记录/日志 — plain record sheets inside the same frame
+
+   Nothing here changes behaviour: no business logic, no API, no permissions and
+   no data shape. Only composition, hierarchy and surface. Selectors are guarded
+   with `#trosa` for the same specificity reason v3 documents: v2 carries id
+   selectors for page components, so the guard keeps this sheet authoritative
+   while never changing which element a rule applies to.
+   ============================================================================ */
+
+/* ============================================================================
+   1. COMPOSITION TOKENS
+   ============================================================================ */
+
+:root {
+  --v4-rail: 244px;          /* sidebar gutter + width on desktop */
+  --v4-bar-top: 18px;        /* floating action layer top offset */
+  --v4-frame-pad: 44px;      /* half of the frame gutter */
+  --v4-gap: clamp(24px, 3vw, 48px);
+  --v4-stack: clamp(28px, 3.4vw, 52px);
+  --v4-r-row: 14px;
+  --v4-glass: rgba(255, 253, 247, .72);
+  --v4-glass-line: rgba(255, 255, 255, .62);
+  --v4-shadow-float: 0 22px 44px -30px rgba(36, 34, 29, .5),
+                     0 2px 6px -4px rgba(36, 34, 29, .18);
+  --v4-shadow-row: 0 10px 24px -20px rgba(36, 34, 29, .45);
+}
+
+/* ============================================================================
+   2. GLOBAL CHROME — search layer, floating shelf, page frame
+   ============================================================================ */
+
+/* --- Search stays reachable while the page scrolls ------------------------- */
+#trosa .global-page-tools {
+  position: fixed;
+  top: var(--v4-bar-top);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  pointer-events: none;
+}
+#trosa .global-page-search {
+  pointer-events: auto;
+  width: 336px;
+  max-width: calc(100vw - 380px);
+  margin-left: calc(var(--v4-rail) + var(--v4-frame-pad)) !important;
+  background: var(--v4-glass) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
+  backdrop-filter: blur(30px) saturate(1.15) !important;
+  border: 1px solid rgba(36, 34, 29, .08) !important;
+  box-shadow: var(--v4-shadow-float) !important;
+  border-radius: 999px !important;
+  height: 46px !important;
+}
+#trosa .global-page-search:focus-within {
+  border-color: var(--dl-gold) !important;
+  box-shadow: var(--v4-shadow-float), var(--dl-gold-wash) 0 0 0 3px !important;
+}
+
+/* --- One floating shelf per page, always in the same place ----------------- */
+#trosa .command-shelf {
+  position: fixed;
+  top: var(--v4-bar-top);
+  right: 28px;
+  z-index: 41;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px !important;
+  border-radius: 16px !important;
+  background: var(--v4-glass) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
+  backdrop-filter: blur(30px) saturate(1.15) !important;
+  border: 1px solid rgba(36, 34, 29, .08) !important;
+  box-shadow: var(--v4-shadow-float) !important;
+}
+#trosa .command-shelf .command-icon {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border: 0 !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+}
+#trosa .command-shelf .command-icon:hover {
+  background: rgba(36, 34, 29, .06) !important;
+}
+#trosa .command-shelf .command-primary {
+  height: 38px !important;
+  padding: 0 16px !important;
+  border-radius: 11px !important;
+  border: 1px solid var(--dl-ink) !important;
+  background: var(--dl-ink) !important;
+  color: var(--dl-paper) !important;
+}
+#trosa .command-shelf .command-primary:hover {
+  background: #000 !important;
+}
+#trosa .command-shelf .command-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+/* --- Page frame ------------------------------------------------------------ */
+#trosa .page-header {
+  padding: calc(var(--v4-bar-top) + 74px) 0 0 !important;
+}
+#trosa .page-body {
+  padding: 22px 0 104px !important;
+}
+#trosa .page-header,
+#trosa .page-body,
+#trosa #page-customers .customer-page-workbar,
+#trosa #page-inbox .inbox-page-header,
+#trosa #page-dashboard .today-page-header,
+#trosa #page-dashboard .today-page-body {
+  width: min(var(--dl-maxw), calc(100% - 88px)) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* --- Page heading: eyebrow → title → one sentence -------------------------- */
+#trosa .page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+#trosa .page-eyebrow,
+#trosa .today-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .page-lede {
+  margin: 2px 0 0 !important;
+  max-width: 62ch;
+  font-size: var(--dl-fs-body-s) !important;
+  line-height: 1.62 !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .page-header .page-heading h2,
+#trosa .page-header h2 {
+  font-family: var(--dl-display) !important;
+  font-size: clamp(30px, 3vw, 44px) !important;
+  font-weight: 500 !important;
+  letter-spacing: -.03em !important;
+  line-height: 1.06 !important;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+}
+#trosa .today-masthead { display: flex; flex-direction: column; gap: 8px; }
+#trosa .today-summary {
+  margin: 2px 0 0 !important;
+  font-size: var(--dl-fs-body-s) !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .today-summary strong {
+  font-weight: 600;
+  color: var(--dl-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Section headers used inside a page body ------------------------------- */
+#trosa .today-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--dl-hair);
+  margin-bottom: 4px;
+}
+#trosa .today-section-header h3 {
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  letter-spacing: -.01em;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+}
+#trosa .section-caption {
+  margin-top: 4px !important;
+  font-size: 12.5px !important;
+  color: var(--dl-mut) !important;
+}
+#trosa .today-sort-tools { display: flex; align-items: center; gap: 14px; }
+#trosa .today-sort-status { font-size: 12.5px; color: var(--dl-mut); }
+#trosa .text-action {
+  border: 0;
+  background: none;
+  padding: 4px 2px;
+  font-size: 13px;
+  color: var(--dl-ink-2);
+  border-bottom: 1px solid transparent;
+}
+#trosa .text-action:hover {
+  color: var(--dl-gold-ink);
+  border-bottom-color: var(--dl-gold);
+}
+
+/* ============================================================================
+   3. SIDEBAR — a floating glass rail with three destinations
+   ============================================================================ */
+
+#trosa .sidebar {
+  inset: 14px auto 14px 14px !important;
+  width: 216px !important;
+  min-width: 216px !important;
+  border-radius: 24px !important;
+  background: var(--v4-glass) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.12) !important;
+  backdrop-filter: blur(30px) saturate(1.12) !important;
+  border: 1px solid rgba(36, 34, 29, .08) !important;
+  box-shadow: var(--v4-shadow-float) !important;
+  padding: 26px 14px 18px !important;
+}
+#trosa .sidebar-brand { padding: 0 8px 22px !important; }
+#trosa .sidebar-brand h1 { font-size: 21px !important; }
+#trosa .sidebar-brand .subtitle {
+  margin-top: 6px !important;
+  font-size: 11px !important;
+  letter-spacing: .14em;
+  color: var(--dl-mut) !important;
+}
+#trosa .nav-section {
+  padding: 0 10px 8px !important;
+  font-size: 10.5px !important;
+  letter-spacing: .2em !important;
+}
+#trosa .nav-item {
+  height: 42px !important;
+  padding: 0 10px !important;
+  border-radius: 12px !important;
+  gap: 11px;
+  font-size: 14px !important;
+  font-weight: 500;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .nav-item:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .nav-item.active {
+  background: var(--dl-paper) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .nav-item.active::before { content: none !important; }
+#trosa .nav-item .nav-icon { color: currentColor !important; }
+#trosa .nav-count {
+  margin-left: auto;
+  font-size: 11.5px !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-gold-ink) !important;
+}
+#trosa .sidebar-tools { margin-top: 14px !important; }
+#trosa .sidebar-tools summary {
+  height: 42px !important;
+  padding: 0 10px !important;
+  border-radius: 12px !important;
+  font-size: 13.5px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .sidebar-tools summary:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .sidebar-tools-menu {
+  margin: 4px 0 6px 0 !important;
+  padding: 0 0 0 0 !important;
+  border-left: 1px solid var(--dl-hair) !important;
+}
+#trosa .sidebar-tools-menu button {
+  height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 10px !important;
+  font-size: 13px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .sidebar-tools-menu button:hover {
+  background: rgba(36, 34, 29, .05) !important;
+  color: var(--dl-ink) !important;
+}
+#trosa .account-section {
+  margin-top: auto !important;
+  padding-top: 14px !important;
+  border-top: 1px solid var(--dl-hair) !important;
+}
+#trosa .sidebar-identity {
+  margin-top: 6px !important;
+  padding: 8px 10px !important;
+  border-radius: 12px !important;
+  background: rgba(36, 34, 29, .04) !important;
+}
+#trosa .main-content { margin-left: calc(14px + 216px + 14px) !important; }
+@media (min-width: 1181px) {
+  #trosa .main-content { margin-left: 244px !important; }
+  html.font-size-large #trosa .main-content { margin-left: 244px !important; }
+  html.font-size-xl #trosa .main-content { margin-left: 244px !important; }
+}
+html.font-size-large #trosa .sidebar { width: 224px !important; min-width: 224px !important; }
+html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !important; }
+
+/* ============================================================================
+   4. TODAY — agenda rail + customer context sheet + time band
+   ============================================================================ */
+
+#trosa .today-page-body { padding-top: 8px !important; }
+#trosa .today-fullscreen-shell {
+  display: grid !important;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  gap: var(--v4-stack);
+  align-items: start;
+}
+#trosa .today-workspace { display: block !important; min-width: 0; }
+#trosa .today-context-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+/* When a real reminder is selected the wide detail is the context; the compact
+   focus card only carries the empty state. */
+#trosa .today-fullscreen-shell:not(.is-empty) #todayFocus { display: none !important; }
+#trosa .today-fullscreen-shell.is-empty .today-wide-detail { display: none !important; }
+#trosa .today-focus-card {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 16px !important;
+  background: var(--dl-paper-2) !important;
+  box-shadow: none !important;
+  padding: 28px !important;
+}
+#trosa .today-focus-card::before { content: none !important; }
+
+/* --- Agenda rows ----------------------------------------------------------- */
+#trosa .today-group-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 14px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-group-label::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--dl-hair-2);
+}
+#trosa .today-group-label[data-due-group="overdue"] span { color: var(--dl-danger); }
+#trosa .today-group-label:first-child { padding-top: 10px; }
+
+#trosa .today-task-list { margin-top: 2px; }
+#trosa .today-task-row {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 3px;
+  padding: 13px 14px !important;
+  border-radius: var(--v4-r-row);
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: background .18s var(--dl-ease), box-shadow .18s var(--dl-ease);
+}
+#trosa .today-task-row::before,
+#trosa .today-task-row::after { content: none !important; }
+#trosa .today-task-row:hover { background: rgba(255, 253, 247, .78) !important; }
+#trosa .today-task-row.selected,
+#trosa .today-task-row.is-multi-selected {
+  background: var(--dl-paper) !important;
+  border-bottom-color: transparent !important;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .today-task-index-wrap { display: flex; align-items: center; gap: 8px; }
+#trosa .today-task-index {
+  font-family: var(--dl-display);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--dl-faint);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+#trosa .today-task-row.selected .today-task-index { color: var(--dl-gold); }
+#trosa .today-task-checkbox { display: none; }
+#trosa .today-task-row.is-selecting .today-task-checkbox { display: inline-block; }
+#trosa .today-task-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+#trosa .today-task-customer {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font-family: var(--dl-display);
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--dl-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#trosa .today-task-customer:hover { color: var(--dl-gold-ink); }
+#trosa .today-task-copy > strong {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--dl-ink) !important;
+  letter-spacing: -.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#trosa .today-task-copy > span {
+  font-size: 12.5px !important;
+  color: var(--dl-mut) !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#trosa .today-task-date {
+  font-size: 12px !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-mut) !important;
+  white-space: nowrap;
+  align-self: start;
+  margin-top: 2px;
+}
+#trosa .today-task-date.overdue { color: var(--dl-danger) !important; font-weight: 600; }
+
+/* --- Customer context sheet (today-wide-detail) ---------------------------- */
+#trosa .today-wide-detail {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 20px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  padding: clamp(24px, 2.4vw, 34px) clamp(22px, 2.6vw, 36px) !important;
+  min-width: 0;
+}
+#trosa .today-wide-detail:empty { display: none !important; }
+#trosa .today-wide-detail-head { padding-bottom: 20px; }
+#trosa .today-wide-kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-wide-head-row { display: flex; align-items: baseline; gap: 16px; margin-top: 8px; }
+#trosa .today-wide-head-row h2 {
+  font-family: var(--dl-display) !important;
+  font-size: clamp(24px, 2.2vw, 30px) !important;
+  font-weight: 500 !important;
+  letter-spacing: -.025em !important;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+  line-height: 1.14 !important;
+}
+#trosa .today-wide-head-row p { margin: 0; font-size: 13px; color: var(--dl-mut); }
+#trosa .today-wide-actions { display: flex; gap: 8px; margin-top: 16px; }
+#trosa .today-wide-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .today-wide-icon:hover {
+  border-color: var(--dl-ink-3) !important;
+  color: var(--dl-ink) !important;
+}
+#trosa .today-wide-facts {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--dl-hair) !important;
+  padding: 4px 0 0;
+}
+#trosa .today-wide-facts > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 18px;
+  align-items: baseline;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+}
+#trosa .today-wide-facts > div > span {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-wide-facts > div > strong {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--dl-ink);
+  line-height: 1.5;
+}
+#trosa .today-wide-facts > div > strong.is-clay { color: var(--dl-gold-ink); }
+#trosa .today-wide-compose {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--dl-hair);
+}
+#trosa .today-wide-compose-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+  margin-bottom: 14px;
+}
+#trosa .today-wide-compose-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+#trosa .today-wide-compose-footer > span { font-size: 12.5px; color: var(--dl-mut); }
+#trosa .today-wide-compose-footer .btn-primary { min-width: 128px; }
+
+/* --- Time band: the next 14 days ------------------------------------------- */
+#trosa .today-future-section { margin-top: var(--v4-stack); }
+#trosa .today-schedule-grid {
+  display: flex !important;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 12px;
+  scrollbar-width: thin;
+}
+#trosa .today-schedule-day {
+  flex: 0 0 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 12px 6px 10px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 14px !important;
+  background: transparent !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .today-schedule-day:hover { border-color: var(--dl-ink-3) !important; }
+#trosa .today-schedule-day.selected {
+  background: var(--dl-paper) !important;
+  border-color: var(--dl-gold) !important;
+  box-shadow: inset 0 -2px 0 var(--dl-gold) !important;
+}
+#trosa .schedule-weekday {
+  font-size: 10.5px !important;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut) !important;
+}
+#trosa .today-schedule-day strong {
+  font-family: var(--dl-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--dl-ink);
+  font-variant-numeric: tabular-nums;
+}
+#trosa .schedule-count { font-size: 11px !important; color: var(--dl-gold-ink) !important; }
+#trosa .schedule-empty { font-size: 11px !important; color: var(--dl-faint) !important; }
+#trosa .today-schedule-detail {
+  margin-top: 4px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--dl-hair-2);
+  font-size: 13px;
+  color: var(--dl-ink-2);
+}
+#trosa .schedule-detail-items { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+#trosa .schedule-detail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--dl-paper-2);
+}
+#trosa .schedule-detail-item b { font-weight: 600; color: var(--dl-ink); }
+
+/* --- Collapsed weekly record ---------------------------------------------- */
+#trosa .today-more {
+  margin-top: var(--v4-stack);
+  border-top: 1px solid var(--dl-hair) !important;
+  border-bottom: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#trosa .today-more > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 18px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-more > summary::-webkit-details-marker { display: none; }
+#trosa .today-more > summary:hover { color: var(--dl-ink-2); }
+#trosa .today-more[open] > summary { color: var(--dl-ink-2); }
+#trosa .today-more-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--v4-gap);
+  padding-bottom: 8px;
+}
+#trosa .today-more-grid h3 {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  letter-spacing: .02em;
+  color: var(--dl-ink-2) !important;
+  margin: 0 0 10px !important;
+}
+#trosa .log-item {
+  display: grid;
+  grid-template-columns: 132px 74px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+  font-size: 12.5px;
+}
+#trosa .log-time { color: var(--dl-mut); font-variant-numeric: tabular-nums; }
+#trosa .log-action {
+  font-size: 10.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dl-gold-ink);
+}
+#trosa .log-detail { color: var(--dl-ink-2); }
+
+/* ============================================================================
+   5. INBOX — a judgement centre: category rail + grouped queue
+   ============================================================================ */
+
+#trosa .inbox-page-body { padding-top: 8px !important; }
+#trosa .inbox-overview { color: var(--dl-ink-2); }
+#trosa .inbox-overview strong {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dl-ink);
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
+}
+#trosa .inbox-sela-runs:empty { display: none; }
+#trosa .inbox-triage {
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  gap: var(--v4-gap);
+  align-items: start;
+  margin-top: 26px;
+}
+#trosa .inbox-filters {
+  display: flex !important;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: calc(var(--v4-bar-top) + 52px);
+}
+#trosa .inbox-filters::before,
+#trosa .inbox-filters.has-indicator::before { display: none !important; content: none !important; }
+#trosa .inbox-filter {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  height: 40px !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: left;
+  font-size: 14px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .inbox-filter:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .inbox-filter.active {
+  background: var(--dl-paper) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .inbox-filter-count {
+  font-size: 11.5px !important;
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-mut) !important;
+}
+#trosa .inbox-filter.active .inbox-filter-count { color: var(--dl-gold-ink) !important; }
+
+#trosa .inbox-list { min-width: 0; }
+#trosa .inbox-group { margin-bottom: 30px; }
+#trosa .inbox-group-head {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .inbox-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-ink-2);
+}
+#trosa .inbox-group-count {
+  font-size: 11px;
+  color: var(--dl-mut);
+  font-variant-numeric: tabular-nums;
+}
+#trosa .inbox-group-hint {
+  font-size: 12.5px;
+  color: var(--dl-mut);
+  text-align: right;
+  line-height: 1.5;
+}
+#trosa .inbox-question-row {
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#trosa .inbox-question-row:hover { background: rgba(255, 253, 247, .72) !important; }
+#trosa .inbox-question-open {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 20px;
+  width: 100%;
+  padding: 16px 14px !important;
+  border: 0 !important;
+  background: transparent !important;
+  text-align: left;
+}
+#trosa .inbox-question-copy { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#trosa .inbox-question-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+#trosa .inbox-source-chip,
+#trosa .inbox-kind-chip {
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--dl-hair);
+  color: var(--dl-ink-2);
+  white-space: nowrap;
+}
+#trosa .inbox-kind-chip { border-color: transparent; background: var(--dl-gold-wash); color: var(--dl-gold-ink); }
+#trosa .inbox-question-open strong {
+  font-family: var(--dl-display);
+  font-size: 17px !important;
+  font-weight: 500 !important;
+  letter-spacing: -.015em;
+  color: var(--dl-ink) !important;
+  line-height: 1.3;
+}
+#trosa .inbox-question-subjectline,
+#trosa .inbox-question-why {
+  font-size: 12.5px;
+  color: var(--dl-mut);
+  line-height: 1.5;
+}
+#trosa .inbox-question-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  color: var(--dl-mut);
+}
+#trosa .inbox-question-evidence { font-size: 12px; }
+#trosa .inbox-question-side time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-faint);
+}
+#trosa .inbox-question-go { color: var(--dl-faint); }
+#trosa .inbox-question-row:hover .inbox-question-go { color: var(--dl-gold-ink); }
+
+/* ============================================================================
+   6. CUSTOMERS — a relationship index, not a table
+   ============================================================================ */
+
+#trosa .customer-page-workbar { padding-bottom: 0 !important; }
+#trosa .customer-index-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .customer-view-chips {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 2px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#trosa .customer-view-chips::before,
+#trosa .customer-view-chips.has-indicator::before { display: none !important; content: none !important; }
+#trosa .customer-view-chip {
+  height: 34px !important;
+  padding: 0 12px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 13.5px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .customer-view-chip:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .customer-view-chip.active {
+  background: var(--dl-paper) !important;
+  border-color: var(--dl-hair) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .customer-view-chip.ghost { color: var(--dl-mut) !important; }
+#trosa .customer-view-chip.ghost:hover { color: var(--dl-ink-2) !important; }
+#trosa .customer-index-actions { display: flex; align-items: center; gap: 2px; }
+
+#trosa .customer-active-filters,
+#trosa .saved-customer-views { margin: 12px 0 0 !important; }
+#trosa .saved-customer-views button {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  font-size: 12.5px !important;
+  color: var(--dl-ink-2) !important;
+  padding: 5px 10px !important;
+}
+#trosa .customer-card-workspace {
+  margin-top: 22px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+#trosa .customer-card-header {
+  display: flex !important;
+  align-items: center;
+  gap: 16px;
+  height: 38px;
+  padding: 0 14px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  background: transparent !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+#trosa .customer-select-cell { flex: 0 0 22px; display: flex; align-items: center; }
+#trosa .customer-index-caption { flex: 1 1 auto; min-width: 0; }
+#trosa .customer-index-th { flex: 0 0 auto; opacity: .8; }
+
+#trosa .customer-card-list { display: block; }
+#trosa .customer-row-card {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 15px 14px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: var(--v4-r-row) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: background .18s var(--dl-ease), box-shadow .18s var(--dl-ease);
+}
+#trosa .customer-row-card::before,
+#trosa .customer-row-card::after { content: none !important; }
+#trosa .customer-row-card:hover {
+  background: var(--dl-paper) !important;
+  border-bottom-color: transparent !important;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .customer-row-card.customer-row-priority { background: rgba(255, 253, 247, .6) !important; }
+#trosa .customer-company-cell {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+#trosa .customer-company-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+#trosa .customer-name-button {
+  border: 0 !important;
+  background: none !important;
+  padding: 0 !important;
+  text-align: left;
+  font-family: var(--dl-display) !important;
+  font-size: 17px !important;
+  font-weight: 500 !important;
+  letter-spacing: -.015em !important;
+  color: var(--dl-ink) !important;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#trosa .customer-name-button:hover { color: var(--dl-gold-ink) !important; }
+#trosa .customer-company-cell small { font-size: 12px !important; color: var(--dl-mut) !important; }
+#trosa .customer-updated { color: var(--dl-faint) !important; }
+#trosa .customer-contact-state {
+  font-size: 10.5px !important;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--dl-mut) !important;
+}
+#trosa .customer-contact-state.contacted { color: var(--dl-ok) !important; }
+#trosa .customer-contact-state.uncontacted { color: var(--dl-faint) !important; }
+#trosa .customer-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+#trosa .customer-tags > span {
+  font-size: 11px !important;
+  padding: 2px 7px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--dl-hair) !important;
+  background: transparent !important;
+  color: var(--dl-ink-2) !important;
+  white-space: nowrap;
+}
+#trosa .customer-row-card > [data-customer-column] {
+  flex: 0 0 auto;
+  font-size: 13px !important;
+  color: var(--dl-ink-2) !important;
+  white-space: nowrap;
+}
+#trosa .customer-row-card > [data-customer-column]::before { content: none !important; }
+#trosa .customer-row-card > [data-customer-column="country"] {
+  font-size: 11.5px !important;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--dl-mut) !important;
+  min-width: 26px;
+}
+#trosa .customer-recent { flex: 0 0 158px; }
+#trosa .customer-next { flex: 0 0 182px; white-space: normal !important; }
+#trosa .customer-next > small { display: block; font-size: 11.5px !important; color: var(--dl-mut) !important; }
+#trosa .customer-no-next { font-size: 12.5px; color: var(--dl-faint) !important; }
+#trosa .customer-website-action {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 10px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .customer-actions-cell { margin-left: auto; flex: 0 0 auto; }
+#trosa .customer-action-group {
+  display: flex;
+  gap: 4px;
+  opacity: .3;
+  transition: opacity .18s var(--dl-ease);
+}
+#trosa .customer-row-card:hover .customer-action-group,
+#trosa .customer-row-card:focus-within .customer-action-group { opacity: 1; }
+#trosa .customer-action {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .customer-action:hover {
+  border-color: var(--dl-hair) !important;
+  background: var(--dl-paper-2) !important;
+  color: var(--dl-ink) !important;
+}
+#trosa .customer-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 14px 0;
+  border-top: 1px solid var(--dl-hair);
+  color: var(--dl-mut);
+  font-size: 12.5px;
+}
+
+/* ============================================================================
+   7. OVERVIEW — the week report as an editorial page
+   ============================================================================ */
+
+#trosa .page-header.ov-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+#trosa .ov-header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+#trosa .ov-header-date {
+  font-size: 12.5px;
+  color: var(--dl-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+#trosa .ov-week-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 13px !important;
+  background: var(--dl-paper-2) !important;
+  box-shadow: none !important;
+}
+#trosa .ov-week-nav,
+#trosa .ov-week-current {
+  height: 32px !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-radius: 9px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 12.5px !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .ov-week-nav:hover,
+#trosa .ov-week-current:hover { background: var(--dl-paper) !important; color: var(--dl-ink) !important; }
+#trosa .ov-week-current { font-weight: 600; color: var(--dl-ink) !important; }
+#trosa .ov-body { margin-top: 34px; }
+#trosa .weekly-team-overview {
+  display: flex !important;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--dl-hair);
+  margin-bottom: 30px !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+#trosa .weekly-team-summary {
+  font-size: 10.5px !important;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-mut) !important;
+}
+#trosa .weekly-team-index { display: flex; gap: 4px; }
+#trosa .weekly-member-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px !important;
+  padding: 0 12px 0 6px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13px !important;
+}
+#trosa .weekly-member-filter i {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--dl-paper-3);
+  color: var(--dl-ink-2);
+}
+#trosa .weekly-member-filter:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .weekly-member-filter.is-active {
+  background: var(--dl-paper) !important;
+  border-color: var(--dl-hair) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .weekly-board {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--v4-gap);
+  align-items: start;
+}
+#trosa .weekly-person {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 18px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  padding: 24px !important;
+  min-width: 0;
+}
+#trosa .weekly-person-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .weekly-person-avatar {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--dl-ink);
+  color: var(--dl-paper);
+  font-size: 12px;
+  font-weight: 600;
+}
+#trosa .weekly-person-header h2 {
+  font-family: var(--dl-display) !important;
+  font-size: 20px !important;
+  font-weight: 500 !important;
+  letter-spacing: -.02em;
+  margin: 0 !important;
+}
+#trosa .weekly-work-card {
+  display: block !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 18px 0 0 !important;
+  margin-top: 18px !important;
+}
+#trosa .weekly-work-title h3 {
+  font-family: var(--dl-display) !important;
+  font-size: 17px !important;
+  font-weight: 500 !important;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+}
+#trosa .weekly-work-top { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+#trosa .weekly-work-top time { font-size: 12px; color: var(--dl-mut); font-variant-numeric: tabular-nums; }
+#trosa .weekly-customer-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#trosa .weekly-customer-meta span { font-size: 12px !important; color: var(--dl-mut) !important; }
+#trosa .weekly-entry-count { font-size: 12px !important; color: var(--dl-mut) !important; }
+
+/* ============================================================================
+   8. SETTINGS — a themed section rail beside hairline sections
+   ============================================================================ */
+
+#trosa .page-header .page-heading + .page-lede { margin-top: 0 !important; }
+#trosa .settings-layout {
+  display: grid;
+  grid-template-columns: 204px minmax(0, 1fr);
+  gap: var(--v4-gap);
+  align-items: start;
+}
+#trosa .settings-nav {
+  position: sticky;
+  top: calc(var(--v4-bar-top) + 56px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+#trosa .settings-nav-title {
+  padding: 0 10px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+#trosa .settings-nav-item {
+  display: block;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--dl-ink-2);
+}
+#trosa .settings-nav-item:hover { background: rgba(36, 34, 29, .05); color: var(--dl-ink); }
+#trosa .settings-nav-item.is-active {
+  background: var(--dl-paper);
+  color: var(--dl-ink);
+  font-weight: 600;
+  box-shadow: var(--v4-shadow-row);
+}
+#trosa .settings-sections { display: flex; flex-direction: column; gap: 38px; min-width: 0; }
+#trosa .settings-sections .card {
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 22px 0 0 !important;
+  margin: 0 !important;
+}
+#trosa .settings-sections .card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 0 16px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+#trosa .settings-sections .card-header h3 {
+  font-size: 17px !important;
+  font-weight: 600 !important;
+  letter-spacing: -.01em;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+}
+#trosa .settings-sections .card-header p {
+  margin: 6px 0 0 !important;
+  max-width: 58ch;
+  font-size: 12.5px;
+  color: var(--dl-mut);
+  line-height: 1.55;
+}
+#trosa .settings-sections .card-body { padding: 0 !important; }
+#trosa .settings-group {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+}
+#trosa .settings-group:last-child { border-bottom: 0; }
+#trosa .settings-group h4 {
+  font-size: 10.5px !important;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut) !important;
+  margin: 0 0 10px !important;
+}
+#trosa .settings-sections .settings-help { color: var(--dl-mut) !important; font-size: 12.5px !important; }
+#trosa .settings-sections .settings-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+  font-size: 13px;
+}
+#trosa .settings-sections .settings-row:last-child { border-bottom: 0; }
+#trosa .settings-sections .settings-row .label { color: var(--dl-mut); }
+#trosa .settings-sections .settings-row .value { color: var(--dl-ink); font-variant-numeric: tabular-nums; }
+#trosa .settings-sections .excel-recovery-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--dl-hair);
+  border-radius: 14px;
+  background: var(--dl-paper-2);
+}
+#trosa .settings-sections .excel-recovery-action strong { display: block; font-size: 14px; color: var(--dl-ink); }
+#trosa .settings-sections .excel-recovery-action span { display: block; margin-top: 4px; font-size: 12.5px; color: var(--dl-mut); }
+
+/* ============================================================================
+   9. RECORD PAGES — calendar, history, logs
+   ============================================================================ */
+
+#trosa .record-sheet {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 18px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  padding: 10px 26px !important;
+}
+#trosa .record-sheet .timeline { padding: 0 !important; }
+#trosa .calendar-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px 0 14px;
+  border-bottom: 1px solid var(--dl-hair);
+  margin-bottom: 4px;
+}
+#trosa .calendar-header h3 {
+  font-family: var(--dl-display) !important;
+  font-size: 22px !important;
+  font-weight: 500 !important;
+  letter-spacing: -.02em;
+  color: var(--dl-ink) !important;
+  margin: 0 !important;
+}
+#trosa .calendar-nav { display: flex; align-items: center; gap: 8px; }
+#trosa .calendar-detail {
+  margin-top: 26px;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--dl-hair);
+}
+#trosa .card {
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 16px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+}
+
+/* ============================================================================
+   10. STATES — error vs empty, focus, batch bar
+   ============================================================================ */
+
+#trosa .today-dashboard-error,
+#trosa .error-state,
+#trosa [data-state="error"] {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(164, 68, 58, .28) !important;
+  border-left: 3px solid var(--dl-danger) !important;
+  border-radius: 10px !important;
+  background: var(--dl-danger-soft) !important;
+  color: #7d3229 !important;
+  font-size: 13px;
+  line-height: 1.55;
+}
+#trosa .empty-state {
+  padding: 30px 8px !important;
+  text-align: left;
+  color: var(--dl-mut) !important;
+}
+#trosa .empty-state p { margin: 0 0 4px; font-size: 13.5px; line-height: 1.6; }
+#trosa .empty-state::before {
+  content: "";
+  display: block;
+  width: 28px;
+  height: 1px;
+  background: var(--dl-hair-strong, var(--dl-hair));
+  margin-bottom: 14px;
+}
+#trosa .batch-bar {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px 14px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 14px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+}
+#trosa .batch-bar.show { display: flex; }
+#trosa :focus-visible {
+  outline: 2px solid var(--dl-gold) !important;
+  outline-offset: 2px !important;
+  border-radius: 6px;
+}
+
+/* ============================================================================
+   13. AUTHORITY PASS
+   visual-v2.css and visual-v3.css declare structural properties
+   `!important` (1459 and 1127 occurrences). Importance beats source order,
+   so every property v4 owns is re-declared here with `!important` too.
+   Class names are deliberately doubled (`#trosa .a.a`) so v4 outranks v3's
+   `:is(#trosa, #trosa *) …` selectors without changing what matches.
+   This block must stay BEFORE section 11 so the responsive overrides, which
+   also use `!important`, still win at narrow widths.
+   ============================================================================ */
+
+/* ---- global chrome: floating search + command shelf ---- */
+#trosa .global-page-tools.global-page-tools {
+  position: fixed !important;
+  top: 18px !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  z-index: 40 !important;
+  pointer-events: none !important;
+}
+#trosa .global-page-search.global-page-search {
+  pointer-events: auto !important;
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 336px !important;
+  min-width: 0 !important;
+  max-width: calc(100vw - 400px) !important;
+  height: 46px !important;
+  margin: 0 0 0 288px !important;
+  padding: 0 16px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 23px !important;
+  background: var(--v4-glass) !important;
+  background-image: none !important;
+  box-shadow: var(--v4-shadow-float) !important;
+  backdrop-filter: blur(30px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
+}
+#trosa .global-page-search.global-page-search > button {
+  flex: 0 0 auto !important;
+  width: 22px !important;
+  height: 22px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+}
+#trosa .global-page-search.global-page-search input {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  font-size: 14px !important;
+}
+#trosa .page-header.page-header > .command-shelf.command-shelf.is-collapsible,
+#trosa .command-shelf.command-shelf {
+  position: fixed !important;
+  top: 18px !important;
+  right: 28px !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 5px !important;
+  transform: none !important;
+  overflow: visible !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  border: 1px solid rgba(255, 255, 255, .62) !important;
+  border-radius: 16px !important;
+  background: var(--v4-glass) !important;
+  background-image: none !important;
+  box-shadow: var(--v4-shadow-float) !important;
+  backdrop-filter: blur(30px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
+  z-index: 41 !important;
+}
+#trosa .command-shelf.command-shelf .command-icon {
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 38px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+}
+#trosa .command-shelf.command-shelf .command-primary {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  height: 38px !important;
+  min-width: 0 !important;
+  padding: 0 16px !important;
+  border: 1px solid var(--dl-ink) !important;
+  border-radius: 11px !important;
+  background: var(--dl-ink) !important;
+  background-image: none !important;
+  color: var(--dl-paper) !important;
+  box-shadow: none !important;
+}
+#trosa .command-shelf.command-shelf .command-primary .command-label {
+  display: inline !important;
+  color: inherit !important;
+}
+
+/* ---- sidebar ---- */
+#trosa #sidebar.sidebar {
+  display: flex !important;
+  flex-direction: column !important;
+  position: fixed !important;
+  top: 14px !important;
+  bottom: 14px !important;
+  left: 14px !important;
+  right: auto !important;
+  width: 216px !important;
+  min-width: 216px !important;
+  max-width: 216px !important;
+  height: auto !important;
+  max-height: calc(100svh - 28px) !important;
+  margin: 0 !important;
+  padding: 22px 14px 14px !important;
+  border: 1px solid rgba(255, 255, 255, .62) !important;
+  border-radius: 24px !important;
+  background: var(--v4-glass) !important;
+  background-image: none !important;
+  box-shadow: var(--v4-shadow-float) !important;
+  backdrop-filter: blur(30px) saturate(1.1) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.1) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  transform: none !important;
+  z-index: 320 !important;
+}
+#trosa #sidebar .sidebar-brand h1 { font-family: var(--dl-display) !important; font-size: 21px !important; }
+#trosa #sidebar .nav-item.nav-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 11px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  margin: 1px 0 !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+}
+#trosa #sidebar .nav-item.nav-item::before { content: none !important; display: none !important; }
+#trosa #sidebar .nav-item.nav-item.active {
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600 !important;
+}
+#trosa #sidebar .nav-item.nav-item .nav-icon { flex: 0 0 18px !important; width: 18px !important; height: 18px !important; }
+#trosa #sidebar .sidebar-tools-menu {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa #sidebar .account-section {
+  margin-top: auto !important;
+  padding-top: 12px !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+  background: none !important;
+}
+#trosa .main-content.main-content { margin-left: 244px !important; }
+
+/* ---- page frame + headings ---- */
+#trosa .page-section.page-section { min-height: 100vh !important; background: transparent !important; }
+#trosa .page-header.page-header,
+#trosa .page-body.page-body,
+#trosa .today-page-header.today-page-header,
+#trosa .today-page-body.today-page-body,
+#trosa .inbox-page-header.inbox-page-header,
+#trosa .inbox-page-body.inbox-page-body {
+  width: min(var(--dl-maxw), calc(100% - 88px)) !important;
+  max-width: min(var(--dl-maxw), calc(100% - 88px)) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+#trosa .page-header.page-header { padding: calc(18px + 74px) 0 0 !important; background: none !important; border: 0 !important; box-shadow: none !important; }
+#trosa .page-body.page-body { padding: 22px 0 104px !important; background: none !important; }
+#trosa .page-heading.page-heading,
+#trosa .today-masthead.today-masthead {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .page-header.page-header h2,
+#trosa .page-heading.page-heading h2,
+#trosa .today-masthead.today-masthead h2 {
+  margin: 8px 0 0 !important;
+  padding: 0 !important;
+  color: var(--dl-ink) !important;
+  font-family: var(--dl-display) !important;
+  font-size: 38px !important;
+  font-weight: 500 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -.02em !important;
+}
+#trosa .page-eyebrow.page-eyebrow {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: .18em !important;
+  text-transform: uppercase !important;
+}
+#trosa .page-lede.page-lede,
+#trosa .today-summary.today-summary {
+  margin: 14px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13.5px !important;
+  line-height: 1.5 !important;
+  max-width: 62ch !important;
+}
+#trosa .today-lede.today-lede strong { color: var(--dl-ink) !important; font-weight: 600 !important; }
+
+/* ---- today ---- */
+#trosa .today-workspace.today-workspace { display: block !important; }
+#trosa .today-fullscreen-shell.today-fullscreen-shell {
+  display: grid !important;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr) !important;
+  gap: 32px !important;
+  row-gap: 32px !important;
+  column-gap: 32px !important;
+  align-items: start !important;
+}
+#trosa .today-task-section.today-task-section { margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; box-shadow: none !important; }
+#trosa .today-section-header.today-section-header {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  margin: 0 0 10px !important;
+  padding: 0 0 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  background: none !important;
+}
+#trosa .today-section-header.today-section-header h3 { margin: 0 !important; color: var(--dl-ink) !important; font-size: 15px !important; font-weight: 600 !important; }
+#trosa .today-section-header.today-section-header .section-caption { margin: 3px 0 0 !important; color: var(--dl-mut) !important; font-size: 12px !important; }
+#trosa #todayReminders.today-task-list { display: block !important; margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; }
+#trosa .today-group-label.today-group-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  margin: 20px 0 4px !important;
+  padding: 0 10px !important;
+  border: 0 !important;
+  background: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: .2em !important;
+  text-transform: uppercase !important;
+}
+#trosa .today-group-label.today-group-label::after { content: "" !important; flex: 1 1 auto !important; height: 1px !important; background: var(--dl-hair-2) !important; }
+#trosa .today-group-label.today-group-label[data-due-group="overdue"] { color: var(--dl-danger) !important; }
+#trosa .today-task-row.today-task-row {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 0 14px !important;
+  row-gap: 0 !important;
+  column-gap: 14px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 13px 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: background var(--dl-dur-fast) var(--dl-ease) !important;
+}
+#trosa .today-task-row.today-task-row::before,
+#trosa .today-task-row.today-task-row::after { content: none !important; display: none !important; }
+#trosa .today-task-row.today-task-row.selected {
+  padding: 13px 10px !important;
+  border-bottom-color: transparent !important;
+  border-radius: 14px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .today-task-row.today-task-row:hover { background: rgba(255, 253, 247, .6) !important; }
+#trosa .today-task-index-wrap.today-task-index-wrap { align-self: center !important; margin: 0 !important; display: flex !important; align-items: center !important; gap: 6px !important; }
+#trosa .today-task-index.today-task-index { color: var(--dl-faint) !important; font-family: var(--dl-display) !important; font-size: 15px !important; font-weight: 500 !important; }
+#trosa .today-task-row.today-task-row.selected .today-task-index.today-task-index { color: var(--dl-gold) !important; }
+#trosa .today-task-copy.today-task-copy { min-width: 0 !important; display: block !important; }
+#trosa .today-task-copy.today-task-copy > strong {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  line-height: 1.35 !important;
+}
+#trosa .today-task-copy.today-task-copy > span {
+  display: block !important;
+  margin: 5px 0 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+  line-height: 1.4 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+#trosa .today-task-customer.today-task-customer {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  color: var(--dl-ink-2) !important;
+  font-family: var(--dl-display) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+#trosa .today-task-copy.today-task-copy > .today-task-customer { margin: 0 0 3px !important; }
+#trosa .today-task-date.today-task-date {
+  align-self: center !important;
+  justify-self: end !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  text-align: right !important;
+  white-space: nowrap !important;
+}
+#trosa .today-task-date.today-task-date.overdue { color: var(--dl-danger) !important; background: none !important; }
+#trosa .today-task-checkbox.today-task-checkbox { display: none !important; }
+#trosa .today-task-list.is-selecting.is-selecting .today-task-checkbox.today-task-checkbox { display: inline-block !important; }
+
+/* v2/v3 draw the overdue/selected accent with a higher-specificity rule than
+   the block above, so the row box is restated under the list id. */
+#trosa #todayReminders.today-task-list .today-task-row.today-task-row,
+#trosa #todayReminders.today-task-list .today-task-row.today-task-row.selected {
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+#trosa #todayReminders.today-task-list .today-task-row.today-task-row.selected {
+  border-bottom-color: transparent !important;
+  border-radius: 14px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+
+/* ---- today context: focus card + wide detail ---- */
+#trosa .today-context-stack.today-context-stack {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa #todayFocus.today-focus-card {
+  position: static !important;
+  margin: 0 !important;
+  padding: 24px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 20px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#trosa #todayFocus.today-focus-card::before { content: none !important; display: none !important; }
+#trosa #todayWideDetail.today-wide-detail {
+  display: grid !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 30px 32px 24px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 20px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#trosa .today-wide-facts.today-wide-facts {
+  display: block !important;
+  margin: 22px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .today-wide-facts.today-wide-facts > div {
+  display: grid !important;
+  grid-template-columns: 96px minmax(0, 1fr) !important;
+  align-items: baseline !important;
+  gap: 0 18px !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 13px 2px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .today-wide-facts.today-wide-facts > div:first-child { border-top: 1px solid var(--dl-hair-2) !important; }
+#trosa .today-wide-facts.today-wide-facts span {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .14em !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+#trosa .today-wide-facts.today-wide-facts strong {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  line-height: 1.45 !important;
+}
+#trosa .today-wide-facts.today-wide-facts strong.is-clay { color: var(--dl-gold-ink) !important; }
+#trosa .today-wide-compose.today-wide-compose {
+  margin: 22px 0 0 !important;
+  padding: 16px 0 0 !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .today-wide-detail.today-wide-detail .today-wide-compose-footer { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 16px !important; }
+
+/* ---- today: future band + collapsed week ---- */
+#trosa .today-schedule-grid.today-schedule-grid {
+  display: flex !important;
+  gap: 8px !important;
+  row-gap: 8px !important;
+  column-gap: 8px !important;
+  overflow-x: auto !important;
+  padding-bottom: 6px !important;
+}
+#trosa .today-schedule-day.today-schedule-day {
+  flex: 0 0 76px !important;
+  min-height: 88px !important;
+  margin: 0 !important;
+  padding: 12px 8px !important;
+  border: 1px solid var(--dl-hair-2) !important;
+  border-radius: 14px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-family: var(--dl-sans) !important;
+}
+#trosa .today-schedule-day.today-schedule-day.selected {
+  border-color: rgba(188, 144, 82, .5) !important;
+  border-radius: 14px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+}
+#trosa .today-more.today-more { margin-top: 44px !important; border-top: 1px solid var(--dl-hair) !important; }
+
+/* ---- inbox ---- */
+#trosa .inbox-triage.inbox-triage {
+  display: grid !important;
+  grid-template-columns: 218px minmax(0, 1fr) !important;
+  gap: 32px !important;
+  row-gap: 32px !important;
+  column-gap: 32px !important;
+  align-items: start !important;
+}
+#trosa #inboxFilters.inbox-filters {
+  position: sticky !important;
+  top: 96px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  gap: 1px !important;
+  row-gap: 1px !important;
+  column-gap: 1px !important;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible !important;
+}
+#trosa #inboxFilters.inbox-filters::before,
+#trosa #inboxFilters.inbox-filters.has-indicator::before { content: none !important; display: none !important; opacity: 0 !important; }
+#trosa #inboxFilters.inbox-filters .inbox-filter.inbox-filter {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13.5px !important;
+  text-align: left !important;
+}
+#trosa #inboxFilters.inbox-filters .inbox-filter.inbox-filter.active {
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600 !important;
+}
+#trosa #inboxList.inbox-list { display: block !important; min-width: 0 !important; }
+#trosa #inboxList.inbox-list > .inbox-workspace.inbox-workspace {
+  display: block !important;
+  border: 0 !important;
+  border-top: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: none !important;
+}
+
+/* ---- customers ---- */
+#trosa .customer-index-bar.customer-index-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  gap: 12px 18px !important;
+  margin: 0 0 4px !important;
+  padding: 0 0 14px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .customer-view-chips.customer-view-chips {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  row-gap: 4px !important;
+  column-gap: 4px !important;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+#trosa .customer-view-chips.customer-view-chips::before,
+#trosa .customer-view-chips.customer-view-chips.has-indicator::before { content: none !important; display: none !important; opacity: 0 !important; }
+#trosa #customerIndexCaption.customer-index-caption { margin: 0 0 0 2px !important; color: var(--dl-mut) !important; font-size: 10.5px !important; font-weight: 600 !important; letter-spacing: .2em !important; text-transform: uppercase !important; }
+#trosa #customerCardWorkspace.customer-card-workspace {
+  display: block !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+#trosa .customer-card-header.customer-card-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 16px 10px 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .16em !important;
+  text-transform: uppercase !important;
+}
+#trosa .customer-card-header.customer-card-header .customer-index-caption { flex: 1 1 auto !important; }
+#trosa .customer-card-header.customer-card-header .customer-index-th { white-space: nowrap !important; }
+#trosa .customer-row-card.customer-row-card {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px 18px !important;
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 14px 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+}
+#trosa .customer-row-card.customer-row-card::before,
+#trosa .customer-row-card.customer-row-card::after { content: none !important; display: none !important; }
+#trosa .customer-row-card.customer-row-card:hover { background: var(--dl-paper) !important; box-shadow: var(--v4-shadow-row) !important; }
+#trosa .customer-pagination.customer-pagination { display: flex !important; align-items: center !important; justify-content: space-between !important; margin: 18px 0 0 !important; padding-top: 14px !important; border-top: 1px solid var(--dl-hair-2) !important; color: var(--dl-mut) !important; font-size: 12.5px !important; }
+
+/* ---- overview / settings / record: kill the remaining card chrome ---- */
+#trosa .card.card,
+#trosa .card.card > .card-header.card-header {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .card.card > .card-header.card-header { padding: 0 0 14px !important; border-bottom: 1px solid var(--dl-hair) !important; background: none !important; }
+#trosa .settings-sections.settings-sections > .card.card { padding: 30px 0 0 !important; border-top: 1px solid var(--dl-hair) !important; }
+#trosa .record-sheet.record-sheet { display: block !important; margin: 0 !important; padding: 26px 28px !important; border: 1px solid var(--dl-hair) !important; border-radius: 18px !important; background: var(--dl-paper) !important; box-shadow: none !important; }
+#trosa .weekly-person.weekly-person { min-width: 0 !important; padding: 22px !important; border: 1px solid var(--dl-hair) !important; border-radius: 18px !important; background: var(--dl-paper) !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+#trosa .weekly-board.weekly-board { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important; align-items: start !important; gap: 22px !important; row-gap: 22px !important; column-gap: 22px !important; }
+#trosa .weekly-work-card.weekly-work-card { margin: 0 !important; padding: 18px 0 !important; border: 0 !important; border-top: 1px solid var(--dl-hair-2) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; overflow: visible !important; }
+#trosa .weekly-person.weekly-person .weekly-person-header.weekly-person-header { margin: 0 !important; padding: 0 0 12px !important; border: 0 !important; border-bottom: 1px solid var(--dl-hair-2) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }
+#trosa .weekly-person.weekly-person .weekly-person-empty.weekly-person-empty { margin: 16px 0 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; color: var(--dl-mut) !important; font-size: 13.5px !important; }
+#trosa .weekly-person.weekly-person .weekly-person-empty.weekly-person-empty strong { color: var(--dl-ink-2) !important; font-size: 14px !important; font-weight: 500 !important; }
+
+/* ---- command shelf icons: v2 hides them until hover via opacity/pointer-events ---- */
+#trosa .command-shelf.command-shelf .command-icon.command-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  min-width: 38px !important;
+  max-width: 38px !important;
+  height: 38px !important;
+  min-height: 38px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 11px !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-family: var(--dl-sans) !important;
+}
+#trosa .command-shelf.command-shelf .command-icon.command-icon:hover { background: rgba(36, 34, 29, .05) !important; }
+#trosa .command-shelf.command-shelf .command-icon.command-icon svg { display: block !important; opacity: 1 !important; width: 18px !important; height: 18px !important; }
+#trosa .command-shelf.command-shelf .command-icon.command-icon .ui-icon { display: inline-flex !important; opacity: 1 !important; }
+
+/* ---- customer index chips ---- */
+#trosa .customer-index-bar.customer-index-bar .customer-view-chip.customer-view-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 14px !important;
+  border: 1px solid transparent !important;
+  border-radius: 10px !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-family: var(--dl-sans) !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+}
+#trosa .customer-index-bar.customer-index-bar .customer-view-chip.customer-view-chip:hover { color: var(--dl-ink) !important; background: rgba(255, 253, 247, .7) !important; }
+#trosa .customer-index-bar.customer-index-bar .customer-view-chip.customer-view-chip.active {
+  border-color: var(--dl-hair) !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600 !important;
+}
+#trosa .customer-index-bar.customer-index-bar .customer-view-chip.customer-view-chip.ghost { color: var(--dl-mut) !important; background: transparent !important; box-shadow: none !important; }
+
+/* ---- customer index head + company cell ---- */
+#trosa #customerCardWorkspace.customer-card-workspace .customer-card-header.customer-card-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 16px 10px 10px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .16em !important;
+  text-transform: uppercase !important;
+}
+#trosa #customerCardWorkspace.customer-card-workspace .customer-card-header.customer-card-header .customer-index-caption.customer-index-caption { flex: 1 1 auto !important; color: var(--dl-mut) !important; font-size: 10.5px !important; font-weight: 600 !important; letter-spacing: .16em !important; text-transform: uppercase !important; }
+#trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card .customer-company-cell.customer-company-cell {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: baseline !important;
+  align-content: center !important;
+  justify-content: flex-start !important;
+  gap: 3px 10px !important;
+  row-gap: 3px !important;
+  column-gap: 10px !important;
+  flex: 1 1 330px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  text-align: left !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-company-cell.customer-company-cell .customer-company-heading.customer-company-heading {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  text-align: left !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-company-cell.customer-company-cell .customer-contact-state.customer-contact-state {
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .12em !important;
+  text-transform: uppercase !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-company-cell.customer-company-cell > small {
+  display: inline !important;
+  margin: 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-company-cell.customer-company-cell .customer-tags.customer-tags {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-company-cell.customer-company-cell .customer-tags.customer-tags > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 20px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 7px !important;
+  background: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-muted.customer-muted {
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+}
+#trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-recent.customer-recent { flex: 0 0 176px !important; overflow: hidden !important; white-space: nowrap !important; text-overflow: ellipsis !important; margin: 0 !important; color: var(--dl-ink-2) !important; font-size: 12.5px !important; text-align: left !important; }
+#trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-next.customer-next { flex: 0 0 186px !important; overflow: hidden !important; margin: 0 !important; text-align: left !important; }
+#trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-next.customer-next > small { display: block !important; margin: 2px 0 0 !important; color: var(--dl-mut) !important; font-size: 11.5px !important; }
+
+/* ---- inbox card internals ---- */
+#trosa #inboxList.inbox-list .inbox-question-why.inbox-question-why {
+  display: block !important;
+  margin: 5px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+  line-height: 1.45 !important;
+}
+#trosa #inboxList.inbox-list .inbox-question-side.inbox-question-side {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-end !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa #inboxList.inbox-list .inbox-question-evidence.inbox-question-evidence {
+  display: inline-block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+#trosa #inboxList.inbox-list .inbox-question-side.inbox-question-side time {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 11.5px !important;
+}
+
+#trosa .ov-body.ov-body,
+#trosa .ov-reports-wrap.ov-reports-wrap,
+#trosa #ovReports.ov-reports-wrap {
+  width: min(var(--dl-maxw), calc(100% - 88px)) !important;
+  max-width: min(var(--dl-maxw), calc(100% - 88px)) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+@media (min-width: 1181px) {
+  #trosa .weekly-board.weekly-board { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+}
+
+/* ============================================================================
+   14. CUSTOMER DETAIL WORKSPACE — the room the operator actually works in
+   Every hook already exists in index.html / app.js; only layout and surfaces
+   change. One paper workspace, one scrolling body, hairline-divided facts.
+   ============================================================================ */
+
+#trosa .modal.modal-customer-workspace,
+#trosa .modal.ov-customer-workspace {
+  display: flex !important;
+  flex-direction: column !important;
+  width: min(1180px, calc(100vw - 48px)) !important;
+  max-width: 1180px !important;
+  height: min(92vh, 900px) !important;
+  max-height: 92vh !important;
+  margin: auto !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 20px !important;
+  background: var(--dl-paper) !important;
+  background-image: none !important;
+  box-shadow: 0 32px 80px rgba(36, 34, 29, .22) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#trosa .modal.modal-customer-workspace .modal-header.customer-workspace-header,
+#trosa .modal.ov-customer-workspace .modal-header.ov-customer-header {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 24px !important;
+  margin: 0 !important;
+  padding: 26px 32px 20px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-header .workspace-kicker,
+#trosa .modal.ov-customer-workspace .ov-customer-header .workspace-kicker {
+  display: block !important;
+  margin: 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .2em !important;
+  text-transform: uppercase !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-header h3,
+#trosa .modal.ov-customer-workspace .ov-customer-header h3 {
+  margin: 8px 0 0 !important;
+  color: var(--dl-ink) !important;
+  font-family: var(--dl-display) !important;
+  font-size: 28px !important;
+  font-weight: 500 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -.02em !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-header .workspace-meta,
+#trosa .modal.ov-customer-workspace .ov-customer-header .workspace-meta {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px 16px !important;
+  margin: 10px 0 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+  line-height: 1.45 !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-header-actions.workspace-header-actions {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  margin: 0 !important;
+}
+#trosa .modal.modal-customer-workspace .modal-body.modal-body,
+#trosa .modal.ov-customer-workspace .modal-body.ov-customer-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  background: none !important;
+}
+
+/* --- fact band: hairline cells, never boxes --- */
+#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 20px 32px 22px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 4px 22px 4px 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * + * {
+  padding-left: 22px !important;
+  border-left: 1px solid var(--dl-hair-2) !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event .customer-fact-event-meta {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin: 0 0 6px !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .14em !important;
+  text-transform: uppercase !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event p {
+  margin: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event small {
+  display: block !important;
+  margin: 6px 0 0 !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 12.5px !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person strong { color: var(--dl-ink) !important; font-size: 14.5px !important; font-weight: 600 !important; }
+#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person span,
+#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person small { color: var(--dl-mut) !important; font-size: 12.5px !important; line-height: 1.4 !important; }
+#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person a { color: var(--dl-gold-ink) !important; font-size: 12.5px !important; text-decoration: none !important; }
+#trosa .modal.modal-customer-workspace .customer-fact-empty.customer-fact-empty { color: var(--dl-faint) !important; font-size: 13px !important; }
+#trosa .modal.modal-customer-workspace .customer-gap-item.customer-gap-item {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 26px !important;
+  padding: 0 10px !important;
+  margin: 3px 0 !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 8px !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 11.5px !important;
+}
+
+/* --- fact band internals: hairline sections, never nested boxes --- */
+#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary .customer-now-next-grid.customer-now-next-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace section.customer-fact-section.customer-fact-section {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 4px 0 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
+  padding-left: 22px !important;
+  border-left: 1px solid var(--dl-hair-2) !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin: 0 0 8px !important;
+  padding: 0 0 8px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .14em !important;
+  text-transform: uppercase !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events {
+  display: grid !important;
+  gap: 8px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events > * {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-now-waiting.customer-now-waiting {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 8px !important;
+  margin: 8px 0 0 !important;
+  padding: 8px 0 0 !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 12.5px !important;
+}
+#trosa .modal.modal-customer-workspace .customer-next-title.customer-next-title {
+  display: block !important;
+  margin: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  line-height: 1.45 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-next-date.customer-next-date {
+  display: block !important;
+  margin: 4px 0 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+}
+#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 4px 0 0 22px !important;
+  border: 0 !important;
+  border-left: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-info.customer-secondary-info > summary {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 0 0 8px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-hint.customer-secondary-hint {
+  color: var(--dl-mut) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
+  gap: 0 22px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid .customer-fact-section.customer-fact-section {
+  padding: 12px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+}
+
+/* --- tabs: hairline rail, gold underline for the active pane --- */
+#trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs {
+  display: flex !important;
+  gap: 4px !important;
+  margin: 0 !important;
+  padding: 0 32px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  overflow-x: auto !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn {
+  position: relative !important;
+  flex: 0 0 auto !important;
+  height: 46px !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn.active {
+  color: var(--dl-ink) !important;
+  font-weight: 600 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn.active::after {
+  content: "" !important;
+  position: absolute !important;
+  left: 14px !important;
+  right: 14px !important;
+  bottom: -1px !important;
+  height: 2px !important;
+  background: var(--dl-gold) !important;
+}
+
+/* --- body: reading column + execution rail --- */
+#trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 330px !important;
+  gap: 0 !important;
+  align-items: start !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 22px 32px 28px !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .tab-content.tab-content { display: none !important; }
+#trosa .modal.modal-customer-workspace .tab-content.tab-content.active { display: block !important; }
+#trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
+  position: sticky !important;
+  top: 0 !important;
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 22px 26px 28px !important;
+  border: 0 !important;
+  border-left: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: var(--dl-paper-2) !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel .workspace-kicker {
+  display: block !important;
+  margin: 0 0 12px !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .2em !important;
+  text-transform: uppercase !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-action-grid.workspace-action-grid {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  margin: 14px 0 0 !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-action-btn.workspace-action-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 42px !important;
+  padding: 0 16px !important;
+  border: 1px solid var(--dl-hair-strong) !important;
+  border-radius: 10px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+  color: var(--dl-ink) !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+}
+#trosa .modal.modal-customer-workspace #customerTaskActionButton.customer-task-action-button,
+#trosa .modal.modal-customer-workspace .workspace-action-btn.workspace-action-btn.primary {
+  border-color: var(--dl-ink) !important;
+  background: var(--dl-ink) !important;
+  color: var(--dl-paper) !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-task-quick-actions.workspace-task-quick-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 10px 14px !important;
+  margin: 12px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+/* --- timeline: hairline rows on a dot rail --- */
+#trosa .modal.modal-customer-workspace #outreachList.timeline,
+#trosa .modal.modal-customer-workspace #outreachList .timeline { display: block !important; overflow: visible !important; }
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item {
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  gap: 0 14px !important;
+  align-items: start !important;
+  margin: 0 !important;
+  padding: 16px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-dot.tl-dot {
+  position: static !important;
+  float: none !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: 9px !important;
+  height: 9px !important;
+  margin: 6px 0 0 4px !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: var(--dl-faint) !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item.email .tl-dot,
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item.inbound .tl-dot { background: var(--dl-gold) !important; }
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-card.tl-card {
+  display: block !important;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-card-hd.tl-card-hd {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  margin: 0 0 6px !important;
+  color: var(--dl-mut) !important;
+  font-size: 11.5px !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-type-badge.tl-type-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  height: 20px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 7px !important;
+  background: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: .02em !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-date.tl-date {
+  margin-left: auto !important;
+  color: var(--dl-mut) !important;
+  font-size: 11.5px !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-card-actions.tl-card-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  opacity: .22 !important;
+  transition: opacity var(--dl-dur-fast) var(--dl-ease) !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item:hover .tl-card-actions.tl-card-actions,
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item:focus-within .tl-card-actions.tl-card-actions { opacity: 1 !important; }
+#trosa .modal.modal-customer-workspace #outreachList .tl-card-title.tl-card-title {
+  margin: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  line-height: 1.6 !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-card-meta.tl-card-meta {
+  margin: 6px 0 0 !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-card-plan.tl-card-plan {
+  margin: 6px 0 0 !important;
+  color: var(--dl-gold-ink) !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-weekly-status.tl-weekly-status { display: inline-flex !important; align-items: center !important; gap: 4px !important; color: var(--dl-gold-ink) !important; font-size: 11px !important; }
+
+/* --- right-hand lists on the other tabs: quiet rows --- */
+#trosa .modal.modal-customer-workspace #contactsList.contacts-list > *,
+#trosa .modal.modal-customer-workspace #customerTasksList > *,
+#trosa .modal.modal-customer-workspace #customerFilesList > * {
+  margin: 0 !important;
+  padding: 14px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-panel-header.workspace-panel-header,
+#trosa .modal.modal-customer-workspace .customer-file-panel-header.customer-file-panel-header {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 0 0 4px !important;
+  padding: 0 0 12px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-panel-header.workspace-panel-header h4,
+#trosa .modal.modal-customer-workspace .customer-file-panel-header.customer-file-panel-header h4 {
+  margin: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+}
+
+/* --- manual entry: collapsed details, hairline tops --- */
+#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose {
+  margin: 22px 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose[open] { padding-bottom: 8px !important; }
+#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose > summary {
+  padding: 14px 0 !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-compose-body.workspace-compose-body { padding: 4px 0 12px !important; }
+#trosa .modal.modal-customer-workspace .workspace-compose-switch.workspace-compose-switch { display: flex !important; gap: 4px !important; margin: 0 0 14px !important; }
+#trosa .modal.modal-customer-workspace .workspace-compose-mode.workspace-compose-mode {
+  height: 32px !important;
+  padding: 0 12px !important;
+  border: 1px solid transparent !important;
+  border-radius: 9px !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+}
+#trosa .modal.modal-customer-workspace .workspace-compose-mode.workspace-compose-mode.active {
+  border-color: var(--dl-hair) !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--v4-shadow-row) !important;
+  color: var(--dl-ink) !important;
+  font-weight: 600 !important;
+}
+
+/* --- the dot must stay a real grid item: v2/v3 positioned it absolutely,
+       which pushed the card into the 18px track and squeezed the header --- */
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-dot.tl-dot {
+  position: static !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  display: block !important;
+  width: 9px !important;
+  height: 9px !important;
+  min-width: 0 !important;
+  margin: 6px 0 0 4px !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+}
+#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-card.tl-card {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+/* --- fact band: flatten every nested box into hairline rows --- */
+#trosa .modal.modal-customer-workspace #customerWorkspaceSummary .customer-fact-section.customer-fact-section {
+  display: block !important;
+  margin: 0 !important;
+  padding: 4px 0 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important;
+  gap: 0 22px !important;
+  align-items: start !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-section.customer-fact-next {
+  padding-left: 22px !important;
+  border-left: 1px solid var(--dl-hair-2) !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 0 0 8px !important;
+  color: var(--dl-mut) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: .16em !important;
+  text-transform: uppercase !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events > * {
+  display: block !important;
+  margin: 0 0 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-now-waiting.customer-now-waiting {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 10px !important;
+  margin: 6px 0 0 !important;
+  padding: 8px 0 0 !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+  background: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 12.5px !important;
+}
+#trosa .modal.modal-customer-workspace .customer-next-title.customer-next-title {
+  display: block !important;
+  margin: 0 !important;
+  color: var(--dl-ink) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  line-height: 1.5 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-next-date.customer-next-date {
+  display: block !important;
+  margin: 4px 0 0 !important;
+  color: var(--dl-mut) !important;
+  font-size: 12.5px !important;
+}
+#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 0 0 22px !important;
+  border: 0 !important;
+  border-left: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info > summary {
+  display: flex !important;
+  align-items: baseline !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 4px 0 10px !important;
+  color: var(--dl-ink-2) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-hint.customer-secondary-hint {
+  color: var(--dl-mut) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
+  gap: 0 22px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+}
+#trosa .modal.modal-customer-workspace .customer-secondary-grid .customer-fact-section.customer-fact-section {
+  padding: 12px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+}
+
+/* --- footer --- */
+#trosa .modal.modal-customer-workspace .modal-footer.modal-footer {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 16px 32px !important;
+  border: 0 !important;
+  border-top: 1px solid var(--dl-hair) !important;
+  border-radius: 0 !important;
+  background: var(--dl-paper) !important;
+  box-shadow: none !important;
+}
+
+/* ============================================================================
+   11. RESPONSIVE — 1280 / 960 / 720 / 390
+   ============================================================================ */
+
+@media (max-width: 1180px) {
+  #trosa .main-content.main-content { margin-left: 84px !important; }
+  #trosa .global-page-search.global-page-search { margin-left: 108px !important; width: 300px !important; max-width: calc(100vw - 480px) !important; }
+  #trosa #sidebar.sidebar { inset: 10px auto 10px 10px !important; width: 64px !important; min-width: 64px !important; max-width: 64px !important; padding: 18px 10px !important; }
+  #trosa #sidebar.sidebar .sidebar-brand .subtitle { display: none !important; }
+  #trosa #sidebar.sidebar .nav-item.nav-item > span:not(.nav-icon):not(.nav-count) { display: none !important; }
+  #trosa #sidebar.sidebar .sidebar-tools-menu .sidebar-tool-label { display: none !important; }
+}
+
+@media (max-width: 1024px) {
+  #trosa .today-fullscreen-shell.today-fullscreen-shell { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .inbox-triage.inbox-triage { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa #inboxFilters.inbox-filters {
+    position: static !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    padding: 0 0 14px !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--dl-hair) !important;
+    margin: 0 0 22px !important;
+  }
+  #trosa #inboxFilters.inbox-filters .inbox-filter.inbox-filter {
+    width: auto !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    justify-content: center !important;
+    padding: 0 12px !important;
+    border: 1px solid transparent !important;
+    border-radius: 10px !important;
+  }
+  #trosa #inboxFilters.inbox-filters .inbox-filter.inbox-filter.active { border-color: var(--dl-hair) !important; }
+  #trosa .settings-layout.settings-layout { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .settings-nav.settings-nav {
+    position: static !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    gap: 16px !important;
+    padding: 0 0 12px !important;
+    border: 0 !important;
+    border-bottom: 1px solid var(--dl-hair) !important;
+  }
+  #trosa .settings-nav.settings-nav .settings-nav-group { display: flex !important; align-items: center !important; gap: 4px !important; }
+  #trosa .settings-nav.settings-nav .settings-nav-title { display: none !important; }
+  #trosa .settings-nav.settings-nav .settings-nav-item { width: auto !important; white-space: nowrap !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-recent.customer-recent,
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-next.customer-next { flex: 1 1 140px !important; }
+}
+
+@media (max-width: 960px) {
+  #trosa .page-header.page-header { padding-top: calc(var(--v4-bar-top) + 58px) !important; }
+  #trosa .page-body.page-body { padding-bottom: 88px !important; }
+  /* A floating shelf on a phone would sit on top of the list it is meant to
+     serve, and the Inbox acceptance check forbids it. Back into the header. */
+  #trosa .page-header.page-header > .command-shelf.command-shelf.is-collapsible.command-shelf,
+  #trosa #page-inbox .command-shelf.command-shelf,
+  #trosa .command-shelf.command-shelf.command-shelf {
+    position: static !important;
+    display: inline-flex !important;
+    width: auto !important;
+    max-width: 100% !important;
+    align-self: flex-start !important;
+    top: auto !important;
+    bottom: auto !important;
+    right: auto !important;
+    left: auto !important;
+    margin: 12px 0 0 !important;
+  }
+  /* Nothing may widen the page on a phone. `clip` (not `hidden`) trims the
+     overflow without creating a scroll box, so the sticky Inbox rail keeps
+     working. */
+  #trosa .page-section.page-section { overflow-x: clip !important; }
+  #trosa .toast-container.toast-container { max-width: calc(100vw - 24px) !important; }
+  #trosa #toastContainer.toast-container > .toast,
+  #trosa .action-status.action-status,
+  #trosa .connection-status.connection-status { max-width: calc(100vw - 24px) !important; }
+  #trosa .command-shelf.command-shelf .command-primary .command-label { display: inline !important; }
+  #trosa .global-page-search.global-page-search { width: 100% !important; max-width: none !important; margin-left: 0 !important; }
+  #trosa .global-page-tools.global-page-tools { left: 64px !important; right: 16px !important; }
+  #trosa .page-header.page-header,
+  #trosa .page-body.page-body {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  #trosa .main-content.main-content > .page-section.page-section > .page-header.page-header,
+  #trosa .main-content.main-content > .page-section.page-section > .page-body.page-body,
+  #trosa #page-dashboard .page-header.page-header,
+  #trosa #page-dashboard .page-body.page-body,
+  #trosa #page-inbox .page-header.page-header,
+  #trosa #page-inbox .page-body.page-body,
+  #trosa #page-customers .page-header.page-header,
+  #trosa #page-customers .page-body.page-body,
+  #trosa #page-calendar .page-header.page-header,
+  #trosa #page-calendar .page-body.page-body,
+  #trosa #page-history .page-header.page-header,
+  #trosa #page-history .page-body.page-body,
+  #trosa #page-logs .page-header.page-header,
+  #trosa #page-logs .page-body.page-body,
+  #trosa #page-overview .page-header.page-header,
+  #trosa #page-overview .page-body.page-body,
+  #trosa #page-settings .page-header.page-header,
+  #trosa #page-settings .page-body.page-body {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  #trosa .weekly-board.weekly-board { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+@media (max-width: 720px) {
+  #trosa .main-content.main-content { margin-left: 0 !important; }
+  #trosa #sidebar.sidebar {
+    left: 10px !important;
+    top: 10px !important;
+    bottom: 10px !important;
+    width: 232px !important;
+    min-width: 232px !important;
+    max-width: 232px !important;
+    transform: translateX(calc(-100% - 24px)) !important;
+    transition: transform 240ms var(--dl-ease) !important;
+  }
+  #trosa #sidebar.sidebar.open { transform: none !important; }
+  #trosa #sidebar.sidebar .sidebar-brand .subtitle { display: block !important; }
+  #trosa #sidebar.sidebar .nav-item.nav-item > span:not(.nav-icon):not(.nav-count) { display: inline !important; }
+  #trosa #sidebar.sidebar .sidebar-tools-menu .sidebar-tool-label { display: inline !important; }
+  #trosa #sidebarToggle.sidebar-toggle { display: flex !important; }
+  /* Customer workspace: a full-bleed sheet with one reading column. */
+  #trosa #customerEditModal.modal-overlay .modal.modal-customer-workspace,
+  #trosa #ovDetailModal.modal-overlay .modal.ov-customer-workspace {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header,
+  #trosa .modal.ov-customer-workspace .ov-customer-header.ov-customer-header { padding: 18px 16px 14px !important; gap: 12px !important; }
+  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header h3,
+  #trosa .modal.ov-customer-workspace .ov-customer-header.ov-customer-header h3 { font-size: 22px !important; }
+  #trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs { padding: 0 12px !important; }
+  #trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main { padding: 16px 16px 22px !important; }
+  #trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
+    position: static !important;
+    padding: 16px 16px 22px !important;
+    border-left: 0 !important;
+    border-top: 1px solid var(--dl-hair) !important;
+  }
+  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 16px !important;
+  }
+  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
+    padding: 10px 0 !important;
+    border-left: 0 !important;
+    border-bottom: 1px solid var(--dl-hair-2) !important;
+  }
+  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
+    padding-left: 0 !important;
+    border-left: 0 !important;
+  }
+  #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info { padding-left: 0 !important; border-left: 0 !important; }
+  #trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .modal.modal-customer-workspace .modal-footer.modal-footer { padding: 12px 16px !important; }
+  #trosa .global-page-tools.global-page-tools { left: 12px !important; right: 12px !important; }
+  #trosa .page-header.page-header,
+  #trosa .page-body.page-body { width: 100% !important; max-width: 100% !important; padding-left: 16px !important; padding-right: 16px !important; }
+  #trosa .main-content.main-content > .page-section.page-section > .page-header.page-header,
+  #trosa .main-content.main-content > .page-section.page-section > .page-body.page-body,
+  #trosa #page-dashboard .page-header.page-header,
+  #trosa #page-dashboard .page-body.page-body,
+  #trosa #page-inbox .page-header.page-header,
+  #trosa #page-inbox .page-body.page-body,
+  #trosa #page-customers .page-header.page-header,
+  #trosa #page-customers .page-body.page-body,
+  #trosa #page-calendar .page-header.page-header,
+  #trosa #page-calendar .page-body.page-body,
+  #trosa #page-history .page-header.page-header,
+  #trosa #page-history .page-body.page-body,
+  #trosa #page-logs .page-header.page-header,
+  #trosa #page-logs .page-body.page-body,
+  #trosa #page-overview .page-header.page-header,
+  #trosa #page-overview .page-body.page-body,
+  #trosa #page-settings .page-header.page-header,
+  #trosa #page-settings .page-body.page-body {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  #trosa .command-shelf.command-shelf.command-shelf { right: 12px !important; }
+  #trosa #page-dashboard .page-header.today-page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    text-align: left !important;
+  }
+  #trosa #page-dashboard .page-header.today-page-header .today-masthead.today-masthead {
+    width: 100% !important;
+    max-width: 100% !important;
+    text-align: left !important;
+  }
+  #trosa #page-dashboard .today-masthead.today-masthead,
+  #trosa .today-masthead.today-masthead .today-eyebrow.today-eyebrow,
+  #trosa .today-masthead.today-masthead h2,
+  #trosa .today-masthead.today-masthead .today-summary.today-summary {
+    text-align: left !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > [data-customer-column="country"]::before { content: "国家" !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > [data-customer-column="field"]::before { content: "行业" !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > [data-customer-column="level"]::before { content: "等级" !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > [data-customer-column]::before {
+    display: inline-block !important;
+    margin-right: 6px !important;
+    color: var(--dl-faint) !important;
+    font-size: 10.5px !important;
+    font-weight: 600 !important;
+    letter-spacing: .1em !important;
+  }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-recent.customer-recent::before { content: "最近发生" !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-next.customer-next::before { content: "下一步" !important; }
+  #trosa .page-header.page-header { padding-top: 74px !important; }
+  #trosa .page-header.page-header h2,
+  #trosa .page-heading.page-heading h2 { font-size: 30px !important; }
+  #trosa .today-fullscreen-shell.today-fullscreen-shell { gap: 26px !important; }
+  #trosa #todayWideDetail.today-wide-detail { padding: 22px 18px !important; border-radius: 16px !important; }
+  #trosa .today-wide-facts.today-wide-facts > div { grid-template-columns: minmax(0, 1fr) !important; gap: 4px !important; }
+  #trosa #todayReminders.today-task-list .today-task-row.today-task-row { grid-template-columns: 28px minmax(0, 1fr) auto !important; padding: 12px 10px !important; }
+  #trosa .inbox-group-hint.inbox-group-hint { display: none !important; }
+  #trosa #inboxList.inbox-list .inbox-question-open.inbox-question-open { grid-template-columns: minmax(0, 1fr) !important; padding: 14px 10px !important; }
+  #trosa #inboxList.inbox-list .inbox-question-side.inbox-question-side { flex-direction: row !important; align-items: center !important; gap: 12px !important; }
+  #trosa .inbox-question-go.inbox-question-go { display: none !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card { gap: 4px 12px !important; padding: 14px 10px !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card .customer-company-cell.customer-company-cell { flex: 1 1 100% !important; }
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-recent.customer-recent,
+  #trosa #customerTableBody.customer-card-list .customer-row-card.customer-row-card > .customer-next.customer-next { flex: 1 1 100% !important; }
+  #trosa .customer-action-group.customer-action-group { opacity: 1 !important; }
+  #trosa .customer-pagination.customer-pagination { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
+  #trosa .log-item.log-item { grid-template-columns: minmax(0, 1fr) !important; gap: 2px !important; }
+  #trosa .today-schedule-day.today-schedule-day { flex: 0 0 64px !important; }
+
+  /* customer workspace on a phone: one column, no side rail */
+  #trosa .modal.modal-customer-workspace.modal-customer-workspace {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+  }
+  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header { padding: 18px 16px 14px !important; }
+  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header h3 { font-size: 23px !important; }
+  #trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs { padding: 0 10px !important; }
+  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding: 16px !important;
+  }
+  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
+    padding: 10px 0 !important;
+    border-left: 0 !important;
+    border-bottom: 1px solid var(--dl-hair-2) !important;
+  }
+  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid,
+  #trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
+    padding-left: 0 !important;
+    border-left: 0 !important;
+  }
+  #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
+    padding-left: 0 !important;
+    padding-top: 12px !important;
+    border-left: 0 !important;
+  }
+  #trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  #trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main { padding: 18px 16px 22px !important; }
+  #trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
+    position: static !important;
+    padding: 20px 16px 24px !important;
+    border-left: 0 !important;
+    border-top: 1px solid var(--dl-hair) !important;
+  }
+  #trosa .modal.modal-customer-workspace .modal-footer.modal-footer { padding: 14px 16px !important; }
+}
+
+/* ============================================================================
+   12. MOTION — quiet, and off when the device or the user asks
+   ============================================================================ */
+
+html.motion-lite #trosa *,
+html.motion-lite #trosa *::before,
+html.motion-lite #trosa *::after {
+  transition-duration: .01ms !important;
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  #trosa *,
+  #trosa *::before,
+  #trosa *::after {
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* The decorative light pool must not track the pointer (UI system §23). */
+html.motion-lite #trosa .daylight-room__pool { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  #trosa .daylight-room__pool { display: none !important; }
+}

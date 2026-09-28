@@ -1012,6 +1012,7 @@ function switchPage(page) {
   setTimeout(function() {
     if (nextPage === 'inbox') updateFilterIndicator(document.getElementById('inboxFilters'));
     else if (nextPage === 'customers') updateFilterIndicator(document.querySelector('.customer-view-chips'));
+    else if (nextPage === 'settings') initSettingsSectionNav();
   }, 80);
 }
 
@@ -1062,6 +1063,49 @@ document.addEventListener('keydown', function(e) {
   e.preventDefault();
   item.click();
 });
+
+// ========== SETTINGS SECTION NAVIGATION ==========
+// Settings is long enough that it needs an index. The nav is a plain anchor
+// list: it only moves the viewport and marks the section you are reading, so it
+// can never change a stored preference or submit a form on its own.
+var _settingsSectionScrollBound = false;
+
+function setActiveSettingsSection(id) {
+  document.querySelectorAll('#page-settings .settings-nav-item').forEach(function(button) {
+    var isActive = button.dataset.settingsTarget === id;
+    button.classList.toggle('is-active', isActive);
+    button.setAttribute('aria-current', isActive ? 'true' : 'false');
+  });
+}
+
+function scrollToSettingsSection(id) {
+  var target = document.getElementById(id);
+  if (!target) return;
+  setActiveSettingsSection(id);
+  var reduceMotion = typeof isMotionLite === 'function' && isMotionLite();
+  if (target.scrollIntoView) target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+
+function initSettingsSectionNav() {
+  var sections = Array.prototype.slice.call(document.querySelectorAll('#page-settings [data-settings-section]'));
+  if (!sections.length) return;
+  var pickActive = function() {
+    var offset = 140;
+    var current = sections[0].id;
+    sections.forEach(function(section) {
+      if (section.getBoundingClientRect().top - offset <= 0) current = section.id;
+    });
+    setActiveSettingsSection(current);
+  };
+  pickActive();
+  if (_settingsSectionScrollBound) return;
+  _settingsSectionScrollBound = true;
+  window.addEventListener('scroll', function() {
+    if (currentPage !== 'settings') return;
+    if (window.requestAnimationFrame) window.requestAnimationFrame(pickActive);
+    else pickActive();
+  }, { passive: true });
+}
 
 function openGlobalSearch() {
   var input = document.getElementById('globalPageSearch');
@@ -1731,8 +1775,40 @@ function renderInbox(counts) {
   list.innerHTML = questions.map(renderInboxQuestionHtml).join('');
 }
 
+// One shared vocabulary for Inbox categories. Several distinct contracts share a
+// single human label here (for example fact_request only ever means "supply the
+// missing fact"), so the same sentence never appears next to itself with two
+// different counts.
+var INBOX_QUESTION_KIND_LABELS = {
+  identity: '待归属',
+  identity_review: '确认主体',
+  reply: '客户回复',
+  review_interaction: '整理沟通',
+  match_customer: '确认归属',
+  fact_request: '补充资料',
+  investigation_request: '提交调查',
+  sela_request: 'Sela 补充 / 判断',
+  agent_request: 'Agent 请求',
+  exclusion_review: '排除身份',
+  approval: '待批准',
+};
+// A short sentence that says what the group is for, so the list reads as a
+// judgement queue instead of an undifferentiated notification stream.
+var INBOX_QUESTION_KIND_HINTS = {
+  fact_request: '缺少作出判断所需的事实，需要你补充或确认',
+  review_interaction: '从邮件或 WhatsApp 捕获的沟通，需要整理成客户记录',
+  match_customer: '无法唯一确定归属，需要你选择对应客户',
+  identity_review: '仅凭名称或来源无法安全判定是否为同一主体',
+  identity: '需要确认这条线索归属于哪个客户',
+  reply: '客户已经回复，需要整理并安排下一步',
+  sela_request: 'Sela 的补充或判断结果需要你确认',
+  agent_request: 'Agent 提出的原子请求，需要你确认后才会执行',
+  exclusion_review: '需要确认是否排除这个身份',
+  approval: '需要你批准后才会执行',
+  investigation_request: '需要提交调查才能继续判断',
+};
 function inboxQuestionFilter(kind) {
-  return ({ identity: '确认归属', reply: '处理回复', fact_request: '补充资料', investigation_request: '提交调查', sela_request: 'Sela 补充 / 判断', exclusion_review: '排除身份', approval: '批准动作', identity_review: '确认主体' })[kind] || '补充资料';
+  return INBOX_QUESTION_KIND_LABELS[kind] || INBOX_QUESTION_FILTER_LABELS[kind] || '其他待处理';
 }
 function renderInboxQuestionWorkspace(counts) {
   inboxState.questions = (inboxQuestions || []).map(function(q) { if (!q.id) q.id = String(q.primary_item_id || q.key); return q; }); inboxState.counts = counts || inboxState.counts;
@@ -1745,15 +1821,43 @@ function renderInboxQuestionWorkspace(counts) {
   var actionableQuestions = inboxState.questions.filter(function(q) { return !isRetiredInboxSendApproval(q); });
   var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = activeCount || '';
   if (overview) overview.innerHTML = '<strong>' + activeCount + '</strong><span>项待处理</span>';
-  var kinds = ['all'].concat(Array.from(new Set(actionableQuestions.map(function(q) { return q.kind; }))));
+  // Order the categories by the shared contract order first, then any kind the
+  // server adds later, so the rail never reorders itself between refreshes.
+  var kinds = ['all'].concat(INBOX_QUESTION_FILTER_ORDER.filter(function(kind) {
+    return kind !== 'all' && actionableQuestions.some(function(q) { return q.kind === kind; });
+  }), actionableQuestions.map(function(q) { return q.kind; }).filter(function(kind, index, all) {
+    return INBOX_QUESTION_FILTER_ORDER.indexOf(kind) === -1 && all.indexOf(kind) === index;
+  }));
   var filters = document.getElementById('inboxFilters');
-  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? activeCount : actionableQuestions.filter(function(q) { return q.kind === kind; }).length; return '<button class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + kind + '" onclick="setInboxQuestionFilter(\'' + kind + '\')">' + (kind === 'all' ? '全部' : inboxQuestionFilter(kind)) + (kind === 'all' ? '' : '<span class="inbox-filter-count">' + n + '</span>') + '</button>'; }).join('');
+  if (filters) filters.innerHTML = kinds.map(function(kind) { var n = kind === 'all' ? activeCount : actionableQuestions.filter(function(q) { return q.kind === kind; }).length; return '<button type="button" class="inbox-filter' + (inboxState.activeFilter === kind ? ' active' : '') + '" data-inbox-filter="' + escapeHtml(kind) + '" aria-pressed="' + (inboxState.activeFilter === kind ? 'true' : 'false') + '" onclick="setInboxQuestionFilter(\'' + escapeHtml(kind) + '\')"><span class="inbox-filter-label">' + (kind === 'all' ? '全部待处理' : inboxQuestionFilter(kind)) + '</span>' + (kind === 'all' ? '' : '<span class="inbox-filter-count">' + n + '</span>') + '</button>'; }).join('');
+  updateFilterIndicator(filters);
   var list = document.getElementById('inboxList'); if (!list) return;
   var actionable = actionableQuestions.filter(function(q) { return inboxState.activeFilter === 'all' || q.kind === inboxState.activeFilter; });
   var retired = inboxState.activeFilter === 'all' ? inboxState.questions.filter(isRetiredInboxSendApproval) : [];
   if (!actionable.length && !retired.length) { list.innerHTML = '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>' + (inboxState.activeFilter === 'all' ? '新回复或待确认归属会出现在这里。' : '当前分类没有待处理事项。') + '</span></div>'; return; }
+  // Group the queue by judgement category. Each block carries its own heading,
+  // count and one-line explanation so the page reads as a triage desk rather
+  // than a flat notification feed.
+  var groupOrder = INBOX_QUESTION_FILTER_ORDER.concat(actionable.map(function(q) { return q.kind; }));
+  var seenKinds = {};
+  var groups = [];
+  groupOrder.forEach(function(kind) {
+    if (kind === 'all' || seenKinds[kind]) return;
+    var items = actionable.filter(function(q) { return q.kind === kind; });
+    if (!items.length) return;
+    seenKinds[kind] = true;
+    groups.push({ kind: kind, items: items });
+  });
   var activeHtml = actionable.length
-    ? '<div class="inbox-workspace">' + actionable.map(renderInboxQuestionCard).join('') + '</div>'
+    ? '<div class="inbox-workspace">' + groups.map(function(group) {
+        return '<section class="inbox-group" data-inbox-kind="' + escapeHtml(group.kind) + '">' +
+          '<header class="inbox-group-head"><span class="inbox-group-label">' + escapeHtml(inboxQuestionFilter(group.kind)) + '</span>' +
+          '<span class="inbox-group-count">' + group.items.length + '</span>' +
+          (INBOX_QUESTION_KIND_HINTS[group.kind] ? '<span class="inbox-group-hint">' + escapeHtml(INBOX_QUESTION_KIND_HINTS[group.kind]) + '</span>' : '') +
+          '</header>' +
+          group.items.map(renderInboxQuestionCard).join('') +
+          '</section>';
+      }).join('') + '</div>'
     : '<div class="inbox-empty"><strong>当前没有需要你判断的问题</strong><span>以下旧请求只需关闭，不会触发发送或 Sela。</span></div>';
   var retiredHtml = retired.length
     ? '<section class="inbox-retired-requests"><div class="inbox-retired-heading"><strong>已停用的旧发送请求</strong><span>' + retired.length + ' 条 · 关闭后不会发送邮件或启动 Sela</span></div><div class="inbox-workspace">' + retired.map(renderInboxQuestionCard).join('') + '</div></section>'
@@ -1793,7 +1897,21 @@ function renderInboxQuestionCard(q) {
   var subjectLine = subjectData.company
     ? '<div class="inbox-question-subject"><span>' + escapeHtml(subjectLabel || '关联主体') + '</span><strong>' + escapeHtml(subjectData.company) + '</strong>' + (q.kind === 'sela_request' && !subjectData.customer_id ? '<small>尚未关联 Trosa 客户</small>' : '') + '</div>'
     : '';
-  if (!open) return '<article class="inbox-question-row"><button class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')"><strong>' + escapeHtml(q.headline || q.question) + '</strong><span>' + (subjectLabel ? escapeHtml(subjectLabel) + ' · ' : '') + escapeHtml(subject) + '</span><small>' + (q.evidence_count || 0) + ' 条证据 · ' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</small></button></article>';
+  if (!open) {
+    // A closed row has to answer three questions at a glance: what kind of
+    // judgement this is, who it is about, and where it came from.
+    var closedKind = inboxQuestionFilter(q.kind);
+    var closedSource = inboxQuestionTypeLabel(q);
+    return '<article class="inbox-question-row" data-inbox-kind="' + escapeHtml(q.kind) + '">' +
+      '<button type="button" class="inbox-question-open" onclick="openInboxQuestion(\'' + escapeHtml(q.id) + '\')">' +
+        '<span class="inbox-question-copy">' +
+          '<span class="inbox-question-tags"><span class="inbox-source-chip" data-source="' + escapeHtml(closedSource) + '">' + escapeHtml(closedSource) + '</span><span class="inbox-kind-chip">' + escapeHtml(closedKind) + '</span></span>' +
+          '<strong>' + escapeHtml(q.headline || q.question) + '</strong>' +
+          '<span class="inbox-question-subjectline">' + (subjectLabel ? escapeHtml(subjectLabel) + ' · ' : '') + escapeHtml(subject) + '</span>' +
+        '</span>' +
+        '<span class="inbox-question-side"><span class="inbox-question-evidence">' + (q.evidence_count || 0) + ' 条证据</span><time>' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</time><span class="inbox-question-go" aria-hidden="true">' + uiIcon('right') + '</span></span>' +
+      '</button></article>';
+  }
   var evidence = (q.evidence || []).map(function(e, i) { return inboxEvidenceHtml(e, i); }).join('');
   var draft = inboxState.draftResponses[q.id] || {}, upload = inboxState.uploadStates[q.id] || {};
   var contactSave = q.sela_contact_save || null;
@@ -3235,6 +3353,7 @@ function renderTodayTasks(reminders) {
     render: function(item, index) { return buildTodayTaskRow(item, index, Number(item.id) === selectedId); }
   });
   initTodayTaskSorting();
+  applyTodayGroups();
   renderTodayFocus(reminders.filter(function(item) { return Number(item.id) === selectedId; })[0] || reminders[0]);
 }
 
@@ -3246,7 +3365,7 @@ function buildTodayTaskRow(r, index, selected) {
     var context = escapeHtml(r.why_today || '') + (r.last_activity ? (r.why_today ? ' · 最近：' : '最近：') + renderRichText(r.last_activity) : '');
     var customerId = Number(r.customer_id);
     var isMultiSelected = selectedTodayCustomers.has(customerId);
-    return '<div class="today-task-row' + (selected ? ' selected' : '') + (isMultiSelected ? ' is-multi-selected' : '') + '" data-reminder-id="' + r.id + '" data-customer-id="' + customerId + '" role="button" tabindex="0" onclick="selectTodayReminder(' + r.id + ')" onkeydown="if(event.target===this&&(event.key===\'Enter\'||event.key===\' \')){event.preventDefault();selectTodayReminder(' + r.id + ')}">' +
+    return '<div class="today-task-row' + (selected ? ' selected' : '') + (isMultiSelected ? ' is-multi-selected' : '') + '" data-reminder-id="' + r.id + '" data-customer-id="' + customerId + '" data-remind-date="' + escapeHtml(String(r.remind_date || '').substring(0, 10)) + '" data-due-group="' + todayDueGroup(r.remind_date) + '" role="button" tabindex="0" onclick="selectTodayReminder(' + r.id + ')" onkeydown="if(event.target===this&&(event.key===\'Enter\'||event.key===\' \')){event.preventDefault();selectTodayReminder(' + r.id + ')}">' +
       '<span class="today-task-index-wrap">' +
         '<span class="today-task-index">' + (index + 1) + '</span>' +
         '<input type="checkbox" class="table-checkbox today-task-checkbox" data-id="' + customerId + '" onclick="event.stopPropagation()" onchange="updateTodaySelection()"' + (isMultiSelected ? ' checked' : '') + ' aria-label="选择 ' + escapeHtml(name) + '">' +
@@ -3266,6 +3385,41 @@ function refreshTodayTaskIndexes() {
   document.querySelectorAll('#todayReminders .today-task-row').forEach(function(row, index) {
     var indexEl = row.querySelector('.today-task-index');
     if (indexEl) indexEl.textContent = index + 1;
+  });
+  applyTodayGroups();
+}
+
+// The agenda is one continuous list, but the day it belongs to is the first
+// thing a person needs to read. Group headings are inserted as siblings of the
+// rows and rebuilt after any render or reorder, so they can never go stale.
+function todayDueGroup(remindDate) {
+  var date = String(remindDate || '').substring(0, 10);
+  if (!date) return 'unscheduled';
+  var today = localDateString();
+  if (date < today) return 'overdue';
+  if (date === today) return 'today';
+  return 'later';
+}
+
+var TODAY_DUE_GROUP_LABELS = { overdue: '已逾期', today: '今天', later: '稍后', unscheduled: '未安排日期' };
+
+function applyTodayGroups() {
+  var list = document.getElementById('todayReminders');
+  if (!list) return;
+  Array.prototype.slice.call(list.querySelectorAll('.today-group-label')).forEach(function(node) { node.remove(); });
+  var rows = Array.prototype.slice.call(list.querySelectorAll('.today-task-row'));
+  var lastGroup = null;
+  rows.forEach(function(row, index) {
+    var group = row.dataset.dueGroup || todayDueGroup(row.dataset.remindDate);
+    row.dataset.dueGroup = group;
+    if (group === lastGroup) return;
+    lastGroup = group;
+    var label = document.createElement('div');
+    label.className = 'today-group-label';
+    label.dataset.dueGroup = group;
+    label.setAttribute('role', 'presentation');
+    label.innerHTML = '<span>' + (TODAY_DUE_GROUP_LABELS[group] || '') + '</span>';
+    list.insertBefore(label, row);
   });
 }
 
