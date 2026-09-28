@@ -137,6 +137,38 @@ class SelaReadSurfaceTest(unittest.TestCase):
         self.assertEqual(outbound.status_code, 200)
         self.assertEqual([row['customer_id'] for row in outbound.get_json()], [stilform])
 
+    def test_flow_customer_matches_the_ui_customer_side_definition(self):
+        # A real customer participation can be a two-way row or a reply-typed
+        # row whose raw direction is not 'inbound'.  The UI's "has contact"
+        # signal counts both, so the external feed must too.
+        two_way = self._create_customer('SK Crafts')
+        reply_typed = self._create_customer('Horoof Design')
+        us_only = self._create_customer('Us Only')
+        self._record(two_way, direction='two_way', content='Both sides talked',
+                     follow_date='2026-09-20')
+        self._record(reply_typed, direction='unknown', content='Customer replied',
+                     follow_date='2026-09-21', activity_type='customer_reply')
+        self._record(us_only, direction='outbound', content='We wrote',
+                     follow_date='2026-09-22')
+
+        # The raw column filter alone would silently miss these real replies.
+        raw_inbound = self.service.get('/api/follow-history?direction=inbound', headers=self.service_headers)
+        self.assertEqual(raw_inbound.status_code, 200)
+        self.assertEqual({row['customer_id'] for row in raw_inbound.get_json()}, set())
+
+        customer_side = self.service.get('/api/follow-history?flow=customer', headers=self.service_headers)
+        self.assertEqual(customer_side.status_code, 200)
+        self.assertEqual({row['customer_id'] for row in customer_side.get_json()}, {two_way, reply_typed})
+
+        our_side = self.service.get('/api/follow-history?flow=us', headers=self.service_headers)
+        self.assertEqual(our_side.status_code, 200)
+        self.assertEqual({row['customer_id'] for row in our_side.get_json()}, {us_only})
+
+        self.assertEqual(
+            self.service.get('/api/follow-history?flow=sideways', headers=self.service_headers).status_code,
+            400,
+        )
+
     def test_since_and_customer_filters_and_validation(self):
         customer_id = self._create_customer('Acrimet')
         self._record(customer_id, direction='inbound', content='Old reply', follow_date='2026-08-01')

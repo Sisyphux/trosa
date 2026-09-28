@@ -15979,7 +15979,13 @@ def get_all_follow_history():
     external read-only consumer may narrow the feed to the one fact it needs
     without scanning every customer or guessing from other tables:
 
-    * ``direction=inbound``  -> real customer replies across all customers;
+    * ``flow=customer``      -> real customer participation (inbound/two-way
+                               contact or a recorded customer reply).  This is
+                               the same definition the UI's "has contact" signal
+                               uses, so it never misses a two-way or reply-typed
+                               row the way ``direction=inbound`` alone would;
+    * ``flow=us``            -> messages we sent;
+    * ``direction=inbound``  -> raw ``direction`` column filter (exact match);
     * ``direction=outbound`` -> messages we sent;
     * ``since=YYYY-MM-DD``   -> only facts on/after that day;
     * ``customer_id``        -> one customer;
@@ -15991,6 +15997,9 @@ def get_all_follow_history():
     Sela-managed leads and is NOT a complete reply source.
     """
     kind = 'communication'
+    flow = (request.args.get('flow') or '').strip().lower() or None
+    if flow is not None and flow not in ('customer', 'us'):
+        return jsonify({'error': 'flow 仅支持 customer 或 us'}), 400
     direction = (request.args.get('direction') or '').strip().lower() or None
     if direction is not None and direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
         return jsonify({'error': 'direction 仅支持 inbound、outbound、two_way 或 unknown'}), 400
@@ -16018,7 +16027,7 @@ def get_all_follow_history():
         # interaction query per customer, which grew with the customer base.
         items = _recent_interactions(
             conn, kind=kind, limit=limit, offset=offset,
-            direction=direction, since=since, customer_ids=customer_ids,
+            direction=direction, since=since, customer_ids=customer_ids, flow=flow,
         )
         history = []
         if items:
@@ -16036,6 +16045,10 @@ def get_all_follow_history():
         c = conn.cursor()
         conditions = ['(f.is_deleted = 0 OR f.is_deleted IS NULL)']
         params = []
+        if flow == 'customer':
+            conditions.append("(f.direction IN ('inbound', 'two_way') OR f.activity_type = 'customer_reply')")
+        elif flow == 'us':
+            conditions.append("f.direction = 'outbound'")
         if direction is not None:
             conditions.append('f.direction = ?')
             params.append(direction)

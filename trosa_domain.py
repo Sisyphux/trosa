@@ -24,6 +24,16 @@ from typing import Any, Iterable
 from db import postgres_mode
 
 
+# Canonical business fact: "the customer really participated in this
+# communication."  The UI relationship signals (``customer_facts.has_contact``),
+# the interaction lifecycle rules and the external read surface must all agree
+# on this one definition; keep them in sync here rather than re-deriving it.
+CUSTOMER_SIDE_PREDICATE = (
+    "(direction IN ('inbound', 'two_way') OR activity_type = 'customer_reply')"
+)
+OUR_SIDE_PREDICATE = "direction = 'outbound'"
+
+
 def _ids(customer_ids: Iterable[int]) -> list[int]:
     return list(dict.fromkeys(int(value) for value in customer_ids if value is not None))
 
@@ -1660,7 +1670,7 @@ def customer_interactions(
 def recent_interactions(
     conn: Any, *, kind: str | None = None, limit: int | None = None,
     offset: int = 0, customer_ids=None, direction: str | None = None,
-    since: str | None = None,
+    since: str | None = None, flow: str | None = None,
 ) -> list[dict]:
     """Return interactions ordered by newest first, optionally for a set of customers.
 
@@ -1668,12 +1678,16 @@ def recent_interactions(
     and does not load every row when a limit is supplied, so global history and
     search surfaces no longer issue one query per customer.
 
-    ``direction`` and ``since`` let an external reader ask for exactly one
-    business fact without scanning every customer, e.g. the real customer
-    replies recorded in the last week (``direction='inbound'``).  They filter
-    the same canonical interaction projection the UI renders, so the result
-    cannot drift from the Customer timeline.
+    ``direction`` filters the raw ``direction`` column.  ``flow`` filters by
+    business side instead: ``flow='customer'`` uses
+    :data:`CUSTOMER_SIDE_PREDICATE` (inbound/two-way contact or a recorded
+    customer reply) and ``flow='us'`` uses :data:`OUR_SIDE_PREDICATE`.  ``flow``
+    is the safe way to ask "did this customer really reply" without missing
+    two-way or reply-typed rows, and it is the same definition the UI uses.
+    ``since`` bounds the result to ``occurred_on >= since``.
     """
+    if flow is not None and flow not in ('customer', 'us'):
+        raise ValueError("flow must be 'customer' or 'us'")
     if postgres_mode():
         params: list[Any] = []
         where = []
@@ -1689,6 +1703,10 @@ def recent_interactions(
         if direction is not None:
             where.append('direction=?')
             params.append(direction)
+        if flow == 'customer':
+            where.append(CUSTOMER_SIDE_PREDICATE)
+        elif flow == 'us':
+            where.append(OUR_SIDE_PREDICATE)
         if since is not None:
             where.append('CAST(occurred_on AS TEXT) >= ?')
             params.append(since)
@@ -1718,6 +1736,10 @@ def recent_interactions(
     if direction is not None:
         where.append('direction=?')
         params.append(direction)
+    if flow == 'customer':
+        where.append(CUSTOMER_SIDE_PREDICATE)
+    elif flow == 'us':
+        where.append(OUR_SIDE_PREDICATE)
     if since is not None:
         where.append('CAST(occurred_on AS TEXT) >= ?')
         params.append(since)
