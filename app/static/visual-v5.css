@@ -1,0 +1,806 @@
+/* ============================================================================
+   Trade OS · Daylight room (visual-v5)
+   ----------------------------------------------------------------------------
+   Loaded after visual-v4.css. v3 gave the product the Daylight *language* and v4
+   re-composed each page, but both kept a resident application frame: a sidebar,
+   a floating search capsule and a card grid. The picked design has none of that.
+   It is one warm-paper room with a thin top bar, a thin status bar, and light
+   that follows attention.
+
+   This sheet is that structure:
+
+     · .room-top / .room-bot  the only resident chrome, one hairline each
+     · #roomIndex             pages + global search, summoned (brand click,
+                              Ctrl/Cmd-K, "/"), full screen, closed with Esc
+     · .today-room            one customer, one next step, the recent facts beside
+                              it; the queue of other due customers is a drawer
+     · .lit-anchor / .lit-row the light rests on the focal element and marks the
+                              row under the pointer or keyboard focus; inside a
+                              .lit-group--dim every other row stays dim
+     · customer workspace     the same room, full screen instead of a modal card
+
+   Nothing here changes behaviour, data or permissions. `.is-lit` is plain class
+   state, so touch, keyboard, reduced-motion and performance modes see the same
+   hierarchy; only the moving pool is skipped there.
+
+   Specificity: v2/v3/v4 declare structure `!important` under `#trosa`, so every
+   rule here doubles or triples its class names (`#trosa .a.a`) — it changes
+   which rule wins, never which element matches.
+   ============================================================================ */
+
+:root {
+  --room-gut: clamp(1.4rem, 4vw, 3.4rem);
+  --room-bar: clamp(48px, 5.8vh, 60px);
+  --room-ease: cubic-bezier(.16, 1, .3, 1);
+  --room-serif: var(--dl-display);
+  --room-index-z: 1200;
+}
+
+#trosa .micro {
+  font-size: .6rem;
+  font-weight: 500;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .tnum { font-variant-numeric: tabular-nums; }
+
+/* ============================================================================
+   1. SHELL — thin top bar, the room, thin status bar
+   ============================================================================ */
+
+#trosa .app-layout.app-room {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 100dvh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#trosa .app-room > .main-content.main-content {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+}
+
+#trosa .room-top {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 1.3rem;
+  height: var(--room-bar);
+  padding: 0 var(--room-gut);
+  border-bottom: 1px solid var(--dl-hair-2);
+  background: color-mix(in srgb, var(--dl-hi) 90%, transparent);
+}
+#trosa .room-brand {
+  padding: .3rem .1rem;
+  border: 0;
+  background: none;
+  color: var(--dl-ink);
+  font-family: var(--room-serif);
+  font-size: 1rem;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: color .3s var(--room-ease);
+}
+#trosa .room-brand:hover,
+#trosa .room-brand[aria-expanded="true"] { color: var(--dl-gold-ink); }
+#trosa .room-page {
+  font-size: .6rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+#trosa .room-top-spacer { flex: 1 1 auto; }
+#trosa .room-key {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .3rem .4rem .3rem .8rem;
+  border: 1px solid var(--dl-hair);
+  border-radius: 999px;
+  background: none;
+  color: var(--dl-ink-3);
+  font-size: .72rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa .room-key:hover { color: var(--dl-ink); border-color: var(--dl-hair-strong); }
+#trosa kbd {
+  padding: .14rem .5rem;
+  border: 1px solid var(--dl-hair);
+  border-radius: 999px;
+  background: none;
+  color: var(--dl-mut);
+  font-family: var(--dl-sans);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  line-height: 1.3;
+}
+#trosa .room-who {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .64rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .room-who i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dl-gold);
+  box-shadow: 0 0 0 3px rgba(188, 144, 82, .14);
+}
+
+#trosa .room-bot {
+  position: sticky;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: var(--room-bar);
+  padding: 0 var(--room-gut);
+  border-top: 1px solid var(--dl-hair-2);
+  background: color-mix(in srgb, var(--dl-hi) 96%, transparent);
+}
+#trosa .room-bot-value {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--room-serif);
+  font-size: .9rem;
+  color: var(--dl-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#trosa .room-bot-date {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: .6rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+
+/* The status bar and top bar are chrome; a page never needs to reserve room for
+   the retired sidebar or floating search. */
+#trosa .page-header.page-header { padding-top: clamp(28px, 5vh, 52px) !important; }
+#trosa .page-body.page-body { padding-bottom: 56px !important; }
+
+/* ---- command shelf: quiet inline actions, never a floating glass bar ---- */
+#trosa .command-shelf.command-shelf.command-shelf {
+  position: static !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: .4rem !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  overflow: visible !important;
+  flex-wrap: wrap !important;
+}
+#trosa .command-shelf.command-shelf.command-shelf .command-primary {
+  height: 34px !important;
+  padding: 0 1.1rem !important;
+  border-radius: 999px !important;
+  font-size: .74rem !important;
+  letter-spacing: .05em;
+}
+#trosa .command-shelf.command-shelf.command-shelf .command-primary .command-label { font-size: inherit !important; font-weight: 500 !important; }
+#trosa .command-shelf.command-shelf.command-shelf .command-icon.command-icon {
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  border-radius: 999px !important;
+}
+
+/* ============================================================================
+   2. INDEX LAYER — pages and search, summoned
+   ============================================================================ */
+
+#trosa .room-index {
+  position: fixed;
+  inset: 0;
+  z-index: var(--room-index-z);
+  display: none;
+  overflow-y: auto;
+  background: linear-gradient(180deg, var(--dl-hi) 0%, var(--dl-canvas) 60%, var(--dl-canvas-low) 100%);
+  opacity: 0;
+  transition: opacity .35s var(--room-ease);
+}
+#trosa .room-index:not([hidden]) { display: block; }
+#trosa .room-index.is-open { opacity: 1; }
+#trosa .room-index-inner {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: clamp(1.4rem, 8vh, 4.6rem) var(--room-gut) 4rem;
+}
+#trosa .room-index-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: clamp(1.4rem, 5vh, 3rem);
+}
+#trosa .room-index-close {
+  padding: .3rem;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+#trosa .room-index-close:hover kbd { color: var(--dl-ink); border-color: var(--dl-hair-strong); }
+
+/* search: one underlined line, the way the room writes everything else */
+#trosa .room-index .global-page-search.global-page-search.global-page-search {
+  position: relative !important;
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-strong) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#trosa .room-index .global-page-search.global-page-search.global-page-search:focus-within { border-bottom-color: var(--dl-gold) !important; }
+#trosa .room-index .global-page-search.global-page-search input {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  padding: .55rem 0 .7rem !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink) !important;
+  font-family: var(--room-serif) !important;
+  font-size: clamp(1.3rem, 2.4vw, 1.9rem) !important;
+  letter-spacing: -.01em;
+  outline: none !important;
+}
+#trosa .room-index .global-page-search input::placeholder { color: var(--dl-faint); }
+#trosa .room-index .global-search-preview.global-search-preview {
+  position: static !important;
+  display: none !important;
+  width: auto !important;
+  max-height: 40dvh;
+  margin: .4rem 0 0 !important;
+  padding: 0 !important;
+  overflow-y: auto;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+#trosa .room-index .global-search-preview.global-search-preview.show { display: block !important; }
+#trosa .room-index .global-search-result.global-search-result {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: .15rem 1rem !important;
+  width: 100% !important;
+  padding: .75rem .6rem !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  text-align: left !important;
+  justify-items: start !important;
+}
+#trosa .room-index .global-search-result.global-search-result strong { justify-self: start; text-align: left;
+  font-family: var(--room-serif);
+  font-size: 1.05rem;
+  font-weight: 400;
+  color: var(--dl-ink);
+}
+#trosa .room-index .global-search-result.global-search-result span { font-size: .72rem; color: var(--dl-mut); text-align: right; }
+#trosa .room-index .global-search-result.global-search-result small { grid-column: 1 / -1; font-size: .78rem; color: var(--dl-ink-3); }
+#trosa .room-index .global-search-result.global-search-result.is-active {
+  background: rgba(255, 253, 247, .92) !important;
+  box-shadow: 0 0 0 1px rgba(188, 144, 82, .2) !important;
+}
+#trosa .room-index .global-search-empty,
+#trosa .room-index .global-search-preview-summary {
+  padding: .8rem .6rem;
+  font-size: .78rem;
+  color: var(--dl-mut);
+}
+
+/* pages: numbered serif rows; the light picks one and the rest step back */
+#trosa .room-index-nav { margin-top: clamp(1.6rem, 6vh, 3.4rem); }
+#trosa .room-index .nav-personal.nav-personal { display: block !important; padding: 0 !important; }
+#trosa .room-index .nav-item.nav-item.nav-item {
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 1.3rem !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: .85rem .3rem !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--dl-hair-2) !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink) !important;
+  font-size: inherit !important;
+  cursor: pointer;
+  transition: opacity .55s var(--room-ease), background .55s var(--room-ease);
+}
+#trosa .room-index .nav-item.nav-item.nav-item::before { content: none !important; display: none !important; }
+#trosa .room-index .nav-index { font-size: .62rem; letter-spacing: .16em; color: var(--dl-faint); transition: color .55s var(--room-ease); }
+#trosa .room-index .nav-name { font-family: var(--room-serif); font-size: clamp(1.35rem, 2.5vw, 1.9rem); letter-spacing: -.012em; line-height: 1.2; }
+#trosa .room-index .nav-count.nav-count { margin-left: auto; font-size: .78rem; color: var(--dl-gold-ink) !important; font-variant-numeric: tabular-nums; }
+#trosa .room-index .nav-item.nav-item.nav-item.active .nav-index { color: var(--dl-gold); }
+#trosa .room-index .nav-item.nav-item.nav-item.is-lit .nav-index { color: var(--dl-gold); }
+
+#trosa .room-index .sidebar-tools-menu.room-index-more {
+  position: static !important;
+  inset: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-height: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  flex-direction: row !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: .2rem 1.6rem !important;
+  margin: 1.4rem 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa .room-index .room-index-more button {
+  width: auto !important;
+  flex: 0 0 auto !important;
+  height: auto !important;
+  padding: .45rem 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid transparent !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: .8rem !important;
+  letter-spacing: .03em;
+  transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa .room-index .room-index-more button:hover { color: var(--dl-ink) !important; border-bottom-color: var(--dl-gold) !important; }
+
+/* ============================================================================
+   3. THE LIGHT — attention is the hierarchy
+   ============================================================================ */
+
+/* A row that is lit (hover or keyboard focus) reads at full contrast with a
+   gold hairline. Inside a --dim group every other row rests at low contrast; in
+   a --focus group the others only step back while one row is lit. */
+#trosa .lit-row { transition: background .55s var(--room-ease), box-shadow .55s var(--room-ease), opacity .55s var(--room-ease); }
+#trosa .lit-row.is-lit {
+  background: rgba(255, 253, 247, .92);
+  box-shadow: 0 0 0 1px rgba(188, 144, 82, .2);
+}
+#trosa .lit-group--focus.has-lit .lit-row:not(.is-lit) { opacity: .5; }
+
+/* ============================================================================
+   4. TODAY — the room
+   ============================================================================ */
+
+#trosa .today-room {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  column-gap: clamp(2rem, 5vw, 5rem);
+  min-height: calc(100dvh - 2 * var(--room-bar));
+  padding: clamp(1.2rem, 3.4vh, 2.4rem) var(--room-gut) clamp(1.4rem, 4vh, 3rem);
+}
+#trosa .today-room > .page-header.page-header {
+  grid-column: 1;
+  grid-row: 1;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 0 clamp(1rem, 3vh, 2rem) !important;
+  display: block !important;
+}
+#trosa .today-room .today-masthead { display: block; }
+#trosa .today-room .today-eyebrow {
+  font-size: .6rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+#trosa .today-room .page-header h2 {
+  margin: .35rem 0 0 !important;
+  font-size: clamp(1.1rem, 1.6vw, 1.42rem) !important;
+  letter-spacing: -.008em !important;
+  line-height: 1.25 !important;
+}
+#trosa .today-room .today-summary.today-summary {
+  margin: .45rem 0 0 !important;
+  font-size: .72rem !important;
+  color: var(--dl-mut) !important;
+}
+#trosa .today-room .command-shelf.command-shelf.command-shelf { margin-top: .9rem !important; }
+#trosa .today-room .command-shelf.command-shelf.command-shelf::before,
+#trosa .today-room .command-shelf.command-shelf.command-shelf::after { content: none !important; display: none !important; }
+
+/* the wrappers only group; their children are the room's own grid items */
+#trosa .today-room .today-fullscreen-shell.today-fullscreen-shell,
+#trosa .today-room .today-context-stack.today-context-stack,
+#trosa .today-room #todayWideDetail.today-wide-detail,
+#trosa .today-room .today-workspace.today-workspace { display: contents !important; }
+
+#trosa .today-room .room-ident {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  padding-bottom: clamp(.9rem, 2.4vh, 1.6rem);
+}
+#trosa .today-room .room-company {
+  margin: 0;
+  font-family: var(--room-serif);
+  font-size: clamp(1.1rem, 1.6vw, 1.42rem);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -.008em;
+  color: var(--dl-ink);
+}
+#trosa .today-room .room-lines {
+  margin: .65rem 0 0;
+  font-size: .62rem;
+  letter-spacing: .14em;
+  line-height: 1.95;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+
+/* the dim column of recent facts */
+#trosa .today-room .room-panel {
+  grid-column: 1;
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+#trosa .room-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .room-panel-head .micro:first-child { color: var(--dl-ink-2); }
+#trosa .room-panel-body { display: flex; flex-direction: column; min-height: 0; }
+#trosa .room-row {
+  display: grid;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  width: 100%;
+  margin: 0;
+  padding: .72rem .8rem .72rem .7rem;
+  border: 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#trosa .room-dt {
+  padding-top: .16rem;
+  font-size: .62rem;
+  letter-spacing: .1em;
+  color: rgba(36, 34, 29, .42);
+  transition: color .55s var(--room-ease);
+}
+#trosa .room-row-copy { min-width: 0; display: block; }
+#trosa .room-tx {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: .83rem;
+  line-height: 1.5;
+  color: var(--dl-ink);
+  transition: color .55s var(--room-ease);
+}
+#trosa .room-rs {
+  display: block;
+  margin-top: .3rem;
+  font-size: .62rem;
+  letter-spacing: .06em;
+  color: var(--dl-mut);
+  transition: color .55s var(--room-ease);
+}
+/* dim by default; the lit row alone reads at full contrast */
+#trosa .lit-group--dim .room-tx { color: rgba(36, 34, 29, .66); }
+#trosa .lit-group--dim .room-rs { color: rgba(36, 34, 29, .34); }
+#trosa .lit-group--dim .room-row.is-lit .room-tx { color: var(--dl-ink); }
+#trosa .lit-group--dim .room-row.is-lit .room-rs { color: var(--dl-mut); }
+#trosa .room-row.is-lit .room-dt { color: var(--dl-gold); }
+#trosa .room-note {
+  padding: 1rem .7rem;
+  font-size: .8rem;
+  line-height: 1.6;
+  color: var(--dl-mut);
+}
+#trosa .room-note.is-error {
+  border-left: 2px solid var(--dl-danger);
+  background: var(--dl-danger-soft);
+  color: #7d3229;
+}
+
+/* the focal: what the light is holding */
+#trosa .today-room #todayFocus.today-room-focus.lit-anchor {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  align-self: center;
+  position: static !important;
+  width: min(640px, 100%);
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#trosa .today-room #todayFocus.today-room-focus::before { content: none !important; display: none !important; }
+#trosa .room-k { display: block; color: var(--dl-gold) !important; letter-spacing: .3em !important; }
+#trosa .room-next {
+  margin: .8rem 0 0 !important;
+  font-family: var(--room-serif) !important;
+  font-size: clamp(1.5rem, 2.75vw, 2.4rem) !important;
+  font-weight: 400 !important;
+  line-height: 1.14 !important;
+  letter-spacing: -.018em !important;
+  color: var(--dl-ink) !important;
+}
+#trosa .room-when { margin: .85rem 0 0; font-size: .7rem; letter-spacing: .16em; color: var(--dl-ink-2); }
+#trosa .room-acts { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin-top: 1.6rem; }
+#trosa .room-act {
+  display: inline-flex;
+  align-items: center;
+  padding: .52rem 1.05rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--dl-ink-2);
+  font: inherit;
+  font-size: .73rem;
+  letter-spacing: .05em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .3s var(--room-ease), background .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa .room-act:hover { color: var(--dl-ink); background: rgba(255, 253, 247, .9); border-color: var(--dl-hair); }
+#trosa .room-act.primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
+#trosa .room-act.primary:hover { background: #37342c; color: var(--dl-paper); border-color: transparent; }
+#trosa .room-hint { margin: 1rem 0 0; font-size: .68rem; letter-spacing: .04em; color: var(--dl-mut); }
+#trosa .today-room .today-room-focus .empty-state { padding: 0 !important; }
+
+/* the queue: other due customers, one deliberate step away */
+#trosa .today-queue-toggle {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .32rem .2rem;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--dl-mut);
+  font-size: .74rem;
+  letter-spacing: .05em;
+  cursor: pointer;
+  transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa .today-queue-toggle:hover:not(:disabled),
+#trosa .today-queue-toggle.is-open { color: var(--dl-ink); border-bottom-color: var(--dl-gold); }
+#trosa .today-queue-toggle:disabled { cursor: default; opacity: .7; }
+#trosa .today-queue-toggle:disabled .today-queue-caret { display: none; }
+#trosa .today-room .today-task-section#todayQueue {
+  display: none;
+  position: absolute;
+  top: calc(clamp(1.2rem, 3.4vh, 2.4rem) + 2.6rem);
+  right: var(--room-gut);
+  z-index: 45;
+  width: min(480px, calc(100% - 2 * var(--room-gut)));
+  max-height: 68dvh;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.2rem !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-radius: 16px !important;
+  background: var(--dl-paper) !important;
+  box-shadow: var(--dl-shadow-3) !important;
+}
+#trosa .today-room .today-task-section#todayQueue.is-open { display: block; }
+
+/* below the room: the rest of Today reads as a record, not a second screen */
+#trosa .today-page-body.today-page-body { padding-top: clamp(1.2rem, 4vh, 2.6rem) !important; }
+
+/* ============================================================================
+   5. CUSTOMER WORKSPACE — the same room, full screen
+   ============================================================================ */
+
+#trosa #customerEditModal.modal-overlay {
+  padding: 0 !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+}
+#trosa #customerEditModal.modal-overlay .modal.modal-customer-workspace.modal-customer-workspace {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100dvh !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: linear-gradient(180deg, var(--dl-hi) 0%, var(--dl-canvas) 60%, var(--dl-canvas-low) 100%) !important;
+}
+#trosa #customerEditModal .modal-header.customer-workspace-header {
+  padding: clamp(1rem, 3vh, 1.8rem) var(--room-gut) 1rem !important;
+}
+#trosa #customerEditModal .customer-workspace-header .workspace-kicker { color: var(--dl-faint) !important; }
+#trosa #customerEditModal .customer-workspace-header h3 {
+  font-size: clamp(1.3rem, 2.2vw, 1.9rem) !important;
+  font-weight: 400 !important;
+}
+#trosa #customerEditModal .modal-body { padding-left: 0 !important; padding-right: 0 !important; }
+#trosa #customerEditModal .customer-workspace-summary,
+#trosa #customerEditModal .customer-workspace-tabs { padding-left: var(--room-gut) !important; padding-right: var(--room-gut) !important; }
+#trosa #customerEditModal .customer-workspace-main { padding-left: var(--room-gut) !important; padding-right: clamp(1.4rem, 3vw, 2.4rem) !important; }
+/* the next step is the focal of this room too */
+#trosa #customerEditModal .customer-next-title.customer-next-title {
+  font-family: var(--room-serif) !important;
+  font-size: clamp(1.5rem, 2.8vw, 2.4rem) !important;
+  font-weight: 400 !important;
+  line-height: 1.18 !important;
+  letter-spacing: -.014em;
+}
+#trosa #customerEditModal .customer-workspace-summary.customer-workspace-summary {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: .6rem !important;
+  margin: 0 !important;
+  padding-top: 1.2rem !important;
+  padding-bottom: 1.2rem !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-top: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#trosa #customerEditModal .customer-now-next-grid.customer-now-next-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) !important;
+  gap: clamp(1.4rem, 4vw, 3.4rem) !important;
+  width: 100% !important;
+  align-items: start;
+}
+#trosa #customerEditModal .customer-fact-section {
+  display: block !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+#trosa #customerEditModal .customer-secondary-info { width: 100% !important; }
+#trosa #customerEditModal .modal-footer.modal-footer {
+  justify-content: flex-end !important;
+  border: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  padding-top: .4rem !important;
+  padding-bottom: .8rem !important;
+}
+/* timeline entries take part in the light like every other record row */
+#trosa #customerEditModal #outreachList .tl-item.lit-row { padding-left: .5rem !important; padding-right: .5rem !important; }
+#trosa #customerEditModal .modal-footer.modal-footer { padding-left: var(--room-gut) !important; padding-right: var(--room-gut) !important; }
+
+/* the customer list says what it is filtered by, and lets go in one click */
+#trosa .customer-active-filters .customer-search-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+}
+#trosa .customer-active-filters .customer-search-chip-clear {
+  border: 0; background: none; padding: 0 .2rem; cursor: pointer;
+  color: var(--dl-mut); font-size: 1rem; line-height: 1;
+}
+#trosa .customer-active-filters .customer-search-chip-clear:hover { color: var(--dl-ink); }
+
+/* ============================================================================
+   6. NARROW SCREENS — the room becomes a column; the light stays put
+   ============================================================================ */
+
+@media (max-width: 1024px) {
+  #trosa .today-room {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding-top: 1.2rem;
+  }
+  #trosa .today-room > .page-header.page-header { order: 1; }
+  #trosa .today-queue-toggle { order: 2; align-self: flex-start; margin: 0 0 1.2rem -.2rem; }
+  #trosa .today-room .room-ident { order: 3; }
+  #trosa .today-room #todayFocus.today-room-focus.lit-anchor { order: 4; margin: 1.2rem 0 0 !important; width: 100%; }
+  #trosa .today-room .room-panel { order: 5; margin-top: 2.4rem; }
+  #trosa .today-room .today-task-section#todayQueue {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: calc(var(--room-bar) + 10px);
+    left: 12px;
+    width: auto;
+    max-height: 60dvh;
+  }
+  #trosa .room-tx { -webkit-line-clamp: 4; }
+}
+@media (max-width: 720px) {
+  /* no keyboard on a phone: say what the button does instead of showing ⌘K */
+  #trosa .room-key kbd { display: none; }
+  #trosa .room-key { padding: .3rem .9rem; }
+  #trosa .room-page { display: none; }
+  #trosa .room-bot { padding-right: var(--room-gut); }
+  #trosa .page-header.page-header { padding-top: 26px !important; }
+}
+/* touch: comfortable targets, no hover-only affordances */
+@media (pointer: coarse) {
+  #trosa .room-act,
+  #trosa .today-queue-toggle,
+  #trosa .room-key,
+  #trosa .room-brand { min-height: 44px; }
+  #trosa .room-index .nav-item.nav-item.nav-item { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+}
+/* the pool never animates on its own; keep the room legible without it */
+@media (prefers-reduced-motion: reduce) {
+  #trosa .room-index { transition: none; }
+}

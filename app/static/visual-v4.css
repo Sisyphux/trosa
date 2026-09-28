@@ -45,82 +45,6 @@
    2. GLOBAL CHROME — search layer, floating shelf, page frame
    ============================================================================ */
 
-/* --- Search stays reachable while the page scrolls ------------------------- */
-#trosa .global-page-tools {
-  position: fixed;
-  top: var(--v4-bar-top);
-  left: 0;
-  right: 0;
-  z-index: 40;
-  margin: 0 !important;
-  padding: 0 !important;
-  background: none !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  pointer-events: none;
-}
-#trosa .global-page-search {
-  pointer-events: auto;
-  width: 336px;
-  max-width: calc(100vw - 380px);
-  margin-left: calc(var(--v4-rail) + var(--v4-frame-pad)) !important;
-  background: var(--v4-glass) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
-  backdrop-filter: blur(30px) saturate(1.15) !important;
-  border: 1px solid rgba(36, 34, 29, .08) !important;
-  box-shadow: var(--v4-shadow-float) !important;
-  border-radius: 999px !important;
-  height: 46px !important;
-}
-#trosa .global-page-search:focus-within {
-  border-color: var(--dl-gold) !important;
-  box-shadow: var(--v4-shadow-float), var(--dl-gold-wash) 0 0 0 3px !important;
-}
-
-/* --- One floating shelf per page, always in the same place ----------------- */
-#trosa .command-shelf {
-  position: fixed;
-  top: var(--v4-bar-top);
-  right: 28px;
-  z-index: 41;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px !important;
-  border-radius: 16px !important;
-  background: var(--v4-glass) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
-  backdrop-filter: blur(30px) saturate(1.15) !important;
-  border: 1px solid rgba(36, 34, 29, .08) !important;
-  box-shadow: var(--v4-shadow-float) !important;
-}
-#trosa .command-shelf .command-icon {
-  flex: 0 0 38px;
-  width: 38px;
-  height: 38px;
-  border: 0 !important;
-  border-radius: 11px !important;
-  background: transparent !important;
-}
-#trosa .command-shelf .command-icon:hover {
-  background: rgba(36, 34, 29, .06) !important;
-}
-#trosa .command-shelf .command-primary {
-  height: 38px !important;
-  padding: 0 16px !important;
-  border-radius: 11px !important;
-  border: 1px solid var(--dl-ink) !important;
-  background: var(--dl-ink) !important;
-  color: var(--dl-paper) !important;
-}
-#trosa .command-shelf .command-primary:hover {
-  background: #000 !important;
-}
-#trosa .command-shelf .command-label {
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: .01em;
-}
 
 /* --- Page frame ------------------------------------------------------------ */
 #trosa .page-header {
@@ -221,134 +145,12 @@
   border-bottom-color: var(--dl-gold);
 }
 
-/* ============================================================================
-   3. SIDEBAR — a floating glass rail with three destinations
-   ============================================================================ */
-
-#trosa .sidebar {
-  inset: 14px auto 14px 14px !important;
-  width: 216px !important;
-  min-width: 216px !important;
-  border-radius: 24px !important;
-  background: var(--v4-glass) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.12) !important;
-  backdrop-filter: blur(30px) saturate(1.12) !important;
-  border: 1px solid rgba(36, 34, 29, .08) !important;
-  box-shadow: var(--v4-shadow-float) !important;
-  padding: 26px 14px 18px !important;
-}
-#trosa .sidebar-brand { padding: 0 8px 22px !important; }
-#trosa .sidebar-brand h1 { font-size: 21px !important; }
-#trosa .sidebar-brand .subtitle {
-  margin-top: 6px !important;
-  font-size: 11px !important;
-  letter-spacing: .14em;
-  color: var(--dl-mut) !important;
-}
-#trosa .nav-section {
-  padding: 0 10px 8px !important;
-  font-size: 10.5px !important;
-  letter-spacing: .2em !important;
-}
-#trosa .nav-item {
-  height: 42px !important;
-  padding: 0 10px !important;
-  border-radius: 12px !important;
-  gap: 11px;
-  font-size: 14px !important;
-  font-weight: 500;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .nav-item:hover { background: rgba(36, 34, 29, .05) !important; }
-#trosa .nav-item.active {
-  background: var(--dl-paper) !important;
-  color: var(--dl-ink) !important;
-  font-weight: 600;
-  box-shadow: var(--v4-shadow-row) !important;
-}
-#trosa .nav-item.active::before { content: none !important; }
-#trosa .nav-item .nav-icon { color: currentColor !important; }
-#trosa .nav-count {
-  margin-left: auto;
-  font-size: 11.5px !important;
-  font-variant-numeric: tabular-nums;
-  color: var(--dl-gold-ink) !important;
-}
-#trosa .sidebar-tools { margin-top: 14px !important; }
-#trosa .sidebar-tools summary {
-  height: 42px !important;
-  padding: 0 10px !important;
-  border-radius: 12px !important;
-  font-size: 13.5px !important;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .sidebar-tools summary:hover { background: rgba(36, 34, 29, .05) !important; }
-#trosa .sidebar-tools-menu {
-  margin: 4px 0 6px 0 !important;
-  padding: 0 0 0 0 !important;
-  border-left: 1px solid var(--dl-hair) !important;
-}
-#trosa .sidebar-tools-menu button {
-  height: 36px !important;
-  padding: 0 12px !important;
-  border-radius: 10px !important;
-  font-size: 13px !important;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .sidebar-tools-menu button:hover {
-  background: rgba(36, 34, 29, .05) !important;
-  color: var(--dl-ink) !important;
-}
-#trosa .account-section {
-  margin-top: auto !important;
-  padding-top: 14px !important;
-  border-top: 1px solid var(--dl-hair) !important;
-}
-#trosa .sidebar-identity {
-  margin-top: 6px !important;
-  padding: 8px 10px !important;
-  border-radius: 12px !important;
-  background: rgba(36, 34, 29, .04) !important;
-}
-#trosa .main-content { margin-left: calc(14px + 216px + 14px) !important; }
-@media (min-width: 1181px) {
-  #trosa .main-content { margin-left: 244px !important; }
-  html.font-size-large #trosa .main-content { margin-left: 244px !important; }
-  html.font-size-xl #trosa .main-content { margin-left: 244px !important; }
-}
-html.font-size-large #trosa .sidebar { width: 224px !important; min-width: 224px !important; }
-html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !important; }
 
 /* ============================================================================
    4. TODAY — agenda rail + customer context sheet + time band
    ============================================================================ */
 
 #trosa .today-page-body { padding-top: 8px !important; }
-#trosa .today-fullscreen-shell {
-  display: grid !important;
-  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
-  gap: var(--v4-stack);
-  align-items: start;
-}
-#trosa .today-workspace { display: block !important; min-width: 0; }
-#trosa .today-context-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  min-width: 0;
-}
-/* When a real reminder is selected the wide detail is the context; the compact
-   focus card only carries the empty state. */
-#trosa .today-fullscreen-shell:not(.is-empty) #todayFocus { display: none !important; }
-#trosa .today-fullscreen-shell.is-empty .today-wide-detail { display: none !important; }
-#trosa .today-focus-card {
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 16px !important;
-  background: var(--dl-paper-2) !important;
-  box-shadow: none !important;
-  padding: 28px !important;
-}
-#trosa .today-focus-card::before { content: none !important; }
 
 /* --- Agenda rows ----------------------------------------------------------- */
 #trosa .today-group-label {
@@ -453,99 +255,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 }
 #trosa .today-task-date.overdue { color: var(--dl-danger) !important; font-weight: 600; }
 
-/* --- Customer context sheet (today-wide-detail) ---------------------------- */
-#trosa .today-wide-detail {
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 20px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  padding: clamp(24px, 2.4vw, 34px) clamp(22px, 2.6vw, 36px) !important;
-  min-width: 0;
-}
-#trosa .today-wide-detail:empty { display: none !important; }
-#trosa .today-wide-detail-head { padding-bottom: 20px; }
-#trosa .today-wide-kicker {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: .2em;
-  text-transform: uppercase;
-  color: var(--dl-mut);
-}
-#trosa .today-wide-head-row { display: flex; align-items: baseline; gap: 16px; margin-top: 8px; }
-#trosa .today-wide-head-row h2 {
-  font-family: var(--dl-display) !important;
-  font-size: clamp(24px, 2.2vw, 30px) !important;
-  font-weight: 500 !important;
-  letter-spacing: -.025em !important;
-  color: var(--dl-ink) !important;
-  margin: 0 !important;
-  line-height: 1.14 !important;
-}
-#trosa .today-wide-head-row p { margin: 0; font-size: 13px; color: var(--dl-mut); }
-#trosa .today-wide-actions { display: flex; gap: 8px; margin-top: 16px; }
-#trosa .today-wide-icon {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 11px !important;
-  background: transparent !important;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .today-wide-icon:hover {
-  border-color: var(--dl-ink-3) !important;
-  color: var(--dl-ink) !important;
-}
-#trosa .today-wide-facts {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--dl-hair) !important;
-  padding: 4px 0 0;
-}
-#trosa .today-wide-facts > div {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 18px;
-  align-items: baseline;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--dl-hair-2);
-}
-#trosa .today-wide-facts > div > span {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--dl-mut);
-}
-#trosa .today-wide-facts > div > strong {
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--dl-ink);
-  line-height: 1.5;
-}
-#trosa .today-wide-facts > div > strong.is-clay { color: var(--dl-gold-ink); }
-#trosa .today-wide-compose {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--dl-hair);
-}
-#trosa .today-wide-compose-title {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: var(--dl-mut);
-  margin-bottom: 14px;
-}
-#trosa .today-wide-compose-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-#trosa .today-wide-compose-footer > span { font-size: 12.5px; color: var(--dl-mut); }
-#trosa .today-wide-compose-footer .btn-primary { min-width: 128px; }
 
 /* --- Time band: the next 14 days ------------------------------------------- */
 #trosa .today-future-section { margin-top: var(--v4-stack); }
@@ -1412,192 +1121,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
    also use `!important`, still win at narrow widths.
    ============================================================================ */
 
-/* ---- global chrome: floating search + command shelf ---- */
-#trosa .global-page-tools.global-page-tools {
-  position: fixed !important;
-  top: 18px !important;
-  left: 0 !important;
-  right: 0 !important;
-  height: auto !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  display: flex !important;
-  justify-content: flex-start !important;
-  align-items: center !important;
-  background: none !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  z-index: 40 !important;
-  pointer-events: none !important;
-}
-#trosa .global-page-search.global-page-search {
-  pointer-events: auto !important;
-  position: relative !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  width: 336px !important;
-  min-width: 0 !important;
-  max-width: calc(100vw - 400px) !important;
-  height: 46px !important;
-  margin: 0 0 0 288px !important;
-  padding: 0 16px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 23px !important;
-  background: var(--v4-glass) !important;
-  background-image: none !important;
-  box-shadow: var(--v4-shadow-float) !important;
-  backdrop-filter: blur(30px) saturate(1.15) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
-}
-#trosa .global-page-search.global-page-search > button {
-  flex: 0 0 auto !important;
-  width: 22px !important;
-  height: 22px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  color: var(--dl-mut) !important;
-}
-#trosa .global-page-search.global-page-search input {
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
-  height: 100% !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  font-size: 14px !important;
-}
-#trosa .page-header.page-header > .command-shelf.command-shelf.is-collapsible,
-#trosa .command-shelf.command-shelf {
-  position: fixed !important;
-  top: 18px !important;
-  right: 28px !important;
-  bottom: auto !important;
-  left: auto !important;
-  width: auto !important;
-  max-width: none !important;
-  height: auto !important;
-  margin: 0 !important;
-  padding: 5px !important;
-  transform: none !important;
-  overflow: visible !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  border: 1px solid rgba(255, 255, 255, .62) !important;
-  border-radius: 16px !important;
-  background: var(--v4-glass) !important;
-  background-image: none !important;
-  box-shadow: var(--v4-shadow-float) !important;
-  backdrop-filter: blur(30px) saturate(1.15) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.15) !important;
-  z-index: 41 !important;
-}
-#trosa .command-shelf.command-shelf .command-icon {
-  flex: 0 0 38px !important;
-  width: 38px !important;
-  height: 38px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 11px !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .command-shelf.command-shelf .command-primary {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  height: 38px !important;
-  min-width: 0 !important;
-  padding: 0 16px !important;
-  border: 1px solid var(--dl-ink) !important;
-  border-radius: 11px !important;
-  background: var(--dl-ink) !important;
-  background-image: none !important;
-  color: var(--dl-paper) !important;
-  box-shadow: none !important;
-}
-#trosa .command-shelf.command-shelf .command-primary .command-label {
-  display: inline !important;
-  color: inherit !important;
-}
-
-/* ---- sidebar ---- */
-#trosa #sidebar.sidebar {
-  display: flex !important;
-  flex-direction: column !important;
-  position: fixed !important;
-  top: 14px !important;
-  bottom: 14px !important;
-  left: 14px !important;
-  right: auto !important;
-  width: 216px !important;
-  min-width: 216px !important;
-  max-width: 216px !important;
-  height: auto !important;
-  max-height: calc(100svh - 28px) !important;
-  margin: 0 !important;
-  padding: 22px 14px 14px !important;
-  border: 1px solid rgba(255, 255, 255, .62) !important;
-  border-radius: 24px !important;
-  background: var(--v4-glass) !important;
-  background-image: none !important;
-  box-shadow: var(--v4-shadow-float) !important;
-  backdrop-filter: blur(30px) saturate(1.1) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(1.1) !important;
-  overflow-y: auto !important;
-  overflow-x: hidden !important;
-  transform: none !important;
-  z-index: 320 !important;
-}
-#trosa #sidebar .sidebar-brand h1 { font-family: var(--dl-display) !important; font-size: 21px !important; }
-#trosa #sidebar .nav-item.nav-item {
-  display: flex !important;
-  align-items: center !important;
-  gap: 11px !important;
-  height: 42px !important;
-  min-height: 42px !important;
-  margin: 1px 0 !important;
-  padding: 0 12px !important;
-  border: 0 !important;
-  border-radius: 12px !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 14px !important;
-  font-weight: 500 !important;
-}
-#trosa #sidebar .nav-item.nav-item::before { content: none !important; display: none !important; }
-#trosa #sidebar .nav-item.nav-item.active {
-  background: var(--dl-paper) !important;
-  box-shadow: var(--v4-shadow-row) !important;
-  color: var(--dl-ink) !important;
-  font-weight: 600 !important;
-}
-#trosa #sidebar .nav-item.nav-item .nav-icon { flex: 0 0 18px !important; width: 18px !important; height: 18px !important; }
-#trosa #sidebar .sidebar-tools-menu {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 1px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa #sidebar .account-section {
-  margin-top: auto !important;
-  padding-top: 12px !important;
-  border-top: 1px solid var(--dl-hair-2) !important;
-  background: none !important;
-}
-#trosa .main-content.main-content { margin-left: 244px !important; }
 
 /* ---- page frame + headings ---- */
 #trosa .page-section.page-section { min-height: 100vh !important; background: transparent !important; }
@@ -1661,14 +1184,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 
 /* ---- today ---- */
 #trosa .today-workspace.today-workspace { display: block !important; }
-#trosa .today-fullscreen-shell.today-fullscreen-shell {
-  display: grid !important;
-  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr) !important;
-  gap: 32px !important;
-  row-gap: 32px !important;
-  column-gap: 32px !important;
-  align-items: start !important;
-}
 #trosa .today-task-section.today-task-section { margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; box-shadow: none !important; }
 #trosa .today-section-header.today-section-header {
   display: flex !important;
@@ -1802,94 +1317,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
   box-shadow: var(--v4-shadow-row) !important;
 }
 
-/* ---- today context: focus card + wide detail ---- */
-#trosa .today-context-stack.today-context-stack {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa #todayFocus.today-focus-card {
-  position: static !important;
-  margin: 0 !important;
-  padding: 24px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 20px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-#trosa #todayFocus.today-focus-card::before { content: none !important; display: none !important; }
-#trosa #todayWideDetail.today-wide-detail {
-  display: grid !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 30px 32px 24px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 20px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-}
-#trosa .today-wide-facts.today-wide-facts {
-  display: block !important;
-  margin: 22px 0 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .today-wide-facts.today-wide-facts > div {
-  display: grid !important;
-  grid-template-columns: 96px minmax(0, 1fr) !important;
-  align-items: baseline !important;
-  gap: 0 18px !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 13px 2px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .today-wide-facts.today-wide-facts > div:first-child { border-top: 1px solid var(--dl-hair-2) !important; }
-#trosa .today-wide-facts.today-wide-facts span {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  color: var(--dl-mut) !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: .14em !important;
-  text-transform: uppercase !important;
-  white-space: nowrap !important;
-}
-#trosa .today-wide-facts.today-wide-facts strong {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  font-weight: 500 !important;
-  line-height: 1.45 !important;
-}
-#trosa .today-wide-facts.today-wide-facts strong.is-clay { color: var(--dl-gold-ink) !important; }
-#trosa .today-wide-compose.today-wide-compose {
-  margin: 22px 0 0 !important;
-  padding: 16px 0 0 !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .today-wide-detail.today-wide-detail .today-wide-compose-footer { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 16px !important; }
 
 /* ---- today: future band + collapsed week ---- */
 #trosa .today-schedule-grid.today-schedule-grid {
@@ -2304,9 +1731,7 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
   padding-left: 0 !important;
   padding-right: 0 !important;
 }
-@media (min-width: 1181px) {
-  #trosa .weekly-board.weekly-board { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-}
+/* member columns come from the auto-fill rule above: four people today, room for more */
 
 /* ============================================================================
    14. CUSTOMER DETAIL WORKSPACE — the room the operator actually works in
@@ -2395,33 +1820,9 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 }
 
 /* --- fact band: hairline cells, never boxes --- */
-#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
-  gap: 0 !important;
-  margin: 0 !important;
-  padding: 20px 32px 22px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 4px 22px 4px 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  background-image: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * + * {
-  padding-left: 22px !important;
-  border-left: 1px solid var(--dl-hair-2) !important;
-}
+
+
+
 #trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event .customer-fact-event-meta {
   display: flex !important;
   align-items: baseline !important;
@@ -2472,30 +1873,9 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 }
 
 /* --- fact band internals: hairline sections, never nested boxes --- */
-#trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary .customer-now-next-grid.customer-now-next-grid {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important;
-  gap: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace section.customer-fact-section.customer-fact-section {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 4px 0 2px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  background-image: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
-  padding-left: 22px !important;
-  border-left: 1px solid var(--dl-hair-2) !important;
-}
+
+
+
 #trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
   display: flex !important;
   align-items: baseline !important;
@@ -2915,30 +2295,9 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 }
 
 /* --- fact band: flatten every nested box into hairline rows --- */
-#trosa .modal.modal-customer-workspace #customerWorkspaceSummary .customer-fact-section.customer-fact-section {
-  display: block !important;
-  margin: 0 !important;
-  padding: 4px 0 2px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  background-image: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) !important;
-  gap: 0 22px !important;
-  align-items: start !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-section.customer-fact-next {
-  padding-left: 22px !important;
-  border-left: 1px solid var(--dl-hair-2) !important;
-}
+
+
+
 #trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
   display: flex !important;
   align-items: baseline !important;
@@ -3054,14 +2413,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
    11. RESPONSIVE — 1280 / 960 / 720 / 390
    ============================================================================ */
 
-@media (max-width: 1180px) {
-  #trosa .main-content.main-content { margin-left: 84px !important; }
-  #trosa .global-page-search.global-page-search { margin-left: 108px !important; width: 300px !important; max-width: calc(100vw - 480px) !important; }
-  #trosa #sidebar.sidebar { inset: 10px auto 10px 10px !important; width: 64px !important; min-width: 64px !important; max-width: 64px !important; padding: 18px 10px !important; }
-  #trosa #sidebar.sidebar .sidebar-brand .subtitle { display: none !important; }
-  #trosa #sidebar.sidebar .nav-item.nav-item > span:not(.nav-icon):not(.nav-count) { display: none !important; }
-  #trosa #sidebar.sidebar .sidebar-tools-menu .sidebar-tool-label { display: none !important; }
-}
 
 @media (max-width: 1024px) {
   #trosa .today-fullscreen-shell.today-fullscreen-shell { grid-template-columns: minmax(0, 1fr) !important; }
@@ -3107,22 +2458,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 @media (max-width: 960px) {
   #trosa .page-header.page-header { padding-top: calc(var(--v4-bar-top) + 58px) !important; }
   #trosa .page-body.page-body { padding-bottom: 88px !important; }
-  /* A floating shelf on a phone would sit on top of the list it is meant to
-     serve, and the Inbox acceptance check forbids it. Back into the header. */
-  #trosa .page-header.page-header > .command-shelf.command-shelf.is-collapsible.command-shelf,
-  #trosa #page-inbox .command-shelf.command-shelf,
-  #trosa .command-shelf.command-shelf.command-shelf {
-    position: static !important;
-    display: inline-flex !important;
-    width: auto !important;
-    max-width: 100% !important;
-    align-self: flex-start !important;
-    top: auto !important;
-    bottom: auto !important;
-    right: auto !important;
-    left: auto !important;
-    margin: 12px 0 0 !important;
-  }
   /* Nothing may widen the page on a phone. `clip` (not `hidden`) trims the
      overflow without creating a scroll box, so the sticky Inbox rail keeps
      working. */
@@ -3132,8 +2467,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
   #trosa .action-status.action-status,
   #trosa .connection-status.connection-status { max-width: calc(100vw - 24px) !important; }
   #trosa .command-shelf.command-shelf .command-primary .command-label { display: inline !important; }
-  #trosa .global-page-search.global-page-search { width: 100% !important; max-width: none !important; margin-left: 0 !important; }
-  #trosa .global-page-tools.global-page-tools { left: 64px !important; right: 16px !important; }
   #trosa .page-header.page-header,
   #trosa .page-body.page-body {
     width: 100% !important;
@@ -3168,22 +2501,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
 }
 
 @media (max-width: 720px) {
-  #trosa .main-content.main-content { margin-left: 0 !important; }
-  #trosa #sidebar.sidebar {
-    left: 10px !important;
-    top: 10px !important;
-    bottom: 10px !important;
-    width: 232px !important;
-    min-width: 232px !important;
-    max-width: 232px !important;
-    transform: translateX(calc(-100% - 24px)) !important;
-    transition: transform 240ms var(--dl-ease) !important;
-  }
-  #trosa #sidebar.sidebar.open { transform: none !important; }
-  #trosa #sidebar.sidebar .sidebar-brand .subtitle { display: block !important; }
-  #trosa #sidebar.sidebar .nav-item.nav-item > span:not(.nav-icon):not(.nav-count) { display: inline !important; }
-  #trosa #sidebar.sidebar .sidebar-tools-menu .sidebar-tool-label { display: inline !important; }
-  #trosa #sidebarToggle.sidebar-toggle { display: flex !important; }
   /* Customer workspace: a full-bleed sheet with one reading column. */
   #trosa #customerEditModal.modal-overlay .modal.modal-customer-workspace,
   #trosa #ovDetailModal.modal-overlay .modal.ov-customer-workspace {
@@ -3207,24 +2524,13 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
     border-left: 0 !important;
     border-top: 1px solid var(--dl-hair) !important;
   }
-  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
-    grid-template-columns: minmax(0, 1fr) !important;
-    padding: 16px !important;
-  }
-  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
-    padding: 10px 0 !important;
-    border-left: 0 !important;
-    border-bottom: 1px solid var(--dl-hair-2) !important;
-  }
-  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid { grid-template-columns: minmax(0, 1fr) !important; }
-  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
-    padding-left: 0 !important;
-    border-left: 0 !important;
-  }
+  
+  
+  
+  
   #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info { padding-left: 0 !important; border-left: 0 !important; }
   #trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid { grid-template-columns: minmax(0, 1fr) !important; }
   #trosa .modal.modal-customer-workspace .modal-footer.modal-footer { padding: 12px 16px !important; }
-  #trosa .global-page-tools.global-page-tools { left: 12px !important; right: 12px !important; }
   #trosa .page-header.page-header,
   #trosa .page-body.page-body { width: 100% !important; max-width: 100% !important; padding-left: 16px !important; padding-right: 16px !important; }
   #trosa .main-content.main-content > .page-section.page-section > .page-header.page-header,
@@ -3250,7 +2556,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
     padding-left: 16px !important;
     padding-right: 16px !important;
   }
-  #trosa .command-shelf.command-shelf.command-shelf { right: 12px !important; }
   #trosa #page-dashboard .page-header.today-page-header {
     flex-direction: column !important;
     align-items: flex-start !important;
@@ -3286,9 +2591,6 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
   #trosa .page-header.page-header { padding-top: 74px !important; }
   #trosa .page-header.page-header h2,
   #trosa .page-heading.page-heading h2 { font-size: 30px !important; }
-  #trosa .today-fullscreen-shell.today-fullscreen-shell { gap: 26px !important; }
-  #trosa #todayWideDetail.today-wide-detail { padding: 22px 18px !important; border-radius: 16px !important; }
-  #trosa .today-wide-facts.today-wide-facts > div { grid-template-columns: minmax(0, 1fr) !important; gap: 4px !important; }
   #trosa #todayReminders.today-task-list .today-task-row.today-task-row { grid-template-columns: 28px minmax(0, 1fr) auto !important; padding: 12px 10px !important; }
   #trosa .inbox-group-hint.inbox-group-hint { display: none !important; }
   #trosa #inboxList.inbox-list .inbox-question-open.inbox-question-open { grid-template-columns: minmax(0, 1fr) !important; padding: 14px 10px !important; }
@@ -3316,21 +2618,10 @@ html.font-size-xl #trosa .sidebar { width: 232px !important; min-width: 232px !i
   #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header { padding: 18px 16px 14px !important; }
   #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header h3 { font-size: 23px !important; }
   #trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs { padding: 0 10px !important; }
-  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary {
-    grid-template-columns: minmax(0, 1fr) !important;
-    padding: 16px !important;
-  }
-  #trosa .modal.modal-customer-workspace #customerWorkspaceSummary.customer-workspace-summary > * {
-    padding: 10px 0 !important;
-    border-left: 0 !important;
-    border-bottom: 1px solid var(--dl-hair-2) !important;
-  }
-  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid,
-  #trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid { grid-template-columns: minmax(0, 1fr) !important; }
-  #trosa .modal.modal-customer-workspace .customer-now-next-grid.customer-now-next-grid > .customer-fact-section.customer-fact-section + .customer-fact-section.customer-fact-section {
-    padding-left: 0 !important;
-    border-left: 0 !important;
-  }
+  
+  
+  
+  
   #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
     padding-left: 0 !important;
     padding-top: 12px !important;
