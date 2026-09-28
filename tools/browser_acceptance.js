@@ -57,12 +57,15 @@ await page.reload({waitUntil: 'domcontentloaded'});
 // A reused Tabbit task may already carry a session; only log in when asked.
 const loginButton = page.locator('#loginUsers [data-user-id="hamid"]');
 const dashboard = page.locator('#page-dashboard.active');
-if (await dashboard.isVisible()) {
-  // keep the session
-} else {
+// The room shell renders behind the account overlay, so the dashboard being
+// visible is not proof of a session: the overlay is.
+const needsLogin = await page.locator('#loginOverlay').waitFor({state: 'visible', timeout: 8000}).then(() => true, () => false);
+if (needsLogin) {
   await loginButton.waitFor({state: 'visible', timeout: 15000});
   await loginButton.click();
   await page.locator('#loginOverlay').waitFor({state: 'hidden', timeout: 15000});
+} else {
+  // keep the session
 }
 await dashboard.waitFor({state: 'visible', timeout: 15000});
 
