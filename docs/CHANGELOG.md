@@ -14,7 +14,7 @@
 
 ## 日期：2026-09-28（清理旧 Agent/Gateway 认知残留）
 
-修改内容：删除 `AGENT_API_CAPABILITY_AUDIT.md`；把 `README.md`、`PRODUCT_DIRECTION.md`、`Trade OS 系统设计说明.md`、`docs/SYSTEM_STATE.md`、`TROSA_MAINTENANCE.md` 中“Sela 经 Trosa Gateway 写回”“上层 Agent 经 `/api/gateway/*`”等过时表述，改为当前正式面：Sela 受限集成 `/api/integrations/sela/*` + 普通业务只读 API（`/api/customers`、`/api/customers/<id>/timeline|tasks|follow_history|contacts`、`/api/inbox`、`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）。
+修改内容：删除 `AGENT_API_CAPABILITY_AUDIT.md`；把 `README.md`、`PRODUCT_DIRECTION.md`、`POSTGRESQL_PRODUCTION_CUTOVER.md`、`Trade OS 系统设计说明.md`、`docs/SYSTEM_STATE.md`、`TROSA_MAINTENANCE.md` 中“Sela 经 Trosa Gateway 写回”“上层 Agent 经 `/api/gateway/*`”等过时表述，改为当前正式面：Sela 受限集成 `/api/integrations/sela/*` + 普通业务只读 API（`/api/customers`、`/api/customers/<id>/timeline|tasks|follow_history|contacts`、`/api/inbox`、`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）。
 
 为什么修改：旧 Gateway 能力审计文档与 pi-mcp 残留会让新 Agent 误判正式读取路径，重复研究已退役入口。
 

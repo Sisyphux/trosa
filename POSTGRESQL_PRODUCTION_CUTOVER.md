@@ -8,7 +8,7 @@
 ## 当前唯一正式路径
 
 ```text
-浏览器 / 浏览器扩展 / sela Gateway
+浏览器 / 浏览器扩展 / Sela 受限集成
         ↓ HTTPS（受限 API）
 ECS trade-os.service → serve.py → Trosa Flask
         ↓
@@ -24,7 +24,7 @@ ECS PostgreSQL（唯一正式业务 writer）
 - `app.py`、`desktop.py` 和根目录启动器不再是正式业务启动入口。SQLite 只允许用于
   显式隔离开发、历史导入/演练和明确批准的恢复材料；它不能与正式 PostgreSQL
   writer 并行运行。
-- sela 只通过受限 HTTPS Gateway 读取和提交业务动作；不直连 PostgreSQL，不保存
+- Sela 只通过受限 HTTPS 集成接口（`/api/integrations/sela/*`）读取和提交业务动作；不直连 PostgreSQL，不保存
   客户、联系人、阶段、任务或人工判断副本。
 
 ## 安全开发与验证
