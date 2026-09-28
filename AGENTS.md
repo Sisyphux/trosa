@@ -18,6 +18,7 @@ Trosa 是三人使用的外贸 CRM 工作台。核心闭环是：恢复客户上
 
 ## 运行与数据边界
 
+- **Trosa / Sela 业务数据访问优先顺序**：系统已为 Agent 提供后端接口和内部数据访问能力。处理业务数据必须优先遵循 `现有 API / service → database / internal tools → CLI → UI（仅作最后验收）`。除非任务明确要求 UI 验收，禁止使用浏览器、Computer Use 或模拟人工点击读取或修改业务数据。已有 API / service 能完成操作时，必须调用现有接口，不得绕过接口改用页面操作。
 - **ECS 是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于 ECS 本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。
 - **正式运行契约是 `trosa-postgresql-v1`**：唯一正式入口是 `serve.py`，要求 `CRM_ENV=production`、`TRADE_OS_DATA_BACKEND=postgres` 和非空 `TRADE_OS_DATABASE_URL`；`/api/network/ping` 必须报告 `status=ok`、`backend=postgresql`、`formal_runtime=true` 和该契约名。缺配置时在迁移、调度器和端口启动前失败，不得隐式回退 SQLite。
 - 本地仅用于开发、隔离测试和已验证发布；不得修改 ECS 数据、正式备份或当前 `data/` 链接所指的运行数据。测试必须使用独立的 `CRM_DB_PATH`。
