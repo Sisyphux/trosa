@@ -603,6 +603,50 @@ class CalendarAndAccessTest(unittest.TestCase):
         v4 = (ROOT / 'app' / 'static' / 'visual-v4.css').read_text(encoding='utf-8')
         self.assertNotIn('weekly-board.weekly-board { grid-template-columns: repeat(3', v4)
 
+    def test_customer_workspace_is_one_daylight_room(self):
+        """The workspace is its own room: section bar, one next step, a quiet column."""
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        v5 = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+        modal = html[html.index('id="customerEditModal"'):html.index('<!-- Complete Reminder Modal -->')]
+        for container in ('cw-app', 'cw-top', 'cw-room', 'cw-ident', 'cw-panel', 'cw-readouts', 'cw-bot', 'cw-pool'):
+            self.assertIn(f'class="{container}', modal)
+        self.assertIn('class="cw-focus lit-anchor"', modal)
+        self.assertRegex(modal, r'class="cw-nav" role="tablist"')
+        # The five sections keep their contracts: tab-btn, data-customer-tab and switchTab.
+        for tab in ('editTabOutreach', 'editTabBasic', 'editTabContacts', 'editTabFiles', 'editTabTasks'):
+            self.assertRegex(modal, rf'class="tab-btn cw-tab[^"]*" role="tab"[^>]*data-customer-tab="{tab}"[^>]*onclick="switchTab\(this, \'{tab}\'\)"')
+            self.assertRegex(modal, rf'id="{tab}" role="tabpanel"')
+        for element_id in ('customerEditTitle', 'customerWorkspaceMeta', 'customerWorkspaceLoading', 'customerWorkspaceRetryButton',
+                           'editCustomerId', 'outreachList', 'customerTimelineMore', 'followCompose', 'contactsList',
+                           'customerFilesList', 'customerFileDropzone', 'customerTasksList', 'customerNextTask',
+                           'customerTaskQuickActions', 'saveCustomerFooterBtn', 'editNextFollowUp'):
+            self.assertIn(f'id="{element_id}"', modal)
+        self.assertIn('aria-label="关闭"', modal)
+        # The retired card-and-panel structure is gone, not restyled.
+        for retired in ('customer-workspace-summary', 'customerWorkspaceSummary', 'customer-next-panel',
+                        'customer-now-next-grid', 'modal-customer-workspace', 'customer-workspace-tabs'):
+            self.assertNotIn(retired, modal)
+            self.assertNotIn(retired, javascript)
+        # The light belongs to the workspace while it is open.
+        light = javascript[javascript.index('function initDaylightRoom() {'):javascript.index('function runPerformanceProbe()')]
+        self.assertIn(".cw-focus.lit-anchor", light)
+        self.assertIn(".cw-pool", light)
+        # The focal's single solid action is 记录沟通 when a next step exists.
+        focal = javascript[javascript.index('function renderCustomerNextTask(reminders) {'):javascript.index('function renderCustomerRoomCounts() {')]
+        self.assertIn('cw-act cw-primary" onclick="openCustomerFollowComposer()">记录沟通</button>', focal)
+        # 1–5 / 0 switch sections, but never while typing into a field.
+        self.assertIn("CUSTOMER_SECTION_KEYS = { '1': 'editTabOutreach'", javascript)
+        keys = javascript[javascript.index('// 1–5 switch sections'):javascript.index('function setCustomerSectionLoading(')]
+        self.assertIn('INPUT|TEXTAREA|SELECT', keys)
+        self.assertIn('isContentEditable', keys)
+        # Contacts, files and tasks stay on-demand: opening the workspace reads only summary + timeline.
+        opener = javascript[javascript.index('async function openEditModal(id) {'):javascript.index('async function copyEmailsToClipboard(')]
+        self.assertNotIn('/contacts', opener)
+        self.assertNotIn('/files', opener)
+        self.assertNotIn('/tasks', opener)
+        self.assertIn('#trosa #customerEditModal .cw-app', v5)
+
     def test_frozen_customer_intelligence_is_not_a_user_module(self):
         spec = importlib.util.spec_from_file_location('crm_app_frozen_modules_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
