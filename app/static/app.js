@@ -110,6 +110,8 @@ function applyIconButtons(root) {
     // 更多工具菜单已经在 HTML 中提供了同一套图标和文字标签；只在
     // 紧凑侧栏用 CSS 隐藏文字，避免动态 iconify 把菜单变成图标/文字混排。
     if (button.closest && button.closest('.sidebar-tools-menu')) return;
+    // The customer workspace names its quiet actions in words (编辑 · 删除).
+    if (button.closest && button.closest('.cw-app')) return;
     var accessibleLabel = (button.getAttribute('aria-label') || button.getAttribute('title') || '').trim();
     var inlineIcon = _INLINE_ICON_ACTIONS[accessibleLabel];
     if (inlineIcon && button.querySelector('svg')) {
@@ -269,7 +271,8 @@ function initMotionSystem() {
 // same lit row. Only the moving pool is skipped there. The pool writes at most
 // one pair of custom properties per frame while it is travelling.
 function initDaylightRoom() {
-  var pool = document.querySelector('.daylight-room__pool');
+  var pagePool = document.querySelector('.daylight-room__pool');
+  var pool = pagePool;
   var finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
   var REST_X = 0.68;
   var REST_Y = 0.42;
@@ -282,6 +285,22 @@ function initDaylightRoom() {
   var litRow = null;
   var lastPointerAt = 0;
 
+  // The customer workspace is a full-screen layer above the page room, so it
+  // carries its own pool; the light belongs to whichever room is on top.
+  function openWorkspace() {
+    var workspace = document.getElementById('customerEditModal');
+    return workspace && workspace.classList.contains('show') && !workspace.classList.contains('is-closing') ? workspace : null;
+  }
+
+  function syncPool() {
+    var workspace = openWorkspace();
+    var next = (workspace && workspace.querySelector('.cw-pool')) || pagePool;
+    if (next === pool) return;
+    if (pool) pool.style.opacity = '0';
+    pool = next;
+    shown = false;
+  }
+
   function roomEnabled() {
     return !!pool && finePointer.matches && !isMotionLite() && !_motionReduced &&
       !document.documentElement.classList.contains('performance-probe') &&
@@ -290,7 +309,8 @@ function initDaylightRoom() {
 
   // Where attention rests when nothing is hovered: the page's own focal element.
   function restPoint() {
-    var anchor = document.querySelector('.page-section.active .lit-anchor');
+    var workspace = openWorkspace();
+    var anchor = workspace ? workspace.querySelector('.cw-focus.lit-anchor') : document.querySelector('.page-section.active .lit-anchor');
     if (anchor) {
       var box = anchor.getBoundingClientRect();
       if (box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < window.innerHeight) {
@@ -320,6 +340,7 @@ function initDaylightRoom() {
   function moveTo(x, y) {
     targetX = x;
     targetY = y;
+    syncPool();
     if (!roomEnabled()) return;
     if (!shown) {
       // First appearance: the light is simply already there, it does not travel.
@@ -407,8 +428,13 @@ function initDaylightRoom() {
 
   // Pages call this after they render or become active, so the light settles on
   // the new focal element unless the pointer is actively steering it.
-  window.refreshDaylightRest = function() {
-    if (litRow || Date.now() - lastPointerAt < 1500) return;
+  // `force` is for a change of room (the workspace opening or closing): the
+  // light moves to the new room's focal even if the pointer was just moving.
+  window.refreshDaylightRest = function(force) {
+    if (force) {
+      clearLit();
+      syncPool();
+    } else if (litRow || Date.now() - lastPointerAt < 1500) return;
     moveToRest();
   };
   window.clearDaylightLit = function() { if (clearLit()) moveToRest(); };
@@ -5946,21 +5972,30 @@ function normalizeCustomerTimelineItems(items) {
   });
 }
 
+function customerWebsiteParts(customer) {
+  var website = String((customer && customer.website) || '').trim();
+  var url = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
+  var host = website;
+  try { host = url ? new URL(url).hostname.replace(/^www\./, '') : ''; } catch (ignore) {}
+  return { url: url, host: host };
+}
+
+// The identity reads as two quiet lines under the company name. A field that
+// is not recorded is simply left out, never padded with "未记录".
 function updateCustomerWorkspaceIdentity(customer) {
   customer = customer || {};
   var title = document.getElementById('customerEditTitle');
   var meta = document.getElementById('customerWorkspaceMeta');
+  var number = document.getElementById('cwMeta');
   if (title) title.textContent = customer.company || customer.name || '客户详情';
+  if (number) number.textContent = '客户工作台' + (customer.id ? ' / № ' + String(customer.id).padStart(3, '0') : '');
   if (!meta) return;
-  var website = (customer.website || '').trim();
-  var websiteUrl = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
-  var websiteHost = '';
-  try { websiteHost = websiteUrl ? new URL(websiteUrl).hostname.replace(/^www\./, '') : ''; } catch (ignore) { websiteHost = website; }
-  var contextMeta = [customer.country, customer.industry || customer.field, customer.owner ? '归属：' + customer.owner : ''].filter(Boolean).join(' · ');
-  meta.innerHTML =
-    (contextMeta ? '<span class="workspace-location">' + escapeHtml(contextMeta) + '</span>' : '') +
-    (websiteUrl ? '<a class="workspace-website-link" href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener" title="在新窗口访问 ' + escapeHtml(websiteHost) + '">' +
-      '<span>' + escapeHtml(websiteHost) + '</span><span class="workspace-site-arrow" aria-hidden="true">↗</span></a>' : '');
+  var site = customerWebsiteParts(customer);
+  var level = customer.level ? customerLevelForDisplay(customer.level) : '';
+  var first = [customer.country, customer.industry || customer.field, level].filter(Boolean).map(escapeHtml).join(' · ');
+  var second = [customer.source_detail, customer.source].filter(Boolean).map(escapeHtml);
+  if (site.url) second.push('<a class="cw-site" href="' + escapeHtml(site.url) + '" target="_blank" rel="noopener" title="在新窗口访问 ' + escapeHtml(site.host) + '">' + escapeHtml(site.host) + '</a>');
+  meta.innerHTML = (first ? '<b>' + first + '</b>' : '') + (first && second.length ? '<br>' : '') + second.join(' · ');
 }
 
 function setCustomerWorkspaceState(state, title, message, progress) {
@@ -5976,8 +6011,8 @@ function setCustomerWorkspaceState(state, title, message, progress) {
   modal.classList.toggle('is-error', state === 'error');
   modal.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
   loading.hidden = !blocked;
-  if (titleEl) titleEl.textContent = title || (state === 'error' ? '客户资料暂时无法加载' : '正在加载客户资料…');
-  if (messageEl) messageEl.textContent = message || (state === 'error' ? '可以重试；当前不会覆盖你正在查看的其他客户。' : '正在读取客户资料和最近沟通。');
+  if (titleEl) titleEl.textContent = title || (state === 'error' ? '客户资料暂时无法加载' : '正在读取…');
+  if (messageEl) messageEl.textContent = message || (state === 'error' ? '可以重试；当前不会覆盖你正在查看的其他客户。' : '');
   if (progressEl) progressEl.style.width = Math.max(8, Math.min(100, Number(progress) || (state === 'error' ? 100 : 24))) + '%';
   if (retryButton) retryButton.hidden = state !== 'error';
 }
@@ -6008,6 +6043,51 @@ function writeCustomerWorkspaceShell(customer) {
   try { sessionStorage.setItem(customerWorkspaceShellKey(customer.id), JSON.stringify(shell)); } catch (ignore) {}
 }
 
+function fillCustomerProfileForm(c) {
+  c = c || {};
+  document.getElementById('editName').value = c.name || '';
+  document.getElementById('editCompany').value = c.company || '';
+  document.getElementById('editCountry').value = c.country || '';
+  setCustomerLevelFieldValue(c.level || 'C');
+  document.getElementById('editBusinessRole').value = c.business_role || '';
+  document.getElementById('editField').value = c.field || '';
+  document.getElementById('editBusinessStage').value = c.business_stage || '';
+  document.getElementById('editSource').value = c.source || '';
+  document.getElementById('editSourceDetail').value = c.source_detail || '';
+  document.getElementById('editNextFollowUp').value = (c.next_follow_up || '').substring(0, 10);
+  document.getElementById('editWebsite').value = c.website || '';
+  document.getElementById('editTags').value = c.tags || '';
+  document.getElementById('editProfile').value = c.profile || '';
+  document.getElementById('editNotes').value = c.notes || '';
+}
+
+// Before a customer's data arrives the room keeps its shape but holds nothing
+// from the previous customer: the focal and the column show a quiet placeholder.
+function resetCustomerWorkspaceRoom() {
+  var who = document.getElementById('cwWho');
+  if (who) who.textContent = currentUser && (currentUser.name || currentUser.label || currentUser.id) || '';
+  ['customerNextTask', 'cwFocusActions', 'cwProfileView', 'contactsList', 'customerFilesList', 'customerTasksList', 'cwWaiting', 'cwDate'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+  ['contactsList', 'customerFilesList', 'customerTasksList'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) delete el.dataset.loaded;
+  });
+  var quick = document.getElementById('customerTaskQuickActions');
+  if (quick) quick.hidden = true;
+  var list = document.getElementById('outreachList');
+  if (list) list.innerHTML = '<p class="cw-empty">正在读取沟通记录…</p>';
+  var more = document.getElementById('customerTimelineMore');
+  if (more) { more.hidden = true; more.innerHTML = ''; }
+  ['cwCountTimeline', 'cwCountTasks', 'cwCountFiles', 'cwCountContacts'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = '—';
+  });
+  closeCwForms();
+  showCustomerSection('editTabOutreach');
+}
+
 async function openEditModal(id) {
   id = Number(id);
   if (!id) return;
@@ -6026,11 +6106,19 @@ async function openEditModal(id) {
   _customerDetailController = typeof AbortController === 'function' ? new AbortController() : null;
   _customerDetailCache = null;
   document.getElementById('customerEditTitle').textContent = '客户详情';
-  document.getElementById('customerWorkspaceMeta').textContent = '正在读取资料…';
+  document.getElementById('customerWorkspaceMeta').textContent = '';
+  resetCustomerWorkspaceRoom();
   var cachedShell = readCustomerWorkspaceShell(id);
   if (cachedShell) updateCustomerWorkspaceIdentity(cachedShell);
-  setCustomerWorkspaceState('loading', '正在加载客户资料…', '先读取客户身份和最近沟通，联系人、文件与分析在打开页签时加载。', 24);
+  setCustomerWorkspaceState('loading', '正在读取…', '', 24);
   openModal('customerEditModal');
+  // Focus enters the room itself (not the brand button), so Tab starts from the
+  // top bar without drawing a ring on arrival.
+  requestAnimationFrame(function() {
+    var room = document.querySelector('#customerEditModal .cw-app');
+    if (room && modal.classList.contains('show')) room.focus({ preventScroll: true });
+  });
+  if (window.refreshDaylightRest) window.refreshDaylightRest(true);
   var detailTimedOut = false;
   var detailSlowNotice = setTimeout(function() {
     if (requestToken !== _customerDetailLoadToken || !_customerDetailController) return;
@@ -6084,20 +6172,7 @@ async function openEditModal(id) {
     writeCustomerWorkspaceShell(c);
     document.getElementById('editCustomerId').value = c.id;
     updateCustomerWorkspaceIdentity(c);
-    document.getElementById('editName').value = c.name || '';
-    document.getElementById('editCompany').value = c.company || '';
-    document.getElementById('editCountry').value = c.country || '';
-    setCustomerLevelFieldValue(c.level || 'C');
-    document.getElementById('editBusinessRole').value = c.business_role || '';
-    document.getElementById('editField').value = c.field || '';
-    document.getElementById('editBusinessStage').value = c.business_stage || '';
-    document.getElementById('editSource').value = c.source || '';
-    document.getElementById('editSourceDetail').value = c.source_detail || '';
-    document.getElementById('editNextFollowUp').value = (c.next_follow_up || '').substring(0, 10);
-    document.getElementById('editWebsite').value = c.website || '';
-    document.getElementById('editTags').value = c.tags || '';
-    document.getElementById('editProfile').value = c.profile || '';
-    document.getElementById('editNotes').value = c.notes || '';
+    fillCustomerProfileForm(c);
     ['contactName', 'contactTitle', 'contactEmail', 'contactPhone', 'contactWhatsapp', 'contactLinkedin',
      'bulkContactEmails', 'followHistoryContent', 'followHistoryResult', 'followHistoryNextTask', 'followHistoryNext']
       .forEach(function(fieldId) { var field = document.getElementById(fieldId); if (field) { if (field.isContentEditable) field.innerHTML = ''; else field.value = ''; } });
@@ -6110,8 +6185,7 @@ async function openEditModal(id) {
     var bulkValidation = document.getElementById('bulkContactEmailValidation');
     if (bulkValidation) { bulkValidation.hidden = true; bulkValidation.innerHTML = ''; }
     switchCustomerCompose('history');
-    var communicationComposer = document.getElementById('followCompose');
-    if (communicationComposer) communicationComposer.open = false;
+    closeCwForms();
     renderFollowTimeline(c.follow_history || [], c.outreach_emails || []);
     renderCustomerFactsBrief(c);
     renderCustomerNextTask(c.reminders || []);
@@ -6120,12 +6194,12 @@ async function openEditModal(id) {
     _customerTimelineLoading = false;
     _customerSectionLoads = {};
     renderCustomerTimelineMore(c.timeline_pagination);
-    document.querySelectorAll('#customerEditModal .tab-btn').forEach(function(t, i) { t.classList.toggle('active', i === 0); });
-    document.querySelectorAll('#customerEditModal .tab-content').forEach(function(t, i) { t.classList.toggle('active', i === 0); });
+    showCustomerSection('editTabOutreach');
 
     // 基础资料到达后立即显示详情；文件、联系人和待办等次级区块按需加载。
     setCustomerWorkspaceState('ready');
     markModalClean('customerEditModal');
+    if (window.refreshDaylightRest) window.refreshDaylightRest(true);
   } catch(e) {
     if (requestToken !== _customerDetailLoadToken || ((e && e.name === 'AbortError') && !detailTimedOut)) return;
     var detailErrorMessage = '网络或本地服务响应较慢。请点击“重新加载”再试一次。';
@@ -6174,10 +6248,10 @@ function openCustomerFollowComposer() {
     direction: 'unknown', activityType: 'follow_up' });
 }
 
-function openCustomerTaskModal(mode) {
+function openCustomerTaskModal(mode, taskId) {
   var customerName = document.getElementById('customerEditTitle').textContent || '当前客户';
   var modal = document.getElementById('customerTaskModal');
-  var currentTask = mode === 'create' ? null : (_customerDetailCache && (_customerDetailCache.reminders || [])[0]);
+  var currentTask = mode === 'create' ? null : customerOpenTask(taskId);
   var isEditing = !!(currentTask && currentTask.id);
   document.getElementById('customerTaskModalCustomer').textContent = customerName;
   document.getElementById('customerTaskModalTitle').textContent = isEditing ? '调整下一步' : '安排下一步';
@@ -6222,35 +6296,87 @@ function setCustomerTaskDate(days, button) {
   }
 }
 
+// ---- 客户工作区：日期与计数 ----
+var CW_WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function cwDate(iso) {
+  var value = normalizeDateString(iso);
+  var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+}
+function cwMonthDay(iso) {
+  var date = cwDate(iso);
+  return date ? String(date.getMonth() + 1).padStart(2, '0') + '/' + String(date.getDate()).padStart(2, '0') : '';
+}
+function cwDaysFromToday(iso) {
+  var date = cwDate(iso);
+  var today = cwDate(localDateString());
+  return date && today ? Math.round((date - today) / 86400000) : null;
+}
+// "9 月 29 日 · 周二 · 2 天后"; an overdue step only says so in words.
+function cwWhen(iso) {
+  var date = cwDate(iso);
+  if (!date) return '未安排日期';
+  var days = cwDaysFromToday(iso);
+  var relative = days === 0 ? '今天' : days === 1 ? '明天' : days > 1 ? days + ' 天后' : '已逾期 ' + (-days) + ' 天';
+  return (date.getMonth() + 1) + ' 月 ' + date.getDate() + ' 日 · ' + CW_WEEKDAYS[date.getDay()] + ' · ' + relative;
+}
+
 function renderCustomerNextTask(reminders) {
   var el = document.getElementById('customerNextTask');
   var quickActions = document.getElementById('customerTaskQuickActions');
-  var otherEl = document.getElementById('customerOtherTasks');
-  var actionButton = document.getElementById('customerTaskActionButton');
-  var openTasks = reminders || [];
+  var actions = document.getElementById('cwFocusActions');
   var next = (reminders || [])[0];
+  if (!el) return;
+  el.hidden = false;
   if (!next) {
-    // The customer summary already states that no next step is arranged.
-    // Keep this action area focused on what the user can do now.
-    el.innerHTML = '';
-    el.hidden = true;
-    if (actionButton) actionButton.textContent = '安排下一步';
+    // A record without a next step is a normal state, not a warning.
+    el.innerHTML = '<h2 class="cw-h2 is-empty">还没有安排下一步</h2>';
+    if (actions) actions.innerHTML =
+      '<button type="button" class="cw-act cw-primary" id="customerTaskActionButton" onclick="openCustomerTaskModal(\'create\')">安排下一步</button>' +
+      '<button type="button" class="cw-act" onclick="openCustomerFollowComposer()">记录沟通</button>';
     if (quickActions) quickActions.hidden = true;
-    if (otherEl) otherEl.innerHTML = '';
+    renderCustomerRoomCounts();
     return;
   }
   var title = next.title || next.content || '联系客户';
-  el.innerHTML = '<strong>' + escapeHtml(title) + '</strong><span>' + formatChineseDate(next.remind_date) + '</span>' +
-    (next.reason ? '<p>' + escapeHtml(next.reason) + '</p>' : '');
-  el.hidden = false;
-  if (actionButton) actionButton.textContent = '调整下一步';
+  el.innerHTML = '<h2 class="cw-h2">' + escapeHtml(title) + '</h2>' +
+    '<p class="cw-when tnum">' + escapeHtml(cwWhen(next.remind_date)) + '</p>' +
+    (next.reason ? '<p class="cw-reason">' + escapeHtml(next.reason) + '</p>' : '');
+  if (actions) actions.innerHTML =
+    '<button type="button" class="cw-act cw-primary" onclick="openCustomerFollowComposer()">记录沟通</button>' +
+    '<button type="button" class="cw-act" id="customerTaskActionButton" onclick="openCustomerTaskModal()">调整</button>' +
+    '<button type="button" class="cw-act" onclick="completeCustomerNextTask(this)">标记完成</button>';
   if (quickActions) quickActions.hidden = false;
-  if (otherEl) {
-    var others = openTasks.slice(1, 4);
-    otherEl.innerHTML = others.length ? '<div class="workspace-kicker">其他未完成待办</div>' + others.map(function(task) {
-      return '<button type="button" class="customer-other-task" onclick="switchCustomerTab(\'editTabTasks\')"><span>' + escapeHtml(task.title || task.content || '待办') + '</span><time>' + escapeHtml(formatChineseDate(task.remind_date || '')) + '</time></button>';
-    }).join('') : '';
-  }
+  renderCustomerRoomCounts();
+}
+
+// Readouts and the section header count only what is known. A number that has
+// not been read yet is "—" (or "1+" when at least one is certain), never a guess.
+function renderCustomerRoomCounts() {
+  var c = _customerDetailCache;
+  function set(id, value) { var el = document.getElementById(id); if (el) el.textContent = value; }
+  if (!c) return;
+  var pagination = c.timeline_pagination || {};
+  var loadedFacts = (c.timeline_items || []).length;
+  var timelineCount = pagination.total != null ? String(pagination.total) : (loadedFacts ? loadedFacts + (pagination.has_next ? '+' : '') : '0');
+  var openTasks = Array.isArray(c.tasks) ? c.tasks.filter(function(task) { return !task.is_done; }).length : null;
+  var taskCount = openTasks != null ? String(openTasks) : ((c.reminders || []).length ? '1+' : '0');
+  var contactCount = Array.isArray(c.contacts) ? c.contacts.length : Number(c.contact_count || 0);
+  var fileCount = Array.isArray(c.files) ? c.files.length : Number(c.file_count || 0);
+  set('cwCountTimeline', timelineCount);
+  set('cwCountTasks', taskCount);
+  set('cwCountFiles', String(fileCount));
+  set('cwCountContacts', String(contactCount));
+  var modal = document.getElementById('customerEditModal');
+  var section = modal && modal.dataset.section;
+  var meta = {
+    editTabOutreach: timelineCount + ' 条记录',
+    editTabBasic: '客户身份',
+    editTabContacts: contactCount + ' 位',
+    editTabFiles: fileCount + ' 个',
+    editTabTasks: taskCount + ' 未完成'
+  }[section] || '';
+  set('cwPanelMeta', meta);
 }
 
 function customerTaskMotionKey(task) {
@@ -6258,48 +6384,60 @@ function customerTaskMotionKey(task) {
 }
 
 function customerTaskHtml(task) {
-  var overdue = isOverdue((task.remind_date || '').substring(0, 10));
-  return '<article class="customer-task-row' + (overdue ? ' is-overdue' : '') + '">' +
-    '<div><strong>' + escapeHtml(task.title || task.content || '待办') + '</strong>' +
-    (task.reason ? '<p>' + escapeHtml(task.reason) + '</p>' : '') + '</div>' +
-    '<time>' + escapeHtml(formatChineseDate(task.remind_date || '')) + '</time></article>';
+  var date = (task.remind_date || '').substring(0, 10);
+  var done = !!task.is_done;
+  var overdue = !done && isOverdue(date);
+  var first = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
+  var isNext = !done && first && Number(first.id) === Number(task.id);
+  var id = Number(task.id) || 0;
+  var sub = [formatChineseDate(date) || '未安排日期', isNext ? '下一步' : '', overdue ? '已逾期' : ''].filter(Boolean).join(' · ');
+  var acts = done || !id ? '' : '<span class="cw-row-acts">' +
+    '<button type="button" class="cw-link" onclick="completeCustomerNextTask(this, ' + id + ')">完成</button><i>·</i>' +
+    '<button type="button" class="cw-link" onclick="postponeCustomerNextTask(1, this, ' + id + ')">明天</button><i>·</i>' +
+    '<button type="button" class="cw-link" onclick="openCustomerTaskModal(\'edit\', ' + id + ')">编辑</button></span>';
+  return '<div class="cw-prow lit-row' + (done ? ' is-done' : '') + (overdue ? ' is-overdue' : '') + '" tabindex="0">' +
+    '<div class="cw-pmain"><b>' + escapeHtml(task.title || task.content || '待办') + '</b>' +
+    '<span class="cw-sm">' + escapeHtml(sub) + '</span>' +
+    (task.reason ? '<span class="cw-sm2">' + escapeHtml(task.reason) + '</span>' : '') + acts + '</div>' +
+    '<time class="tnum">' + escapeHtml(cwMonthDay(date)) + '</time></div>';
 }
 
 function renderCustomerTaskEmpty(list) {
-  var activeRows = list && list.querySelectorAll('.customer-task-row:not([data-motion-leaving])');
-  var rows = list && list.querySelectorAll('.customer-task-row');
+  var activeRows = list && list.querySelectorAll('.cw-prow:not([data-motion-leaving])');
+  var rows = list && list.querySelectorAll('.cw-prow');
+  var empty = '<p class="cw-empty">暂无未完成待办。<button type="button" class="cw-link" onclick="openCustomerTaskModal(\'create\')">安排下一步</button></p>';
   if (list && rows && rows.length && shouldAnimateLists()) {
     var token = String(Date.now()) + '-' + Math.random();
     list.dataset.taskEmptyToken = token;
     if (activeRows && activeRows.length) reconcileKeyedElements(list, [], {
-      selector: '.customer-task-row', leave: true,
+      selector: '.cw-prow', leave: true,
       key: customerTaskMotionKey, render: customerTaskHtml
     });
     window.setTimeout(function() {
-      if (list.dataset.taskEmptyToken !== token || list.querySelector('.customer-task-row')) return;
+      if (list.dataset.taskEmptyToken !== token || list.querySelector('.cw-prow')) return;
       delete list.dataset.taskEmptyToken;
-      list.innerHTML = '<div class="customer-task-empty">暂无未完成待办。</div>';
+      list.innerHTML = empty;
     }, 330);
     return;
   }
   delete list.dataset.taskEmptyToken;
-  list.innerHTML = '<div class="customer-task-empty">暂无未完成待办。</div>';
+  list.innerHTML = empty;
 }
 
 function renderCustomerTasks(tasks, changedKeys) {
   var list = document.getElementById('customerTasksList');
   if (!list) return;
   var explicit = tasks || [];
-  list.classList.add('customer-task-list');
   if (!explicit.length) {
     renderCustomerTaskEmpty(list);
     return;
   }
   delete list.dataset.taskEmptyToken;
+  if (!list.querySelector('.cw-prow')) list.textContent = '';
   var changed = {};
   (changedKeys || []).forEach(function(key) { if (key) changed[key] = true; });
   reconcileKeyedElements(list, explicit, {
-    selector: '.customer-task-row',
+    selector: '.cw-prow',
     leave: true,
     key: customerTaskMotionKey,
     render: customerTaskHtml,
@@ -6312,60 +6450,68 @@ function renderCustomerTasks(tasks, changedKeys) {
 function focusCustomerGap(tabId) {
   var target = tabId || 'editTabBasic';
   switchCustomerTab(target);
+  if (target === 'editTabBasic') openCustomerProfileEdit();
+  else if (target === 'editTabContacts') setCwForm('cwContactForm', true);
   setTimeout(function() {
     var field = target === 'editTabContacts' ? 'contactName' : target === 'editTabBasic' ? 'editField' : '';
     var input = field && document.getElementById(field);
     if (input && !input.disabled) input.focus({ preventScroll: true });
-  }, 180);
+  }, 60);
 }
 
+// The workspace's derived chrome — the 资料 definition list with its checks and
+// sela research, the waiting line in the status bar, the readouts. Every write
+// that changes customer facts calls this, so it stays one function.
 function renderCustomerFactsBrief(customer) {
-  var summary = document.getElementById('customerWorkspaceSummary');
-  if (!summary) return;
   customer = customer || {};
-  var primaryContact = customer.primary_contact || (customer.contacts || [])[0];
-  var contactCount = Number(customer.contact_count || (customer.contacts || []).length || 0);
+  var waitingText = customer.customer_judgment || '';
+  var waitEl = document.getElementById('cwWaiting');
+  if (waitEl) {
+    waitEl.textContent = waitingText || '还没有记录，点此填写';
+    waitEl.classList.toggle('is-empty', !waitingText);
+  }
+  var dateEl = document.getElementById('cwDate');
+  if (dateEl) {
+    var today = cwDate(localDateString());
+    var last = customer.last_contact || ((customer.recent_facts || [])[0] || {}).date || '';
+    var days = last ? cwDaysFromToday(last) : null;
+    var lastText = days === null ? '尚无沟通记录' : days >= 0 ? '上次沟通 今天' : '上次沟通 ' + (-days) + ' 天前';
+    dateEl.textContent = '今天 ' + localDateString() + ' · ' + CW_WEEKDAYS[today.getDay()] + ' · ' + lastText;
+  }
+  var view = document.getElementById('cwProfileView');
+  if (view) view.innerHTML = customerProfileHtml(customer);
+  renderCustomerRoomCounts();
+}
+
+function customerProfileHtml(customer) {
+  var site = customerWebsiteParts(customer);
+  var level = customerLevelForDisplay(customer.level);
   var gaps = customer.information_gaps || [];
-  var currentStatus = customer.current_judgment || {
-    label: customer.customer_judgment || '未记录人工判断',
-    source: customer.customer_judgment ? '用户记录' : '待确认'
-  };
-  var currentNext = customer.current_next_step || {};
-  var nextTask = (customer.reminders || [])[0] || customer.next_task;
-  var nextLabel = currentNext.label || (nextTask && (nextTask.title || nextTask.content)) || '未安排下一步';
-  var hasNextTask = !!(nextTask && (nextTask.title || nextTask.content));
-  var nextDate = currentNext.date || (nextTask && nextTask.remind_date) || '';
-  var waitingText = customer.customer_judgment || '未记录人工判断';
-  var website = (customer.website || '').trim();
-  var websiteUrl = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
-  var websiteHost = website;
-  try { websiteHost = websiteUrl ? new URL(websiteUrl).hostname.replace(/^www\./, '') : ''; } catch (ignore) {}
-  var contactChannels = primaryContact ? [primaryContact.email, primaryContact.phone, primaryContact.whatsapp].filter(Boolean) : [];
-  var contactHtml = primaryContact
-    ? '<div class="customer-fact-person"><strong>' + escapeHtml(primaryContact.name || primaryContact.email || '联系人') + '</strong>' +
-      (primaryContact.title ? '<span>' + escapeHtml(primaryContact.title) + '</span>' : '') +
-      (primaryContact.email ? '<a href="mailto:' + escapeHtml(primaryContact.email) + '">' + escapeHtml(primaryContact.email) + '</a>' : '') +
-      (contactChannels.length > 1 ? '<small>' + escapeHtml(contactChannels.slice(1).join(' · ')) + '</small>' : '') +
-      (contactCount > 1 ? '<small>共 ' + contactCount + ' 位联系人</small>' : '') +
-    '</div>'
-    : '<div class="customer-fact-empty">暂无联系人</div>';
-  var recentFacts = (customer.recent_facts || []).slice(0, 3);
-  var recentHtml = recentFacts.length ? recentFacts.slice(0, 1).map(function(fact) {
-    var factText = fact.content || fact.subject || '已记录沟通';
-    var sourceLabel = customerFactLabel(fact.type, fact.source_detail);
-    return '<article class="customer-fact-event" data-fact-key="' + escapeHtml(customerTimelineKey(fact)) + '"><div class="customer-fact-event-meta"><span>' + escapeHtml(sourceLabel) + '</span><time>' + escapeHtml(formatChineseDate(fact.date || '')) + '</time></div>' +
-      '<p>' + (fact.type === 'follow' ? renderRichText(factText) : escapeHtml(factText)) + '</p>' +
-      (fact.result ? '<small><b>结果</b> ' + (fact.type === 'follow' ? renderRichText(fact.result) : escapeHtml(fact.result)) + '</small>' : '') +
-    '</article>';
-  }).join('') : '<div class="customer-fact-empty">暂无沟通记录</div>';
-  var gapsHtml = gaps.length ? gaps.map(function(gap) {
-    var gapLabel = gap.label || '资料待确认';
-    var gapDetail = gap.detail || '需要人工确认';
-    return '<button type="button" class="customer-gap-item" title="' + escapeHtml(gapDetail) + '" aria-label="' + escapeHtml(gapLabel + '：' + gapDetail) + '" onclick="focusCustomerGap(\'' + escapeHtml(gap.target || 'editTabBasic') + '\')"><span>' + escapeHtml(gapLabel) + '</span></button>';
-  }).join('') : '';
-  var customerLevel = customerLevelForDisplay(customer.level);
+  function row(label, value) { return '<dt>' + label + '</dt><dd>' + value + '</dd>'; }
+  function text(value) { return value ? escapeHtml(value) : '<span class="cw-none">—</span>'; }
+  var levelControl = '<label class="customer-level-quick cw-level" title="点击等级即可直接输入修改">' +
+    '<input class="customer-level-quick-input" inputmode="text" autocapitalize="characters" aria-label="客户等级，输入 A/B/C/D，可选加号或减号" value="' + escapeHtml(level) + '" data-current-level="' + escapeHtml(level) + '" onchange="quickUpdateCustomerLevel(this)">' +
+    '<span class="customer-level-quick-feedback" aria-live="polite"></span></label>';
+  var html = '<dl class="cw-dlg">' +
+    row('公司', text(customer.company || customer.name) + (customer.name && customer.company && customer.name !== customer.company ? '<span class="cw-none"> · ' + escapeHtml(customer.name) + '</span>' : '')) +
+    row('国家 / 地区', text(customer.country)) +
+    row('行业领域', text(customer.industry || customer.field)) +
+    row('客户来源', text([customer.source, customer.source_detail].filter(Boolean).join(' · '))) +
+    row('等级 · 角色', levelControl + (customer.business_role ? ' · ' + escapeHtml(customer.business_role) : '')) +
+    row('网站', site.url ? '<a href="' + escapeHtml(site.url) + '" target="_blank" rel="noopener">' + escapeHtml(site.host) + '</a>' : text('')) +
+    row('当前等待', '<button type="button" class="cw-link cw-inline" onclick="editCustomerWaiting()">' + text(customer.customer_judgment) + '</button>') +
+    row('简介', text(customer.profile)) +
+    (customer.notes ? row('备注', escapeHtml(customer.notes)) : '') +
+    (customer.tags ? row('标签', escapeHtml(customer.tags)) : '') +
+  '</dl>';
+  if (gaps.length) {
+    html += '<div class="cw-sub"><span class="cw-subk">资料需检查</span><div class="cw-gaps">' + gaps.map(function(gap) {
+      var gapLabel = gap.label || '资料待确认';
+      var gapDetail = gap.detail || '需要人工确认';
+      return '<button type="button" class="cw-link" title="' + escapeHtml(gapDetail) + '" aria-label="' + escapeHtml(gapLabel + '：' + gapDetail) + '" onclick="focusCustomerGap(\'' + escapeHtml(gap.target || 'editTabBasic') + '\')">' + escapeHtml(gapLabel) + '</button>';
+    }).join('') + '</div></div>';
+  }
   var agentProspect = customer.agent_prospect || null;
-  var agentResearchHtml = '';
   if (agentProspect) {
     var researchTags = [agentProspect.qualification_status, agentProspect.research_status, agentProspect.confidence].filter(Boolean).join(' · ');
     var researchText = agentProspect.reason || agentProspect.research_reason || 'sela 已建立该客户的研究资料。';
@@ -6376,37 +6522,18 @@ function renderCustomerFactsBrief(customer) {
       return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(label) + '</a>';
     }).join(' · ');
     var isDnc = agentProspect.contact_permission === 'do_not_contact';
-    var permission = isDnc
-      ? '已停止联系' + (agentProspect.suppression_reason ? '：' + agentProspect.suppression_reason : '')
-      : '';
+    var permission = isDnc ? '已停止联系' + (agentProspect.suppression_reason ? '：' + agentProspect.suppression_reason : '') : '';
     var exclusionReview = agentProspect.exclusion_review || null;
-    var exclusionReviewHtml = exclusionReview
-      ? '<small class="customer-fact-files">排除身份待确认：可能与「' + escapeHtml(exclusionReview.canonical_name || exclusionReview.matched_value || '历史记录') + '」相同；当前仅名称相似。</small><div><button type="button" class="text-action" onclick="resolveCustomerSelaExclusionReview(\'accept\')">确认是新主体</button><button type="button" class="text-action" onclick="resolveCustomerSelaExclusionReview(\'reject\')">确认同一主体并停止联系</button></div>'
-      : '';
-    agentResearchHtml = '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">sela 研究</span><span class="customer-fact-gap-count">' + escapeHtml(researchTags || '已导入') + '</span></div><p class="customer-fact-context-copy">' + renderRichText(researchText.slice(0, 720)) + '</p>' +
-      (agentProspect.angle ? '<small class="customer-fact-files">沟通角度：' + escapeHtml(agentProspect.angle) + '</small>' : '') +
-      (permission ? '<small class="customer-fact-files">联系权限：' + escapeHtml(permission) + '</small><div><button type="button" class="text-action" onclick="setCustomerContactPermission(\'allowed\')">恢复联系（人工解禁）</button></div>' : '') +
-      exclusionReviewHtml +
-      (researchSources ? '<small class="customer-fact-files">公开来源：' + researchSources + '</small>' : '') +
-    '</section>';
+    html += '<div class="cw-sub"><span class="cw-subk">sela 研究' + (researchTags ? ' · ' + escapeHtml(researchTags) : '') + '</span>' +
+      '<p class="cw-subp">' + renderRichText(researchText.slice(0, 720)) + '</p>' +
+      (agentProspect.angle ? '<p class="cw-subs">沟通角度：' + escapeHtml(agentProspect.angle) + '</p>' : '') +
+      (permission ? '<p class="cw-subs">联系权限：' + escapeHtml(permission) + ' <button type="button" class="cw-link" onclick="setCustomerContactPermission(\'allowed\')">恢复联系（人工解禁）</button></p>' : '') +
+      (exclusionReview ? '<p class="cw-subs">排除身份待确认：可能与「' + escapeHtml(exclusionReview.canonical_name || exclusionReview.matched_value || '历史记录') + '」相同；当前仅名称相似。 <button type="button" class="cw-link" onclick="resolveCustomerSelaExclusionReview(\'accept\')">确认是新主体</button> <button type="button" class="cw-link" onclick="resolveCustomerSelaExclusionReview(\'reject\')">确认同一主体并停止联系</button></p>' : '') +
+      (researchSources ? '<p class="cw-subs">公开来源：' + researchSources + '</p>' : '') +
+    '</div>';
   }
-  summary.innerHTML =
-    '<div class="customer-now-next-grid">' +
-      '<section class="customer-fact-section customer-fact-now"><div class="customer-fact-section-head"><span class="customer-fact-label">最近沟通</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabOutreach\')">时间线</button></div><div class="customer-fact-events">' + recentHtml + '</div><div class="customer-now-waiting"><span>当前等待</span><strong>' + escapeHtml(waitingText) + '</strong><button type="button" class="text-action" onclick="editCustomerWaiting()">调整</button></div></section>' +
-      '<section class="customer-fact-section customer-fact-next"><div class="customer-fact-section-head"><span class="customer-fact-label">下一步</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabTasks\')">全部待办</button></div><strong class="customer-next-title">' + escapeHtml(nextLabel) + '</strong>' + (nextDate ? '<time class="customer-next-date">' + escapeHtml(formatChineseDate(nextDate)) + '</time>' : (hasNextTask ? '<span class="customer-next-date">未安排日期</span>' : '')) + '</section>' +
-    '</div>' +
-    '<details class="customer-secondary-info"><summary><span>资料与历史信息</span>' + (gaps.length ? '<span class="customer-secondary-hint">' + gaps.length + ' 项需检查</span>' : '') + '</summary><div class="customer-secondary-grid">' +
-      '<section class="customer-fact-section customer-fact-identity"><div class="customer-fact-section-head"><span class="customer-fact-label">客户身份</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabBasic\')">资料</button></div>' +
-        '<strong class="customer-fact-company">' + escapeHtml(customer.company || customer.name || '未记录公司名称') + '</strong>' +
-        (customer.name && customer.company && customer.name !== customer.company ? '<span class="customer-fact-subline">客户名称：' + escapeHtml(customer.name) + '</span>' : '') +
-        '<div class="customer-fact-values"><span><b>国家/地区</b>' + escapeHtml(customer.country || '未记录') + '</span><span><b>行业/领域</b>' + escapeHtml(customer.industry || customer.field || '未记录') + '</span><span><b>来源</b>' + escapeHtml([customer.source, customer.source_detail].filter(Boolean).join(' · ') || '未记录') + '</span><label class="customer-level-quick" title="点击等级即可直接输入修改"><b>等级</b><span class="customer-level-quick-control"><input class="customer-level-quick-input" type="text" inputmode="text" autocapitalize="characters" aria-label="客户等级，输入 A/B/C/D，可选加号或减号" value="' + escapeHtml(customerLevel) + '" data-current-level="' + escapeHtml(customerLevel) + '" onchange="quickUpdateCustomerLevel(this)"><span class="customer-level-quick-affordance" aria-hidden="true"><span class="ui-icon ui-icon-edit"></span></span><span class="customer-level-quick-feedback" aria-live="polite"></span></span></label><span class="customer-fact-website"><b>网站</b>' + (websiteUrl ? '<a href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener">' + escapeHtml(websiteHost) + '</a>' : '未记录') + '</span></div>' +
-      '</section>' +
-      '<section class="customer-fact-section customer-fact-contact"><div class="customer-fact-section-head"><span class="customer-fact-label">沟通对象</span><button type="button" class="text-action" onclick="switchCustomerTab(\'editTabContacts\')">' + (primaryContact ? '查看' : '添加') + '</button></div>' + contactHtml + '</section>' +
-      '<section class="customer-fact-section customer-fact-status"><div class="customer-fact-section-head"><span class="customer-fact-label">关系状态</span></div><div class="customer-fact-status-grid"><div><strong>' + escapeHtml(currentStatus.label || '未记录') + '</strong></div></div></section>' +
-      '<section class="customer-fact-section customer-fact-context"><div class="customer-fact-section-head"><span class="customer-fact-label">客户背景</span></div><p class="customer-fact-context-copy">' + renderRichText((customer.profile || customer.notes || '尚未记录').slice(0, 360)) + '</p></section>' +
-      agentResearchHtml +
-      (gaps.length ? '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">资料需检查</span></div><div class="customer-gap-list">' + gapsHtml + '</div></section>' : '<section class="customer-fact-section customer-fact-gaps"><div class="customer-fact-section-head"><span class="customer-fact-label">基础字段齐全</span></div></section>') +
-    '</div></details>';
+  html += '<div class="cw-foot"><button type="button" class="cw-link" onclick="exportCurrentCustomerEmails()">导出邮箱</button><button type="button" class="cw-link" onclick="copyCustomerContext(\'timeline\')">导出全部沟通</button></div>';
+  return html;
 }
 
 async function resolveCustomerSelaExclusionReview(decision) {
@@ -6686,8 +6813,16 @@ function applyCustomerTaskSnapshot(tasks, changedKey) {
   }
 }
 
-async function completeCustomerNextTask(button) {
-  var next = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
+function customerOpenTask(taskId) {
+  var cache = _customerDetailCache;
+  if (!cache) return null;
+  var pool = (cache.reminders || []).concat(Array.isArray(cache.tasks) ? cache.tasks : []);
+  if (!taskId) return (cache.reminders || [])[0] || null;
+  return pool.find(function(task) { return Number(task.id) === Number(taskId); }) || null;
+}
+
+async function completeCustomerNextTask(button, taskId) {
+  var next = customerOpenTask(taskId);
   if (!next) return;
   var scope = beginCustomerScope();
   var reset = setActionFeedback(button, 'pending', '处理中…');
@@ -6695,8 +6830,8 @@ async function completeCustomerNextTask(button) {
     var saved = await api('/api/reminders/' + next.id, { method: 'PUT', body: JSON.stringify({ result: '已完成', activity_type: 'task_completed' }) });
     var cache = liveCustomerCache(scope);
     if (cache) {
-      var remaining = (cache.reminders || []).filter(function(task) {
-        return Number(task.id) !== Number(next.id);
+      var remaining = (Array.isArray(cache.tasks) ? cache.tasks : (cache.reminders || [])).filter(function(task) {
+        return Number(task.id) !== Number(next.id) && !task.is_done;
       });
       applyCustomerTaskSnapshot(remaining);
       if (saved && saved.activity_id) {
@@ -6725,8 +6860,8 @@ async function completeCustomerNextTask(button) {
   }
 }
 
-async function postponeCustomerNextTask(days, button) {
-  var next = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
+async function postponeCustomerNextTask(days, button, taskId) {
+  var next = customerOpenTask(taskId);
   if (!next) return;
   var scope = beginCustomerScope();
   var due = new Date();
@@ -6739,8 +6874,8 @@ async function postponeCustomerNextTask(days, button) {
       var updatedTask = saved && saved.reminder ? saved.reminder : Object.assign({}, next, {
         remind_date: (saved && saved.remind_date) || localDateString(due)
       });
-      var remaining = (cache.reminders || []).filter(function(task) {
-        return Number(task.id) !== Number(next.id) &&
+      var remaining = (Array.isArray(cache.tasks) ? cache.tasks : (cache.reminders || [])).filter(function(task) {
+        return Number(task.id) !== Number(next.id) && !task.is_done &&
           Number(task.id) !== Number(saved && saved.merged_into || 0);
       });
       if (!updatedTask.is_done) remaining.push(updatedTask);
@@ -6938,7 +7073,7 @@ function contactEditFormHtml(contact) {
   var firstRow = CONTACT_EDIT_FIELDS.slice(0, 2).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
   var secondRow = CONTACT_EDIT_FIELDS.slice(2, 4).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
   var thirdRow = CONTACT_EDIT_FIELDS.slice(4, 6).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
-  return '<div class="sub-item contact-item contact-item-editing" data-contact-id="' + contactId + '">' +
+  return '<div class="cw-contact-edit" data-contact-id="' + contactId + '">' +
     '<form class="contact-edit-form" autocomplete="off" onsubmit="return saveContact(event,' + contactId + ')">' +
       '<div class="contact-edit-header"><div><strong>编辑联系人</strong><span>修改后会立即同步到客户资料</span></div><button class="text-action contact-edit-cancel" type="button" onclick="cancelContactEdit(' + contactId + ')">取消编辑</button></div>' +
       '<div class="form-row">' + firstRow + '</div>' +
@@ -6961,7 +7096,10 @@ function syncContactEditInputValues(contact) {
 
 function renderContacts(contacts) {
   var el = document.getElementById('contactsList');
-  if (!contacts || contacts.length === 0) { el.innerHTML = '<div class="contact-empty-state"><strong>还没有联系人</strong></div>'; return; }
+  if (!contacts || contacts.length === 0) {
+    el.innerHTML = '<p class="cw-empty">还没有联系人。<button type="button" class="cw-link" onclick="setCwForm(\'cwContactForm\', true)">添加联系人</button></p>';
+    return;
+  }
   var html = '';
   contacts.forEach(function(c) {
     var contactId = Number(c.id);
@@ -6971,11 +7109,14 @@ function renderContacts(contacts) {
       return;
     }
     var displayName = escapeHtml(c.name || c.email || '(未命名)');
-    html += '<div class="sub-item contact-item" data-contact-id="' + contactId + '"><div class="sub-item-header"><span class="sub-item-title">' + displayName + (c.is_primary ? ' <span style="font-size:0.7rem;color:var(--accent);">(主要)</span>' : '') + '</span><span class="contact-item-actions">' +
-      '<button class="btn btn-sm" type="button" onclick="startContactEdit(' + contactId + ')" aria-label="编辑联系人 ' + displayName + '">编辑</button>' +
-      '<button class="btn btn-sm btn-danger" type="button" onclick="deleteContact(' + contactId + ')" aria-label="删除联系人 ' + displayName + '">删除</button></span></div><div class="sub-item-detail">' +
-      (c.title ? '<div>' + escapeHtml(c.title) + '</div>' : '') + (c.email ? '<div>' + escapeHtml(c.email) + '</div>' : '') +
-      (c.phone ? '<div>电话：' + escapeHtml(c.phone) + '</div>' : '') + (c.whatsapp ? '<div>WhatsApp：' + escapeHtml(c.whatsapp) + '</div>' : '') + (c.linkedin ? '<div>' + escapeHtml(c.linkedin) + '</div>' : '') + '</div></div>';
+    var sub = [c.title, c.is_primary ? '主要联系人' : ''].filter(Boolean).map(escapeHtml).join(' · ');
+    var channels = [c.phone ? '电话 ' + c.phone : '', c.whatsapp ? 'WhatsApp ' + c.whatsapp : '', c.linkedin || ''].filter(Boolean).map(escapeHtml).join(' · ');
+    html += '<div class="cw-prow lit-row" data-contact-id="' + contactId + '" tabindex="0"><div class="cw-pmain"><b>' + displayName + '</b>' +
+      (sub ? '<span class="cw-sm">' + sub + '</span>' : '') +
+      (channels ? '<span class="cw-sm2">' + channels + '</span>' : '') +
+      '<span class="cw-row-acts"><button class="cw-link" type="button" onclick="startContactEdit(' + contactId + ')" aria-label="编辑联系人 ' + displayName + '">编辑</button><i>·</i>' +
+      '<button class="cw-link" type="button" onclick="deleteContact(' + contactId + ')" aria-label="删除联系人 ' + displayName + '">删除</button></span></div>' +
+      (c.email ? '<a href="mailto:' + escapeHtml(c.email) + '">' + escapeHtml(c.email) + '</a>' : '') + '</div>';
   });
   el.innerHTML = html;
   if (_editingContactId) {
@@ -7222,33 +7363,24 @@ function renderCustomerFiles(files) {
   if (!el) return;
   files = files || [];
   if (!files.length) {
-    el.innerHTML = '<div class="customer-file-empty"><strong>还没有客户文件</strong></div>';
+    el.innerHTML = '<p class="cw-empty">还没有客户文件。<button type="button" class="cw-link" onclick="setCwForm(\'customerFileCompose\', true)">添加文件</button></p>';
     return;
   }
-  var html = '<div class="customer-file-list">';
-  files.forEach(function(f) {
-    var ext = String(f.original_name || '').split('.').pop().toUpperCase().slice(0, 4) || '文件';
+  el.innerHTML = files.map(function(f) {
     var mode = f.missing ? 'download' : _customerFileOpenMode(f.original_name);
-    var missing = f.missing ? '<span class="customer-file-missing">文件本体缺失</span>' : '';
-    var tag = f.category ? '<span class="customer-file-tag">' + escapeHtml(f.category) + '</span>' : '';
-    var uploader = f.uploaded_by ? '<span>由 ' + escapeHtml(f.uploaded_by) + ' 上传</span>' : '';
     var date = (f.created_at || '').slice(0, 10);
-    var metaParts = [customerFileSizeText(f.file_size), date, uploader].filter(Boolean);
-    var actions = '<span class="customer-file-actions">' +
-      (mode === 'preview' && !f.missing ? '<button class="btn btn-sm" type="button" onclick="event.stopPropagation();openCustomerFile(' + f.id + ',\'preview\')">预览</button>' : '') +
-      (!f.missing ? '<button class="btn btn-sm" type="button" onclick="event.stopPropagation();downloadCustomerFile(' + f.id + ')">下载</button>' : '') +
-      '<button class="btn btn-sm btn-danger" type="button" onclick="event.stopPropagation();deleteCustomerFile(' + f.id + ')">删除</button></span>';
-    var rowAttr = 'role="button" tabindex="0" title="' + (f.missing ? '文件本体缺失' : (mode === 'download' ? '点击下载文件' : '点击预览文件')) + '" ' +
-      'onclick="' + (f.missing ? '' : 'openCustomerFile(' + f.id + ',\'' + mode + '\')') + '" ' +
-      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + (f.missing ? '' : 'openCustomerFile(' + f.id + ',\'' + mode + '\')') + '}"';
-    html += '<div class="customer-file-item" ' + rowAttr + '>' +
-      '<span class="customer-file-icon">' + uiIcon('file') + '</span>' +
-      '<span class="customer-file-type">' + escapeHtml(ext) + '</span>' +
-      '<span class="customer-file-main"><span class="customer-file-name" title="' + escapeHtml(f.original_name) + '">' + escapeHtml(f.original_name) + '</span>' +
-      '<span class="customer-file-meta">' + metaParts.join(' · ') + ' ' + missing + ' ' + tag + '</span></span>' +
-      actions + '</div>';
-  });
-  el.innerHTML = html + '</div>';
+    var sub = [f.category, customerFileSizeText(f.file_size), f.uploaded_by ? '由 ' + f.uploaded_by + ' 上传' : '', f.missing ? '文件本体缺失' : ''].filter(Boolean).map(escapeHtml).join(' · ');
+    var open = f.missing ? '' : 'openCustomerFile(' + f.id + ',\'' + mode + '\')';
+    var acts = '<span class="cw-row-acts">' +
+      (mode === 'preview' && !f.missing ? '<button class="cw-link" type="button" onclick="event.stopPropagation();openCustomerFile(' + f.id + ',\'preview\')">预览</button><i>·</i>' : '') +
+      (!f.missing ? '<button class="cw-link" type="button" onclick="event.stopPropagation();downloadCustomerFile(' + f.id + ')">下载</button><i>·</i>' : '') +
+      '<button class="cw-link" type="button" onclick="event.stopPropagation();deleteCustomerFile(' + f.id + ')">删除</button></span>';
+    return '<div class="cw-prow lit-row' + (f.missing ? ' is-missing' : '') + '" role="button" tabindex="0" title="' + (f.missing ? '文件本体缺失' : (mode === 'download' ? '点击下载文件' : '点击预览文件')) + '"' +
+      ' onclick="' + open + '" onkeydown="if(event.target===this&&(event.key===\'Enter\'||event.key===\' \')){event.preventDefault();' + open + '}">' +
+      '<div class="cw-pmain"><b title="' + escapeHtml(f.original_name) + '">' + escapeHtml(f.original_name) + '</b>' +
+      '<span class="cw-sm">' + sub + '</span>' + acts + '</div>' +
+      '<time class="tnum">' + escapeHtml(cwMonthDay(date)) + '</time></div>';
+  }).join('');
 }
 
 function openCustomerFilePicker() {
@@ -7279,8 +7411,7 @@ function setCustomerFileInputFiles(fileList) {
     input.files = dt.files;
   } catch (ignore) {}
   renderCustomerFilePickList();
-  var compose = document.getElementById('customerFileCompose');
-  if (compose && input.files && input.files.length) compose.open = true;
+  if (input.files && input.files.length) setCwForm('customerFileCompose', true);
 }
 
 function handleCustomerFileDrop(event) {
@@ -7299,8 +7430,7 @@ function initCustomerFileInput() {
   if (!input) return;
   input.addEventListener('change', function() {
     renderCustomerFilePickList();
-    var compose = document.getElementById('customerFileCompose');
-    if (compose && input.files && input.files.length) compose.open = true;
+    if (input.files && input.files.length) setCwForm('customerFileCompose', true);
   });
 }
 
@@ -7426,15 +7556,14 @@ function customerFactLabel(type, sourceDetail) {
 function renderCustomerTimelineMore(pagination) {
   var el = document.getElementById('customerTimelineMore');
   if (!el) return;
-  el.className = 'customer-timeline-more';
+  el.className = 'cw-more';
   if (!pagination || !pagination.has_next) {
-    el.hidden = !((_customerDetailCache && (_customerDetailCache.timeline_items || []).length));
-    if (!el.hidden) el.classList.add('is-end');
+    el.hidden = true;
     el.innerHTML = '';
     return;
   }
   el.hidden = false;
-  el.innerHTML = '<button class="btn btn-sm" type="button" onclick="loadMoreCustomerTimeline()">查看更早记录</button>';
+  el.innerHTML = '<button class="cw-link" type="button" onclick="loadMoreCustomerTimeline()">加载更早的沟通</button>';
 }
 
 async function loadMoreCustomerTimeline() {
@@ -7443,7 +7572,7 @@ async function loadMoreCustomerTimeline() {
   var scope = beginCustomerScope(customerId);
   var more = document.getElementById('customerTimelineMore');
   _customerTimelineLoading = true;
-  if (more) { more.className = 'customer-timeline-more is-loading'; more.innerHTML = ''; more.hidden = false; }
+  if (more) { more.className = 'cw-more is-loading'; more.innerHTML = '<span>正在读取更早的沟通…</span>'; more.hidden = false; }
   try {
     var nextPage = _customerTimelinePage + 1;
     var data = await api('/api/customers/' + customerId + '/timeline?page=' + nextPage + '&per_page=' + _customerTimelinePerPage);
@@ -7512,16 +7641,14 @@ function markElementConfirmed(node) {
   }, 1100);
 }
 
-function markCustomerFactConfirmed(key) {
-  var summary = document.getElementById('customerWorkspaceSummary');
-  if (!summary || !key) return;
-  markElementConfirmed(summary.querySelector('[data-fact-key="' + key + '"]'));
-}
+// The recent facts are the timeline rows themselves now; confirming the row is
+// done by markTimelineEntryConfirmed.
+function markCustomerFactConfirmed(key) {}
 
 function markTimelineEntryConfirmed(key) {
   var list = document.getElementById('outreachList');
   if (!list || !key) return;
-  markElementConfirmed(list.querySelector('.tl-item[data-motion-key="' + key + '"]'));
+  markElementConfirmed(list.querySelector('.cw-row[data-motion-key="' + key + '"]'));
 }
 
 function syncCustomerLatestContact(cache) {
@@ -7557,6 +7684,11 @@ function findCustomerTimelineEntry(type, id) {
 // Reconcile the cached workspace with the row the server just returned.  Ordering
 // follows the timeline itself (newest first), so an edited date moves the record
 // exactly where a later read will place it.
+function adjustCustomerTimelineTotal(cache, delta) {
+  var pagination = cache && cache.timeline_pagination;
+  if (pagination && pagination.total != null) pagination.total = Math.max(0, Number(pagination.total) + delta);
+}
+
 function upsertCustomerTimelineEntry(entry, options) {
   options = options || {};
   var cache = _customerDetailCache;
@@ -7577,6 +7709,8 @@ function upsertCustomerTimelineEntry(entry, options) {
   var items = (cache.timeline_items || []).filter(function(item) {
     return !(item.type === recordType && Number(item.id) === Number(entry.id));
   });
+  // A new record changes the total the workspace reads out ("N 条记录").
+  if (items.length === (cache.timeline_items || []).length) adjustCustomerTimelineTotal(cache, 1);
   items.push(raw);
   items.sort(function(a, b) {
     var dateOrder = String(b.date || b.follow_date || b.sent_date || '')
@@ -7608,6 +7742,7 @@ function removeCustomerTimelineEntry(type, id, options) {
   var items = (cache.timeline_items || []).filter(function(item) {
     return !(item.type === recordType && Number(item.id) === Number(id));
   });
+  if (items.length < (cache.timeline_items || []).length) adjustCustomerTimelineTotal(cache, -1);
   cache.timeline_items = items;
   cache.follow_history = items.filter(function(item) { return item.type === 'follow'; });
   cache.outreach_emails = items.filter(function(item) { return item.type === 'outreach'; });
@@ -7708,64 +7843,58 @@ function syncCustomerWorkspaceAfterOutreach(customerId, outreach, changedKey) {
     changedKey || customerTimelineKey({ type: 'outreach', id: outreach && outreach.id }));
 }
 
-function timelineItemHtml(item) {
-  var typeLabel = item.type === 'email' ? '开发信' : communicationTypeLabel(item.activity_type);
-  var typeIcon = item.type === 'email' ? uiIcon('mail') : uiIcon('message');
-  var typeClass = item.type === 'email' ? 'tl-outreach' : 'tl-follow';
-  var reportIcon = uiIcon('star');
-  var reportTitle = item.is_reported ? '从本周工作中移除' : '加入本周工作';
-  var reportClass = item.is_reported ? 'tl-report active' : 'tl-report';
-  var weeklyStatus = item.is_reported
-    ? '<span class="tl-weekly-status" aria-label="已纳入本周工作" title="已纳入本周工作">' + reportIcon + '<span>已纳入本周</span></span>'
-    : '';
+var CW_DIRECTION_LABELS = { inbound: '客户发来', outbound: '我方发出', two_way: '双方沟通' };
+var CW_REPLY_LABELS = { pending: '待回复', replied: '已回复', bounced: '退信', no_reply: '无回复' };
 
-  var html = '<div class="tl-item lit-row ' + typeClass + '"><div class="tl-dot"></div><div class="tl-card">';
-  var showDirection = item.type === 'activity' && item.activity_type !== 'task_completed';
-  var directionClass = communicationDirectionClass(item.direction);
-  var directionTitle = '用于快速查看沟通脉络，并帮助系统判断后续工作重点';
-  html += '<div class="tl-card-hd"><span class="tl-type-badge">' + typeIcon + ' ' + typeLabel + '</span>' + (showDirection ? '<span class="tl-direction-badge ' + directionClass + '" title="' + directionTitle + '">' + escapeHtml(communicationDirectionLabel(item.direction)) + '</span>' : '') + weeklyStatus + '<span class="tl-date">' + formatDate(item.date) + '</span><div class="tl-card-actions">';
-  var reportType = item.type === 'email' ? 'outreach' : 'follow';
-  html += '<button class="tl-report-btn ' + reportClass + '" onclick="toggleReport(\'' + reportType + '\',' + item.id + ')" aria-label="' + reportTitle + '" aria-pressed="' + (item.is_reported ? 'true' : 'false') + '" title="' + reportTitle + '">' + reportIcon + '</button>';
-  if (item.type === 'activity') html += '<button class="tl-action-btn" onclick="openFollowEditModal(' + item.id + ')" title="编辑记录">编辑</button><button class="tl-action-btn danger" onclick="deleteFollowLog(' + item.id + ')" title="删除记录">删除</button>';
-  if (item.type === 'email') html += '<button class="btn btn-sm btn-danger" onclick="deleteOutreach(' + item.id + ')" style="font-size:0.68rem;padding:2px 6px;">删除</button>';
-  var richAttrs = item.type === 'activity' ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
-  var titleHtml = renderRichText(item.title);
-  if (String(item.title || '').length > 280) {
-    titleHtml = '<details class="timeline-long-content"><summary><span class="timeline-long-preview">' + titleHtml + '</span></summary></details>';
-  }
-  html += '</div></div><div class="tl-card-title"' + richAttrs + '>' + titleHtml + '</div>';
-  if (item.meta_text) html += '<div class="tl-card-meta" data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</div>';
-  if (item.type === 'activity' && item.next_plan) html += '<div class="tl-card-plan">由此安排：<span data-rich-log-id="' + item.id + '" data-rich-field="next_plan">' + renderRichText(item.next_plan) + '</span></div>';
-  if (item.type === 'email') html += '<div class="tl-card-meta">' + statusBadge(item.reply_status) + '</div>';
-  html += '</div></div>';
-  return html;
+// One quiet record row: date, what happened, and "类型 · 结果 — …" (or the
+// direction when there is no result). Edit / 加入本周 / delete appear on the
+// lit row; they are the same handlers as before.
+function timelineItemHtml(item) {
+  var isEmail = item.type === 'email';
+  var typeLabel = isEmail ? '开发信' : communicationTypeLabel(item.activity_type);
+  var reportType = isEmail ? 'outreach' : 'follow';
+  var reportLabel = item.is_reported ? '移出本周' : '加入本周';
+  var tail = '';
+  if (isEmail) tail = CW_REPLY_LABELS[item.reply_status] || '';
+  else if (item.meta_text) tail = '结果 — <span data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</span>';
+  else if (item.activity_type !== 'task_completed') tail = escapeHtml(CW_DIRECTION_LABELS[item.direction] || communicationDirectionLabel(item.direction));
+  var richAttrs = !isEmail ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
+  var acts = '<span class="cw-row-acts">' +
+    (!isEmail ? '<button type="button" class="cw-link" onclick="openFollowEditModal(' + item.id + ')">编辑</button><i>·</i>' : '') +
+    '<button type="button" class="cw-link" onclick="toggleReport(\'' + reportType + '\',' + item.id + ')" aria-pressed="' + (item.is_reported ? 'true' : 'false') + '">' + reportLabel + '</button><i>·</i>' +
+    '<button type="button" class="cw-link" onclick="' + (isEmail ? 'deleteOutreach(' : 'deleteFollowLog(') + item.id + ')">删除</button></span>';
+  return '<div class="cw-row lit-row" tabindex="0">' +
+    '<span class="cw-dt tnum">' + escapeHtml(cwMonthDay(item.date)) + '</span>' +
+    '<div class="cw-rmain"><div class="cw-tx"' + richAttrs + '>' + renderRichText(item.title) + '</div>' +
+    (!isEmail && item.next_plan ? '<p class="cw-plan">由此安排：<span data-rich-log-id="' + item.id + '" data-rich-field="next_plan">' + renderRichText(item.next_plan) + '</span></p>' : '') +
+    '<span class="cw-rs">' + escapeHtml(typeLabel) + (tail ? ' · ' + tail : '') + (item.is_reported ? ' · 已纳入本周' : '') + '</span>' +
+    acts + '</div></div>';
 }
 
 function renderCustomerTimelineEmpty(el) {
-  var list = el && el.querySelector('.timeline');
-  var activeRows = list && list.querySelectorAll('.tl-item:not([data-motion-leaving])');
-  var rows = list && list.querySelectorAll('.tl-item');
+  var list = el && el.querySelector('.cw-rows');
+  var activeRows = list && list.querySelectorAll('.cw-row:not([data-motion-leaving])');
+  var rows = list && list.querySelectorAll('.cw-row');
   if (list && rows && rows.length && shouldAnimateLists()) {
     var token = String(Date.now()) + '-' + Math.random();
     el.dataset.timelineEmptyToken = token;
     if (activeRows && activeRows.length) reconcileKeyedElements(list, [], {
-      selector: '.tl-item', leave: true,
+      selector: '.cw-row', leave: true,
       key: function(item) { return item.motionKey; },
       render: timelineItemHtml
     });
     window.setTimeout(function() {
-      if (el.dataset.timelineEmptyToken !== token || list.querySelector('.tl-item')) return;
+      if (el.dataset.timelineEmptyToken !== token || list.querySelector('.cw-row')) return;
       delete el.dataset.timelineEmptyToken;
-      el.textContent = '';
-      el.innerHTML = '<div class="empty-state"><p>暂无沟通记录</p></div>';
+      el.innerHTML = CW_TIMELINE_EMPTY;
     }, 330);
     renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
     return;
   }
   delete el.dataset.timelineEmptyToken;
-  el.textContent = '';
-  el.innerHTML = '<div class="empty-state"><p>暂无沟通记录</p></div>';
+  el.innerHTML = CW_TIMELINE_EMPTY;
 }
+var CW_TIMELINE_EMPTY = '<p class="cw-empty">还没有沟通记录。<button type="button" class="cw-link" onclick="openCustomerFollowComposer()">记录第一条沟通</button></p>';
 
 // The timeline is reconciled by record identity instead of being replaced as a
 // block: a saved record slides in where it belongs, an edited one keeps its
@@ -7807,15 +7936,15 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
   }
   delete el.dataset.timelineEmptyToken;
 
-  var list = el.querySelector('.timeline');
+  var list = el.querySelector('.cw-rows');
   if (!list) {
     el.textContent = '';
     list = document.createElement('div');
-    list.className = 'timeline';
+    list.className = 'cw-rows';
     el.appendChild(list);
   }
   reconcileKeyedElements(list, items, {
-    selector: '.tl-item',
+    selector: '.cw-row',
     leave: true,
     key: function(item) { return item.motionKey; },
     render: function(item) { return timelineItemHtml(item); },
@@ -7826,6 +7955,7 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
     }
   });
   renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
+  renderCustomerRoomCounts();
 }
 
 // 把“本周工作”标记立即应用到当前工作区缓存与时间线；乐观更新与失败回滚共用。
@@ -7928,8 +8058,7 @@ async function addFollowHistory() {
       document.getElementById('followHistoryDirectionOverride').value = 'auto';
       _communicationAnalyses.history = null;
       updateAutoDirectionPreview('history');
-      var composer = document.getElementById('followCompose');
-      if (composer) composer.open = false;
+      setCwForm('followCompose', false);
     }
     var activity = Object.assign({ type: 'follow' }, saved.activity || {
       id: saved.id, follow_date: saved.recent_contact_date || localDateString(),
@@ -8017,8 +8146,7 @@ async function addOutreach() {
       document.getElementById('outreachPaste').value = ''; document.getElementById('outreachSubject').value = ''; document.getElementById('outreachContent').value = '';
       document.getElementById('outreachDate').value = ''; document.getElementById('outreachReply').value = 'pending';
     }
-    var composer = document.getElementById('followCompose');
-    if (composer) composer.open = false;
+    setCwForm('followCompose', false);
     reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
   } catch(e) {}
 }
@@ -9699,7 +9827,7 @@ function closeModal(id, force) {
   if (!force && !customerLoading && modalNeedsUnsavedGuard(id) && customerModalIsDirty(id)) {
     _pendingCustomerModalClose = id;
     var subtitle = document.getElementById('unsavedChangesSubtitle');
-    var title = document.querySelector('#' + id + ' .modal-header h3');
+    var title = document.querySelector('#' + id + ' .modal-header h3, #' + id + ' .cw-ident h1');
     if (subtitle) subtitle.textContent = (title ? '“' + title.textContent.trim() + '”中的' : '你刚才填写的') + '内容还没有保存。';
     var saveButton = document.getElementById('unsavedSaveButton');
     if (saveButton) saveButton.style.display = _modalSaveHandlers[id] ? '' : 'none';
@@ -9725,6 +9853,8 @@ function closeModal(id, force) {
   if (!_motionReduced) modal.classList.add('is-closing');
   delete _modalCleanStates[id];
   syncModalBodyLock();
+  // Leaving the workspace hands the light back to the page underneath.
+  if (id === 'customerEditModal' && window.refreshDaylightRest) window.refreshDaylightRest(true);
   var finishClose = function() {
     modal.classList.remove('is-closing');
     delete _modalCloseTimers[id];
@@ -9812,42 +9942,123 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 // ========== TAB HELPER ==========
-var _customerTabTransitionToken = 0;
 function switchTab(btn, tabId) {
+  if (btn.closest('#customerEditModal')) { switchCustomerSection(tabId); return; }
   var parent = btn.closest('.modal-body');
   var nextPanel = document.getElementById(tabId);
-  var currentPanel = parent && parent.querySelector('.tab-content.active');
-  var isCustomerWorkspace = !!btn.closest('#customerEditModal');
-  if (!parent || !nextPanel || currentPanel === nextPanel) return;
-  if (isCustomerWorkspace) loadCustomerSection(tabId);
+  if (!parent || !nextPanel) return;
   parent.querySelectorAll('.tab-btn').forEach(function(t) { t.classList.remove('active'); });
   btn.classList.add('active');
-  var saveButton = document.getElementById('saveCustomerFooterBtn');
-  if (saveButton && isCustomerWorkspace) saveButton.style.display = tabId === 'editTabBasic' ? '' : 'none';
-  if (!currentPanel || !isCustomerWorkspace || _motionReduced) {
-    parent.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
-    nextPanel.classList.add('active');
+  parent.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+  nextPanel.classList.add('active');
+}
+
+// ---- 客户工作区分区 ----
+// The top bar is the section navigation. A section changes in place inside the
+// record column: nothing scrolls, the focal (next step) stays where it is.
+var CUSTOMER_SECTIONS = {
+  editTabOutreach: { title: '最近沟通', action: '+ 手动录入', run: "setCwForm('followCompose', true)" },
+  editTabBasic: { title: '资料', action: '编辑资料', run: 'openCustomerProfileEdit()' },
+  editTabContacts: { title: '联系人', action: '+ 添加联系人', run: "setCwForm('cwContactForm', true)" },
+  editTabFiles: { title: '文件', action: '+ 添加文件', run: "setCwForm('customerFileCompose', true)" },
+  editTabTasks: { title: '待办', action: '+ 新增待办', run: "openCustomerTaskModal('create')" }
+};
+var CUSTOMER_SECTION_KEYS = { '1': 'editTabOutreach', '2': 'editTabBasic', '3': 'editTabContacts', '4': 'editTabFiles', '5': 'editTabTasks', '0': 'editTabOutreach' };
+
+function showCustomerSection(tabId) {
+  var modal = document.getElementById('customerEditModal');
+  var section = CUSTOMER_SECTIONS[tabId];
+  if (!modal || !section) return;
+  modal.dataset.section = tabId;
+  modal.querySelectorAll('.cw-tab').forEach(function(tab) {
+    var on = tab.dataset.customerTab === tabId;
+    tab.classList.toggle('active', on);
+    tab.setAttribute('aria-selected', on ? 'true' : 'false');
+    tab.tabIndex = on ? 0 : -1;
+  });
+  modal.querySelectorAll('.cw-section').forEach(function(panel) {
+    var on = panel.id === tabId;
+    panel.classList.toggle('active', on);
+    panel.setAttribute('aria-hidden', on ? 'false' : 'true');
+  });
+  var title = document.getElementById('cwPanelTitle');
+  if (title) title.textContent = section.title;
+  var action = document.getElementById('cwPanelAction');
+  if (action) action.innerHTML = '<button type="button" class="cw-link" onclick="' + section.run + '">' + section.action + '</button>';
+  renderCustomerRoomCounts();
+}
+
+function switchCustomerSection(tabId) {
+  var modal = document.getElementById('customerEditModal');
+  if (!modal || !CUSTOMER_SECTIONS[tabId]) return;
+  if (modal.dataset.section === tabId) return;
+  loadCustomerSection(tabId);
+  showCustomerSection(tabId);
+  if (window.refreshDaylightRest) window.refreshDaylightRest();
+}
+
+// Forms never sit on the first screen. A text action opens one in place of the
+// section's rows (with "← 返回"); the fields and their ids are unchanged.
+function setCwForm(id, open) {
+  var form = document.getElementById(id);
+  if (!form) return;
+  var section = form.closest('.cw-section');
+  if (open && section) section.querySelectorAll('.cw-form').forEach(function(other) { if (other !== form) other.hidden = true; });
+  form.hidden = !open;
+  if (section) section.classList.toggle('is-form', !!section.querySelector('.cw-form:not([hidden])'));
+  if (open) {
+    var modal = document.getElementById('customerEditModal');
+    if (section && modal && section.id !== modal.dataset.section) switchCustomerSection(section.id);
+    var field = form.querySelector('input:not([type="hidden"]):not([disabled]), textarea, select, [contenteditable="true"]');
+    if (field) setTimeout(function() { field.focus({ preventScroll: true }); }, 0);
+  }
+}
+
+function closeCwForms() {
+  document.querySelectorAll('#customerEditModal .cw-form').forEach(function(form) { form.hidden = true; });
+  document.querySelectorAll('#customerEditModal .cw-section').forEach(function(section) { section.classList.remove('is-form'); });
+}
+
+function openCustomerProfileEdit() {
+  if (_customerDetailCache) fillCustomerProfileForm(_customerDetailCache);
+  setCwForm('cwProfileForm', true);
+}
+
+function cancelCustomerProfileEdit() {
+  if (_customerDetailCache) fillCustomerProfileForm(_customerDetailCache);
+  setCwForm('cwProfileForm', false);
+}
+
+async function saveCustomerProfile() {
+  var saved = await saveCustomer();
+  if (saved) setCwForm('cwProfileForm', false);
+  return saved;
+}
+
+// 1–5 switch sections, 0 returns to 最近沟通 — only when the workspace is the
+// top layer and the keystroke is not typing into a field.
+document.addEventListener('keydown', function(event) {
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+  var modal = document.getElementById('customerEditModal');
+  if (!modal || !modal.classList.contains('show')) return;
+  var open = document.querySelectorAll('.modal-overlay.show');
+  if (open[open.length - 1] !== modal) return;
+  var target = event.target;
+  if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    if (!target || !target.classList || !target.classList.contains('cw-tab')) return;
+    var tabs = Array.from(modal.querySelectorAll('.cw-tab'));
+    var next = tabs[(tabs.indexOf(target) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+    event.preventDefault();
+    switchCustomerSection(next.dataset.customerTab);
+    next.focus();
     return;
   }
-
-  var token = ++_customerTabTransitionToken;
-  var workspaceMain = currentPanel.closest('.customer-workspace-main');
-  if (workspaceMain) workspaceMain.style.minHeight = currentPanel.offsetHeight + 'px';
-  currentPanel.classList.add('customer-tab-exit');
-  currentPanel.setAttribute('aria-hidden', 'true');
-  window.setTimeout(function() {
-    if (token !== _customerTabTransitionToken) return;
-    currentPanel.classList.remove('active', 'customer-tab-exit');
-    nextPanel.classList.add('active', 'customer-tab-enter');
-    nextPanel.setAttribute('aria-hidden', 'false');
-    window.setTimeout(function() {
-      if (token === _customerTabTransitionToken) nextPanel.classList.remove('customer-tab-enter');
-    }, 190);
-    window.setTimeout(function() {
-      if (token === _customerTabTransitionToken && workspaceMain) workspaceMain.style.minHeight = '';
-    }, 220);
-  }, 120);
-}
+  var tabId = CUSTOMER_SECTION_KEYS[event.key];
+  if (!tabId || modal.classList.contains('is-loading')) return;
+  event.preventDefault();
+  switchCustomerSection(tabId);
+});
 
 function setCustomerSectionLoading(section, message) {
   var targets = {
@@ -9856,7 +10067,7 @@ function setCustomerSectionLoading(section, message) {
   };
   var targetId = targets[section];
   var target = targetId && document.getElementById(targetId);
-  if (target && !target.dataset.loaded) target.innerHTML = '<div class="workspace-loading"><p>' + escapeHtml(message || '正在加载…') + '</p></div>';
+  if (target && !target.dataset.loaded) target.innerHTML = '<p class="cw-empty">' + escapeHtml(message || '正在读取…') + '</p>';
 }
 
 async function loadCustomerSection(tabId) {
@@ -9880,13 +10091,16 @@ async function loadCustomerSection(tabId) {
         contactsCache.primary_contact = contactsCache.contacts[0] || null;
         renderContacts(contactsCache.contacts);
         renderCustomerFactsBrief(contactsCache);
+        if (window.refreshDaylightRest) window.refreshDaylightRest();
       }
     } else if (tabId === 'editTabFiles') {
       var files = await api('/api/customers/' + customerId + '/files');
       var filesCache = liveCustomerCache(scope);
       if (filesCache) {
         filesCache.files = (files && (files.files || files)) || [];
+        filesCache.file_count = filesCache.files.length;
         renderCustomerFiles(filesCache.files);
+        renderCustomerRoomCounts();
       }
     } else if (tabId === 'editTabTasks') {
       var tasks = await api('/api/customers/' + customerId + '/tasks');
@@ -9903,7 +10117,7 @@ async function loadCustomerSection(tabId) {
     if (!liveCustomerCache(scope)) return;
     var targets = { editTabContacts: 'contactsList', editTabFiles: 'customerFilesList', editTabTasks: 'customerTasksList' };
     var target = document.getElementById(targets[tabId]);
-    if (target) target.innerHTML = '<div class="workspace-loading"><p>这部分内容暂时无法加载。</p><button class="btn btn-sm" type="button" onclick="loadCustomerSection(\'' + tabId + '\')">重新加载</button></div>';
+    if (target) target.innerHTML = '<p class="cw-empty cw-error">这部分内容暂时无法加载。<button class="cw-link" type="button" onclick="loadCustomerSection(\'' + tabId + '\')">重新加载</button></p>';
   } finally {
     _customerSectionLoads[tabId] = false;
   }

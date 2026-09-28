@@ -10,11 +10,11 @@
 <title>Trosa</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
-<link rel="stylesheet" href="/style.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
-<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-ui-copy-noise-20260923-r5">
-<link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-daylight-20260927">
-<link rel="stylesheet" href="/visual-v4.css?v={{VERSION}}-daylight-perpage-20260928">
-<link rel="stylesheet" href="/visual-v5.css?v={{VERSION}}-daylight-room-20260928">
+<link rel="stylesheet" href="/style.css?v={{VERSION}}-cw-room-20260928">
+<link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-cw-room-20260928">
+<link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-cw-room-20260928">
+<link rel="stylesheet" href="/visual-v4.css?v={{VERSION}}-cw-room-20260928">
+<link rel="stylesheet" href="/visual-v5.css?v={{VERSION}}-cw-room-20260928">
 </head>
 <body id="trosa">
 
@@ -609,52 +609,73 @@
 
 <!-- ==================== MODALS ==================== -->
 
-<!-- Customer Edit Modal -->
-<div class="modal-overlay" id="customerEditModal">
-  <div class="modal modal-customer-workspace">
-    <div class="modal-header customer-workspace-header">
-      <div>
-        <div class="workspace-kicker">客户</div>
-        <h3 id="customerEditTitle">客户详情</h3>
-        <div class="workspace-meta" id="customerWorkspaceMeta"></div>
-      </div>
-      <div class="workspace-header-actions">
-      <button class="btn btn-sm" type="button" onclick="exportCurrentCustomerEmails()">导出邮箱</button>
-      <button class="btn btn-sm" type="button" onclick="copyCustomerContext('timeline')">导出全部沟通</button>
-      <button type="button" class="modal-close" onclick="closeModal('customerEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
-      </div>
-    </div>
-    <div class="modal-body">
-      <div class="customer-workspace-loading" id="customerWorkspaceLoading" hidden role="status" aria-live="polite">
-        <span class="customer-workspace-loading-spinner" aria-hidden="true"></span>
-        <strong id="customerWorkspaceLoadingTitle">正在加载客户资料…</strong>
-        <p id="customerWorkspaceLoadingMessage">正在读取客户资料、沟通记录和联系人。</p>
-        <div class="customer-workspace-loading-progress" aria-hidden="true"><span id="customerWorkspaceLoadingProgress"></span></div>
-        <button class="btn btn-sm" id="customerWorkspaceRetryButton" type="button" onclick="retryCustomerDetail()" hidden>重新加载</button>
-      </div>
+<!-- Customer Edit Modal: the customer workspace is one daylight room.
+     Top bar = section navigation; the next step is the single focal; the records
+     sit in a quiet column on the left; readouts bottom-right; waiting in the
+     status bar. Every form stays in the DOM (ids are contracts) but opens in
+     place inside the column instead of occupying the first screen. -->
+<div class="modal-overlay cw-overlay" id="customerEditModal" role="dialog" aria-modal="true" aria-labelledby="customerEditTitle">
+  <div class="cw-app" tabindex="-1">
+    <header class="cw-top">
+      <button type="button" class="cw-brand" onclick="closeModal('customerEditModal')" title="返回">Trosa</button>
+      <span class="cw-meta tnum" id="cwMeta">客户工作台</span>
+      <nav class="cw-nav" role="tablist" aria-label="客户分区">
+        <button type="button" class="tab-btn cw-tab active" role="tab" aria-selected="true" aria-controls="editTabOutreach" data-customer-tab="editTabOutreach" data-key="1" onclick="switchTab(this, 'editTabOutreach')">最近沟通</button>
+        <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabBasic" tabindex="-1" data-customer-tab="editTabBasic" data-key="2" onclick="switchTab(this, 'editTabBasic')">资料</button>
+        <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabContacts" tabindex="-1" data-customer-tab="editTabContacts" data-key="3" onclick="switchTab(this, 'editTabContacts')">联系人</button>
+        <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabFiles" tabindex="-1" data-customer-tab="editTabFiles" data-key="4" onclick="switchTab(this, 'editTabFiles')">文件</button>
+        <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabTasks" tabindex="-1" data-customer-tab="editTabTasks" data-key="5" onclick="switchTab(this, 'editTabTasks')">待办</button>
+      </nav>
+      <span class="cw-who"><i aria-hidden="true"></i><span id="cwWho"></span></span>
+      <button type="button" class="cw-close" onclick="closeModal('customerEditModal')" aria-label="关闭" title="关闭（Esc）">×</button>
+    </header>
+
+    <main class="cw-room">
+      <span class="cw-sunband" aria-hidden="true"></span>
+      <span class="cw-pool" aria-hidden="true"></span>
       <input type="hidden" id="editCustomerId">
-      <section class="customer-workspace-summary" id="customerWorkspaceSummary" aria-label="客户事实简报"></section>
-      <div class="tabs customer-workspace-tabs">
-        <button class="tab-btn active" data-customer-tab="editTabOutreach" onclick="switchTab(this, 'editTabOutreach')">沟通与时间线</button>
-        <button class="tab-btn" data-customer-tab="editTabBasic" onclick="switchTab(this, 'editTabBasic')">资料</button>
-        <button class="tab-btn" data-customer-tab="editTabContacts" onclick="switchTab(this, 'editTabContacts')">联系人</button>
-        <button class="tab-btn" data-customer-tab="editTabFiles" onclick="switchTab(this, 'editTabFiles')">文件</button>
-        <button class="tab-btn" data-customer-tab="editTabTasks" onclick="switchTab(this, 'editTabTasks')">全部待办</button>
+      <input type="hidden" id="editNextFollowUp">
+
+      <div class="cw-ident">
+        <h1 id="customerEditTitle">客户详情</h1>
+        <p class="cw-lines" id="customerWorkspaceMeta"></p>
       </div>
 
-      <div class="customer-workspace-grid">
-        <div class="customer-workspace-main">
-          <div class="tab-content active" id="editTabOutreach">
-            <div id="outreachList"></div>
-            <div class="customer-timeline-more" id="customerTimelineMore" hidden></div>
-            <details class="workspace-compose workspace-communication-compose" id="followCompose">
-              <summary>手动录入</summary>
-              <div class="workspace-compose-body">
-                <div class="workspace-compose-switch" role="tablist" aria-label="沟通记录类型">
-                  <button type="button" class="workspace-compose-mode active" data-compose-mode="history" role="tab" aria-selected="true" onclick="switchCustomerCompose('history')">沟通记录</button>
-                  <button type="button" class="workspace-compose-mode" data-compose-mode="outreach" data-module="outreach" role="tab" aria-selected="false" onclick="switchCustomerCompose('outreach')">开发邮件</button>
-                </div>
-                <div class="workspace-compose-panel" data-compose-panel="history">
+      <section class="cw-focus lit-anchor" aria-label="下一步">
+        <span class="cw-k">下一步</span>
+        <div class="cw-state" id="customerWorkspaceLoading" hidden role="status" aria-live="polite">
+          <span class="cw-state-line" aria-hidden="true"><span id="customerWorkspaceLoadingProgress"></span></span>
+          <strong id="customerWorkspaceLoadingTitle">正在读取…</strong>
+          <p id="customerWorkspaceLoadingMessage"></p>
+          <button class="cw-act" id="customerWorkspaceRetryButton" type="button" onclick="retryCustomerDetail()" hidden>重新加载</button>
+        </div>
+        <div class="cw-next" id="customerNextTask" aria-live="polite"></div>
+        <div class="cw-acts" id="cwFocusActions"></div>
+        <div class="cw-quick" id="customerTaskQuickActions" hidden>
+          <span>顺延</span>
+          <button type="button" class="cw-link" onclick="postponeCustomerNextTask(1, this)">明天</button>
+          <span aria-hidden="true">·</span>
+          <button type="button" class="cw-link" onclick="postponeCustomerNextTask(3, this)">3 天后</button>
+        </div>
+      </section>
+
+      <section class="cw-panel" aria-labelledby="cwPanelTitle">
+        <div class="cw-phead">
+          <span class="cw-ptitle" id="cwPanelTitle">最近沟通</span>
+          <span class="cw-pmeta tnum" id="cwPanelMeta"></span>
+          <span class="cw-pact" id="cwPanelAction"></span>
+        </div>
+        <div class="cw-pbody">
+          <div class="tab-content cw-section active" id="editTabOutreach" role="tabpanel" aria-label="最近沟通">
+            <div class="cw-list" id="outreachList"></div>
+            <div class="cw-more" id="customerTimelineMore" hidden></div>
+            <div class="cw-form" id="followCompose" hidden>
+              <button type="button" class="cw-link cw-back" onclick="setCwForm('followCompose', false)">← 返回</button>
+              <div class="cw-compose-switch" role="tablist" aria-label="沟通记录类型">
+                <button type="button" class="cw-link active" data-compose-mode="history" role="tab" aria-selected="true" onclick="switchCustomerCompose('history')">沟通记录</button>
+                <button type="button" class="cw-link" data-compose-mode="outreach" data-module="outreach" role="tab" aria-selected="false" onclick="switchCustomerCompose('outreach')">开发邮件</button>
+              </div>
+              <div class="cw-compose-panel" data-compose-panel="history">
                 <div class="form-group"><label class="form-label" for="followHistoryType">沟通方式</label><select class="form-control" id="followHistoryType"><option value="WhatsApp">WhatsApp</option><option value="邮件">邮件</option><option value="电话">电话</option><option value="会议">会议</option><option value="报价">报价</option><option value="寄样">寄样</option><option value="展会现场">展会现场</option><option value="微信">微信</option><option value="视频会议">视频会议</option><option value="客户来访">客户来访</option><option value="其他跟进">其他跟进</option></select></div>
                 <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('history')">AI 帮我整理</button></div><div class="rich-text-area" id="followHistoryContent" contenteditable="true" data-placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容" role="textbox" aria-multiline="true" oninput="updateAutoDirectionPreview('history')"></div><div class="auto-direction-row"><span id="historyDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="followHistoryDirectionOverride" onchange="updateAutoDirectionPreview('history')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
                 <div class="quick-reply-analysis" id="followHistoryAnalysis" hidden></div>
@@ -662,47 +683,63 @@
                 <div class="form-group"><label class="form-label">下一步做什么？</label><input type="text" class="form-control" id="followHistoryNextTask" placeholder="可留空，例如：发送再生料方案报价" oninput="updateFollowHistorySaveLabel()"></div>
                 <div class="form-row">
                   <div class="form-group"><label class="form-label">任务日期</label><input type="date" class="form-control" id="followHistoryNext" onchange="updateFollowHistorySaveLabel()"></div>
-                  <div class="form-group workspace-report-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
+                  <div class="form-group cw-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
                 </div>
-                <div class="workspace-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
+                <div class="cw-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
                 <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="自动提取主题、正文和发送时间"></textarea><small class="email-import-hint">默认状态为“待回复”；退信或客户回复会自动调整。</small></div>
-                <details class="workspace-compose"><summary>需要修正主题、时间或状态？</summary><div class="workspace-compose-body"><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
+                <details class="cw-fix"><summary>需要修正主题、时间或状态？</summary><div><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
                 <textarea id="outreachContent" hidden></textarea>
                 <button class="btn btn-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
                 </div>
-              </div>
-            </details>
+            </div>
           </div>
 
-          <div class="tab-content" id="editTabContacts">
-            <div id="contactsList"></div>
-            <details class="workspace-compose workspace-contact-compose" open>
-              <summary>添加联系人</summary>
-              <div class="workspace-compose-body">
-                <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
+          <div class="tab-content cw-section" id="editTabBasic" role="tabpanel" aria-label="资料">
+            <div class="cw-list" id="cwProfileView"></div>
+            <div class="cw-form" id="cwProfileForm" hidden>
+              <button type="button" class="cw-link cw-back" onclick="cancelCustomerProfileEdit()">← 返回</button>
+              <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
+            <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
+            <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="editSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="editSourceDetail" placeholder="可选，例如：SIGN CHINA 2026 / ImportGenius"></div></div>
+            <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
+            <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
+            <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
+            <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
+              <div class="cw-form-actions">
+                <button class="btn btn-primary btn-sm" id="saveCustomerFooterBtn" type="button" onclick="saveCustomerProfile()">保存资料修改</button>
+                <button class="cw-link" type="button" onclick="cancelCustomerProfileEdit()">取消</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-content cw-section" id="editTabContacts" role="tabpanel" aria-label="联系人">
+            <div class="cw-list" id="contactsList"></div>
+            <div class="cw-foot">
+              <button type="button" class="cw-link" onclick="setCwForm('cwContactForm', true)">添加联系人</button>
+              <button type="button" class="cw-link" data-module="email_validation" onclick="setCwForm('cwBulkContactForm', true)">批量导入邮箱</button>
+            </div>
+            <div class="cw-form" id="cwContactForm" hidden>
+              <button type="button" class="cw-link cw-back" onclick="setCwForm('cwContactForm', false)">← 返回</button>
+              <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">邮箱</label><input type="email" class="form-control" id="contactEmail"></div><div class="form-group"><label class="form-label">电话</label><input type="text" class="form-control" id="contactPhone"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">WhatsApp</label><input type="text" class="form-control" id="contactWhatsapp"></div><div class="form-group"><label class="form-label">领英</label><input type="text" class="form-control" id="contactLinkedin"></div></div>
                 <button class="btn btn-primary btn-sm" id="addContactSubmit" type="button" onclick="addContact()">添加联系人</button>
-              </div>
-            </details>
-            <details class="workspace-compose workspace-email-import" data-module="email_validation">
-              <summary>批量导入邮箱</summary>
-              <div class="workspace-compose-body"><div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button></div>
-            </details>
+            </div>
+            <div class="cw-form" id="cwBulkContactForm" data-module="email_validation" hidden>
+              <button type="button" class="cw-link cw-back" onclick="setCwForm('cwBulkContactForm', false)">← 返回</button>
+              <div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button>
+            </div>
           </div>
 
-          <div class="tab-content" id="editTabFiles">
-            <div class="customer-file-panel-header">
-              <div><h4>客户文件</h4></div>
-              <button class="btn btn-sm btn-primary" type="button" onclick="openCustomerFilePicker()">添加文件</button>
-            </div>
-            <div id="customerFilesList"></div>
-            <details class="workspace-compose workspace-file-compose" id="customerFileCompose">
-              <summary>上传文件</summary>
-              <div class="workspace-compose-body">
-                <div class="form-group">
+          <div class="tab-content cw-section" id="editTabFiles" role="tabpanel" aria-label="文件">
+            <div class="cw-list" id="customerFilesList"></div>
+            <div class="cw-form" id="customerFileCompose" hidden>
+              <button type="button" class="cw-link cw-back" onclick="setCwForm('customerFileCompose', false)">← 返回</button>
+              <div class="form-group">
                   <label class="form-label">选择文件（可多选）</label>
                   <div class="customer-file-dropzone" id="customerFileDropzone" role="button" tabindex="0" onclick="openCustomerFilePicker()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCustomerFilePicker();}" ondrop="handleCustomerFileDrop(event)" ondragover="event.preventDefault();this.classList.add('is-dragover')" ondragleave="this.classList.remove('is-dragover')">
                     <span>点击选择，或把文件拖到这里</span>
@@ -721,50 +758,29 @@
                   </div>
                 </div>
                 <button class="btn btn-primary btn-sm" id="customerFileUploadBtn" type="button" onclick="uploadCustomerFiles()">上传所选文件</button>
-              </div>
-            </details>
+            </div>
           </div>
 
-          <div class="tab-content" id="editTabTasks">
-            <div class="workspace-panel-header customer-task-panel-header"><div><h4>已安排待办</h4></div><button class="btn btn-sm btn-primary" type="button" onclick="openCustomerTaskModal('create')">新增待办</button></div>
-            <div id="customerTasksList"></div>
+          <div class="tab-content cw-section" id="editTabTasks" role="tabpanel" aria-label="待办">
+            <div class="cw-list" id="customerTasksList"></div>
           </div>
-
-          <div class="tab-content" id="editTabBasic">
-            <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
-            <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
-            <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
-            <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
-            <div class="form-row"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="editSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="editSourceDetail" placeholder="可选，例如：SIGN CHINA 2026 / ImportGenius"></div></div>
-            <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
-            <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
-            <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
-            <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
-          </div>
-
         </div>
+      </section>
 
-        <aside class="customer-next-panel" aria-label="客户执行动作">
-          <div class="workspace-kicker">执行动作</div>
-          <input type="hidden" id="editNextFollowUp">
-          <div class="customer-next-task" id="customerNextTask" hidden></div>
-          <div class="workspace-action-grid">
-            <button class="btn workspace-action-btn" onclick="openCustomerFollowComposer()">记录沟通</button>
-            <button class="btn workspace-action-btn" id="customerTaskActionButton" onclick="openCustomerTaskModal()">安排下一步</button>
-          </div>
-          <div class="workspace-task-quick-actions" id="customerTaskQuickActions" hidden>
-            <button class="text-action" onclick="completeCustomerNextTask(this)">完成</button>
-            <button class="text-action" onclick="postponeCustomerNextTask(1, this)">明天</button>
-            <button class="text-action" onclick="postponeCustomerNextTask(3, this)">3 天后</button>
-          </div>
-          <div class="customer-other-tasks" id="customerOtherTasks"></div>
-        </aside>
+      <div class="cw-readouts" aria-label="客户概况">
+        <div><span>沟通记录</span><b class="tnum" id="cwCountTimeline">—</b></div>
+        <div><span>未完成待办</span><b class="tnum" id="cwCountTasks">—</b></div>
+        <div><span>客户文件</span><b class="tnum" id="cwCountFiles">—</b></div>
+        <div><span>联系人</span><b class="tnum" id="cwCountContacts">—</b></div>
       </div>
-    </div>
-    <div class="modal-footer">
-      <button type="button" class="btn" onclick="closeModal('customerEditModal')">关闭</button>
-      <button class="btn btn-primary" id="saveCustomerFooterBtn" onclick="saveCustomer()" style="display:none;">保存资料修改</button>
-    </div>
+      <span class="cw-vig" aria-hidden="true"></span>
+    </main>
+
+    <footer class="cw-bot">
+      <span class="micro">当前等待</span>
+      <button type="button" class="cw-waitv" id="cwWaiting" onclick="editCustomerWaiting()" title="调整当前等待"></button>
+      <span class="cw-date tnum" id="cwDate"></span>
+    </footer>
   </div>
 </div>
 
@@ -1160,6 +1176,6 @@
 <datalist id="communicationTypeOptions">
   <option value="WhatsApp"><option value="邮件"><option value="电话"><option value="会议"><option value="报价"><option value="寄样"><option value="展会现场"><option value="微信"><option value="视频会议"><option value="客户来访"><option value="其他跟进">
 </datalist>
-  <script src="/app.js?v={{VERSION}}-ui-copy-noise-20260923-r5"></script>
+  <script src="/app.js?v={{VERSION}}-cw-room-20260928"></script>
 </body>
 </html>

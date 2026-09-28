@@ -52,7 +52,7 @@ function seed(items) {
 }
 
 function timelineRow(id) {
-  return doc.querySelector('.tl-item[data-motion-key="follow-' + id + '"]');
+  return doc.querySelector('.cw-row[data-motion-key="follow-' + id + '"]');
 }
 
 function wait(ms) {
@@ -84,7 +84,7 @@ async function run() {
   assert.ok(edited.classList.contains('motion-updated'));
 
   win.removeCustomerTimelineEntry('follow', 2);
-  const leaving = doc.querySelector('.tl-item[data-motion-key="follow-2"]');
+  const leaving = doc.querySelector('.cw-row[data-motion-key="follow-2"]');
   assert.ok(leaving, 'removed record remains for the exit animation');
   assert.ok(leaving.classList.contains('motion-list-leave'));
   assert.equal(leaving.hasAttribute('data-motion-leaving'), true);
@@ -93,13 +93,13 @@ async function run() {
 
   seed([follow(3, '最后一条')]);
   win.removeCustomerTimelineEntry('follow', 3);
-  assert.ok(doc.querySelector('.tl-item[data-motion-key="follow-3"]'));
+  assert.ok(doc.querySelector('.cw-row[data-motion-key="follow-3"]'));
   // A fast reconciliation returning the same empty result must still let the
   // already-started exit finish instead of clearing the node immediately.
   win.renderFollowTimeline([], []);
-  assert.ok(doc.querySelector('.tl-item[data-motion-key="follow-3"]'));
+  assert.ok(doc.querySelector('.cw-row[data-motion-key="follow-3"]'));
   await wait(380);
-  assert.ok(doc.querySelector('#outreachList .empty-state'), 'empty state should follow the exit animation');
+  assert.ok(doc.querySelector('#outreachList .cw-empty'), 'empty state should follow the exit animation');
 
   // Exercise the actual edit handler with a durable response, not only the
   // lower-level cache helper. The reconciliation responses are intentionally
