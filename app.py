@@ -376,8 +376,20 @@ def _sela_integration_path_allowed():
         # records through the same API surface used by Trosa itself.  The
         # identity is mapped to Hamid server-side in ``before_request``;
         # callers cannot select a user or reach administration endpoints.
+        #
+        # The read set mirrors the facts a human sees on the Customer, Today
+        # and Inbox screens: the customer list, the current Inbox, a single
+        # customer (plus contacts/timeline/tasks/follow history), Today's
+        # due/overdue reminders, upcoming open tasks (the global "next step"
+        # view) and the global recent-communication feed.  Without the last
+        # three an external agent had to scan every customer and guess at
+        # Today/replies, which produced summaries inconsistent with the UI.
         or (request.method == 'GET' and (
-            request.path in {'/api/customers', '/api/inbox'}
+            request.path in {
+                '/api/customers', '/api/inbox',
+                '/api/reminders/today', '/api/reminders/upcoming',
+                '/api/follow-history',
+            }
             or re.fullmatch(r'/api/customers/\d+(?:/(?:contacts|follow_history|tasks|timeline))?', request.path)
             or re.fullmatch(r'/api/reminders/\d+', request.path)
         ))
@@ -15961,15 +15973,56 @@ def extension_save_unassigned():
 @app.route('/api/follow-history', methods=['GET'])
 @login_required
 def get_all_follow_history():
+    """Newest-first global communication feed (kind='communication').
+
+    Defaults are unchanged: the latest 50 rows for the History screen.  An
+    external read-only consumer may narrow the feed to the one fact it needs
+    without scanning every customer or guessing from other tables:
+
+    * ``direction=inbound``  -> real customer replies across all customers;
+    * ``direction=outbound`` -> messages we sent;
+    * ``since=YYYY-MM-DD``   -> only facts on/after that day;
+    * ``customer_id``        -> one customer;
+    * ``limit`` (<=200) / ``offset`` -> bounded paging.
+
+    Rows come from the same canonical interaction projection the Customer
+    timeline renders, so this feed cannot disagree with the UI.  The per-Sela
+    ``/api/integrations/sela/prospects`` projection is deliberately scoped to
+    Sela-managed leads and is NOT a complete reply source.
+    """
+    kind = 'communication'
+    direction = (request.args.get('direction') or '').strip().lower() or None
+    if direction is not None and direction not in ('outbound', 'inbound', 'two_way', 'unknown'):
+        return jsonify({'error': 'direction 仅支持 inbound、outbound、two_way 或 unknown'}), 400
+    since = (request.args.get('since') or '').strip() or None
+    if since is not None and not re.match(r'^\d{4}-\d{2}-\d{2}', since):
+        return jsonify({'error': 'since 需要 YYYY-MM-DD 格式'}), 400
+    try:
+        limit = int(request.args.get('limit', 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    customer_id_arg = (request.args.get('customer_id') or '').strip()
+    if customer_id_arg and not customer_id_arg.isdigit():
+        return jsonify({'error': 'customer_id 需要整数'}), 400
+    customer_ids = [int(customer_id_arg)] if customer_id_arg else None
+
     conn = get_db()
     if postgres_mode():
         # One newest-first query for the whole history, then attach the small
         # set of customer labels actually returned.  The old shape issued one
         # interaction query per customer, which grew with the customer base.
-        items = _recent_interactions(conn, kind='communication', limit=50)
+        items = _recent_interactions(
+            conn, kind=kind, limit=limit, offset=offset,
+            direction=direction, since=since, customer_ids=customer_ids,
+        )
         history = []
         if items:
-            ids = [int(item['customer_id']) for item in items]
+            ids = sorted({int(item['customer_id']) for item in items})
             marks = ','.join('?' for _ in ids)
             names = {
                 int(row['id']): (row.get('name') or row.get('company') or '')
@@ -15981,7 +16034,25 @@ def get_all_follow_history():
             history = [{**item, 'customer_name': names.get(int(item['customer_id']), '')} for item in items]
     else:
         c = conn.cursor()
-        c.execute('SELECT f.*, c.name as customer_name FROM follow_up_logs f JOIN customers c ON f.customer_id = c.id WHERE (f.is_deleted = 0 OR f.is_deleted IS NULL) ORDER BY f.follow_date DESC, f.created_at DESC LIMIT 50')
+        conditions = ['(f.is_deleted = 0 OR f.is_deleted IS NULL)']
+        params = []
+        if direction is not None:
+            conditions.append('f.direction = ?')
+            params.append(direction)
+        if since is not None:
+            conditions.append('CAST(f.follow_date AS TEXT) >= ?')
+            params.append(since)
+        if customer_ids:
+            conditions.append('f.customer_id = ?')
+            params.append(customer_ids[0])
+        params.extend([limit, offset])
+        c.execute(
+            f'SELECT f.*, c.name as customer_name FROM follow_up_logs f '
+            f'JOIN customers c ON f.customer_id = c.id '
+            f'WHERE {" AND ".join(conditions)} '
+            f'ORDER BY f.follow_date DESC, f.created_at DESC LIMIT ? OFFSET ?',
+            params,
+        )
         history = [dict(row) for row in c.fetchall()]
     conn.close()
     return jsonify(history)

@@ -71,6 +71,12 @@ class SelaServiceAuthTest(unittest.TestCase):
         self.assertEqual(service.get('/api/customers', headers=service_headers).status_code, 200)
         self.assertEqual(service.get('/api/inbox', headers=service_headers).status_code, 200)
         self.assertEqual(service.get('/api/integrations/sela/needs', headers=service_headers).status_code, 200)
+        # Today/upcoming reminders and the global communication feed are the
+        # business facts the Customer/Today/Inbox UI shows.  Without them an
+        # external Agent had to scan every customer and approximate replies.
+        self.assertEqual(service.get('/api/reminders/today', headers=service_headers).status_code, 200)
+        self.assertEqual(service.get('/api/reminders/upcoming', headers=service_headers).status_code, 200)
+        self.assertEqual(service.get('/api/follow-history?direction=inbound', headers=service_headers).status_code, 200)
         self.assertEqual(service.post(
             '/api/integrations/sela/inbox-captures',
             json={'message': {'id': 'auth-capture-1', 'body': 'test'}},

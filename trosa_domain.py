@@ -1659,13 +1659,20 @@ def customer_interactions(
 
 def recent_interactions(
     conn: Any, *, kind: str | None = None, limit: int | None = None,
-    offset: int = 0, customer_ids=None,
+    offset: int = 0, customer_ids=None, direction: str | None = None,
+    since: str | None = None,
 ) -> list[dict]:
     """Return interactions ordered by newest first, optionally for a set of customers.
 
     Unlike :func:`customer_interactions` this does not require a single customer
     and does not load every row when a limit is supplied, so global history and
     search surfaces no longer issue one query per customer.
+
+    ``direction`` and ``since`` let an external reader ask for exactly one
+    business fact without scanning every customer, e.g. the real customer
+    replies recorded in the last week (``direction='inbound'``).  They filter
+    the same canonical interaction projection the UI renders, so the result
+    cannot drift from the Customer timeline.
     """
     if postgres_mode():
         params: list[Any] = []
@@ -1679,6 +1686,12 @@ def recent_interactions(
         if kind is not None:
             where.append('kind=?')
             params.append(kind)
+        if direction is not None:
+            where.append('direction=?')
+            params.append(direction)
+        if since is not None:
+            where.append('CAST(occurred_on AS TEXT) >= ?')
+            params.append(since)
         clause = (' WHERE ' + ' AND '.join(where)) if where else ''
         query = f'''SELECT id, customer_id, kind, occurred_on, activity_type, direction,
                            content, result, next_plan, source, is_reported,
@@ -1702,6 +1715,12 @@ def recent_interactions(
     if kind is not None:
         where.append('kind=?')
         params.append(kind)
+    if direction is not None:
+        where.append('direction=?')
+        params.append(direction)
+    if since is not None:
+        where.append('CAST(occurred_on AS TEXT) >= ?')
+        params.append(since)
     clause = (' WHERE ' + ' AND '.join(where)) if where else ''
     query = f'''SELECT * FROM (
                    SELECT 'communication' AS kind, f.id, f.customer_id,

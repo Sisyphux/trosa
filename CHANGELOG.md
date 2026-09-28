@@ -1,3 +1,11 @@
+## 2026-09-28 — Sela / 外部 Agent 只读数据面补全，读到的状态与界面一致
+
+- 现象：Sela 服务身份无法读取 Today/到期待办，只能扫描客户、任务和 next_step 近似推断；全局「最近沟通 / 新客户回复」也没有正式只读入口。外部汇总因此出现「0 inbound」却与真实客户回复（如 Stilform）矛盾的结论——根因是它读到的 `/api/integrations/sela/prospects` 只覆盖 Sela 自己管理的 115 个线索，而所有真实回复客户都不在其中。
+- 修复：在既有 Sela 只读白名单上补齐三个普通业务只读端点——`GET /api/reminders/today`、`GET /api/reminders/upcoming`（Today 的到期/逾期 + 全部未来人工待办，即全局「下一步」）、`GET /api/follow-history`（全局最近沟通）。不新增 Agent 专用大接口，不扩大任何写权限。
+- 语义统一：`/api/follow-history` 现在支持只读筛选 `direction`（`inbound` = 真实客户回复）、`since`、`customer_id`、有界 `limit`（默认 50、上限 200）与 `offset`，返回仍然来自与客户时间线同一份规范事实投影，并附带 `customer_name`。默认行为不变，历史页无需改动。返回的 `direction` 可精确区分 inbound / outbound。
+- 边界与说明：`/api/integrations/sela/prospects` 仍只表示 Sela 管理线索的投影，不是完整回复源；真实回复的正式读法是全局沟通 feed 或客户时间线。审计确认：近期有真实 inbound/two_way 的客户全部不在 prospects 投影内，且不存在「开发信状态 replied 但没有对应 inbound 沟通事实」的行。
+- 验证：隔离 SQLite 全量 525 项回归通过；真实 loopback PostgreSQL rehearsal 36 项通过；新增 `tests/test_sela_read_surface.py` 覆盖服务身份可读 Today/upcoming/feed、inbound 过滤只返回真实回复、since/customer_id/limit 边界与非法参数 400，以及写/管理端点仍被拒绝。
+
 ## 2026-09-27 — 全站界面统一为 Daylight 设计语言（桌面 / iPad / 手机三套体验）
 
 - 现象：界面长期由多套叠加样式（早期暖色编辑风、液态玻璃、胡桃木导航栏与多轮局部修补）拼成，同一类元素在不同页面各不相同，新页面只能继续复制样式；iPad 与手机基本是「缩小版桌面」。
