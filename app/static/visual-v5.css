@@ -17,7 +17,8 @@
      · .lit-anchor / .lit-row the light rests on the focal element and marks the
                               row under the pointer or keyboard focus; inside a
                               .lit-group--dim every other row stays dim
-     · customer workspace     the same room, full screen instead of a modal card
+     · customer workspace     its own room (.cw-*): section bar, one next step,
+                              a quiet record column, readouts, waiting
 
    Nothing here changes behaviour, data or permissions. `.is-lit` is plain class
    state, so touch, keyboard, reduced-motion and performance modes see the same
@@ -666,90 +667,589 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .today-page-body.today-page-body { padding-top: clamp(1.2rem, 4vh, 2.6rem) !important; }
 
 /* ============================================================================
-   5. CUSTOMER WORKSPACE — the same room, full screen
+   5. CUSTOMER WORKSPACE — one room: section bar, the next step, a quiet column
+   ----------------------------------------------------------------------------
+   The workspace is its own full-screen room above the page (#customerEditModal
+   keeps the modal contract: open/close, unsaved guard, Esc). Everything inside
+   uses the `cw-` prefix so no earlier layer's modal/card rules match it; plain
+   specificity is enough. Sizes follow the reference in a 16px unit (--cw-u)
+   that still scales with the user's font-size setting (root is 15px).
    ============================================================================ */
 
 #trosa #customerEditModal.modal-overlay {
   padding: 0 !important;
-  background: transparent !important;
-  backdrop-filter: none !important;
+  background: var(--dl-canvas) !important;
   -webkit-backdrop-filter: none !important;
-  align-items: stretch !important;
-  justify-content: stretch !important;
+  backdrop-filter: none !important;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;
 }
-#trosa #customerEditModal.modal-overlay .modal.modal-customer-workspace.modal-customer-workspace {
-  width: 100% !important;
-  max-width: none !important;
-  height: 100dvh !important;
-  max-height: none !important;
-  margin: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  background: linear-gradient(180deg, var(--dl-hi) 0%, var(--dl-canvas) 60%, var(--dl-canvas-low) 100%) !important;
+#trosa #customerEditModal .cw-app {
+  --cw-u: calc(1rem * 16 / 15);
+  --cw-ink-dim: rgba(36, 34, 29, .66);
+  --cw-date-dim: rgba(36, 34, 29, .42);
+  --cw-sub-dim: rgba(36, 34, 29, .34);
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: linear-gradient(180deg, var(--dl-hi) 0%, var(--dl-canvas) 60%, var(--dl-canvas-low) 100%);
+  color: var(--dl-ink);
+  font-family: var(--dl-sans);
+  font-size: var(--cw-u);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
-#trosa #customerEditModal .modal-header.customer-workspace-header {
-  padding: clamp(1rem, 3vh, 1.8rem) var(--room-gut) 1rem !important;
+#trosa #customerEditModal.show .cw-app { animation: cw-arrive .45s var(--room-ease); }
+@keyframes cw-arrive { from { opacity: 0; } to { opacity: 1; } }
+#trosa #customerEditModal :focus-visible { outline: 1px solid var(--dl-gold); outline-offset: 4px; }
+#trosa #customerEditModal .cw-app:focus,
+#trosa #customerEditModal .cw-row:focus-visible,
+#trosa #customerEditModal .cw-prow:focus-visible { outline: none; }
+
+/* quiet text actions: no box, no fill */
+#trosa #customerEditModal .cw-link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition: color .3s var(--room-ease);
 }
-#trosa #customerEditModal .customer-workspace-header .workspace-kicker { color: var(--dl-faint) !important; }
-#trosa #customerEditModal .customer-workspace-header h3 {
-  font-size: clamp(1.3rem, 2.2vw, 1.9rem) !important;
-  font-weight: 400 !important;
+#trosa #customerEditModal .cw-link:hover { color: var(--dl-ink); }
+
+/* ---- top bar: brand, number, the sections, who ---- */
+#trosa #customerEditModal .cw-top {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 1.3em;
+  height: var(--room-bar);
+  padding: 0 var(--room-gut);
+  border-bottom: 1px solid var(--dl-hair-2);
 }
-#trosa #customerEditModal .modal-body { padding-left: 0 !important; padding-right: 0 !important; }
-#trosa #customerEditModal .customer-workspace-summary,
-#trosa #customerEditModal .customer-workspace-tabs { padding-left: var(--room-gut) !important; padding-right: var(--room-gut) !important; }
-#trosa #customerEditModal .customer-workspace-main { padding-left: var(--room-gut) !important; padding-right: clamp(1.4rem, 3vw, 2.4rem) !important; }
-/* the next step is the focal of this room too */
-#trosa #customerEditModal .customer-next-title.customer-next-title {
-  font-family: var(--room-serif) !important;
-  font-size: clamp(1.5rem, 2.8vw, 2.4rem) !important;
-  font-weight: 400 !important;
-  line-height: 1.18 !important;
-  letter-spacing: -.014em;
+#trosa #customerEditModal .cw-brand {
+  padding: .3em .1em;
+  border: 0;
+  background: none;
+  color: var(--dl-ink);
+  font-family: var(--room-serif);
+  font-size: 1em;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: color .3s var(--room-ease);
 }
-#trosa #customerEditModal .customer-workspace-summary.customer-workspace-summary {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) !important;
-  gap: .6rem !important;
-  margin: 0 !important;
-  padding-top: 1.2rem !important;
-  padding-bottom: 1.2rem !important;
-  border-bottom: 1px solid var(--dl-hair) !important;
-  border-top: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
+#trosa #customerEditModal .cw-brand:hover { color: var(--dl-gold-ink); }
+#trosa #customerEditModal .cw-meta {
+  font-size: .6em;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+  white-space: nowrap;
 }
-#trosa #customerEditModal .customer-now-next-grid.customer-now-next-grid {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) !important;
-  gap: clamp(1.4rem, 4vw, 3.4rem) !important;
-  width: 100% !important;
+#trosa #customerEditModal .cw-nav { margin-left: auto; display: flex; gap: 1.15em; }
+#trosa #customerEditModal .cw-nav .cw-tab {
+  min-height: 0;
+  margin: 0;
+  padding: .2em 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--dl-mut);
+  font-family: var(--dl-sans);
+  font-size: .74em;
+  font-weight: 400;
+  letter-spacing: .05em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa #customerEditModal .cw-nav .cw-tab:hover { color: var(--dl-ink); }
+#trosa #customerEditModal .cw-nav .cw-tab.active { color: var(--dl-ink); border-bottom-color: var(--dl-gold); }
+#trosa #customerEditModal .cw-who {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .64em;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+  white-space: nowrap;
+}
+#trosa #customerEditModal .cw-who i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dl-gold);
+  box-shadow: 0 0 0 3px rgba(188, 144, 82, .14);
+}
+#trosa #customerEditModal .cw-close {
+  margin-right: -.4em;
+  padding: .1em .35em;
+  border: 0;
+  background: none;
+  color: var(--dl-mut);
+  font-size: 1.15em;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .3s var(--room-ease);
+}
+#trosa #customerEditModal .cw-close:hover { color: var(--dl-ink); }
+
+/* ---- the room: daylight band, the pool, the vignette ---- */
+#trosa #customerEditModal .cw-room { position: relative; min-height: 0; overflow: hidden; }
+#trosa #customerEditModal .cw-sunband {
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  top: -6%;
+  height: 42%;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 253, 247, .95), rgba(255, 253, 247, 0));
+  filter: blur(2px);
+}
+/* initDaylightRoom writes viewport coordinates; the room starts under the bar */
+#trosa #customerEditModal .cw-pool {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: min(900px, 64vw);
+  height: min(640px, 74vh);
+  pointer-events: none;
+  transform: translate3d(calc(var(--pool-x, 68vw) - 50%), calc(var(--pool-y, 50vh) - var(--room-bar) - 50%), 0);
+  background: radial-gradient(closest-side, rgba(255, 255, 252, 1), rgba(255, 253, 246, .92) 34%, rgba(255, 250, 238, .45) 60%, rgba(255, 250, 238, 0) 78%);
+  filter: blur(12px);
+  opacity: 0;
+  transition: opacity 1.8s var(--room-ease) .25s;
+  will-change: transform;
+}
+html.motion-lite #trosa #customerEditModal .cw-pool,
+html.motion-reduced #trosa #customerEditModal .cw-pool,
+html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
+#trosa #customerEditModal .cw-vig {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(92% 84% at 68% 45%, rgba(0, 0, 0, 0) 30%, rgba(70, 62, 48, .16) 100%);
+}
+#trosa #customerEditModal .cw-ident,
+#trosa #customerEditModal .cw-focus,
+#trosa #customerEditModal .cw-panel,
+#trosa #customerEditModal .cw-readouts { z-index: 1; }
+
+/* ---- identity ---- */
+#trosa #customerEditModal .cw-ident { position: absolute; left: var(--room-gut); top: clamp(1.6rem, 4.4vh, 3.2rem); max-width: 34ch; }
+#trosa #customerEditModal .cw-ident h1 {
+  margin: 0;
+  color: var(--dl-ink);
+  font-family: var(--room-serif);
+  font-size: clamp(1.1rem, 1.6vw, 1.42rem);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: -.008em;
+}
+#trosa #customerEditModal .cw-lines {
+  margin: .65rem 0 0;
+  font-size: .62em;
+  letter-spacing: .14em;
+  line-height: 1.95;
+  text-transform: uppercase;
+  color: var(--dl-faint);
+}
+#trosa #customerEditModal .cw-lines b { font-weight: 400; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-lines a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--dl-hair); white-space: nowrap; }
+#trosa #customerEditModal .cw-lines a:hover { color: var(--dl-ink); }
+
+/* ---- the focal: the next step ---- */
+#trosa #customerEditModal .cw-focus { position: absolute; left: 50%; top: 44%; transform: translateY(-50%); width: min(640px, 45vw); }
+#trosa #customerEditModal .cw-k { display: block; font-size: .6em; font-weight: 500; letter-spacing: .3em; text-transform: uppercase; color: var(--dl-gold); }
+#trosa #customerEditModal .cw-h2 {
+  margin: .8rem 0 0;
+  color: var(--dl-ink);
+  font-family: var(--room-serif);
+  font-size: clamp(1.5rem, 2.75vw, 2.4rem);
+  font-weight: 400;
+  line-height: 1.14;
+  letter-spacing: -.018em;
+  overflow-wrap: anywhere;
+}
+#trosa #customerEditModal .cw-h2.is-empty { color: var(--dl-mut); }
+#trosa #customerEditModal .cw-when { margin: .85rem 0 0; font-size: .7em; letter-spacing: .16em; color: var(--dl-ink-2); }
+#trosa #customerEditModal .cw-reason {
+  display: -webkit-box;
+  max-width: 52ch;
+  margin: .5rem 0 0;
+  overflow: hidden;
+  font-size: .72em;
+  line-height: 1.55;
+  color: var(--dl-mut);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+#trosa #customerEditModal .cw-acts { display: flex; flex-wrap: wrap; align-items: center; gap: .6em; margin-top: 1.6rem; }
+#trosa #customerEditModal .cw-acts:empty { display: none; }
+#trosa #customerEditModal .cw-act {
+  padding: .52rem 1.05rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--dl-ink-2);
+  font-family: var(--dl-sans);
+  font-size: .73em;
+  letter-spacing: .05em;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: color .3s var(--room-ease), background .3s var(--room-ease), border-color .3s var(--room-ease);
+}
+#trosa #customerEditModal .cw-act:hover { color: var(--dl-ink); background: rgba(255, 253, 247, .9); border-color: var(--dl-hair); }
+#trosa #customerEditModal .cw-act.cw-primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
+#trosa #customerEditModal .cw-act.cw-primary:hover { background: #37342c; color: #fffdf7; border-color: transparent; }
+#trosa #customerEditModal .cw-act:disabled { opacity: .55; cursor: default; }
+#trosa #customerEditModal .cw-quick { display: flex; align-items: baseline; gap: .45em; margin-top: .9rem; padding-left: 1.05rem; font-size: .68em; letter-spacing: .04em; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-quick[hidden] { display: none; }
+#trosa #customerEditModal .cw-quick .cw-link { color: var(--dl-mut); }
+
+/* loading and error live in the focal as one quiet line — never a spinner */
+#trosa #customerEditModal .cw-state { margin-top: .9rem; }
+#trosa #customerEditModal .cw-state[hidden] { display: none; }
+#trosa #customerEditModal .cw-state-line { display: block; width: min(240px, 60%); height: 1px; overflow: hidden; background: var(--dl-hair); }
+#trosa #customerEditModal .cw-state-line span { display: block; height: 1px; background: var(--dl-gold); transition: width .6s var(--room-ease); }
+#trosa #customerEditModal .cw-state strong {
+  display: block;
+  margin-top: .9rem;
+  color: var(--dl-mut);
+  font-family: var(--room-serif);
+  font-size: clamp(1.1rem, 1.9vw, 1.6rem);
+  font-weight: 400;
+  line-height: 1.2;
+}
+#trosa #customerEditModal .cw-state p { max-width: 48ch; margin: .5rem 0 0; font-size: .72em; line-height: 1.55; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-state p:empty { display: none; }
+#trosa #customerEditModal .cw-state .cw-act { margin: 1rem 0 0 -1.05rem; }
+#trosa #customerEditModal.is-error .cw-state strong { color: var(--dl-ink); }
+#trosa #customerEditModal.is-error .cw-state-line span { background: #a0654a; }
+#trosa #customerEditModal.is-loading .cw-next,
+#trosa #customerEditModal.is-loading .cw-acts,
+#trosa #customerEditModal.is-loading .cw-quick,
+#trosa #customerEditModal.is-error .cw-k,
+#trosa #customerEditModal.is-error .cw-next,
+#trosa #customerEditModal.is-error .cw-acts,
+#trosa #customerEditModal.is-error .cw-quick,
+#trosa #customerEditModal.is-error .cw-pbody,
+#trosa #customerEditModal.is-error .cw-pact,
+#trosa #customerEditModal.is-error .cw-readouts { visibility: hidden; }
+#trosa #customerEditModal.is-loading .cw-pact,
+#trosa #customerEditModal.is-loading .cw-readouts { opacity: .45; pointer-events: none; }
+
+/* ---- the column of records ---- */
+#trosa #customerEditModal .cw-panel {
+  position: absolute;
+  left: var(--room-gut);
+  top: 38%;
+  bottom: 15%;
+  width: min(430px, 32vw);
+  display: flex;
+  flex-direction: column;
+}
+#trosa #customerEditModal .cw-panel:has(.cw-section.active.is-form) { width: min(560px, 40vw); }
+#trosa #customerEditModal .cw-phead {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding-bottom: .6rem;
+  border-bottom: 1px solid var(--dl-hair);
+  font-size: .6em;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+#trosa #customerEditModal .cw-ptitle { color: var(--dl-ink-2); font-weight: 500; }
+#trosa #customerEditModal .cw-pmeta { margin-left: auto; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-pact { color: var(--dl-mut); letter-spacing: .12em; }
+#trosa #customerEditModal .cw-pbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-block: .6rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dl-hair) transparent;
+}
+#trosa #customerEditModal .cw-section { display: none; margin: 0; padding: 0; border: 0; }
+#trosa #customerEditModal .cw-section.active { display: flex; flex: 1 1 auto; flex-direction: column; }
+#trosa #customerEditModal .cw-list,
+#trosa #customerEditModal .cw-rows { display: flex; flex: 1 1 auto; flex-direction: column; }
+#trosa #customerEditModal .cw-section.is-form > .cw-list,
+#trosa #customerEditModal .cw-section.is-form > .cw-more,
+#trosa #customerEditModal .cw-section.is-form > .cw-foot { display: none; }
+
+/* a record row: dim by default, the lit row reads at full contrast */
+#trosa #customerEditModal .cw-row {
+  display: grid;
+  grid-template-columns: 4.4rem minmax(0, 1fr);
+  gap: 1rem;
   align-items: start;
+  flex: 1 1 auto;
+  padding: .72rem .8rem .72rem .7rem;
+  border-bottom: 1px solid var(--dl-hair-2);
 }
-#trosa #customerEditModal .customer-fact-section {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+#trosa #customerEditModal .cw-dt { padding-top: .16rem; font-size: .62em; letter-spacing: .1em; color: var(--cw-date-dim); transition: color .55s var(--room-ease); }
+#trosa #customerEditModal .cw-rmain { min-width: 0; }
+#trosa #customerEditModal .cw-tx {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: .83em;
+  line-height: 1.5;
+  color: var(--cw-ink-dim);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  transition: color .55s var(--room-ease);
 }
-#trosa #customerEditModal .customer-secondary-info { width: 100% !important; }
-#trosa #customerEditModal .modal-footer.modal-footer {
-  justify-content: flex-end !important;
-  border: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  padding-top: .4rem !important;
-  padding-bottom: .8rem !important;
+#trosa #customerEditModal .cw-tx p,
+#trosa #customerEditModal .cw-rs p { display: inline; margin: 0; }
+#trosa #customerEditModal .cw-row:focus-within .cw-tx { -webkit-line-clamp: unset; }
+#trosa #customerEditModal .cw-plan { margin: .25rem 0 0; font-size: .7em; color: var(--cw-date-dim); }
+#trosa #customerEditModal .cw-rs {
+  display: block;
+  margin-top: .3rem;
+  overflow: hidden;
+  font-size: .62em;
+  letter-spacing: .06em;
+  color: var(--cw-sub-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .55s var(--room-ease);
 }
-/* timeline entries take part in the light like every other record row */
-#trosa #customerEditModal #outreachList .tl-item.lit-row { padding-left: .5rem !important; padding-right: .5rem !important; }
-#trosa #customerEditModal .modal-footer.modal-footer { padding-left: var(--room-gut) !important; padding-right: var(--room-gut) !important; }
+#trosa #customerEditModal .cw-row.is-lit .cw-dt { color: var(--dl-gold); }
+#trosa #customerEditModal .cw-row.is-lit .cw-tx { color: var(--dl-ink); }
+#trosa #customerEditModal .cw-row.is-lit .cw-rs,
+#trosa #customerEditModal .cw-row.is-lit .cw-plan { color: var(--dl-mut); }
+
+/* row actions surface on the lit row, over its lower-right corner, so they
+   never take height from the column (static and always shown on touch) */
+#trosa #customerEditModal .cw-row,
+#trosa #customerEditModal .cw-prow { position: relative; }
+#trosa #customerEditModal .cw-row-acts {
+  position: absolute;
+  right: .8rem;
+  bottom: .55rem;
+  display: flex;
+  align-items: baseline;
+  gap: .4rem;
+  padding-left: 1.4rem;
+  background: linear-gradient(90deg, rgba(255, 253, 247, 0), rgba(255, 253, 247, .97) 1.2rem);
+  font-size: .62em;
+  letter-spacing: .06em;
+  color: var(--dl-mut);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s var(--room-ease);
+}
+#trosa #customerEditModal .cw-row-acts i { font-style: normal; }
+#trosa #customerEditModal .cw-row-acts .cw-link:hover { color: var(--dl-ink-2); }
+#trosa #customerEditModal .lit-row.is-lit .cw-row-acts,
+#trosa #customerEditModal .lit-row:focus-within .cw-row-acts { opacity: 1; pointer-events: auto; }
+
+/* contacts, files, tasks */
+#trosa #customerEditModal .cw-prow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 1 1 auto;
+  padding: .72rem .8rem .72rem .7rem;
+  border-bottom: 1px solid var(--dl-hair-2);
+}
+#trosa #customerEditModal .cw-prow[role="button"] { cursor: pointer; }
+#trosa #customerEditModal .cw-pmain { min-width: 0; }
+#trosa #customerEditModal .cw-prow b { font-size: .88em; font-weight: 400; color: var(--dl-ink-2); overflow-wrap: anywhere; transition: color .55s var(--room-ease); }
+#trosa #customerEditModal .cw-prow.is-lit b { color: var(--dl-ink); }
+#trosa #customerEditModal .cw-sm { display: block; margin-top: .26rem; font-size: .6em; letter-spacing: .12em; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-sm2 { display: block; margin-top: .2rem; font-size: .66em; color: var(--dl-faint); overflow-wrap: anywhere; }
+#trosa #customerEditModal .cw-prow > a { font-size: .68em; color: var(--dl-ink-2); text-decoration: none; border-bottom: 1px solid var(--dl-hair); white-space: nowrap; }
+#trosa #customerEditModal .cw-prow > time { flex: 0 0 auto; font-size: .66em; color: var(--dl-faint); white-space: nowrap; }
+#trosa #customerEditModal .cw-prow.is-done b { color: var(--dl-faint); text-decoration: line-through; }
+#trosa #customerEditModal .cw-prow.is-missing b { color: var(--dl-mut); }
+
+/* 资料: a definition list, then checks and sela research */
+#trosa #customerEditModal .cw-dlg { display: grid; grid-template-columns: 6.4rem minmax(0, 1fr); gap: 0 1rem; margin: 0; padding-top: .2rem; }
+#trosa #customerEditModal .cw-dlg dt { margin: 0; padding: .4rem 0; font-size: .6em; letter-spacing: .14em; line-height: 2; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-dlg dd {
+  min-width: 0;
+  margin: 0;
+  padding: .4rem 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--dl-hair-2);
+  font-size: .82em;
+  color: var(--dl-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#trosa #customerEditModal .cw-dlg a,
+#trosa #customerEditModal .cw-subs a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--dl-hair); }
+#trosa #customerEditModal .cw-none { color: var(--dl-faint); }
+#trosa #customerEditModal .cw-inline { max-width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+#trosa #customerEditModal .cw-level { display: inline-flex; align-items: baseline; gap: .4rem; }
+#trosa #customerEditModal .cw-level input {
+  width: 2.6em;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed var(--dl-hair);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+#trosa #customerEditModal .cw-level input:focus { outline: none; border-bottom-color: var(--dl-gold); }
+#trosa #customerEditModal .customer-level-quick-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
+#trosa #customerEditModal .customer-level-quick-feedback.is-visible { opacity: 1; }
+#trosa #customerEditModal .customer-level-quick-feedback.is-error { color: #a0654a; }
+#trosa #customerEditModal .cw-sub { margin-top: 1.1rem; }
+#trosa #customerEditModal .cw-subk { display: block; margin-bottom: .4rem; font-size: .6em; letter-spacing: .14em; text-transform: uppercase; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-gaps { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .74em; color: var(--dl-ink-2); }
+#trosa #customerEditModal .cw-gaps .cw-link { border-bottom: 1px solid var(--dl-hair); }
+#trosa #customerEditModal .cw-subp { margin: 0; font-size: .76em; line-height: 1.55; color: var(--dl-ink-2); }
+#trosa #customerEditModal .cw-subs { margin: .35rem 0 0; font-size: .68em; line-height: 1.5; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-subs .cw-link { margin-left: .5rem; color: var(--dl-ink-2); border-bottom: 1px solid var(--dl-hair); }
+
+/* list footers, "load more", empty and failed sections */
+#trosa #customerEditModal .cw-foot { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: .4rem 1.1rem; padding: .8rem .1rem .2rem; font-size: .66em; letter-spacing: .05em; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-more { flex: 0 0 auto; padding: .7rem .7rem .2rem; font-size: .66em; letter-spacing: .05em; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-more[hidden] { display: none; }
+#trosa #customerEditModal .cw-empty { margin: 0; padding: 1.2rem .7rem; font-size: .8em; line-height: 1.6; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-empty .cw-link { margin-left: .6rem; color: var(--dl-ink-2); border-bottom: 1px solid var(--dl-hair); }
+#trosa #customerEditModal .cw-error { color: var(--dl-ink-2); }
+
+/* forms open in place of a section's rows */
+#trosa #customerEditModal .cw-form { padding: .5rem .1rem 1rem; font-size: .9em; }
+#trosa #customerEditModal .cw-form[hidden] { display: none; }
+#trosa #customerEditModal .cw-back { display: block; margin: .2rem 0 .8rem; font-size: .74em; letter-spacing: .06em; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-compose-switch { display: flex; gap: 1.1rem; margin-bottom: .9rem; font-size: .8em; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-compose-switch .active { color: var(--dl-ink); border-bottom: 1px solid var(--dl-gold); }
+#trosa #customerEditModal .cw-form-actions { display: flex; align-items: center; gap: 1.1rem; margin-top: .9rem; font-size: .8em; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-fix { margin: .2rem 0 .8rem; }
+#trosa #customerEditModal .cw-fix > summary { margin-bottom: .5rem; font-size: .8em; color: var(--dl-mut); cursor: pointer; }
+#trosa #customerEditModal .cw-check label { display: inline-flex; align-items: center; gap: .4rem; font-size: .8em; color: var(--dl-ink-2); }
+#trosa #customerEditModal .cw-contact-edit { padding: .6rem 0 1rem; border-bottom: 1px solid var(--dl-hair-2); font-size: .9em; }
+
+/* ---- readouts and the status bar ---- */
+#trosa #customerEditModal .cw-readouts {
+  position: absolute;
+  right: var(--room-gut);
+  bottom: clamp(1.2rem, 3.4vh, 2.4rem);
+  display: flex;
+  gap: clamp(1.2rem, 2.6vw, 2.4rem);
+  text-align: right;
+}
+#trosa #customerEditModal .cw-readouts span { display: block; font-size: .58em; letter-spacing: .18em; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-readouts b { display: block; margin-top: .3rem; color: var(--dl-ink); font-family: var(--room-serif); font-size: 1.05em; font-weight: 400; }
+#trosa #customerEditModal .cw-bot {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: var(--room-bar);
+  padding: 0 var(--room-gut);
+  border-top: 1px solid var(--dl-hair-2);
+}
+#trosa #customerEditModal .cw-bot .micro { flex: 0 0 auto; }
+#trosa #customerEditModal .cw-waitv {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--dl-ink-2);
+  font-family: var(--room-serif);
+  font-size: .9em;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .3s var(--room-ease);
+}
+#trosa #customerEditModal .cw-waitv:hover { color: var(--dl-ink); }
+#trosa #customerEditModal .cw-waitv.is-empty { color: var(--dl-faint); }
+#trosa #customerEditModal .cw-date { flex: 0 0 auto; margin-left: auto; font-size: .6em; letter-spacing: .16em; text-transform: uppercase; color: var(--dl-faint); }
+
+/* ---- narrow: the room becomes one column; the sections stay reachable ---- */
+@media (max-width: 1024px) {
+  #trosa #customerEditModal.modal-overlay { overflow-y: auto; scroll-padding-top: 110px; }
+  #trosa #customerEditModal .cw-app { align-self: flex-start; height: auto; min-height: 100dvh; grid-template-rows: auto auto auto; }
+  #trosa #customerEditModal .cw-top {
+    position: sticky;
+    top: 0;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--room-bar);
+    row-gap: .1rem;
+    padding-top: .45rem;
+    padding-bottom: .45rem;
+    background: color-mix(in srgb, var(--dl-hi) 98%, transparent);
+  }
+  #trosa #customerEditModal .cw-who { margin-left: auto; }
+  /* deliberate deviation from the reference: there is no other way to reach
+     the sections, so the nav wraps to its own scrollable line, never hides */
+  #trosa #customerEditModal .cw-nav { order: 9; width: 100%; margin-left: 0; padding-bottom: .15rem; overflow-x: auto; gap: 1.3em; scrollbar-width: none; }
+  #trosa #customerEditModal .cw-room { display: flex; flex-direction: column; padding: 2.2rem var(--room-gut) 1.4rem; }
+  #trosa #customerEditModal .cw-ident,
+  #trosa #customerEditModal .cw-focus,
+  #trosa #customerEditModal .cw-panel,
+  #trosa #customerEditModal .cw-readouts { position: static; width: auto; max-width: none; transform: none; }
+  #trosa #customerEditModal .cw-panel:has(.cw-section.active.is-form) { width: auto; }
+  #trosa #customerEditModal .cw-focus { margin-top: 3rem; }
+  #trosa #customerEditModal .cw-panel { margin-top: 2.8rem; }
+  #trosa #customerEditModal .cw-pbody { flex: none; display: block; overflow: visible; }
+  #trosa #customerEditModal .cw-section.active { display: block; }
+  #trosa #customerEditModal .cw-list,
+  #trosa #customerEditModal .cw-rows { display: block; }
+  #trosa #customerEditModal .cw-prow { padding-left: 0; padding-right: 0; }
+  #trosa #customerEditModal .cw-row { padding-left: .35rem; padding-right: .35rem; }
+  #trosa #customerEditModal .cw-readouts { flex-wrap: wrap; margin-top: 2.4rem; text-align: left; }
+  /* the light holds still above the focal */
+  #trosa #customerEditModal .cw-pool { left: 50%; top: 26%; width: 150vw; height: 78vh; transform: translate(-50%, -50%); opacity: .9 !important; }
+  #trosa #customerEditModal .cw-vig { display: none; }
+  #trosa #customerEditModal .cw-bot { flex-wrap: wrap; height: auto; gap: .6rem; padding: 1rem var(--room-gut) 1.4rem; }
+  #trosa #customerEditModal .cw-date { width: 100%; margin-left: 0; }
+}
+@media (max-width: 560px) {
+  #trosa #customerEditModal .cw-meta { display: none; }
+  #trosa #customerEditModal .cw-ident h1 { font-size: 1.05rem; }
+  #trosa #customerEditModal .cw-h2 { font-size: 1.45rem; }
+  #trosa #customerEditModal .cw-dlg { grid-template-columns: 5.2rem minmax(0, 1fr); }
+  #trosa #customerEditModal .cw-row { grid-template-columns: 3.4rem minmax(0, 1fr); gap: .7rem; }
+}
+/* touch: comfortable targets, actions always visible */
+@media (pointer: coarse) {
+  #trosa #customerEditModal .cw-act,
+  #trosa #customerEditModal .cw-nav .cw-tab,
+  #trosa #customerEditModal .cw-brand,
+  #trosa #customerEditModal .cw-close { min-height: 44px; }
+  #trosa #customerEditModal .cw-close { min-width: 44px; }
+  #trosa #customerEditModal .cw-row-acts,
+  #trosa #customerEditModal .cw-foot,
+  #trosa #customerEditModal .cw-quick { gap: .9rem; }
+  #trosa #customerEditModal .cw-row-acts .cw-link,
+  #trosa #customerEditModal .cw-foot .cw-link,
+  #trosa #customerEditModal .cw-quick .cw-link { min-height: 32px; }
+}
+@media (hover: none), (max-width: 1024px) {
+  #trosa #customerEditModal .cw-row-acts { position: static; margin-top: .35rem; padding-left: 0; background: none; opacity: 1; pointer-events: auto; }
+}
 
 /* the customer list says what it is filtered by, and lets go in one click */
 #trosa .customer-active-filters .customer-search-chip {

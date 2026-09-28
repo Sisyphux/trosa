@@ -45,7 +45,6 @@
    2. GLOBAL CHROME — search layer, floating shelf, page frame
    ============================================================================ */
 
-
 /* --- Page frame ------------------------------------------------------------ */
 #trosa .page-header {
   padding: calc(var(--v4-bar-top) + 74px) 0 0 !important;
@@ -144,7 +143,6 @@
   color: var(--dl-gold-ink);
   border-bottom-color: var(--dl-gold);
 }
-
 
 /* ============================================================================
    4. TODAY — agenda rail + customer context sheet + time band
@@ -254,7 +252,6 @@
   margin-top: 2px;
 }
 #trosa .today-task-date.overdue { color: var(--dl-danger) !important; font-weight: 600; }
-
 
 /* --- Time band: the next 14 days ------------------------------------------- */
 #trosa .today-future-section { margin-top: var(--v4-stack); }
@@ -1104,7 +1101,8 @@
   box-shadow: none !important;
 }
 #trosa .batch-bar.show { display: flex; }
-#trosa :focus-visible {
+/* the customer workspace draws its own 1px ring (visual-v5 §5) */
+#trosa :focus-visible:not(.cw-app *) {
   outline: 2px solid var(--dl-gold) !important;
   outline-offset: 2px !important;
   border-radius: 6px;
@@ -1120,7 +1118,6 @@
    This block must stay BEFORE section 11 so the responsive overrides, which
    also use `!important`, still win at narrow widths.
    ============================================================================ */
-
 
 /* ---- page frame + headings ---- */
 #trosa .page-section.page-section { min-height: 100vh !important; background: transparent !important; }
@@ -1316,7 +1313,6 @@
   background: var(--dl-paper) !important;
   box-shadow: var(--v4-shadow-row) !important;
 }
-
 
 /* ---- today: future band + collapsed week ---- */
 #trosa .today-schedule-grid.today-schedule-grid {
@@ -1739,7 +1735,6 @@
    change. One paper workspace, one scrolling body, hairline-divided facts.
    ============================================================================ */
 
-#trosa .modal.modal-customer-workspace,
 #trosa .modal.ov-customer-workspace {
   display: flex !important;
   flex-direction: column !important;
@@ -1758,7 +1753,6 @@
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-#trosa .modal.modal-customer-workspace .modal-header.customer-workspace-header,
 #trosa .modal.ov-customer-workspace .modal-header.ov-customer-header {
   flex: 0 0 auto !important;
   display: flex !important;
@@ -1772,7 +1766,6 @@
   background: none !important;
   box-shadow: none !important;
 }
-#trosa .modal.modal-customer-workspace .customer-workspace-header .workspace-kicker,
 #trosa .modal.ov-customer-workspace .ov-customer-header .workspace-kicker {
   display: block !important;
   margin: 0 !important;
@@ -1782,7 +1775,6 @@
   letter-spacing: .2em !important;
   text-transform: uppercase !important;
 }
-#trosa .modal.modal-customer-workspace .customer-workspace-header h3,
 #trosa .modal.ov-customer-workspace .ov-customer-header h3 {
   margin: 8px 0 0 !important;
   color: var(--dl-ink) !important;
@@ -1792,7 +1784,6 @@
   line-height: 1.15 !important;
   letter-spacing: -.02em !important;
 }
-#trosa .modal.modal-customer-workspace .customer-workspace-header .workspace-meta,
 #trosa .modal.ov-customer-workspace .ov-customer-header .workspace-meta {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -1802,14 +1793,6 @@
   font-size: 12.5px !important;
   line-height: 1.45 !important;
 }
-#trosa .modal.modal-customer-workspace .workspace-header-actions.workspace-header-actions {
-  display: flex !important;
-  flex: 0 0 auto !important;
-  align-items: center !important;
-  gap: 8px !important;
-  margin: 0 !important;
-}
-#trosa .modal.modal-customer-workspace .modal-body.modal-body,
 #trosa .modal.ov-customer-workspace .modal-body.ov-customer-body {
   flex: 1 1 auto !important;
   min-height: 0 !important;
@@ -1819,600 +1802,9 @@
   background: none !important;
 }
 
-/* --- fact band: hairline cells, never boxes --- */
-
-
-
-#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event .customer-fact-event-meta {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 10px !important;
-  margin: 0 0 6px !important;
-  color: var(--dl-mut) !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: .14em !important;
-  text-transform: uppercase !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event p {
-  margin: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 14px !important;
-  line-height: 1.55 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-event.customer-fact-event small {
-  display: block !important;
-  margin: 6px 0 0 !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 12.5px !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 2px !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person strong { color: var(--dl-ink) !important; font-size: 14.5px !important; font-weight: 600 !important; }
-#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person span,
-#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person small { color: var(--dl-mut) !important; font-size: 12.5px !important; line-height: 1.4 !important; }
-#trosa .modal.modal-customer-workspace .customer-fact-person.customer-fact-person a { color: var(--dl-gold-ink) !important; font-size: 12.5px !important; text-decoration: none !important; }
-#trosa .modal.modal-customer-workspace .customer-fact-empty.customer-fact-empty { color: var(--dl-faint) !important; font-size: 13px !important; }
-#trosa .modal.modal-customer-workspace .customer-gap-item.customer-gap-item {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  height: 26px !important;
-  padding: 0 10px !important;
-  margin: 3px 0 !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 8px !important;
-  background: none !important;
-  box-shadow: none !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 11.5px !important;
-}
-
-/* --- fact band internals: hairline sections, never nested boxes --- */
-
-
-
-#trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 10px !important;
-  margin: 0 0 8px !important;
-  padding: 0 0 8px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  color: var(--dl-mut) !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: .14em !important;
-  text-transform: uppercase !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events {
-  display: grid !important;
-  gap: 8px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events > * {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-now-waiting.customer-now-waiting {
-  display: flex !important;
-  align-items: baseline !important;
-  gap: 8px !important;
-  margin: 8px 0 0 !important;
-  padding: 8px 0 0 !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair-2) !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 12.5px !important;
-}
-#trosa .modal.modal-customer-workspace .customer-next-title.customer-next-title {
-  display: block !important;
-  margin: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  line-height: 1.45 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-next-date.customer-next-date {
-  display: block !important;
-  margin: 4px 0 0 !important;
-  color: var(--dl-mut) !important;
-  font-size: 12.5px !important;
-}
-#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 4px 0 0 22px !important;
-  border: 0 !important;
-  border-left: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-info.customer-secondary-info > summary {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 10px !important;
-  margin: 0 !important;
-  padding: 0 0 8px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-hint.customer-secondary-hint {
-  color: var(--dl-mut) !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
-  gap: 0 22px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid .customer-fact-section.customer-fact-section {
-  padding: 12px 0 !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-}
-
-/* --- tabs: hairline rail, gold underline for the active pane --- */
-#trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs {
-  display: flex !important;
-  gap: 4px !important;
-  margin: 0 !important;
-  padding: 0 32px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  overflow-x: auto !important;
-}
-#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn {
-  position: relative !important;
-  flex: 0 0 auto !important;
-  height: 46px !important;
-  margin: 0 !important;
-  padding: 0 14px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  color: var(--dl-mut) !important;
-  font-size: 13.5px !important;
-  font-weight: 500 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn.active {
-  color: var(--dl-ink) !important;
-  font-weight: 600 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-workspace-tabs .tab-btn.tab-btn.active::after {
-  content: "" !important;
-  position: absolute !important;
-  left: 14px !important;
-  right: 14px !important;
-  bottom: -1px !important;
-  height: 2px !important;
-  background: var(--dl-gold) !important;
-}
-
-/* --- body: reading column + execution rail --- */
-#trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 330px !important;
-  gap: 0 !important;
-  align-items: start !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main {
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 22px 32px 28px !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .tab-content.tab-content { display: none !important; }
-#trosa .modal.modal-customer-workspace .tab-content.tab-content.active { display: block !important; }
-#trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
-  position: sticky !important;
-  top: 0 !important;
-  display: block !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 22px 26px 28px !important;
-  border: 0 !important;
-  border-left: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: var(--dl-paper-2) !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel .workspace-kicker {
-  display: block !important;
-  margin: 0 0 12px !important;
-  color: var(--dl-mut) !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: .2em !important;
-  text-transform: uppercase !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-action-grid.workspace-action-grid {
-  display: flex !important;
-  flex-direction: column !important;
-  gap: 8px !important;
-  margin: 14px 0 0 !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-action-btn.workspace-action-btn {
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 100% !important;
-  height: 42px !important;
-  padding: 0 16px !important;
-  border: 1px solid var(--dl-hair-strong) !important;
-  border-radius: 10px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  color: var(--dl-ink) !important;
-  font-size: 13.5px !important;
-  font-weight: 600 !important;
-}
-#trosa .modal.modal-customer-workspace #customerTaskActionButton.customer-task-action-button,
-#trosa .modal.modal-customer-workspace .workspace-action-btn.workspace-action-btn.primary {
-  border-color: var(--dl-ink) !important;
-  background: var(--dl-ink) !important;
-  color: var(--dl-paper) !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-task-quick-actions.workspace-task-quick-actions {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 10px 14px !important;
-  margin: 12px 0 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-}
-
-/* --- timeline: hairline rows on a dot rail --- */
-#trosa .modal.modal-customer-workspace #outreachList.timeline,
-#trosa .modal.modal-customer-workspace #outreachList .timeline { display: block !important; overflow: visible !important; }
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item {
-  display: grid !important;
-  grid-template-columns: 18px minmax(0, 1fr) !important;
-  gap: 0 14px !important;
-  align-items: start !important;
-  margin: 0 !important;
-  padding: 16px 0 !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-dot.tl-dot {
-  position: static !important;
-  float: none !important;
-  grid-column: 1 !important;
-  grid-row: 1 !important;
-  width: 9px !important;
-  height: 9px !important;
-  margin: 6px 0 0 4px !important;
-  border: 0 !important;
-  border-radius: 50% !important;
-  background: var(--dl-faint) !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item.email .tl-dot,
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item.inbound .tl-dot { background: var(--dl-gold) !important; }
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-card.tl-card {
-  display: block !important;
-  grid-column: 2 !important;
-  grid-row: 1 !important;
-  width: auto !important;
-  max-width: none !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-card-hd.tl-card-hd {
-  display: flex !important;
-  align-items: center !important;
-  flex-wrap: wrap !important;
-  gap: 8px !important;
-  margin: 0 0 6px !important;
-  color: var(--dl-mut) !important;
-  font-size: 11.5px !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-type-badge.tl-type-badge {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 5px !important;
-  height: 20px !important;
-  padding: 0 8px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 7px !important;
-  background: none !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  letter-spacing: .02em !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-date.tl-date {
-  margin-left: auto !important;
-  color: var(--dl-mut) !important;
-  font-size: 11.5px !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-card-actions.tl-card-actions {
-  display: flex !important;
-  align-items: center !important;
-  gap: 6px !important;
-  opacity: .22 !important;
-  transition: opacity var(--dl-dur-fast) var(--dl-ease) !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item:hover .tl-card-actions.tl-card-actions,
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item:focus-within .tl-card-actions.tl-card-actions { opacity: 1 !important; }
-#trosa .modal.modal-customer-workspace #outreachList .tl-card-title.tl-card-title {
-  margin: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  line-height: 1.6 !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-card-meta.tl-card-meta {
-  margin: 6px 0 0 !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 13px !important;
-  line-height: 1.55 !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-card-plan.tl-card-plan {
-  margin: 6px 0 0 !important;
-  color: var(--dl-gold-ink) !important;
-  font-size: 13px !important;
-  line-height: 1.5 !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-weekly-status.tl-weekly-status { display: inline-flex !important; align-items: center !important; gap: 4px !important; color: var(--dl-gold-ink) !important; font-size: 11px !important; }
-
-/* --- right-hand lists on the other tabs: quiet rows --- */
-#trosa .modal.modal-customer-workspace #contactsList.contacts-list > *,
-#trosa .modal.modal-customer-workspace #customerTasksList > *,
-#trosa .modal.modal-customer-workspace #customerFilesList > * {
-  margin: 0 !important;
-  padding: 14px 0 !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-panel-header.workspace-panel-header,
-#trosa .modal.modal-customer-workspace .customer-file-panel-header.customer-file-panel-header {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 12px !important;
-  margin: 0 0 4px !important;
-  padding: 0 0 12px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair) !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-panel-header.workspace-panel-header h4,
-#trosa .modal.modal-customer-workspace .customer-file-panel-header.customer-file-panel-header h4 {
-  margin: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  font-weight: 600 !important;
-}
-
-/* --- manual entry: collapsed details, hairline tops --- */
-#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose {
-  margin: 22px 0 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose[open] { padding-bottom: 8px !important; }
-#trosa .modal.modal-customer-workspace details.workspace-compose.workspace-compose > summary {
-  padding: 14px 0 !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-compose-body.workspace-compose-body { padding: 4px 0 12px !important; }
-#trosa .modal.modal-customer-workspace .workspace-compose-switch.workspace-compose-switch { display: flex !important; gap: 4px !important; margin: 0 0 14px !important; }
-#trosa .modal.modal-customer-workspace .workspace-compose-mode.workspace-compose-mode {
-  height: 32px !important;
-  padding: 0 12px !important;
-  border: 1px solid transparent !important;
-  border-radius: 9px !important;
-  background: none !important;
-  box-shadow: none !important;
-  color: var(--dl-mut) !important;
-  font-size: 12.5px !important;
-  font-weight: 500 !important;
-}
-#trosa .modal.modal-customer-workspace .workspace-compose-mode.workspace-compose-mode.active {
-  border-color: var(--dl-hair) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: var(--v4-shadow-row) !important;
-  color: var(--dl-ink) !important;
-  font-weight: 600 !important;
-}
-
-/* --- the dot must stay a real grid item: v2/v3 positioned it absolutely,
-       which pushed the card into the 18px track and squeezed the header --- */
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-dot.tl-dot {
-  position: static !important;
-  grid-column: 1 !important;
-  grid-row: 1 !important;
-  display: block !important;
-  width: 9px !important;
-  height: 9px !important;
-  min-width: 0 !important;
-  margin: 6px 0 0 4px !important;
-  top: auto !important;
-  left: auto !important;
-  right: auto !important;
-  bottom: auto !important;
-}
-#trosa .modal.modal-customer-workspace #outreachList .tl-item.tl-item .tl-card.tl-card {
-  grid-column: 2 !important;
-  grid-row: 1 !important;
-  width: auto !important;
-  max-width: none !important;
-  min-width: 0 !important;
-}
-
-/* --- fact band: flatten every nested box into hairline rows --- */
-
-
-
-#trosa .modal.modal-customer-workspace .customer-fact-section-head.customer-fact-section-head {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 12px !important;
-  margin: 0 0 8px !important;
-  color: var(--dl-mut) !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: .16em !important;
-  text-transform: uppercase !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-fact-events.customer-fact-events > * {
-  display: block !important;
-  margin: 0 0 8px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-now-waiting.customer-now-waiting {
-  display: flex !important;
-  align-items: baseline !important;
-  gap: 10px !important;
-  margin: 6px 0 0 !important;
-  padding: 8px 0 0 !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair-2) !important;
-  background: none !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 12.5px !important;
-}
-#trosa .modal.modal-customer-workspace .customer-next-title.customer-next-title {
-  display: block !important;
-  margin: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  line-height: 1.5 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-next-date.customer-next-date {
-  display: block !important;
-  margin: 4px 0 0 !important;
-  color: var(--dl-mut) !important;
-  font-size: 12.5px !important;
-}
-#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 0 0 22px !important;
-  border: 0 !important;
-  border-left: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-}
-#trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info > summary {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 12px !important;
-  margin: 0 !important;
-  padding: 4px 0 10px !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-hint.customer-secondary-hint {
-  color: var(--dl-mut) !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)) !important;
-  gap: 0 22px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-}
-#trosa .modal.modal-customer-workspace .customer-secondary-grid .customer-fact-section.customer-fact-section {
-  padding: 12px 0 !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-}
-
-/* --- footer --- */
-#trosa .modal.modal-customer-workspace .modal-footer.modal-footer {
-  flex: 0 0 auto !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-end !important;
-  gap: 10px !important;
-  margin: 0 !important;
-  padding: 16px 32px !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair) !important;
-  border-radius: 0 !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-}
-
 /* ============================================================================
    11. RESPONSIVE — 1280 / 960 / 720 / 390
    ============================================================================ */
-
 
 @media (max-width: 1024px) {
   #trosa .today-fullscreen-shell.today-fullscreen-shell { grid-template-columns: minmax(0, 1fr) !important; }
@@ -2502,7 +1894,7 @@
 
 @media (max-width: 720px) {
   /* Customer workspace: a full-bleed sheet with one reading column. */
-  #trosa #customerEditModal.modal-overlay .modal.modal-customer-workspace,
+  
   #trosa #ovDetailModal.modal-overlay .modal.ov-customer-workspace {
     width: 100% !important;
     max-width: 100% !important;
@@ -2511,26 +1903,10 @@
     border: 0 !important;
     border-radius: 0 !important;
   }
-  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header,
+  
   #trosa .modal.ov-customer-workspace .ov-customer-header.ov-customer-header { padding: 18px 16px 14px !important; gap: 12px !important; }
-  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header h3,
+  
   #trosa .modal.ov-customer-workspace .ov-customer-header.ov-customer-header h3 { font-size: 22px !important; }
-  #trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs { padding: 0 12px !important; }
-  #trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid { grid-template-columns: minmax(0, 1fr) !important; }
-  #trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main { padding: 16px 16px 22px !important; }
-  #trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
-    position: static !important;
-    padding: 16px 16px 22px !important;
-    border-left: 0 !important;
-    border-top: 1px solid var(--dl-hair) !important;
-  }
-  
-  
-  
-  
-  #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info { padding-left: 0 !important; border-left: 0 !important; }
-  #trosa .modal.modal-customer-workspace .customer-secondary-grid.customer-secondary-grid { grid-template-columns: minmax(0, 1fr) !important; }
-  #trosa .modal.modal-customer-workspace .modal-footer.modal-footer { padding: 12px 16px !important; }
   #trosa .page-header.page-header,
   #trosa .page-body.page-body { width: 100% !important; max-width: 100% !important; padding-left: 16px !important; padding-right: 16px !important; }
   #trosa .main-content.main-content > .page-section.page-section > .page-header.page-header,
@@ -2604,38 +1980,6 @@
   #trosa .customer-pagination.customer-pagination { flex-direction: column !important; align-items: flex-start !important; gap: 12px !important; }
   #trosa .log-item.log-item { grid-template-columns: minmax(0, 1fr) !important; gap: 2px !important; }
   #trosa .today-schedule-day.today-schedule-day { flex: 0 0 64px !important; }
-
-  /* customer workspace on a phone: one column, no side rail */
-  #trosa .modal.modal-customer-workspace.modal-customer-workspace {
-    width: 100% !important;
-    max-width: 100% !important;
-    height: 100% !important;
-    max-height: 100% !important;
-    margin: 0 !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-  }
-  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header { padding: 18px 16px 14px !important; }
-  #trosa .modal.modal-customer-workspace .customer-workspace-header.customer-workspace-header h3 { font-size: 23px !important; }
-  #trosa .modal.modal-customer-workspace .tabs.customer-workspace-tabs { padding: 0 10px !important; }
-  
-  
-  
-  
-  #trosa .modal.modal-customer-workspace details.customer-secondary-info.customer-secondary-info {
-    padding-left: 0 !important;
-    padding-top: 12px !important;
-    border-left: 0 !important;
-  }
-  #trosa .modal.modal-customer-workspace .customer-workspace-grid.customer-workspace-grid { grid-template-columns: minmax(0, 1fr) !important; }
-  #trosa .modal.modal-customer-workspace .customer-workspace-main.customer-workspace-main { padding: 18px 16px 22px !important; }
-  #trosa .modal.modal-customer-workspace aside.customer-next-panel.customer-next-panel {
-    position: static !important;
-    padding: 20px 16px 24px !important;
-    border-left: 0 !important;
-    border-top: 1px solid var(--dl-hair) !important;
-  }
-  #trosa .modal.modal-customer-workspace .modal-footer.modal-footer { padding: 14px 16px !important; }
 }
 
 /* ============================================================================
