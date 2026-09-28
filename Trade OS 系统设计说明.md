@@ -131,7 +131,7 @@ Apple 日历通过个人 ICS 地址读取当前待办。它是只读订阅通道
 - 发送、报价和承诺由用户执行。
 - 关闭模块后停止对应后台处理并保留历史内容。
 
-上层 Agent 通过 `/api/agent/*` 和 `/api/gateway/*` 使用 Trosa 的原子工具。Agent 可以读取今日工作、客户工作区、客户沟通时间线和跨客户沟通搜索结果，再根据用户目标组合多个原子工具；结构化写入要么生成登录会话下的提议，要么遵守 Gateway scope、幂等和撤销边界。Trosa 不包含独立 Agent/Web runtime，核心 CRM 业务独立运行。
+外部 Agent 的正式只读入口是受限的 Sela 服务身份（`/api/integrations/sela/*`）与普通业务读 API（客户、客户时间线/待办/沟通历史、Inbox、`/api/reminders/today|upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）；登录会话可用 `/api/agent/*` 读取今日工作、客户工作区、客户沟通时间线和跨客户沟通搜索。结构化写入要么生成登录会话下的提议，要么遵守 Gateway scope、幂等和撤销边界。Trosa 不包含独立 Agent/Web runtime，核心 CRM 业务独立运行。
 
 ## 9. 自动化边界
 

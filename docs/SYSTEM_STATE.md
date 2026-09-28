@@ -77,7 +77,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | 前端 | `app/static/` | 单页应用；Customer/Today/Inbox共同确认入口已发布并通过公网健康门 | 在用 |
 | 采集扩展 | `browser-extension/` | MV3侧边栏，从网页邮箱/WhatsApp采集回POST `/api/extension/*` | 在用 |
 | Sela同步 | `/api/integrations/sela/*` 16条 | 只同步**已确认**外联；精确身份匹配+幂等键+REVIEW；不直连DB | 在用 |
-| Agent网关 | `/api/gateway/*` 11条 + `/api/agent/*` 8条 | 原子读取/确认式提案/受限幂等写入；提案与动作分离 | 在用 |
+| 外部只读/集成 | `/api/integrations/sela/*` + 普通业务读 API + `/api/agent/*` | Sela 服务身份可只读客户/沟通/Today/Inbox；`/api/agent/*` 限登录会话原子读取与确认式提案；`/api/gateway/*` 个人 token 入口保留可用 | 在用 |
 | Gmail同步 | `gmail_sync.py` + 5条集成路由 | `gmail.readonly`；仅唯一精确邮箱匹配自动写入，其余进Inbox | 可选，关闭不影响核心 |
 | AI辅助 | `app/engine.py` | 沟通整理/截图识别/官网导入/问答；只预填与草稿，不直接写入 | 可选，关闭核心完整可用 |
 | 日历 | `ical_gen.py` | 个人ICS订阅，只读，不回写 | 在用 |
@@ -107,9 +107,9 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 - 跨用户读取只返回白名单字段；三位用户（Hamid/Amy/Kelley）数据隔离。
 - 客户/联系人自动确认只允许**规范化后唯一精确邮箱或手机号**；名称、昵称、公司简称、
   不完整电话只进候选/待审阅。
-- Sela 用独立Bearer token（prospect/exclusion `sela-v2`，follow-up `sela-follow-up-v1`）；
+- Sela 用独立 Bearer token（prospect/exclusion `sela-v2`，并复用同一受限身份只读客户/沟通/Today/Inbox）；
   多重命中或身份冲突必须返回 `REVIEW`，不得猜测归属。
-- Gateway 用个人Bearer token + scope + `Idempotency-Key`；高风险删除/批量/恢复/token管理不开放。
+- 个人 Agent Gateway token（`/api/gateway/*`）保留为登录用户绑定的外部动作入口，用 scope + `Idempotency-Key`；高风险删除/批量/恢复/token管理不开放。Sela 服务身份不扩权、不共享。
 - **已知短板（见§8）**：运行角色疑似 superuser 且无 RLS；隔离主要依赖应用层而非数据库强制。
 
 ## 6. Agent 职责（AI/Sela/上层Agent）
@@ -150,7 +150,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 
 顺序（见 `TROSA_MAINTENANCE.md`）：保持本地回归、备份、同一 commit 发布和远端四字段
 健康门；下一步再推进 Sela 证据预填与 REVIEW 交接。保持不扩张冻结功能、不新增页面与
-重复概念。Agent Gateway 共享业务写入可在“不新增第二条业务路径”边界内推进。
+重复概念。外部 Agent 只读优先复用 Sela 受限集成与普通业务读 API，不新增第二条业务路径。
 
 ## 10. 文档职责（唯一入口在此）
 
@@ -170,19 +170,22 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | `docs/architecture/*` | 带指纹的快照证据 | C4/数据/运行时拓扑与证据索引（图源为事实源，SVG为派生） |
 | 其余根目录 md/docx/历史报告 | 非核心，见§11判定 | 不作为新人阅读清单 |
 
-## 11. 历史遗留判定（本轮只判定、不删除，待下一步指令执行）
+## 11. 历史遗留判定与处置（2026-09-28 执行）
 
 - A 保留：`AGENTS.md`、`TROSA_MAINTENANCE.md`、`README.md`、`PRODUCT_DIRECTION.md`、
   `PRODUCT_DESIGN_STANDARD.md`、`Trade OS 系统设计说明.md`、`使用说明.md`、`DEPLOYMENT.md`、
   `docs/architecture/*`、`design/TRADE_OS_UI_SYSTEM.md`。
-- B 合并后归档：`GITHUB_MIGRATION.md`（并入 README/DEPLOYMENT 后归档）；
-  `AGENT_API_CAPABILITY_AUDIT.md`（边界已并入本文§6，原文归档备查）。
+- B 合并后归档：`GITHUB_MIGRATION.md`（并入 README/DEPLOYMENT 后归档）。
+  `AGENT_API_CAPABILITY_AUDIT.md` 已于 2026-09-28 删除（过时的 Gateway 能力认知，边界并入本文§6）。
 - D 归档（停止作为现行文档引用）：`POSTGRESQL_FINAL_CUTOVER_CHECKLIST.md`（历史切换证据）、
   `report-source.md`（2026-09-07深度审计原文，结论已并入§8）、
   `Trade OS 重构审查报告.md`（自声明历史文档）、`Trade OS AI 设计原则与功能边界.docx`、
   `产品宣传册-Publimpresos-20260817.md`、`design-qa.md`（单次验收笔记）、`archive/*.tar.gz`。
-- 待确认删除（本轮不执行）：`pi-agent/node_modules/`（环境产物，不应进仓）、
-  `.agents/` `.codex/` `.trae/` `.workbuddy/` 空壳目录。删除需可恢复快照并经用户确认。
+- 已于 2026-09-28 本地清理（均为 git 忽略的非仓库文件；删除前留有可恢复快照）：
+  `pi-agent/`（仅 node_modules 环境产物）、`.workbuddy/`（旧 WorkBuddy Agent 记忆）、
+  `~/.config/trosa/pi-mcp.env`（旧 Gateway token，属机密，未备份）、
+  `~/.pi/agent/extensions/trosa-hamid-mcp.ts`（引用已不存在的 MCP client 脚本）。
+  `report-source.md` 仍按 D 保留为归档历史，不删除。
 
 ## 12. 事实 / 推断 / 不确定
 

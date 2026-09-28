@@ -9,8 +9,20 @@
 > - 两者不重复记录同一细节，互相引用；**禁止新增第三套 changelog**，禁止删除历史记录。
 >
 > 历史说明：2026-09-12 之前的架构决策散落在根 `CHANGELOG.md`（2152行）、
-> `report-source.md`、`AGENT_API_CAPABILITY_AUDIT.md` 与切库清单中，本文件自审计基线日起收敛，
+> `report-source.md`（归档）与切库清单中，本文件自审计基线日起收敛，
 > 此前事项只收录仍有效的架构结论，不复刻全部产品流水。
+
+## 日期：2026-09-28（清理旧 Agent/Gateway 认知残留）
+
+修改内容：删除 `AGENT_API_CAPABILITY_AUDIT.md`；把 `README.md`、`PRODUCT_DIRECTION.md`、`Trade OS 系统设计说明.md`、`docs/SYSTEM_STATE.md`、`TROSA_MAINTENANCE.md` 中“Sela 经 Trosa Gateway 写回”“上层 Agent 经 `/api/gateway/*`”等过时表述，改为当前正式面：Sela 受限集成 `/api/integrations/sela/*` + 普通业务只读 API（`/api/customers`、`/api/customers/<id>/timeline|tasks|follow_history|contacts`、`/api/inbox`、`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）。
+
+为什么修改：旧 Gateway 能力审计文档与 pi-mcp 残留会让新 Agent 误判正式读取路径，重复研究已退役入口。
+
+影响范围：文档与认知；`/api/gateway/*` 代码保留可用，不删除。无数据库变化。
+
+是否需要迁移：否。
+
+当前状态：已生效。
 
 ## 日期：2026-09-12（PostgreSQL 正式运行契约收敛）
 
@@ -103,7 +115,7 @@ Python/JavaScript 静态检查、浏览器扩展回归和隔离 PostgreSQL 17 �
 
 是否需要迁移：否。
 
-当前状态：已生效。详见 `AGENT_API_CAPABILITY_AUDIT.md`（原文归档备查，边界已并入 `docs/SYSTEM_STATE.md §6`）。
+当前状态：已生效。边界见 `docs/SYSTEM_STATE.md §6`；旧 `AGENT_API_CAPABILITY_AUDIT.md` 已于 2026-09-28 删除（内容过时且会误导外部 Agent 读取路径）。
 
 ---
 

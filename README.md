@@ -42,7 +42,7 @@ ECS PostgreSQL（正式唯一业务写入源，127.0.0.1:5432）
 
 - PostgreSQL 中的 `trosa.customer_records`（Customer）、`trosa.customer_contacts`（Contact）、`trosa.customer_interactions`（Interaction）、`trosa.customer_tasks`（Task）、`trosa.inbox_items`（Inbox）是当前正式业务读模型。`trosa.customer_details` 保存 Customer 的备注、来源、外部身份和手动下一步标记；新产品代码通过 `trosa_domain.py` 读取这些模型。
 - Interaction 统一呈现人工沟通、Gmail/发送投递事实和客户回复；Task 是唯一的可执行下一步，Today、Search、Stats 和 Weekly 都是这些正式事实的视图，而非独立队列。
-- Sela 只保存本地 Agent 的执行、幂等、delivery journal 与恢复技术状态；它通过 Trosa Gateway 写回正式事实，绝不维护客户、联系人、阶段、任务或人工判断副本。
+- Sela 只保存本地 Agent 的执行、幂等、delivery journal 与恢复技术状态；它通过受限的 `/api/integrations/sela/*` 接口同步**已确认**外联并写回正式事实，绝不维护客户、联系人、阶段、任务或人工判断副本。
 - `trosa.customer_states` 是 `business_stage`、`business_role` 与 `customer_judgment` 的正式 PostgreSQL 事实源；旧 `status`、`type`、`attention_*` 仅为导入、恢复和历史兼容保留。
 - `follow_up_logs`、`outreach_emails`、`reminders` 和 `customers` 是旧 HTTP/SQLite 形状的 compatibility view。它们的写入会落到上面的 canonical PostgreSQL facts；它们不是新功能的业务模型。
 - Today 只读取有动作和日期的开放任务；`outreach_*` 自动开发节点、网站监控和旧 AI 研究不参与正式运行路径。
