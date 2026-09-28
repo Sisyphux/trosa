@@ -14,6 +14,14 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+// There is no resident navigation: pages are reached through the summoned
+// index layer (brand click), exactly as a user does.
+async function gotoPage(name) {
+  await page.locator('#roomBrand').click();
+  await page.locator('#roomIndex').waitFor({state: 'visible', timeout: 15000});
+  await page.locator('#roomIndex [data-page="' + name + '"]').first().click();
+}
+
 function localDate() {
   const now = new Date();
   const pad = (value) => String(value).padStart(2, '0');
@@ -23,8 +31,8 @@ function localDate() {
 const origin = new URL(baseUrl).origin;
 const hostname = new URL(baseUrl).hostname;
 await context.clearCookies({domain: hostname}).catch(() => {});
-// Keep the desktop layout stable regardless of the Tabbit window size:
-// below 768px the sidebar collapses behind a toggle and nav clicks fail.
+// Keep the desktop layout stable regardless of the Tabbit window size: below
+// 1025px the room becomes a single column.
 await page.setViewportSize({width: 1440, height: 900});
 // A reused Tabbit task can still sit on a dead rehearsal port from an earlier
 // run. Detach from it before touching origin-scoped storage.
@@ -59,7 +67,7 @@ if (await dashboard.isVisible()) {
 await dashboard.waitFor({state: 'visible', timeout: 15000});
 
 // Customer → real customer workspace.
-await page.locator('[data-page="customers"]').first().click();
+await gotoPage('customers');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
 await page.getByRole('button', {name: 'Rehearsal Acrylic Co', exact: true}).click();
 let customerModal = page.locator('#customerEditModal.show:visible');
@@ -84,7 +92,7 @@ await customerModal.waitFor({state: 'hidden', timeout: 15000});
 await page.reload({waitUntil: 'domcontentloaded'});
 await page.locator('#loginOverlay').waitFor({state: 'hidden', timeout: 15000});
 await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
-await page.locator('[data-page="customers"]').first().click();
+await gotoPage('customers');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
 await page.getByRole('button', {name: 'Rehearsal Acrylic Co', exact: true})
   .waitFor({state: 'visible', timeout: 15000});
@@ -123,8 +131,11 @@ await customerModal.waitFor({state: 'hidden', timeout: 15000});
 // lookup to the Today container: an unscoped getByText can match the same text
 // in the customer workspace that is still in the DOM while its modal closes,
 // which made this assertion pass (or fail) for the wrong reason.
-await page.locator('[data-page="dashboard"]').first().click();
+await gotoPage('dashboard');
 await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
+// The room holds one due customer; the others wait in the queue drawer.
+await page.locator('#todayQueueToggle').click();
+await page.locator('#todayQueue.is-open').waitFor({state: 'visible', timeout: 15000});
 const todayTask = page.locator('#page-dashboard')
   .getByText('Browser acceptance: send sample quotation', {exact: true}).first();
 await todayTask.waitFor({state: 'visible', timeout: 15000});
@@ -133,13 +144,16 @@ check(todayText.includes('Browser acceptance: send sample quotation'),
   'dated next step is missing from Today');
 
 // Inbox must remain a real rendered workspace with pending judgement items.
-await page.locator('[data-page="inbox"]').first().click();
+await gotoPage('inbox');
 await page.locator('#page-inbox.active').waitFor({state: 'visible', timeout: 15000});
 const inboxText = await page.locator('#page-inbox').innerText();
 check(inboxText.includes('Inbox'), 'Inbox page did not render');
 check(await page.locator('#inboxList > *').count() > 0, 'Inbox rendered no items');
 
-// Search input → live preview → Enter → matching Customer result.
+// Search input (in the summoned index layer) → live preview → Enter → matching
+// Customer result. Ctrl/Cmd-K is the real user path for reaching it.
+await page.keyboard.press('Control+k');
+await page.locator('#roomIndex').waitFor({state: 'visible', timeout: 15000});
 const search = page.locator('#globalPageSearch');
 await search.fill('Browser acceptance');
 await page.locator('#globalSearchPreview.show:visible').waitFor({state: 'visible', timeout: 15000});

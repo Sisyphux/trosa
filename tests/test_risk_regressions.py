@@ -587,6 +587,22 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertNotIn('id="todayDevelopmentSection"', html)
         self.assertNotIn('id="statDevelopment"', html)
 
+    def test_room_shell_replaces_resident_sidebar_with_summoned_index(self):
+        """Navigation is a summoned index layer; there is no resident sidebar."""
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.assertNotIn('id="sidebar"', html)
+        self.assertRegex(html, r'id="roomIndex"[^>]*role="dialog"')
+        self.assertIn('id="globalPageSearch"', html)
+        self.assertIn('visual-v5.css', html)
+        self.assertIn('lit-anchor', html)
+        self.assertNotIn('decoration only', javascript)
+        self.assertIn('function openRoomIndex', javascript)
+        self.assertIn('function clearCustomerSearch', javascript)
+        # The team is four people today with room to grow: no fixed three-column member board.
+        v4 = (ROOT / 'app' / 'static' / 'visual-v4.css').read_text(encoding='utf-8')
+        self.assertNotIn('weekly-board.weekly-board { grid-template-columns: repeat(3', v4)
+
     def test_frozen_customer_intelligence_is_not_a_user_module(self):
         spec = importlib.util.spec_from_file_location('crm_app_frozen_modules_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
