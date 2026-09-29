@@ -7075,11 +7075,11 @@ function contactEditFormHtml(contact) {
   var thirdRow = CONTACT_EDIT_FIELDS.slice(4, 6).map(function(field) { return contactEditInputHtml(contact, contactId, field); }).join('');
   return '<div class="cw-contact-edit" data-contact-id="' + contactId + '">' +
     '<form class="contact-edit-form" autocomplete="off" onsubmit="return saveContact(event,' + contactId + ')">' +
-      '<div class="contact-edit-header"><div><strong>编辑联系人</strong><span>修改后会立即同步到客户资料</span></div><button class="text-action contact-edit-cancel" type="button" onclick="cancelContactEdit(' + contactId + ')">取消编辑</button></div>' +
+      '<div class="contact-edit-header"><div><strong>编辑联系人</strong><span>修改后会立即同步到客户资料</span></div><button class="cw-link contact-edit-cancel" type="button" onclick="cancelContactEdit(' + contactId + ')">取消编辑</button></div>' +
       '<div class="form-row">' + firstRow + '</div>' +
       '<div class="form-row">' + secondRow + '</div>' +
       '<div class="form-row">' + thirdRow + '</div>' +
-      '<div class="contact-edit-actions"><button class="btn btn-primary btn-sm" type="submit">保存修改</button><span class="contact-edit-status" role="status" aria-live="polite"></span></div>' +
+      '<div class="contact-edit-actions"><button class="btn btn-primary cw-act cw-primary btn-sm" type="submit">保存修改</button><span class="contact-edit-status" role="status" aria-live="polite"></span></div>' +
   '</form>' +
   '</div>';
 }

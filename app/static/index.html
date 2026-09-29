@@ -685,13 +685,13 @@
                   <div class="form-group"><label class="form-label">任务日期</label><input type="date" class="form-control" id="followHistoryNext" onchange="updateFollowHistorySaveLabel()"></div>
                   <div class="form-group cw-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
                 </div>
-                <button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
+                <button type="button" class="btn btn-primary cw-act cw-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
                 </div>
                 <div class="cw-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
                 <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="自动提取主题、正文和发送时间"></textarea><small class="email-import-hint">默认状态为“待回复”；退信或客户回复会自动调整。</small></div>
                 <details class="cw-fix"><summary>需要修正主题、时间或状态？</summary><div><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
                 <textarea id="outreachContent" hidden></textarea>
-                <button class="btn btn-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
+                <button class="btn btn-primary cw-act cw-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
                 </div>
             </div>
           </div>
@@ -710,7 +710,7 @@
             <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
             <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
               <div class="cw-form-actions">
-                <button class="btn btn-primary btn-sm" id="saveCustomerFooterBtn" type="button" onclick="saveCustomerProfile()">保存资料修改</button>
+                <button class="btn btn-primary cw-act cw-primary btn-sm" id="saveCustomerFooterBtn" type="button" onclick="saveCustomerProfile()">保存资料修改</button>
                 <button class="cw-link" type="button" onclick="cancelCustomerProfileEdit()">取消</button>
               </div>
             </div>
@@ -727,11 +727,11 @@
               <div class="form-row"><div class="form-group"><label class="form-label">姓名</label><input type="text" class="form-control" id="contactName" placeholder="可选"></div><div class="form-group"><label class="form-label">职位</label><input type="text" class="form-control" id="contactTitle"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">邮箱</label><input type="email" class="form-control" id="contactEmail"></div><div class="form-group"><label class="form-label">电话</label><input type="text" class="form-control" id="contactPhone"></div></div>
                 <div class="form-row"><div class="form-group"><label class="form-label">WhatsApp</label><input type="text" class="form-control" id="contactWhatsapp"></div><div class="form-group"><label class="form-label">领英</label><input type="text" class="form-control" id="contactLinkedin"></div></div>
-                <button class="btn btn-primary btn-sm" id="addContactSubmit" type="button" onclick="addContact()">添加联系人</button>
+                <button class="btn btn-primary cw-act cw-primary btn-sm" id="addContactSubmit" type="button" onclick="addContact()">添加联系人</button>
             </div>
             <div class="cw-form" id="cwBulkContactForm" data-module="email_validation" hidden>
               <button type="button" class="cw-link cw-back" onclick="setCwForm('cwBulkContactForm', false)">← 返回</button>
-              <div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary btn-sm" onclick="addBulkContacts()">检查并导入</button>
+              <div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary cw-act cw-primary btn-sm" onclick="addBulkContacts()">检查并导入</button>
             </div>
           </div>
 
@@ -757,7 +757,7 @@
                     </datalist>
                   </div>
                 </div>
-                <button class="btn btn-primary btn-sm" id="customerFileUploadBtn" type="button" onclick="uploadCustomerFiles()">上传所选文件</button>
+                <button class="btn btn-primary cw-act cw-primary btn-sm" id="customerFileUploadBtn" type="button" onclick="uploadCustomerFiles()">上传所选文件</button>
             </div>
           </div>
 
@@ -836,8 +836,8 @@
       </details>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('completeModal')">取消</button>
-      <button class="btn btn-primary" id="completeSubmitBtn" onclick="submitComplete()">只保存记录</button>
+      <button class="btn cw-act" onclick="closeModal('completeModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" id="completeSubmitBtn" onclick="submitComplete()">只保存记录</button>
     </div>
   </div>
 </div>
@@ -861,8 +861,8 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('batchCompleteModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitBatchComplete()">确认完成</button>
+      <button class="btn cw-act" onclick="closeModal('batchCompleteModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="submitBatchComplete()">确认完成</button>
     </div>
   </div>
 </div>
@@ -892,8 +892,8 @@
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('addNewCustomerModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitNewCustomer()">添加客户</button>
+      <button class="btn cw-act" onclick="closeModal('addNewCustomerModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="submitNewCustomer()">添加客户</button>
     </div>
   </div>
 </div>
@@ -949,9 +949,9 @@
       <div class="form-group add-customer-advanced exist-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="addExistNotes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('addCustomerModal')">取消</button>
-      <button class="btn" onclick="submitExistCustomer(false)">仅保存</button>
-      <button class="btn btn-primary" onclick="submitExistCustomer(true)">保存并复制邮箱</button>
+      <button class="btn cw-act" onclick="closeModal('addCustomerModal')">取消</button>
+      <button class="btn cw-act" onclick="submitExistCustomer(false)">仅保存</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="submitExistCustomer(true)">保存并复制邮箱</button>
     </div>
   </div>
 </div>
@@ -961,7 +961,7 @@
   <div class="modal" style="max-width:620px;">
     <div class="modal-header"><div><h3>确认识别结果</h3><p class="modal-subtitle">尚未保存；确认后填入客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body" id="smartFillPreviewContent"></div>
-    <div class="modal-footer"><button class="btn" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
+    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary cw-act cw-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
   </div>
 </div>
 
@@ -970,7 +970,7 @@
   <div class="modal" style="max-width:440px;">
     <div class="modal-header"><div><h3>还有未保存的修改</h3><p class="modal-subtitle" id="unsavedChangesSubtitle">你刚才填写的内容还没有保存。</p></div></div>
     <div class="modal-body"><p class="unsaved-message">要先保存这些修改，还是放弃后退出？</p></div>
-    <div class="modal-footer"><button class="btn" onclick="continueEditingCustomerForm()">继续编辑</button><button class="btn btn-danger" onclick="discardCustomerFormChanges()">放弃修改</button><button class="btn btn-primary" id="unsavedSaveButton" onclick="savePendingCustomerForm()">保存并退出</button></div>
+    <div class="modal-footer"><button class="btn cw-act" onclick="continueEditingCustomerForm()">继续编辑</button><button class="btn btn-danger cw-act" onclick="discardCustomerFormChanges()">放弃修改</button><button class="btn btn-primary cw-act cw-primary" id="unsavedSaveButton" onclick="savePendingCustomerForm()">保存并退出</button></div>
   </div>
 </div>
 
@@ -985,8 +985,8 @@
       <div class="form-group"><label class="form-label">客户列表</label><textarea class="form-control" id="batchAddText" rows="10" placeholder="每行一条：姓名, 公司, 国家, 行业, 备注&#10;例如：Mia, ABC GmbH, 德国, 工程塑料, 展会客户&#10;或只填写公司名称"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('batchAddModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitBatchAdd()">批量添加</button>
+      <button class="btn cw-act" onclick="closeModal('batchAddModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="submitBatchAdd()">批量添加</button>
     </div>
   </div>
 </div>
@@ -1018,8 +1018,8 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('customerTaskModal')">取消</button>
-      <button class="btn btn-primary" id="customerTaskSubmit" onclick="createCustomerTask(this)">创建下一步</button>
+      <button class="btn cw-act" onclick="closeModal('customerTaskModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" id="customerTaskSubmit" onclick="createCustomerTask(this)">创建下一步</button>
     </div>
   </div>
 </div>
@@ -1045,7 +1045,7 @@
         <div class="form-group"><label class="form-label" for="inboxReplyDate">沟通日期</label><input type="date" class="form-control" id="inboxReplyDate"></div>
       </div>
     </div>
-    <div class="modal-footer"><button class="btn" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">确认并记录</button></div>
+    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary cw-act cw-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">确认并记录</button></div>
   </div>
 </div>
 
@@ -1062,8 +1062,8 @@
       <div class="form-group"><label class="form-label" id="batchSetLabel">值</label><select class="form-control" id="batchSetValue"></select></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('batchSetModal')">取消</button>
-      <button class="btn btn-primary" id="batchSetSubmit" type="button" onclick="submitBatchSet()">应用</button>
+      <button class="btn cw-act" onclick="closeModal('batchSetModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" id="batchSetSubmit" type="button" onclick="submitBatchSet()">应用</button>
     </div>
   </div>
 </div>
@@ -1086,8 +1086,8 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" type="button" onclick="dismissAppDialog()">取消</button>
-      <button class="btn btn-primary" type="button" id="appDialogSubmit" onclick="submitAppDialog()">确定</button>
+      <button class="btn cw-act" type="button" onclick="dismissAppDialog()">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" type="button" id="appDialogSubmit" onclick="submitAppDialog()">确定</button>
     </div>
   </div>
 </div>
@@ -1121,8 +1121,8 @@
       <div class="form-group"><label class="form-label">结果或判断</label><textarea class="form-control" id="todayQuickEditResult" rows="2" placeholder="可留空"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('todayQuickEditModal')">取消</button>
-      <button class="btn btn-primary" onclick="submitTodayQuickEdit()">应用</button>
+      <button class="btn cw-act" onclick="closeModal('todayQuickEditModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="submitTodayQuickEdit()">应用</button>
     </div>
   </div>
 </div>
@@ -1136,7 +1136,7 @@
     </div>
     <div class="modal-body">
       <input type="hidden" id="followEditId">
-      <div class="form-group"><label class="form-label">客户</label><input type="text" class="form-control" id="followEditCustomer" disabled style="background:var(--bg);"></div>
+      <div class="form-group"><label class="form-label">客户</label><input type="text" class="form-control" id="followEditCustomer" disabled></div>
       <div class="form-group"><label class="form-label">跟进日期</label><input type="date" class="form-control" id="followEditDate"></div>
       <div class="form-group"><label class="form-label" for="followEditType">沟通方式</label><input class="form-control" id="followEditType" list="communicationTypeOptions" placeholder="可自由填写"></div>
       <div class="form-group"><label class="form-label">信息方向</label><select class="form-control" id="followEditDirection"><option value="unknown">未标记</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></div>
@@ -1151,8 +1151,8 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="closeModal('followEditModal')">取消</button>
-      <button class="btn btn-primary" onclick="saveFollowEdit()">保存</button>
+      <button class="btn cw-act" onclick="closeModal('followEditModal')">取消</button>
+      <button class="btn btn-primary cw-act cw-primary" onclick="saveFollowEdit()">保存</button>
     </div>
   </div>
 </div>
