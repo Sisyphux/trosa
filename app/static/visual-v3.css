@@ -695,7 +695,7 @@ html {
    4. CONTROLS — buttons, fields, chips, tabs
    ============================================================================ */
 
-.btn:not(.cw-act):is(#trosa, #trosa *){
+.btn:not(.cw-act, .icon-action-button):is(#trosa, #trosa *){
   min-height: var(--dl-tap);
   padding: 8px 15px !important;
   border: 1px solid var(--dl-hair-strong) !important;
@@ -710,14 +710,14 @@ html {
   transition: background var(--dl-dur-fast) var(--dl-ease),
     border-color var(--dl-dur-fast) var(--dl-ease),
     color var(--dl-dur-fast) var(--dl-ease) !important;
-}.btn:not(.cw-act):hover:is(#trosa, #trosa *){
+}.btn:not(.cw-act, .icon-action-button):hover:is(#trosa, #trosa *){
   border-color: var(--dl-ink-3) !important;
   background: var(--dl-paper-3) !important;
   color: var(--dl-ink) !important;
   box-shadow: none !important;
 }.btn:not(.cw-act):active:is(#trosa, #trosa *){
   background: var(--dl-ink-wash) !important;
-}.btn:not(.cw-act):disabled:is(#trosa, #trosa *),.btn:not(.cw-act)[disabled]:is(#trosa, #trosa *),.btn:not(.cw-act).disabled:is(#trosa, #trosa *){
+}.btn:not(.cw-act, .icon-action-button):disabled:is(#trosa, #trosa *),.btn:not(.cw-act, .icon-action-button)[disabled]:is(#trosa, #trosa *){
   border-color: var(--dl-hair-2) !important;
   background: var(--dl-paper-3) !important;
   color: var(--dl-faint) !important;
@@ -736,11 +736,11 @@ html {
   border-color: var(--dl-hair) !important;
   background: var(--dl-ink-wash-2) !important;
   color: var(--dl-ink-3) !important;
-}.btn-danger:not(.cw-act):is(#trosa, #trosa *){
+}.btn-danger:not(.cw-act, .icon-action-button):is(#trosa, #trosa *){
   border-color: rgba(164, 68, 58, .34) !important;
   background: transparent !important;
   color: var(--dl-danger) !important;
-}.btn-danger:not(.cw-act):hover:is(#trosa, #trosa *){
+}.btn-danger:not(.cw-act, .icon-action-button):hover:is(#trosa, #trosa *){
   border-color: var(--dl-danger) !important;
   background: var(--dl-danger-soft) !important;
   color: var(--dl-danger) !important;
@@ -758,7 +758,7 @@ html {
 }.btn .ui-icon:is(#trosa, #trosa *),.text-action .ui-icon:is(#trosa, #trosa *){
   margin-right: 6px;
 }/* Quiet text action: reads as a link, behaves as a button. */
-.text-action:not(.cw-act):is(#trosa, #trosa *),.customer-search-context-action:is(#trosa, #trosa *){
+.text-action:not(.cw-act, .modal *):is(#trosa, #trosa *),.customer-search-context-action:is(#trosa, #trosa *){
   border: 0 !important;
   background: transparent !important;
   color: var(--dl-ink-2) !important;
@@ -771,7 +771,7 @@ html {
   border-radius: 0 !important;
   transition: border-color var(--dl-dur-fast) var(--dl-ease),
     color var(--dl-dur-fast) var(--dl-ease) !important;
-}.text-action:not(.cw-act):hover:is(#trosa, #trosa *){
+}.text-action:not(.cw-act, .modal *):hover:is(#trosa, #trosa *){
   color: var(--dl-ink) !important;
   border-bottom-color: var(--dl-hair-strong) !important;
   background: transparent !important;
@@ -1297,46 +1297,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.today-task-checkbox:is(#trosa, #trosa *){
   accent-color: var(--dl-ink);
 }/* Focal card: the single "next step" that owns the only solid button. */
-.today-focus-card:is(#trosa, #trosa *){
-  position: sticky;
-  top: 24px;
-  padding: 26px 24px 24px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-lg) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: var(--dl-shadow-1) !important;
-}.today-focus-card:is(#trosa, #trosa *)::before{
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  border-radius: var(--dl-r-lg) var(--dl-r-lg) 0 0;
-  background: linear-gradient(90deg, var(--dl-gold), rgba(188, 144, 82, .18));
-}.today-focus-label:is(#trosa, #trosa *){
-  color: var(--dl-mut) !important;
-}.today-focus-task:is(#trosa, #trosa *){
-  font-family: var(--dl-display) !important;
-  font-size: 1.32rem !important;
-  font-weight: 500 !important;
-  line-height: 1.32 !important;
-  letter-spacing: -.015em;
-  color: var(--dl-ink) !important;
-}.today-focus-context:is(#trosa, #trosa *),.today-focus-contact:is(#trosa, #trosa *){
-  color: var(--dl-ink-2) !important;
-  font-size: var(--dl-fs-body-s) !important;
-  line-height: 1.6;
-}.today-focus-contact:is(#trosa, #trosa *){
-  color: var(--dl-ink-3) !important;
-  font-size: var(--dl-fs-caption) !important;
-}.today-focus-card .btn-primary:is(#trosa, #trosa *){
-  width: 100%;
-  min-height: 44px;
-}.today-focus-card .btn:is(#trosa, #trosa *),.today-focus-card .text-action:is(#trosa, #trosa *){
-  margin-top: 10px;
-}.today-focus-card .text-action:is(#trosa, #trosa *){
-  display: inline-block;
-  margin-right: 16px;
-}/* Schedule strip: fourteen quiet days, one active. */
+/* Schedule strip: fourteen quiet days, one active. */
 .today-future-section:is(#trosa, #trosa *){
   margin-top: 44px;
 }.today-schedule-grid:is(#trosa, #trosa *){
@@ -1763,7 +1724,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   box-shadow: none !important;
 }.inbox-question-decision:is(#trosa, #trosa *){
   border-left: 2px solid var(--dl-gold) !important;
-}.inbox-evidence-fields:is(#trosa, #trosa *),.smart-fill-review:is(#trosa, #trosa *),.quick-reply-analysis:is(#trosa, #trosa *){
+}.inbox-evidence-fields:is(#trosa, #trosa *),.quick-reply-analysis:is(#trosa, #trosa *){
   border: 1px solid var(--dl-hair) !important;
   border-radius: var(--dl-r-md) !important;
   background: var(--dl-paper-3) !important;
@@ -1875,11 +1836,6 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   backdrop-filter: none !important;
 }.workspace-kicker:is(#trosa, #trosa *){
   color: var(--dl-mut) !important;
-}.add-customer-advanced:is(#trosa, #trosa *),.exist-customer-advanced:is(#trosa, #trosa *),.new-customer-advanced:is(#trosa, #trosa *),.legacy-classification:is(#trosa, #trosa *),.draft-contacts-section:is(#trosa, #trosa *),.draft-email-import:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-md) !important;
-  background: var(--dl-paper-3) !important;
-  box-shadow: none !important;
 }.draft-contacts-header:is(#trosa, #trosa *){
   color: var(--dl-ink-3);
   font-size: var(--dl-fs-caption);
@@ -2081,7 +2037,7 @@ table:is(#trosa, #trosa *){
   padding-bottom: 22px;
 }.timeline-title:is(#trosa, #trosa *){
   color: var(--dl-ink) !important;
-  font-weight: 600 !important;
+  font-weight: 400 !important;
 }.timeline-desc:is(#trosa, #trosa *){
   color: var(--dl-ink-2) !important;
   font-size: var(--dl-fs-body-s) !important;
@@ -2106,13 +2062,7 @@ table:is(#trosa, #trosa *){
   backdrop-filter: none !important;
 }/* The narrow-desktop / tablet sticky action bar of the focal card: opaque paper
    with a hairline, so an overflowing task never reads as floating glass. */
-.today-focus-actions:is(#trosa, #trosa *){
-  border-top: 1px solid var(--dl-hair) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}/* visual-v2 retires the JS sliding capsule (the strip scrolls horizontally, so a
+/* visual-v2 retires the JS sliding capsule (the strip scrolls horizontally, so a
    capsule anchored to the container would drift out of place). The active view is
    therefore drawn by the chip itself: one solid ink pill inside a quiet strip. */
 .inbox-filters:is(#trosa, #trosa *)::before,.customer-view-chips:is(#trosa, #trosa *)::before{
@@ -2544,9 +2494,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .customer-workspace-grid:is(#trosa, #trosa *), .today-workspace:is(#trosa, #trosa *){
     grid-template-columns: minmax(0, 1fr) !important;
   }
-  .today-focus-card:is(#trosa, #trosa *){
-    position: static;
-  }
+  
 
   /* Timeline and log rows get more breathing room. */
   .log-item:is(#trosa, #trosa *){
@@ -2577,9 +2525,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 24px !important;
   }
-  .today-focus-card:is(#trosa, #trosa *){
-    position: static;
-  }
+  
   .customer-workspace-grid:is(#trosa, #trosa *){
     grid-template-columns: minmax(0, 1fr) !important;
   }
@@ -2743,10 +2689,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
     grid-template-columns: minmax(0, 1fr) !important;
     gap: 22px !important;
   }
-  .today-focus-card:is(#trosa, #trosa *){
-    position: static;
-    padding: 22px 18px 18px !important;
-  }
+  
   .today-task-row:is(#trosa, #trosa *){
     padding: 13px 14px !important;
   }

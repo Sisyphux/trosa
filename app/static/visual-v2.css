@@ -216,7 +216,7 @@ body {
 @media (max-width: 640px) { .gmail-integration-state { grid-template-columns: 1fr; } .gmail-integration-state > span, .gmail-integration-state > button, .gmail-integration-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; } }
 .ai-integration-card .card-header > div { min-width: 0; }
 .ai-integration-card .card-header p { margin: 4px 0 0; color: var(--v2-ink-muted); font-size: var(--fs-caption); line-height: 1.55; font-weight: 400; }
-.ai-config-status { display: grid; gap: 7px; padding: 13px 15px; border: 1px solid var(--v2-line); border-radius: 12px; background: rgba(255,253,249,.48); color: var(--v2-ink-soft); font-size: var(--fs-body-s); line-height: 1.5; }
+.ai-config-status { display: grid; gap: 7px; padding: 0 0 12px; border-bottom: 1px solid var(--dl-hair-2); color: var(--v2-ink-soft); font-size: var(--fs-body-s); line-height: 1.5; }
 .ai-config-status-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ai-config-status-main strong { color: var(--v2-ink); font-size: .9rem; }
 .ai-config-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--v2-ink-muted); }
@@ -323,8 +323,8 @@ body {
   box-shadow: 0 16px 38px rgba(58,48,36,.09);
 }
 .today-task-row:hover { background: rgba(255,253,249,.55); }
-.today-task-drag-handle { width: 24px; height: 30px; color: #a59e91; font-size: .84rem; }
-.today-task-drag-handle svg { width: 16px; height: 16px; fill: currentColor; pointer-events: none; }
+
+
 .today-task-index { width: 28px; height: 28px; font-size: .78rem; transition: opacity .14s ease; }
 .today-task-index-wrap { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; }
 .today-task-checkbox {
@@ -343,28 +343,18 @@ body {
 .today-task-copy span:last-child { margin-top: 3px; color: var(--v2-ink-muted); font-size: var(--fs-body-s); }
 .today-task-date { color: var(--v2-ink-muted); font-size: var(--fs-body-s); }
 .today-task-date.overdue { color: var(--v2-danger); }
-.today-focus-card {
-  position: sticky;
-  top: 92px;
-  padding: 28px 26px 24px;
-  border: 1px solid rgba(255,255,255,.88);
-  border-radius: 23px;
-  background:
-    radial-gradient(circle at 102% -4%, rgba(190,129,94,.12), transparent 12rem),
-    rgba(255,253,249,.80);
-  box-shadow: var(--v2-shadow-paper);
-}
-.today-focus-label { color: var(--v2-ink-muted); font-size: .72rem; letter-spacing: .08em; }
-.today-focus-card h3 { margin: 9px 0 3px; font-size: 1.55rem; }
-.today-focus-meta { color: var(--v2-ink-muted); font-size: var(--fs-caption); }
-.today-focus-task { margin-top: 18px; font-family: var(--font-sans); font-size: var(--fs-body-s); font-weight: 650; line-height: 1.65; }
-.today-focus-context { margin: 15px 0 18px; padding: 12px 0; }
-.today-focus-context > div { grid-template-columns: 72px minmax(0,1fr); gap: 10px; padding: 6px 0; }
-.today-focus-context span { font-size: .72rem; }
-.today-focus-context strong { font-size: var(--fs-caption); font-weight: 450; line-height: 1.6; }
-.today-focus-primary { min-height: 44px; border-radius: 10px; }
-.today-focus-links { margin-top: 13px; }
-.today-focus-actions { margin-top: auto; }
+
+
+
+
+
+
+
+
+
+
+
+
 .today-future-section { margin-top: 52px; padding-top: 27px; border-top-color: var(--v2-line); }
 .today-future-section .today-section-header { border-bottom: 0; }
 .today-schedule-grid { gap: 7px; }
@@ -382,8 +372,6 @@ body {
 .btn-sm { min-height: 32px; padding: 6px 12px; }
 .btn-icon { border-color: transparent; background: transparent; box-shadow: none; }
 .btn-icon:hover { border-color: var(--v2-line); background: rgba(255,253,249,.72); box-shadow: none; }
-.text-action { color: var(--v2-ink-soft); }
-.text-action:hover { color: var(--v2-clay); }
 
 .form-label { margin-bottom: 8px; color: var(--v2-ink-soft); font-size: var(--fs-label); font-weight: 600; }
 .form-control, .search-box input, .filter-select,
@@ -580,7 +568,7 @@ tbody tr:hover { background: rgba(255,253,249,.43); }
 .page-content > .timeline, #historyList, #logsList { max-width: 1040px; }
 #logsList .card, #historyList .card { border-color: rgba(255,255,255,.72); background: rgba(255,253,249,.48); box-shadow: inset 0 1px 0 rgba(255,255,255,.62); }
 .settings-group { border-bottom-color: var(--v2-line); }
-.module-setting, .column-setting, .nav-order-item { border-color: var(--v2-line); border-radius: 10px; background: rgba(255,253,249,.45); }
+.nav-order-item { border-color: var(--v2-line); border-radius: 10px; background: rgba(255,253,249,.45); }
 #page-overview {
   background:
     linear-gradient(rgba(250,247,240,.56), rgba(247,243,235,.62)),
@@ -1271,13 +1259,11 @@ a:focus-visible,
   font-size: 12px !important;
 }
 
-.btn-icon:not(.cw-act),
-.text-action:not(.cw-act) {
+.btn-icon:not(.cw-act) {
   color: var(--ui-ink-soft) !important;
 }
 
-.btn-icon:not(.cw-act):hover,
-.text-action:not(.cw-act):hover {
+.btn-icon:not(.cw-act):hover {
   color: var(--v2-clay) !important;
 }
 
@@ -1428,63 +1414,23 @@ html.motion-lite #page-dashboard .today-task-row {
   background: transparent !important;
 }
 
-#page-dashboard .today-focus-card,
-html.motion-lite #page-dashboard .today-focus-card {
-  padding: 24px !important;
-  border: 1px solid var(--ui-line) !important;
-  border-radius: var(--ui-radius-panel) !important;
-  background: var(--ui-paper-strong) !important;
-  box-shadow: var(--ui-shadow-paper) !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
 
-#page-dashboard .today-focus-card h3 {
-  margin: 8px 0 3px !important;
-  color: var(--ui-ink) !important;
-  font-size: 27px !important;
-  line-height: 1.2 !important;
-}
 
-#page-dashboard .today-focus-label,
-#page-dashboard .today-focus-meta,
-#page-dashboard .today-focus-context span {
-  color: var(--v2-mist) !important;
-  font-size: 12px !important;
-}
 
-#page-dashboard .today-focus-task {
-  margin-top: 16px !important;
-  color: var(--v2-clay) !important;
-  font-size: 14px !important;
-  line-height: 1.6 !important;
-}
 
-#page-dashboard .today-focus-context {
-  margin: 16px 0 18px !important;
-  padding: 12px 0 !important;
-  border-top: 1px solid var(--ui-line) !important;
-  border-bottom: 1px solid var(--ui-line) !important;
-}
 
-#page-dashboard .today-focus-context > div {
-  padding: 7px 0 !important;
-}
 
-#page-dashboard .today-focus-context strong {
-  color: var(--ui-ink-soft) !important;
-  font-size: 13px !important;
-  line-height: 1.55 !important;
-}
 
-#page-dashboard .today-focus-primary {
-  min-height: 42px !important;
-  border-radius: var(--ui-radius-control) !important;
-}
 
-#page-dashboard .today-focus-actions {
-  background: transparent !important;
-}
+
+
+
+
+
+
+
+
+
 
 #page-dashboard .today-future-section {
   margin-top: 40px !important;
@@ -2166,11 +2112,7 @@ html.motion-lite .modal {
     font-size: 11px !important;
   }
 
-  #page-dashboard .today-focus-card {
-    position: static !important;
-    margin-top: 16px !important;
-    padding: 20px !important;
-  }
+  
 
   #page-inbox .inbox-page-body {
     width: calc(100% - 32px) !important;
@@ -2280,14 +2222,9 @@ html.motion-lite .modal {
     font-size: 11px !important;
   }
 
-  #page-dashboard .today-focus-card {
-    padding: 18px !important;
-    border-radius: 14px !important;
-  }
+  
 
-  #page-dashboard .today-focus-card h3 {
-    font-size: 23px !important;
-  }
+  
 
   #page-dashboard .today-future-section {
     margin-top: 32px !important;
@@ -2465,7 +2402,7 @@ html.motion-lite .modal {
 #inboxReplyModal .modal-close { width: 38px; height: 38px; border-radius: 19px; }
 #inboxReplyModal .form-control { border-radius: var(--glass-radius-field); background: rgba(255,254,251,.84); }
 #inboxReplyModal .inbox-reply-textarea { min-height: 178px; }
-#inboxReplyModal .quick-reply-next { border-radius: 22px; }
+
 #inboxReplyModal .btn { min-height: 42px; border-radius: 21px; padding-left: 18px; padding-right: 18px; }
 #inboxReplyModal .btn-primary { box-shadow: inset 0 1px 0 rgba(255,255,255,.24), 0 8px 18px rgba(118,65,45,.14); }
 
@@ -2484,7 +2421,6 @@ html.motion-lite .modal {
   #inboxReplyModal { padding: 8px; align-items: flex-end; }
   #inboxReplyModal .modal { width: 100%; max-height: calc(100dvh - 16px); margin: 0; }
   #inboxReplyModal .modal-header, #inboxReplyModal .modal-body { padding-left: 20px; padding-right: 20px; }
-  .communication-context-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 820px) {
@@ -2494,13 +2430,13 @@ html.motion-lite .modal {
 
 @media (max-width: 1180px) {
   .today-workspace { grid-template-columns: minmax(0,1fr) 340px; gap: 22px; }
-  .today-focus-card { padding: 24px 22px; }
+  
   .advanced-filter-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 }
 
 @media (max-width: 980px) {
   .today-workspace { grid-template-columns: 1fr; }
-  .today-focus-card { position: static; }
+  
   .today-schedule-grid { grid-template-columns: repeat(4,minmax(0,1fr)); }
   .advanced-filter-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
@@ -2584,33 +2520,14 @@ html.motion-lite .modal {
     grid-template-columns: minmax(0, .95fr) minmax(280px, .85fr);
     gap: 16px;
   }
-  .today-focus-card {
-    position: sticky;
-    top: 20px;
-    display: flex;
-    flex-direction: column;
-    max-height: calc(100dvh - 164px);
-    min-height: 352px;
-    padding: 22px 20px 16px;
-    overflow-y: auto;
-    border-radius: 20px;
-  }
-  .today-focus-card h3 { font-size: 1.36rem; }
-  .today-focus-task { margin-top: 13px; }
-  .today-focus-context { margin: 11px 0 14px; padding: 8px 0; }
-  .today-focus-context > div { grid-template-columns: 64px minmax(0, 1fr); padding: 5px 0; }
-  .today-focus-actions {
-    position: sticky;
-    bottom: -16px;
-    margin: auto -20px -16px;
-    padding: 12px 20px 15px;
-    border-top: 1px solid rgba(55,48,38,.1);
-    background: linear-gradient(180deg, rgba(255,253,249,.82), rgba(255,253,249,.98) 28%);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-  }
-  .today-focus-primary { width: 100%; min-height: 42px; }
-  .today-focus-links { display: flex; justify-content: center; gap: 15px; margin-top: 9px; }
+  
+  
+  
+  
+  
+  
+  
+  
   .today-schedule-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .customer-findbar { gap: 10px; }
   .customer-view-chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 5px; }
@@ -2628,7 +2545,7 @@ html.motion-lite .modal {
   .today-page-body { padding-top: 28px; }
   .today-task-row { grid-template-columns: 22px 28px minmax(0,1fr) auto; gap: 7px; padding-left: 3px; padding-right: 5px; }
   .today-task-copy span:last-child { display: none; }
-  .today-focus-card { padding: 23px 19px; }
+  
   .today-schedule-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .command-shelf { left: 50%; right: auto; transform: translateX(-50%); }
   .advanced-filter-grid, .module-settings-grid, .column-settings, .settings-number-grid { grid-template-columns: 1fr; }
@@ -3786,7 +3703,7 @@ html.motion-lite *::after {
 .modal-header h3 { font-size: var(--fs-title-l); letter-spacing: -.01em; }
 .card-header h3 { font-size: var(--fs-title-m); font-weight: 650; }
 .today-section-header h3 { font-size: 1.15rem; font-weight: 650; letter-spacing: -.005em; }
-.today-focus-card h3 { letter-spacing: -.02em; }
+
 .settings-group h4, .pool-group-title { font-size: var(--fs-title-s); font-weight: 650; }
 
 /* 正文行距与字距：长文本提升可读性 */
@@ -4284,11 +4201,11 @@ time, .timeline-date, .log-time, .today-date, .today-task-date,
 .today-task-date.overdue { color: var(--v2-danger); }
 
 /* —— Today focus card：标签雾蓝、元信息雾蓝、任务陶土 —— */
-.today-focus-label { color: var(--v2-mist); }
-.today-focus-meta { color: var(--v2-mist); }
-.today-focus-task { color: var(--v2-clay); }
-.today-focus-context span { color: var(--v2-mist); }
-.today-focus-context strong { color: var(--v2-ink-soft); }
+
+
+
+
+
 
 /* —— 客户列表卡片：客户名墨色、属性中性、时间雾蓝、状态语义色 —— */
 .customer-name-button { color: var(--v2-ink); font-weight: 600; }
@@ -4335,8 +4252,6 @@ tbody td { color: var(--v2-ink-soft); }
 
 /* —— 操作按钮：归档/次要操作雾蓝，主操作陶土 —— */
 .customer-action-archive { color: var(--v2-mist); }
-.text-action { color: var(--v2-mist); }
-.text-action:hover { color: var(--v2-clay); }
 
 /* —— 侧边栏：导航项中性，激活项墨色，计数陶土 —— */
 .nav-item { color: var(--v2-ink-soft); }
@@ -4737,33 +4652,6 @@ mark.search-hit {
   margin-top: 5px;
   padding: 0;
   font-size: var(--fs-micro);
-}
-
-.communication-context-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 0 0 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--v2-line);
-  border-radius: 12px;
-  background: rgba(232,237,226,.42);
-}
-
-.communication-context-summary div { min-width: 0; }
-.communication-context-summary span {
-  display: block;
-  color: var(--v2-ink-muted);
-  font-size: var(--fs-micro);
-}
-.communication-context-summary strong {
-  display: block;
-  overflow: hidden;
-  color: var(--v2-ink);
-  font-size: var(--fs-micro);
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .global-search-empty {
@@ -5369,27 +5257,9 @@ mark.hl-pink {
 #page-dashboard .today-task-copy strong {
   color: #a35d43;
 }
-#page-dashboard .today-focus-card {
-  top: 88px;
-  padding: 27px 25px 22px;
-  border-color: rgba(255,255,255,.76);
-  background:
-    radial-gradient(circle at 96% 4%, rgba(172,194,174,.19), transparent 11rem),
-    rgba(255,253,248,.62);
-  box-shadow:
-    inset 0 1px rgba(255,255,255,.82),
-    0 24px 58px rgba(65,53,43,.085);
-  backdrop-filter: blur(24px) saturate(112%);
-  -webkit-backdrop-filter: blur(24px) saturate(112%);
-}
-#page-dashboard .today-focus-card h3 {
-  color: #3c4645;
-  font-size: 1.62rem;
-  line-height: 1.12;
-}
-#page-dashboard .today-focus-actions {
-  background: linear-gradient(180deg, rgba(250,247,240,0), rgba(250,247,240,.92) 28%);
-}
+
+
+
 
 @media (min-width: 821px) and (max-width: 1020px) {
   #page-dashboard .today-page-header,
@@ -5398,17 +5268,14 @@ mark.hl-pink {
     grid-template-columns: minmax(0, 1fr) 310px;
     gap: 18px;
   }
-  #page-dashboard .today-focus-card {
-    min-height: 0;
-    padding: 23px 20px 17px;
-  }
+  
 }
 
 @media (max-width: 820px) {
   #page-dashboard .today-page-header,
   #page-dashboard .today-page-body { width: calc(100% - 36px); }
   #page-dashboard .today-workspace { grid-template-columns: 1fr; }
-  #page-dashboard .today-focus-card { top: auto; }
+  
 }
 
 /* Full desktop uses the space released by the compact navigation rail. */
@@ -5440,20 +5307,16 @@ mark.hl-pink {
   #page-dashboard .today-task-copy strong,
   #page-dashboard .today-task-copy span:last-child,
   #page-dashboard .today-task-date { font-size: .89rem; }
-  #page-dashboard .today-focus-card {
-    top: 108px;
-    padding: 34px 32px 27px;
-    border-radius: 27px;
-  }
-  #page-dashboard .today-focus-label { font-size: .78rem; }
-  #page-dashboard .today-focus-card h3 { font-size: 2rem; }
-  #page-dashboard .today-focus-meta { font-size: .88rem; }
-  #page-dashboard .today-focus-task { margin-top: 22px; font-size: .98rem; }
-  #page-dashboard .today-focus-context { margin: 19px 0 22px; padding: 15px 0; }
-  #page-dashboard .today-focus-context > div { grid-template-columns: 86px minmax(0,1fr); padding: 7px 0; }
-  #page-dashboard .today-focus-context span { font-size: .78rem; }
-  #page-dashboard .today-focus-context strong { font-size: .9rem; }
-  #page-dashboard .today-focus-primary { min-height: 50px; font-size: .98rem; }
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
 }
 
 /* Customer index: keep a single visible-column grid for the header and every row. */
@@ -5523,7 +5386,7 @@ mark.hl-pink {
   #page-dashboard .today-task-row { min-height: 76px; }
   #page-dashboard .today-task-copy strong { font-size: .82rem; }
   #page-dashboard .today-task-copy span:last-child { display: none; }
-  #page-dashboard .today-focus-card { margin-top: 14px; }
+  
   #page-customers .page-header,
   #page-inbox .page-header { padding-top: 88px; }
 }
@@ -5542,7 +5405,7 @@ mark.hl-pink {
   }
   #page-dashboard .today-workspace { display: contents; }
   #page-dashboard .today-task-section { grid-column: 1; min-width: 0; }
-  #page-dashboard .today-focus-card { display: none; }
+  
   #page-dashboard .today-section-header { margin: 0 0 14px; padding: 0 2px 14px; }
   #page-dashboard .today-section-header h3 { font-size: 1.08rem; }
   #page-dashboard .today-task-list {
@@ -7394,9 +7257,7 @@ html.motion-lite .card {
 #page-dashboard .today-workspace.is-empty {
   grid-template-columns: minmax(0, 1fr);
 }
-#page-dashboard .today-workspace.is-empty .today-focus-card {
-  display: none;
-}
+
 #page-dashboard .today-summary[hidden] {
   display: none !important;
 }

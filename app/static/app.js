@@ -112,6 +112,8 @@ function applyIconButtons(root) {
     if (button.closest && button.closest('.sidebar-tools-menu')) return;
     // The customer workspace names its quiet actions in words (编辑 · 删除).
     if (button.closest && button.closest('.cw-app')) return;
+    // A modal footer keeps 取消 / 返回修改 in words; the header ✕ already closes.
+    if (button.closest && button.closest('.modal-footer')) return;
     var accessibleLabel = (button.getAttribute('aria-label') || button.getAttribute('title') || '').trim();
     var inlineIcon = _INLINE_ICON_ACTIONS[accessibleLabel];
     if (inlineIcon && button.querySelector('svg')) {

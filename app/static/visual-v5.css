@@ -276,7 +276,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   display: block !important;
   width: 100% !important;
   height: auto !important;
-  padding: .55rem 0 .7rem !important;
+  padding: var(--search-pad, .55rem 0 .7rem) !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: none !important;
@@ -1519,3 +1519,155 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .contact-edit-actions {
   border-top: 1px solid var(--dl-hair-2);
 }
+
+/* ============================================================================
+   8. TRANSIENT CONTAINERS — what sits between the fields in a modal
+   Context, notes, sub-groups, status lines and preview facts are plain text on
+   paper; a single 1px hairline carries the grouping. No fill, no box, no bold.
+   The v2/v3/style.css boxes these replace were removed at the source.
+   ============================================================================ */
+
+/* the small caption every container label shares */
+#trosa .modal .communication-context-summary span,
+#trosa .modal .modal-fact-label,
+#trosa .modal .report-cat-label,
+#trosa .modal .smart-preview-grid span,
+#trosa .modal .smart-preview-profile > span,
+#trosa .modal .smart-preview-contacts > span,
+#trosa .modal .draft-contact-title strong,
+#trosa .modal .draft-contacts-header strong {
+  display: block;
+  color: var(--dl-faint);
+  font-size: .6rem;
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+/* 记录沟通: four facts as a line of text above one hairline */
+#trosa .modal .communication-context-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.8rem;
+  margin: 0 0 1.1rem;
+  padding: 0 0 .8rem;
+  border-bottom: 1px solid var(--dl-hair-2);
+}
+#trosa .modal .communication-context-summary[hidden] { display: none; }
+#trosa .modal .communication-context-summary div { min-width: 0; max-width: 100%; }
+#trosa .modal .communication-context-summary strong,
+#trosa .modal .modal-fact-value {
+  display: block;
+  margin-top: .2rem;
+  overflow: hidden;
+  color: var(--dl-ink-2);
+  font-size: .82rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* its text box: one faint layer at rest; focus only lights the lower edge */
+#trosa .modal .inbox-reply-textarea.form-control {
+  padding: .55rem .7rem;
+  border: 1px solid var(--dl-hair-2);
+  border-radius: 4px;
+}
+#trosa .modal .inbox-reply-textarea.form-control:focus { border-color: var(--dl-hair-2) var(--dl-hair-2) var(--dl-gold); }
+
+/* secondary actions in a modal: plain words on the label's baseline */
+#trosa .modal .text-action {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dl-ink-2);
+  font-family: var(--dl-sans);
+  font-size: .74rem;
+  font-weight: 400;
+  letter-spacing: .03em;
+  line-height: 1.5;
+  text-decoration: none;
+  cursor: pointer;
+}
+#trosa .modal .text-action:hover { color: var(--dl-gold-ink); }
+#trosa .modal .quick-reply-tools { align-items: baseline; gap: 1.1rem; }
+
+/* customer picker results: rows on paper, hairline between */
+#trosa .modal .customer-picker-results {
+  padding: 0;
+  border: 1px solid var(--dl-hair);
+  border-radius: 4px;
+  background: var(--dl-paper);
+  box-shadow: 0 6px 18px rgba(36, 34, 29, .08);
+}
+/* the native clear control, redrawn in ink */
+#trosa input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(45deg, transparent 46%, var(--dl-ink-2) 46% 54%, transparent 54%),
+    linear-gradient(-45deg, transparent 46%, var(--dl-ink-2) 46% 54%, transparent 54%);
+  opacity: .55;
+  cursor: pointer;
+}
+/* touch: the clear control is a 44px square, so its field gives it a 44px line */
+@media (pointer: coarse) {
+  #trosa .modal input[type="search"].form-control,
+  #trosa .room-index .global-page-search input { --search-pad: 0; min-height: 44px; padding-top: 0; padding-bottom: 0; }
+  #trosa input[type="search"]::-webkit-search-cancel-button { width: 44px; height: 44px; background-size: 14px 14px; background-position: center; background-repeat: no-repeat; }
+}
+
+/* 完成这次跟进: facts, the next-step switch and its group */
+#trosa .modal .modal-fact { margin-bottom: .95rem; }
+#trosa .modal .complete-next-section {
+  margin-bottom: .6rem;
+  padding: .2rem 0 .2rem 1rem;
+  border-left: 1px solid var(--dl-hair);
+}
+#trosa .modal .report-opt-toggle { display: flex; align-items: flex-start; gap: .6rem; cursor: pointer; }
+#trosa .modal .report-opt-title { color: var(--dl-ink-2); font-size: .8rem; }
+#trosa .modal .report-opt-hint,
+#trosa .modal .modal-note-hint { margin-top: .2rem; color: var(--dl-mut); font-size: .72rem; line-height: 1.5; }
+#trosa .modal .report-cat-section { display: none; margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--dl-hair-2); }
+#trosa .modal .report-cat-label { margin-bottom: .5rem; }
+#trosa .modal .report-cat-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+#trosa .modal .cat-pill { cursor: pointer; }
+
+/* batch / quick edit: a note and a sub-heading, not tinted cards */
+#trosa .modal .modal-note { margin-bottom: 1.1rem; padding-bottom: .8rem; border-bottom: 1px solid var(--dl-hair-2); }
+#trosa .modal .modal-note-title,
+#trosa .modal .modal-subhead-title { color: var(--dl-ink); font-size: .84rem; font-weight: 400; }
+#trosa .modal .modal-subhead { margin: 1.1rem 0 .6rem; padding-top: .9rem; border-top: 1px solid var(--dl-hair-2); }
+#trosa .modal .form-label-aside { letter-spacing: 0; text-transform: none; }
+
+/* 添加客户: contacts are hairline-separated groups */
+#trosa .modal .draft-contacts-section { border-top: 1px solid var(--dl-hair-2); }
+#trosa .modal .draft-contact-card { padding-top: .9rem; border-top: 1px solid var(--dl-hair-2); }
+#trosa .modal .draft-contact-card:first-child { padding-top: 0; border-top: 0; }
+#trosa .modal .draft-contact-title span { color: var(--dl-faint); font-size: .66rem; }
+#trosa .modal .draft-email-import summary,
+#trosa .modal .manual-contact-entry > summary,
+#trosa .modal .draft-contact-more summary { color: var(--dl-ink-2); }
+#trosa .modal .draft-email-import .text-action { justify-self: start; }
+
+/* status lines: a word in the state's colour, never a tinted block */
+#trosa .modal .smart-fill-review.has-error,
+#trosa .modal .smart-preview-status.error { color: #8f4a36; }
+#trosa .modal .smart-fill-review.is-ready,
+#trosa .modal .smart-preview-status.success { color: var(--dl-ok); }
+
+/* 确认识别结果: facts as a caption / value list on hairlines */
+#trosa .modal .smart-preview-grid { gap: 0 1.4rem; }
+#trosa .modal .smart-preview-grid > div,
+#trosa .modal .smart-preview-profile,
+#trosa .modal .smart-preview-contacts { padding: .6rem 0; border-bottom: 1px solid var(--dl-hair-2); }
+#trosa .modal .smart-preview-grid strong,
+#trosa .modal .smart-preview-status strong,
+#trosa .modal .smart-preview-contacts li strong,
+#trosa .modal .smart-preview-contacts li span { color: var(--dl-ink); font-size: .84rem; font-weight: 400; }
+
+/* ---- pages: the calendar subscription is a line of text, its link keeps a box ---- */
+#trosa .ical-subscription { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--dl-hair-2); }
+#trosa .ical-subscription-label { color: var(--dl-mut); font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
+#trosa .ical-url-input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--dl-hair); border-radius: 4px; background: none; color: var(--dl-mut); font-family: monospace; font-size: .78rem; }
+#trosa .ical-sync-status { flex-basis: 100%; color: var(--dl-mut); font-size: .76rem; }
