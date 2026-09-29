@@ -683,6 +683,44 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertIn('background: transparent !important;', footer)
         self.assertIn('border-top: 1px solid var(--dl-hair-2) !important;', footer)
 
+    def test_daylight_leftover_containers_are_hairline_text(self):
+        """Modal containers and page leftovers read as text on hairlines, not boxes."""
+        style = (ROOT / 'app' / 'static' / 'style.css').read_text(encoding='utf-8')
+        v2 = (ROOT / 'app' / 'static' / 'visual-v2.css').read_text(encoding='utf-8')
+        v3 = (ROOT / 'app' / 'static' / 'visual-v3.css').read_text(encoding='utf-8')
+        v4 = (ROOT / 'app' / 'static' / 'visual-v4.css').read_text(encoding='utf-8')
+        v5 = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+        index = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+
+        # visual-v5 §8 holds the container language and never raises !important.
+        section = v5[v5.index('8. TRANSIENT CONTAINERS'):]
+        self.assertNotIn('!important', section)
+        self.assertIn('#trosa .modal .communication-context-summary[hidden] { display: none; }', section)
+        # The boxes it replaces were removed at the source, not overridden.
+        self.assertNotIn('.communication-context-summary {', v2)
+        self.assertNotIn('.draft-contacts-section:is(#trosa, #trosa *)', v3)
+        self.assertNotIn('.smart-fill-review:is(#trosa, #trosa *)', v3)
+        self.assertNotIn('.complete-next-section { padding', style)
+
+        # Modal fields show focus with their gold hairline, not the global ring.
+        self.assertIn('#trosa :focus-visible:not(.cw-app *, .modal .form-control, .modal .rich-text-area) {', v4)
+        # Modal secondary actions escape the bold underlined page text-action.
+        self.assertIn('.text-action:not(.cw-act, .modal *):is(#trosa, #trosa *)', v3)
+        # A modal footer keeps 取消 / 返回修改 in words.
+        self.assertIn("if (button.closest && button.closest('.modal-footer')) return;", javascript)
+
+        # The inline styles moved to classes rather than living in both places.
+        for moved in ('class="modal-note"', 'class="modal-subhead"', 'class="report-cat-section" id="reportCatSection"',
+                      'class="ical-subscription"', 'class="modal-fact-value" id="completeCustomerName"'):
+            self.assertIn(moved, index)
+        self.assertNotIn('style="margin-bottom:16px;padding:12px;background:var(--brand-50)', index)
+        self.assertNotIn('data-cat="follow" style=', index)
+
+        # Inbox keeps its structure: labels are text, the title is regular, selection is a gold line.
+        self.assertIn('#trosa .inbox-kind-chip { color: var(--dl-gold-ink); }', v4)
+        self.assertIn('box-shadow: inset 0 -1px 0 var(--dl-gold) !important;', v4)
+
     def test_frozen_customer_intelligence_is_not_a_user_module(self):
         spec = importlib.util.spec_from_file_location('crm_app_frozen_modules_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
