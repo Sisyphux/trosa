@@ -42,16 +42,18 @@
   --dl-paper-3: #f5f1e7;       /* inset / quiet field */
   --dl-ink: #24221d;           /* primary text, solid actions */
   --dl-ink-2: #57534a;         /* secondary text (≥7:1 on paper) */
-  --dl-ink-3: #6f6a5f;         /* tertiary text */
-  --dl-mut: #8a8478;           /* quiet labels only, never body copy */
-  --dl-faint: #b7b1a4;         /* disabled / placeholder / rules */
-  --dl-gold: #bc9052;          /* accent, decoration and focus */
-  --dl-gold-ink: #8a6224;      /* accent text on paper (contrast-safe) */
+  --dl-ink-3: #68635a;         /* tertiary text (≥4.5:1 on every surface incl. canvas) */
+  --dl-mut: #6e695e;           /* quiet labels, dates, placeholders (≥4.5:1 on canvas) */
+  --dl-faint: #b7b1a4;         /* disabled state, rules, ornaments only — never information */
+  --dl-gold: #bc9052;          /* bright gold: decoration only (dots, glow, ornaments) */
+  --dl-gold-ink: #84591d;      /* deep gold: accent text, state marks, focus (≥4.5:1) */
+  --dl-focus: var(--dl-gold-ink);   /* keyboard focus ring (≥3:1 on all surfaces) */
+  --dl-focus-on-ink: var(--dl-paper); /* halo between a solid ink control and its ring */
   --dl-gold-soft: #f3e7d3;
   --dl-gold-wash: rgba(188, 144, 82, .10);
   --dl-danger: #a4443a;
   --dl-danger-soft: #f6e6e3;
-  --dl-ok: #5c7a5a;
+  --dl-ok: #4f6d4d;
   --dl-ok-soft: #e7eee3;
   --dl-info: #4f6d78;
   --dl-warn: #8a6a1f;
@@ -147,8 +149,8 @@
   --primary-foreground: var(--dl-paper);
   --destructive: var(--dl-danger);
   --success: var(--dl-ok);
-  --accent: var(--dl-gold);
-  --ring: var(--dl-gold);
+  --accent: var(--dl-gold-ink);
+  --ring: var(--dl-focus);
   --font-display: var(--dl-display);
   --font-sans: var(--dl-sans);
   --font-serif: var(--dl-display);
@@ -369,9 +371,13 @@ html {
   background: var(--dl-gold-soft);
   color: var(--dl-ink);
 }:focus-visible:is(#trosa, #trosa *){
-  outline: 2px solid var(--dl-gold);
+  outline: 2px solid var(--dl-focus);
   outline-offset: 2px;
   border-radius: var(--dl-r-xs);
+}/* Solid ink controls: a warm-white halo fills the ring's offset gap, so the
+   deep-gold ring stays separated from the ink fill as well as from the page. */
+.btn-primary:focus-visible:is(#trosa, #trosa *),.command-primary:focus-visible:is(#trosa, #trosa *),.tab-btn.active:focus-visible:is(#trosa, #trosa *),.tab-btn[aria-selected="true"]:focus-visible:is(#trosa, #trosa *),.customer-view-chip.active:focus-visible:is(#trosa, #trosa *),.customer-view-chip[aria-pressed="true"]:focus-visible:is(#trosa, #trosa *),.today-schedule-day.active:focus-visible:is(#trosa, #trosa *),.today-schedule-day.is-active:focus-visible:is(#trosa, #trosa *),.schedule-day.active:focus-visible:is(#trosa, #trosa *),.inbox-filter.active:focus-visible:is(#trosa, #trosa *){
+  box-shadow: 0 0 0 2px var(--dl-focus-on-ink) !important;
 }/* Scrollbars: quiet, warm, desktop-proof. */
 *:is(#trosa, #trosa *){
   scrollbar-color: var(--dl-faint) transparent;
@@ -478,7 +484,7 @@ html {
   width: 3px;
   height: 22px;
   transform: translateY(-50%);
-  background: var(--dl-gold);
+  background: var(--dl-gold-ink);
   border-radius: 0 3px 3px 0;
 }.nav-item:is(#trosa, #trosa *){
   position: relative;
@@ -668,7 +674,7 @@ html {
   transition: border-color var(--dl-dur-fast) var(--dl-ease),
     box-shadow var(--dl-dur-fast) var(--dl-ease) !important;
 }.global-page-search:focus-within:is(#trosa, #trosa *){
-  border-color: var(--dl-gold) !important;
+  border-color: var(--dl-focus) !important;
   box-shadow: 0 0 0 3px var(--dl-gold-wash), var(--dl-shadow-1) !important;
 }.global-page-search button:is(#trosa, #trosa *){
   color: var(--dl-mut) !important;
@@ -818,10 +824,10 @@ html {
     box-shadow var(--dl-dur-fast) var(--dl-ease) !important;
 }.settings-inline-field select:focus:is(#trosa, #trosa *),.filter-select:focus:is(#trosa, #trosa *),.ai-config-grid .form-control:focus:is(#trosa, #trosa *),.login-pin-form .form-control:focus:is(#trosa, #trosa *),#teamInvitationUrl:focus:is(#trosa, #trosa *){
   outline: none !important;
-  border-color: var(--dl-gold) !important;
+  border-color: var(--dl-focus) !important;
   box-shadow: 0 0 0 3px var(--dl-gold-wash) !important;
 }.form-control:is(#trosa, #trosa *)::placeholder,.form-group input:is(#trosa, #trosa *)::placeholder,textarea:is(#trosa, #trosa *)::placeholder{
-  color: var(--dl-faint) !important;
+  color: var(--dl-mut) !important;
 }.settings-inline-field select:disabled:is(#trosa, #trosa *),.ai-config-grid .form-control:disabled:is(#trosa, #trosa *),.login-pin-form .form-control:disabled:is(#trosa, #trosa *){
   background: var(--dl-paper-3) !important;
   color: var(--dl-ink-3) !important;
@@ -861,7 +867,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   background: var(--dl-paper);
   cursor: pointer;
 }input[type="checkbox"]:focus-visible:is(#trosa, #trosa *),.table-checkbox:focus-visible:is(#trosa, #trosa *){
-  outline: 2px solid var(--dl-gold);
+  outline: 2px solid var(--dl-focus);
   outline-offset: 2px;
 }/* Chips, tabs, segmented filters */
 .tab-btn:not(.cw-tab):is(#trosa, #trosa *),.customer-view-chip:is(#trosa, #trosa *),.cat-pill:is(#trosa, #trosa *){
@@ -1228,7 +1234,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   top: 0;
   bottom: 0;
   width: 3px;
-  background: var(--dl-gold);
+  background: var(--dl-gold-ink);
 }/* Overdue keeps the semantic red rule, but as a drawn edge instead of a
    layout-shifting border: the row grid never moves between states. */
 .today-task-row:has(.today-task-date.overdue):is(#trosa, #trosa *){
@@ -1247,7 +1253,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
    an off light is simply quiet, an on light gets the single gold accent. */
 .today-task-row.customer-light-on:is(#trosa, #trosa *){
   background: var(--dl-gold-wash) !important;
-  box-shadow: inset 3px 0 0 var(--dl-gold) !important;
+  box-shadow: inset 3px 0 0 var(--dl-gold-ink) !important;
 }.today-task-row.customer-light-on:is(#trosa, #trosa *)::after{
   display: none !important;
 }.today-task-row.customer-light-off:is(#trosa, #trosa *){
@@ -1258,7 +1264,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.today-task-row.customer-light-off:is(#trosa, #trosa *) .today-task-customer{
   color: var(--dl-ink-2) !important;
 }.today-task-index-wrap:is(#trosa, #trosa *){
-  color: var(--dl-faint);
+  color: var(--dl-mut);
 }.today-task-index:is(#trosa, #trosa *){
   font-family: var(--dl-display);
   font-size: 0.98rem !important;
@@ -1337,12 +1343,12 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   font-weight: 500;
   color: inherit !important;
 }.today-schedule-day.has-items:is(#trosa, #trosa *){
-  border-color: var(--dl-gold) !important;
+  border-color: var(--dl-gold-ink) !important;
 }
 /* v2 keeps a clay hairline on the selected day; Daylight's selected day is the
    room's gold, so the strip never carries a second, warmer accent. */
 .today-schedule-day.selected:is(#trosa, #trosa *){
-  border-color: var(--dl-gold) !important;
+  border-color: var(--dl-gold-ink) !important;
   background: var(--dl-gold-soft) !important;
 }.today-schedule-detail:is(#trosa, #trosa *){
   margin-top: 14px;
@@ -1382,7 +1388,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.dash-wl-item:last-child:is(#trosa, #trosa *){
   border-bottom: 0;
 }.dash-wl-icon:is(#trosa, #trosa *){
-  color: var(--dl-gold);
+  color: var(--dl-gold-ink);
 }.dash-wl-cust:is(#trosa, #trosa *){
   font-size: var(--dl-fs-body-s);
   font-weight: 550;
@@ -1485,7 +1491,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }#page-customers .customer-row-card.customer-row-priority:is(#trosa, #trosa *){
   border-bottom-color: var(--dl-hair-2) !important;
   background: var(--dl-gold-wash) !important;
-  box-shadow: inset 3px 0 0 var(--dl-gold) !important;
+  box-shadow: inset 3px 0 0 var(--dl-gold-ink) !important;
 }#page-customers .customer-row-card.customer-light-off:is(#trosa, #trosa *),#page-customers .customer-row-card.customer-light-off:hover:is(#trosa, #trosa *){
   opacity: 1 !important;
   filter: none !important;
@@ -1530,7 +1536,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.customer-website-action:hover:is(#trosa, #trosa *){
   color: var(--dl-gold-ink) !important;
 }.customer-no-website:is(#trosa, #trosa *){
-  color: var(--dl-faint) !important;
+  color: var(--dl-mut) !important;
   font-size: var(--dl-fs-caption);
 }.customer-action-group:is(#trosa, #trosa *){
   display: flex;
@@ -1565,7 +1571,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   filter: none;
   opacity: 1;
 }.customer-light-lens:is(#trosa, #trosa *),.customer-light-filament:is(#trosa, #trosa *){
-  color: var(--dl-gold) !important;
+  color: var(--dl-gold-ink) !important;
 }.customer-tags span:is(#trosa, #trosa *){
   border-color: var(--dl-hair) !important;
   background: var(--dl-paper-3) !important;
@@ -2162,7 +2168,7 @@ table:is(#trosa, #trosa *){
   color: var(--dl-gold-ink) !important;
   box-shadow: none !important;
 }#page-overview .weekly-member-filter:focus-visible:is(#trosa, #trosa *){
-  outline: 2px solid var(--dl-gold) !important;
+  outline: 2px solid var(--dl-focus) !important;
   outline-offset: 2px;
   box-shadow: none !important;
 }#page-overview .ov-hero-week:is(#trosa, #trosa *){
@@ -2276,7 +2282,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   }
   /* Keyboard users get a visible, unambiguous target. */
   .customer-row-card:focus-visible:is(#trosa, #trosa *), .today-task-row:focus-visible:is(#trosa, #trosa *), .inbox-item:focus-within:is(#trosa, #trosa *){
-    outline: 2px solid var(--dl-gold) !important;
+    outline: 2px solid var(--dl-focus) !important;
     outline-offset: -2px !important;
   }
 }/* A narrow mouse window — an ageing laptop, or 200% zoom — is still a rail,
