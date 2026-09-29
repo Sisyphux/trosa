@@ -101,7 +101,7 @@
 
 ## 当前视觉依据
 
-- `../TRADE_OS_UI_SYSTEM.md`：Trade OS 现行视觉系统与组件规则。
+- `../DESIGN_WORLD.md`：Trosa 现行设计世界（Daylight）与房间规则；`../UI_QUALITY_BASELINE.md`：与风格无关的质量底线。
 - `../trade-os-style-lab.html`：现有风格实验。
 - `../today-visual-prototype.html`、`../customer-focus-prototype.html`：页面原型。
 - `../../design-qa.md`：已实施页面的截图验证记录；属于实现证据，不作为外部灵感素材。

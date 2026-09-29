@@ -174,7 +174,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 
 - A 保留：`AGENTS.md`、`TROSA_MAINTENANCE.md`、`README.md`、`PRODUCT_DIRECTION.md`、
   `PRODUCT_DESIGN_STANDARD.md`、`Trade OS 系统设计说明.md`、`使用说明.md`、`DEPLOYMENT.md`、
-  `docs/architecture/*`、`design/TRADE_OS_UI_SYSTEM.md`。
+  `docs/architecture/*`、`design/DESIGN_WORLD.md`、`design/UI_QUALITY_BASELINE.md`。
 - B 合并后归档：`GITHUB_MIGRATION.md`（并入 README/DEPLOYMENT 后归档）。
   `AGENT_API_CAPABILITY_AUDIT.md` 已于 2026-09-28 删除（过时的 Gateway 能力认知，边界并入本文§6）。
 - D 归档（停止作为现行文档引用）：`POSTGRESQL_FINAL_CUTOVER_CHECKLIST.md`（历史切换证据）、

@@ -1,3 +1,5 @@
+> **已被 Daylight 取代，仅供历史参考。** 现行规范见 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md)，与风格无关的质量基线见 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md)。本文中的陶土色、液态玻璃、Command Shelf 与各类“禁止”条款不再约束新设计。
+
 # Trade OS UI 设计系统 v1.0
 
 > 状态：**视觉方向已经确认，第一轮全局视觉与信息架构已经应用到正式界面。** 第二版“今天”样板作为实施基线；后续逐页深化时继续保留现有功能，并分别完成 Windows 网页、iPad 和 iPhone 查看验收。

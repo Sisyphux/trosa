@@ -2,7 +2,7 @@
 
 这里存放未来界面工作可直接参考的截图、网页摘录、组件细节、色彩与材质样本，以及需要主动避开的反例。
 
-现有视觉原则以 [`../TRADE_OS_UI_SYSTEM.md`](../TRADE_OS_UI_SYSTEM.md) 为准。本库提供证据和灵感，不会自动改变产品的功能、信息架构或设计系统。
+现有视觉原则以 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md) 为准。本库提供证据和灵感，不会自动改变产品的功能、信息架构或设计系统。
 
 ## 投放方式
 
@@ -36,7 +36,7 @@ avoid-gradient-dashboard-overload.png
 
 每次界面设计或改版前：
 
-1. 先读 `../TRADE_OS_UI_SYSTEM.md`。
+1. 先读 `../DESIGN_WORLD.md`。
 2. 查阅与任务相关的目录和 `CATALOG.md`。
 3. 明确素材中“可借鉴”与“排除”的部分，再开始实现。
 4. 完成后以本库和 UI 系统为依据进行截图审查。

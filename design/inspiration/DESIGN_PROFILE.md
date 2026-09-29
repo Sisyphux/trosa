@@ -1,6 +1,6 @@
 # Trade OS 审美方向 v1
 
-本页从 2026-07-31 已整理的参考图中提炼，用于指导后续界面选择。产品现行规则仍以 [`../TRADE_OS_UI_SYSTEM.md`](../TRADE_OS_UI_SYSTEM.md) 为准。
+本页从 2026-07-31 已整理的参考图中提炼，用于指导后续界面选择。产品现行规则仍以 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md) 为准（质量底线见 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md)）。
 
 ## 核心气质
 
