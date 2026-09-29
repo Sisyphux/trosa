@@ -1221,16 +1221,13 @@ textarea {
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
 .today-task-row:focus-visible,
 .customer-row-card:focus-visible {
   outline: 2px solid rgba(168, 95, 69, .68) !important;
   outline-offset: 2px !important;
 }
 
-.btn {
+.btn:not(.cw-act) {
   min-height: 40px !important;
   padding: 9px 14px !important;
   border: 1px solid var(--ui-line-strong) !important;
@@ -1243,63 +1240,59 @@ textarea:focus-visible,
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease !important;
 }
 
-.btn:hover {
+.btn:not(.cw-act):hover {
   border-color: rgba(55, 48, 38, .34) !important;
   background: var(--v2-clay-soft) !important;
   box-shadow: none !important;
 }
 
-.btn:active {
+.btn:not(.cw-act):active {
   transform: translateY(1px) !important;
 }
 
-.btn-primary,
-.command-primary {
+.btn-primary:not(.cw-act),
+.command-primary:not(.cw-act) {
   border-color: transparent !important;
   background: var(--v2-clay) !important;
   color: #fff !important;
   box-shadow: 0 4px 10px rgba(147, 77, 53, .14) !important;
 }
 
-.btn-primary:hover,
-.command-primary:hover {
+.btn-primary:not(.cw-act):hover,
+.command-primary:not(.cw-act):hover {
   border-color: transparent !important;
   background: var(--v2-clay-hover) !important;
   color: #fff !important;
 }
 
-.btn-sm {
+.btn-sm:not(.cw-act) {
   min-height: 34px !important;
   padding: 7px 11px !important;
   font-size: 12px !important;
 }
 
-.btn-icon,
-.text-action {
+.btn-icon:not(.cw-act),
+.text-action:not(.cw-act) {
   color: var(--ui-ink-soft) !important;
 }
 
-.btn-icon:hover,
-.text-action:hover {
+.btn-icon:not(.cw-act):hover,
+.text-action:not(.cw-act):hover {
   color: var(--v2-clay) !important;
 }
 
-.form-control,
+/* Controls that keep their own box outside the quiet form surfaces. */
 .search-box input,
 .filter-select,
 .advanced-filter-grid input,
 .advanced-filter-grid select,
 .inbox-inline-decision input,
+.inbox-question-decision input,
+.inbox-question-decision select,
+.inbox-question-decision textarea,
+.settings-number-grid input,
 .today-wide-next-fields input,
-#todayWideFeedback,
-input[type="text"],
-input[type="email"],
-input[type="url"],
-input[type="date"],
-input[type="number"],
-input[type="password"],
-select,
-textarea {
+#todayWideFeedback {
   min-height: 42px;
   border: 1px solid var(--ui-line-strong) !important;
   border-radius: var(--ui-radius-control) !important;
@@ -1308,17 +1301,17 @@ textarea {
   color: var(--ui-ink) !important;
 }
 
-.form-control:focus,
 .search-box input:focus,
 .filter-select:focus,
 .advanced-filter-grid input:focus,
 .advanced-filter-grid select:focus,
 .inbox-inline-decision input:focus,
+.inbox-question-decision input:focus,
+.inbox-question-decision select:focus,
+.inbox-question-decision textarea:focus,
+.settings-number-grid input:focus,
 .today-wide-next-fields input:focus,
-#todayWideFeedback:focus,
-input:focus,
-select:focus,
-textarea:focus {
+#todayWideFeedback:focus {
   border-color: rgba(168, 95, 69, .60) !important;
   box-shadow: 0 0 0 3px rgba(168, 95, 69, .10) !important;
 }

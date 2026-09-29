@@ -1308,3 +1308,214 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 @media (prefers-reduced-motion: reduce) {
   #trosa .room-index { transition: none; }
 }
+
+/* ============================================================================
+   7. FORMS — quiet daylight fields
+   A field is a small caption with one hairline under the value: no box, no
+   fill, no inner shadow. The global control boxes (visual-v2 §controls,
+   visual-v3 §4 Fields) released these selectors at the source, so this
+   section wins on plain specificity and never raises an override flag.
+   Scope is the transient surfaces only: every `.modal` and the customer
+   workspace (`#customerEditModal`). Search, filters, checkboxes, the login
+   gate and the settings inline fields keep their own boxes.
+   ============================================================================ */
+
+/* --- label: a quiet caption, not a bold heading --- */
+#trosa .modal .form-label,
+#trosa #customerEditModal .form-label {
+  display: block;
+  margin-bottom: .3rem;
+  color: var(--dl-faint);
+  font-family: var(--dl-sans);
+  font-size: .6rem;
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+#trosa .modal .required,
+#trosa #customerEditModal .required {
+  color: var(--dl-gold);
+  font-weight: 400;
+}
+
+/* --- control: value on a single hairline --- */
+#trosa .modal .form-control,
+#trosa .modal .form-group input:where(:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"])),
+#trosa .modal .form-group select,
+#trosa .modal .form-group textarea,
+#trosa #customerEditModal .form-control,
+#trosa #customerEditModal .form-group input:where(:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"])),
+#trosa #customerEditModal .form-group select,
+#trosa #customerEditModal .form-group textarea {
+  width: 100%;
+  min-height: 2.1rem;
+  padding: .3rem 0 .4rem;
+  border: 0;
+  border-bottom: 1px solid var(--dl-hair);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--dl-ink);
+  font-family: var(--dl-sans);
+  font-size: .88rem;
+  line-height: 1.5;
+  transition: border-color var(--dl-dur-fast) var(--dl-ease);
+}
+#trosa .modal .form-control:focus,
+#trosa .modal .form-group input:focus,
+#trosa .modal .form-group select:focus,
+#trosa .modal .form-group textarea:focus,
+#trosa #customerEditModal .form-control:focus,
+#trosa #customerEditModal .form-group input:focus,
+#trosa #customerEditModal .form-group select:focus,
+#trosa #customerEditModal .form-group textarea:focus {
+  outline: none;
+  border-bottom-color: var(--dl-gold);
+  box-shadow: none;
+}
+#trosa .modal .form-control:disabled,
+#trosa .modal .form-control[readonly],
+#trosa .modal .form-group input:disabled,
+#trosa #customerEditModal .form-control:disabled,
+#trosa #customerEditModal .form-control[readonly] {
+  border-bottom: 1px dashed var(--dl-hair);
+  background: none;
+  color: var(--dl-mut);
+  cursor: not-allowed;
+}
+
+/* --- select: the same hairline, a thin hand-drawn caret --- */
+#trosa .modal select.form-control,
+#trosa .modal .form-group select,
+#trosa #customerEditModal select.form-control,
+#trosa #customerEditModal .form-group select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 1.1rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--dl-faint) 50%),
+    linear-gradient(135deg, var(--dl-faint) 50%, transparent 50%);
+  background-position: calc(100% - .62rem) calc(50% + 1px), calc(100% - .38rem) calc(50% + 1px);
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+#trosa .modal input[type="date"].form-control::-webkit-calendar-picker-indicator,
+#trosa #customerEditModal input[type="date"].form-control::-webkit-calendar-picker-indicator {
+  opacity: .45;
+  cursor: pointer;
+}
+
+/* --- textarea / rich text: the one place a faint frame is allowed --- */
+#trosa .modal .form-group textarea,
+#trosa #customerEditModal .form-group textarea {
+  padding-bottom: .45rem;
+}
+#trosa .modal .rich-text-area,
+#trosa #customerEditModal .rich-text-area {
+  min-height: 4.4rem;
+  padding: .55rem .7rem;
+  border: 1px solid var(--dl-hair-2);
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  color: var(--dl-ink);
+  font-family: var(--dl-sans);
+  font-size: .88rem;
+  line-height: 1.6;
+}
+#trosa .modal .rich-text-area:focus,
+#trosa #customerEditModal .rich-text-area:focus {
+  outline: none;
+  border-color: var(--dl-gold);
+  box-shadow: none;
+}
+#trosa .modal .rich-text-area:empty::before,
+#trosa #customerEditModal .rich-text-area:empty::before {
+  color: var(--dl-faint);
+}
+#trosa .modal .rich-text-area-compact,
+#trosa #customerEditModal .rich-text-area-compact {
+  min-height: 2.6rem;
+}
+
+/* --- rhythm: smaller, even vertical spacing; no grid lines between fields --- */
+#trosa .modal:not(.modal-app-dialog) .form-row,
+#trosa #customerEditModal .form-row {
+  gap: 1.4rem;
+}
+#trosa .modal:not(.modal-app-dialog) .form-group,
+#trosa #customerEditModal .form-group {
+  margin-bottom: .95rem;
+}
+
+/* --- error: a word, not a red block --- */
+#trosa .modal .form-control.is-invalid,
+#trosa .modal .form-control.error,
+#trosa .modal .form-group input[aria-invalid="true"],
+#trosa .modal .form-group textarea[aria-invalid="true"],
+#trosa #customerEditModal .form-control.is-invalid,
+#trosa #customerEditModal .form-group input[aria-invalid="true"] {
+  border-bottom-color: #a0654a;
+  color: var(--dl-ink);
+}
+
+/* --- the app dialog in read-only mode keeps its multi-line box --- */
+#trosa .modal-app-dialog.is-readonly #appDialogInput {
+  min-height: 5.75rem;
+}
+
+/* --- form actions: one solid ink pill, the rest plain text --- */
+#trosa .cw-act {
+  padding: .52rem 1.05rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--dl-ink-2);
+  font-family: var(--dl-sans);
+  font-size: .73em;
+  letter-spacing: .05em;
+  min-height: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+#trosa .cw-act:hover {
+  color: var(--dl-ink);
+  background: var(--dl-ink-wash);
+}
+#trosa .cw-act.cw-primary {
+  padding: .56rem 1.2rem;
+  background: var(--dl-ink);
+  color: #f6f2e9;
+}
+#trosa .cw-act.cw-primary:hover {
+  background: #37342c;
+  color: #fffdf7;
+}
+#trosa .cw-act:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+/* --- inline contact edit: a small label head, then quiet fields --- */
+#trosa #customerEditModal .cw-contact-edit .form-row {
+  gap: 1.4rem;
+}
+#trosa #customerEditModal .cw-contact-edit .form-group {
+  margin-bottom: .85rem;
+}
+#trosa #customerEditModal .contact-edit-header strong {
+  display: block;
+  color: var(--dl-mut);
+  font-size: .6em;
+  font-weight: 400;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+#trosa #customerEditModal .contact-edit-header span {
+  color: var(--dl-mut);
+  font-size: .78em;
+  font-weight: 400;
+}
+#trosa #customerEditModal .contact-edit-actions {
+  border-top: 1px solid var(--dl-hair-2);
+}
