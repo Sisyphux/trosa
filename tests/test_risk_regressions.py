@@ -647,6 +647,42 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertNotIn('/tasks', opener)
         self.assertIn('#trosa #customerEditModal .cw-app', v5)
 
+    def test_daylight_forms_are_quiet_without_an_important_war(self):
+        """Form fields are label-plus-hairline; the old boxed globals let go."""
+        v2 = (ROOT / 'app' / 'static' / 'visual-v2.css').read_text(encoding='utf-8')
+        v3 = (ROOT / 'app' / 'static' / 'visual-v3.css').read_text(encoding='utf-8')
+        v5 = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+        index = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+
+        # The quiet field language lives in visual-v5 §7 and never raises !important.
+        forms_start = v5.index('7. FORMS')
+        forms_section = v5[forms_start:]
+        self.assertIn('#trosa .modal .form-control', forms_section)
+        self.assertIn('border-bottom: 1px solid var(--dl-hair);', forms_section)
+        self.assertNotIn('!important', forms_section)
+
+        # The old global control box no longer claims the modal / workspace fields.
+        self.assertNotIn('input[type="text"],\ninput[type="email"],', v2)
+        self.assertNotIn('.form-control:is(#trosa, #trosa *){\n  width: 100%;', v3)
+        # Excluded surfaces keep their own box on purpose.
+        for kept in ('.search-box input,', '.filter-select,', '.settings-number-grid input,',
+                     '.inbox-question-decision input,'):
+            self.assertIn(kept, v2)
+        self.assertIn('.settings-inline-field select:is(#trosa, #trosa *)', v3)
+
+        # Form actions carry the room language: one solid ink pill, text otherwise.
+        self.assertIn('cw-act cw-primary btn-sm" id="followHistorySubmit"', index)
+        self.assertIn('cw-act cw-primary" id="saveInboxReplyButton"', index)
+        self.assertIn('cw-act cw-primary" type="button" id="appDialogSubmit"', index)
+        self.assertIn("'<div class=\"contact-edit-actions\"><button class=\"btn btn-primary cw-act cw-primary btn-sm\"", javascript)
+        self.assertIn('cw-link contact-edit-cancel', javascript)
+
+        # The modal reads as quiet paper: hairline footer, no grey strip.
+        footer = v3[v3.index('.modal-footer:is(#trosa, #trosa *){'):]
+        self.assertIn('background: transparent !important;', footer)
+        self.assertIn('border-top: 1px solid var(--dl-hair-2) !important;', footer)
+
     def test_frozen_customer_intelligence_is_not_a_user_module(self):
         spec = importlib.util.spec_from_file_location('crm_app_frozen_modules_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
@@ -2338,7 +2374,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         index = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
         self.assertIn('id="followHistorySubmit" onclick="addFollowHistory()"', index)
-        self.assertIn('<button type="button" class="btn btn-primary btn-sm" id="followHistorySubmit"', index)
+        self.assertIn('<button type="button" class="btn btn-primary cw-act cw-primary btn-sm" id="followHistorySubmit"', index)
         handler = javascript[javascript.index('async function addFollowHistory()'):javascript.index('async function saveCustomerWorkspaceAndExit()')]
         self.assertIn("button.dataset.submitting === 'true'", handler)
         self.assertIn("button.dataset.submitting = 'true'", handler)
