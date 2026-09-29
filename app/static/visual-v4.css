@@ -1086,7 +1086,7 @@
 #trosa .batch-bar.show { display: flex; }
 /* the customer workspace draws its own 1px ring (visual-v5 §5) */
 #trosa :focus-visible:not(.cw-app *, .modal .form-control, .modal .rich-text-area) {
-  outline: 1px solid var(--dl-gold) !important;
+  outline: 1px solid var(--dl-focus) !important;
   outline-offset: 4px !important;
   border-radius: 2px;
 }

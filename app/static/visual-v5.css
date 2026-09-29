@@ -271,7 +271,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-#trosa .room-index .global-page-search.global-page-search.global-page-search:focus-within { border-bottom-color: var(--dl-gold) !important; }
+#trosa .room-index .global-page-search.global-page-search.global-page-search:focus-within { border-bottom-color: var(--dl-focus) !important; }
 #trosa .room-index .global-page-search.global-page-search input {
   display: block !important;
   width: 100% !important;
@@ -706,7 +706,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 }
 #trosa #customerEditModal.show .cw-app { animation: cw-arrive .45s var(--room-ease); }
 @keyframes cw-arrive { from { opacity: 0; } to { opacity: 1; } }
-#trosa #customerEditModal :focus-visible { outline: 1px solid var(--dl-gold); outline-offset: 4px; }
+#trosa #customerEditModal :focus-visible { outline: 1px solid var(--dl-focus); outline-offset: 4px; }
 #trosa #customerEditModal .cw-app:focus,
 #trosa #customerEditModal .cw-row:focus-visible,
 #trosa #customerEditModal .cw-prow:focus-visible { outline: none; }
@@ -1113,7 +1113,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   color: inherit;
   font: inherit;
 }
-#trosa #customerEditModal .cw-level input:focus { outline: none; border-bottom-color: var(--dl-gold); }
+#trosa #customerEditModal .cw-level input:focus { outline: none; border-bottom-color: var(--dl-focus); }
 #trosa #customerEditModal .customer-level-quick-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
 #trosa #customerEditModal .customer-level-quick-feedback.is-visible { opacity: 1; }
 #trosa #customerEditModal .customer-level-quick-feedback.is-error { color: #a0654a; }
@@ -1370,7 +1370,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .form-group select:focus,
 #trosa #customerEditModal .form-group textarea:focus {
   outline: none;
-  border-bottom-color: var(--dl-gold);
+  border-bottom-color: var(--dl-focus);
   box-shadow: none;
 }
 #trosa .modal .form-control:disabled,
@@ -1573,7 +1573,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   border: 1px solid var(--dl-hair-2);
   border-radius: 4px;
 }
-#trosa .modal .inbox-reply-textarea.form-control:focus { border-color: var(--dl-hair-2) var(--dl-hair-2) var(--dl-gold); }
+#trosa .modal .inbox-reply-textarea.form-control:focus { border-color: var(--dl-hair-2) var(--dl-hair-2) var(--dl-focus); }
 
 /* secondary actions in a modal: plain words on the label's baseline */
 #trosa .modal .text-action {
