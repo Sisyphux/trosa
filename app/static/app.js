@@ -3616,9 +3616,399 @@ function arrangeOverdueReminders(button) {
   });
 }
 
+/* ============================================================================
+   Today — the tide: our one day, and where each customer's working hours fall.
+   The chart is the page's only instrument; the gold "now" line runs through it
+   and the table below. Nothing here is written back to the server: the timezone
+   is the one already stored on the customer, shown as inferred or manual.
+   ============================================================================ */
+var TIDE_WORK_START = 9;
+var TIDE_WORK_END = 18;
+var TIDE_WD_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+var TIDE_GROUP_LABELS = { open: '窗口已开', later: '稍后开窗', none: '今天没有窗口', unknown: '时区未知' };
+var TIDE_GROUP_ORDER = ['open', 'later', 'none', 'unknown'];
+var _tidePreview = null;          // minutes into our day, or null for "now"
+var _tideWindowsCache = {};       // tz@dayStart -> [{start,end,rawStart,rawEnd}]
+var _tideActiveReminders = [];
+var _tideUpcomingCache = [];
+var _tideBound = false;
+var _todayRendered = false;
+
+function tideDayStartMs() {
+  var d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+function tideNowMin() { return (Date.now() - tideDayStartMs()) / 60000; }
+function tideActiveMin() { return _tidePreview == null ? tideNowMin() : _tidePreview; }
+
+// Intl is the only source of truth for offsets: DST is whatever the IANA zone
+// says it is at that instant. We never add our own DST rules.
+function tideDateParts(tz, ms) {
+  var p = {};
+  var parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short'
+  }).formatToParts(new Date(ms));
+  for (var i = 0; i < parts.length; i++) p[parts[i].type] = parts[i].value;
+  return {
+    y: Number(p.year), mo: Number(p.month), d: Number(p.day),
+    hh: parseInt(p.hour, 10) % 24, mm: Number(p.minute), ss: Number(p.second),
+    wd: p.weekday
+  };
+}
+function tideOffsetMs(tz, ms) {
+  var p = tideDateParts(tz, ms);
+  var asUTC = Date.UTC(p.y, p.mo - 1, p.d, p.hh, p.mm, p.ss);
+  return asUTC - Math.floor(ms / 1000) * 1000;
+}
+function tideWallToMs(tz, y, mo, d, hh, mm) {
+  var guess = Date.UTC(y, mo - 1, d, hh, mm, 0);
+  var off = tideOffsetMs(tz, guess);
+  var ms = guess - off;
+  var off2 = tideOffsetMs(tz, ms);
+  if (off2 !== off) ms = guess - off2;
+  return ms;
+}
+// Every Mon–Fri 09:00–18:00 local interval that touches our day, in minutes
+// from our midnight. Weekends are skipped; windows that cross our midnight are
+// clamped but keep their raw edges for honest labels.
+function tideWindowsForDay(tz, dayStartMs) {
+  var out = [];
+  var seen = {};
+  for (var k = -2; k <= 2; k++) {
+    var lp = tideDateParts(tz, dayStartMs + k * 86400000 + 12 * 3600000);
+    var key = lp.y + '-' + lp.mo + '-' + lp.d;
+    if (seen[key]) continue;
+    seen[key] = 1;
+    if (lp.wd === 'Sat' || lp.wd === 'Sun') continue;
+    var s = (tideWallToMs(tz, lp.y, lp.mo, lp.d, TIDE_WORK_START, 0) - dayStartMs) / 60000;
+    var e = (tideWallToMs(tz, lp.y, lp.mo, lp.d, TIDE_WORK_END, 0) - dayStartMs) / 60000;
+    if (e <= 0 || s >= 1440) continue;
+    out.push({ start: Math.max(0, s), end: Math.min(1440, e), rawStart: s, rawEnd: e });
+  }
+  out.sort(function(a, b) { return a.start - b.start; });
+  return out;
+}
+function tideWindows(tz) {
+  if (!tz) return [];
+  var key = tz + '@' + tideDayStartMs();
+  if (!_tideWindowsCache[key]) _tideWindowsCache[key] = tideWindowsForDay(tz, tideDayStartMs());
+  return _tideWindowsCache[key];
+}
+function tideIsWorking(tz, ms) {
+  var p = tideDateParts(tz, ms);
+  if (p.wd === 'Sat' || p.wd === 'Sun') return false;
+  var h = p.hh + p.mm / 60;
+  return h >= TIDE_WORK_START && h < TIDE_WORK_END;
+}
+function tideStateAt(tz, t) {
+  var wins = tideWindows(tz);
+  for (var i = 0; i < wins.length; i++) {
+    if (t >= wins[i].start && t < wins[i].end) {
+      return { k: 'open', left: wins[i].end - t, openAt: wins[i].start, closeAt: wins[i].end };
+    }
+  }
+  for (var j = 0; j < wins.length; j++) {
+    if (wins[j].start > t) return { k: 'later', inMin: wins[j].start - t, openAt: wins[j].start };
+  }
+  return { k: 'none' };
+}
+// The next window strictly after `fromMin`, searching our day then the next 8
+// days. s is the day offset from today (0 today, 1 tomorrow…).
+function tideNextWindow(tz, fromMin) {
+  var wins = tideWindows(tz);
+  for (var i = 0; i < wins.length; i++) if (wins[i].start > fromMin) return { s: 0, startMin: wins[i].start };
+  for (var s = 1; s <= 8; s++) {
+    var w = tideWindowsForDay(tz, tideDayStartMs() + s * 86400000);
+    if (w.length) return { s: s, startMin: w[0].start + s * 1440 };
+  }
+  return null;
+}
+function tideNextAfter(tz, closeAt) {
+  var wins = tideWindows(tz);
+  for (var i = 0; i < wins.length; i++) if (wins[i].start >= closeAt) return { s: 0, startMin: wins[i].start };
+  for (var s = 1; s <= 8; s++) {
+    var w = tideWindowsForDay(tz, tideDayStartMs() + s * 86400000);
+    if (w.length) return { s: s, startMin: w[0].start + s * 1440 };
+  }
+  return null;
+}
+function tideDayLabel(s) {
+  if (s === 0) return '今天';
+  if (s === 1) return '明天';
+  if (s === 2) return '后天';
+  return TIDE_WD_LABELS[new Date(tideDayStartMs() + s * 86400000).getDay()];
+}
+function tideClock(minutes) {
+  var m = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  var h = Math.floor(m / 60), mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
+function tideDuration(min) {
+  min = Math.max(0, Math.round(min));
+  var h = Math.floor(min / 60), m = min % 60;
+  if (h && m) return h + ' 小时 ' + m + ' 分';
+  if (h) return h + ' 小时';
+  return m + ' 分';
+}
+function tideGroupOf(r, t) {
+  if (!r.timezone) return 'unknown';
+  return tideStateAt(r.timezone, t).k;
+}
+// A 窗口已开 (soonest to close first) → B 稍后开窗 (soonest to open first)
+// → C 今天没有窗口 (priority) → D 时区未知 (due date, never guessed).
+function tideOrderedGroups(reminders, t) {
+  var groups = { open: [], later: [], none: [], unknown: [] };
+  for (var i = 0; i < reminders.length; i++) {
+    var r = reminders[i];
+    var g = tideGroupOf(r, t);
+    var st = r.timezone ? tideStateAt(r.timezone, t) : null;
+    var next = (r.timezone && g === 'none') ? tideNextWindow(r.timezone, t) : null;
+    groups[g].push({ r: r, st: st, next: next });
+  }
+  var pr = function(x) { return Number(x.priority_score) || 0; };
+  groups.open.sort(function(a, b) { return (a.st.left - b.st.left) || (pr(b.r) - pr(a.r)); });
+  groups.later.sort(function(a, b) { return (a.st.inMin - b.st.inMin) || (pr(b.r) - pr(a.r)); });
+  groups.none.sort(function(a, b) { return (pr(b.r) - pr(a.r)) || String(a.r.remind_date || '').localeCompare(String(b.r.remind_date || '')); });
+  groups.unknown.sort(function(a, b) { return String(a.r.remind_date || '').localeCompare(String(b.r.remind_date || '')) || (pr(b.r) - pr(a.r)); });
+  return groups;
+}
+function tideStatusInfo(r, t) {
+  if (!r.timezone) return { cls: 'is-unknown', main: '时区未知', sub: '到客户资料里补时区' };
+  var st = tideStateAt(r.timezone, t);
+  if (st.k === 'open') {
+    var sub = '还剩 ' + tideDuration(st.left);
+    if (st.left <= 120) {
+      var nx = tideNextAfter(r.timezone, st.closeAt);
+      if (nx) sub += ' · 错过则等到 ' + tideDayLabel(nx.s) + ' ' + tideClock(nx.startMin);
+    }
+    return { cls: 'is-open', main: '开窗中', sub: sub };
+  }
+  if (st.k === 'later') return { cls: 'is-later', main: tideClock(st.openAt) + ' 开窗', sub: '还有 ' + tideDuration(st.inMin) };
+  var n = tideNextWindow(r.timezone, t);
+  return { cls: 'is-none', main: '今天没有窗口', sub: n ? (tideDayLabel(n.s) + ' ' + tideClock(n.startMin) + ' 开窗') : '' };
+}
+function tideBandHtml(r, t) {
+  if (!r.timezone) return '';
+  var wins = tideWindows(r.timezone);
+  var html = '';
+  for (var i = 0; i < wins.length; i++) {
+    var w = wins[i];
+    var left = (w.start / 1440) * 100;
+    var width = ((w.end - w.start) / 1440) * 100;
+    var cls = 'tide-win';
+    if (t >= w.end) cls += ' is-gone';
+    else if (t >= w.start) cls += ' is-open';
+    html += '<span class="' + cls + '" style="left:' + left.toFixed(3) + '%;width:' + width.toFixed(3) + '%"></span>';
+  }
+  return html;
+}
+function tideTrackHtml(r, t) {
+  return tideBandHtml(r, t) + '<span class="tide-nowtick" aria-hidden="true"></span>';
+}
+function tideC3Html(r, t) {
+  var info = tideStatusInfo(r, t);
+  return '<b class="tide-status ' + info.cls + '">' + escapeHtml(info.main) + '</b>' +
+    (info.sub ? '<span class="tide-count">' + escapeHtml(info.sub) + '</span>' : '');
+}
+function tideWorkingCount(t) {
+  var rems = _tideActiveReminders || [];
+  var ms = tideDayStartMs() + t * 60000;
+  var total = 0, working = 0;
+  for (var i = 0; i < rems.length; i++) {
+    if (!rems[i].timezone) continue;
+    total++;
+    if (tideIsWorking(rems[i].timezone, ms)) working++;
+  }
+  return { total: total, working: working };
+}
+
+// The chart: how many counterparts are in working hours at each moment.
+function renderTideChart() {
+  var svg = document.getElementById('todayTideSvg');
+  if (!svg) return;
+  var rems = _tideActiveReminders || [];
+  var tzs = [];
+  for (var i = 0; i < rems.length; i++) {
+    if (rems[i].timezone && tzs.indexOf(rems[i].timezone) < 0) tzs.push(rems[i].timezone);
+  }
+  var dayStart = tideDayStartMs();
+  var N = 145, step = 10;
+  var counts = [];
+  for (var s = 0; s < N; s++) {
+    var ms = dayStart + s * step * 60000;
+    var c = 0;
+    for (var z = 0; z < tzs.length; z++) if (tideIsWorking(tzs[z], ms)) c++;
+    counts.push(c);
+  }
+  var smooth = [];
+  for (var s2 = 0; s2 < N; s2++) {
+    var acc = 0, n = 0;
+    for (var k = -4; k <= 4; k++) { var j = s2 + k; if (j >= 0 && j < N) { acc += counts[j]; n++; } }
+    smooth.push(acc / n);
+  }
+  var peak = 0;
+  for (var s3 = 0; s3 < N; s3++) if (smooth[s3] > peak) peak = smooth[s3];
+  if (peak <= 0) peak = 1;
+  var pts = [];
+  for (var s4 = 0; s4 < N; s4++) pts.push((s4 * step).toFixed(1) + ' ' + (92 - (smooth[s4] / peak) * 78).toFixed(2));
+  var line = 'M' + pts.join(' L');
+  var area = line + ' L1440 96 L0 96 Z';
+  var nowX = Math.max(0, Math.min(1440, tideNowMin()));
+  var gridv = '';
+  for (var h = 0; h <= 24; h += 3) gridv += '<line class="tide-gridv" x1="' + (h * 60) + '" y1="6" x2="' + (h * 60) + '" y2="92"></line>';
+  svg.innerHTML =
+    '<defs>' +
+      '<linearGradient id="tideFill" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop class="tide-grad-a" offset="0"></stop>' +
+        '<stop class="tide-grad-b" offset="1"></stop>' +
+      '</linearGradient>' +
+      '<clipPath id="tideFutureClip"><rect x="' + nowX.toFixed(1) + '" y="0" width="' + Math.max(0, 1440 - nowX).toFixed(1) + '" height="96"></rect></clipPath>' +
+      '<clipPath id="tidePastClip"><rect x="0" y="0" width="' + nowX.toFixed(1) + '" height="96"></rect></clipPath>' +
+    '</defs>' +
+    gridv +
+    '<path class="tide-fill" clip-path="url(#tideFutureClip)" d="' + area + '"></path>' +
+    '<path class="tide-curve" clip-path="url(#tideFutureClip)" d="' + line + '"></path>' +
+    '<path class="tide-curve tide-ebb" clip-path="url(#tidePastClip)" d="' + line + '"></path>' +
+    '<line class="tide-base" x1="0" y1="92" x2="1440" y2="92"></line>';
+  var hrs = document.querySelector('#todayTideChart .tide-hrs');
+  if (hrs) {
+    var html = '';
+    for (var hh = 0; hh <= 24; hh += 3) html += '<span style="left:' + ((hh / 24) * 100).toFixed(2) + '%">' + (hh < 10 ? '0' : '') + hh + ':00</span>';
+    hrs.innerHTML = html;
+  }
+  updateTideLines();
+}
+
+function updateTideLines() {
+  var nowX = Math.max(0, Math.min(1, tideNowMin() / 1440));
+  var pvX = Math.max(0, Math.min(1, tideActiveMin() / 1440));
+  var nowEl = document.getElementById('todayTideNowline');
+  if (nowEl) nowEl.style.left = 'calc(var(--c1) + (100% - var(--c1) - var(--c3)) * ' + nowX.toFixed(5) + ')';
+  var pvEl = document.getElementById('todayTidePreviewline');
+  if (pvEl) pvEl.style.left = 'calc(var(--c1) + (100% - var(--c1) - var(--c3)) * ' + pvX.toFixed(5) + ')';
+  var root = document.getElementById('todayRoom');
+  if (root) root.classList.toggle('is-previewing', _tidePreview != null);
+  var ticks = document.querySelectorAll('#todayReminders .tide-nowtick');
+  for (var i = 0; i < ticks.length; i++) ticks[i].style.left = (nowX * 100).toFixed(3) + '%';
+}
+
+function updateTideCaption() {
+  var t = tideActiveMin();
+  var w = tideWorkingCount(t);
+  var label = _tidePreview == null ? ('现在 ' + tideClock(t)) : ('预演 ' + tideClock(t));
+  var text = w.total ? (label + ' · ' + w.working + ' / ' + w.total + ' 位对方在工作时间') : (label + ' · 还没有客户设置时区');
+  var el = document.getElementById('todayTideCaption');
+  if (el) el.textContent = text;
+  var chart = document.getElementById('todayTideChart');
+  if (chart) {
+    chart.setAttribute('aria-valuenow', String(Math.round(t)));
+    chart.setAttribute('aria-valuetext', label + '，' + w.working + ' 位在工作时间');
+  }
+  updateTideLines();
+}
+
+function setTidePreview(minutes) {
+  var m = Math.max(0, Math.min(1439, Math.round(minutes)));
+  if (_tidePreview === m) return;
+  _tidePreview = m;
+  updateTideCaption();
+  applyTodayGroups();
+  updateTodayFocusClock();
+}
+function clearTidePreview() {
+  if (_tidePreview == null) return;
+  _tidePreview = null;
+  updateTideCaption();
+  applyTodayGroups();
+  updateTodayFocusClock();
+}
+function tideMinFromX(clientX) {
+  var chart = document.getElementById('todayTideChart');
+  if (!chart) return 0;
+  var rect = chart.getBoundingClientRect();
+  if (!rect.width) return 0;
+  var x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return Math.round((x * 1440) / 15) * 15;
+}
+function showTideGhost(clientX) {
+  var el = document.getElementById('todayTideGhostline');
+  var root = document.getElementById('todayRoom');
+  if (!el) return;
+  el.style.left = 'calc(var(--c1) + (100% - var(--c1) - var(--c3)) * ' + Math.max(0, Math.min(1, tideMinFromX(clientX) / 1440)).toFixed(5) + ')';
+  if (root) root.classList.add('is-ghosting');
+}
+function hideTideGhost() {
+  var root = document.getElementById('todayRoom');
+  if (root) root.classList.remove('is-ghosting');
+}
+function tideSyncNarrow() {
+  var chart = document.getElementById('todayTideChart');
+  if (!chart) return;
+  var narrow = !!(window.matchMedia && window.matchMedia('(max-width: 820px)').matches);
+  chart.setAttribute('tabindex', narrow ? '-1' : '0');
+  chart.setAttribute('aria-hidden', narrow ? 'true' : 'false');
+  if (narrow) clearTidePreview();
+}
+function initTodayTide() {
+  if (_tideBound) return;
+  var chart = document.getElementById('todayTideChart');
+  if (!chart) return;
+  _tideBound = true;
+  var dragging = false;
+  chart.addEventListener('pointerdown', function(e) {
+    dragging = true;
+    if (chart.setPointerCapture) { try { chart.setPointerCapture(e.pointerId); } catch (err) {} }
+    setTidePreview(tideMinFromX(e.clientX));
+    if (e.cancelable) e.preventDefault();
+  });
+  chart.addEventListener('pointermove', function(e) {
+    if (dragging) setTidePreview(tideMinFromX(e.clientX));
+    else showTideGhost(e.clientX);
+  });
+  chart.addEventListener('pointerup', function() { dragging = false; hideTideGhost(); });
+  chart.addEventListener('pointercancel', function() { dragging = false; hideTideGhost(); });
+  chart.addEventListener('pointerleave', function() { if (!dragging) hideTideGhost(); });
+  chart.addEventListener('keydown', function(e) {
+    var base = _tidePreview == null ? tideNowMin() : _tidePreview;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      var step = e.shiftKey ? 180 : 30;
+      setTidePreview(base + (e.key === 'ArrowRight' ? step : -step));
+      e.preventDefault();
+    } else if (e.key === 'Home' || e.key === 'Escape') {
+      clearTidePreview();
+      e.preventDefault();
+    }
+  });
+  tideSyncNarrow();
+  window.addEventListener('resize', tideSyncNarrow);
+  if (window.matchMedia) {
+    try { window.matchMedia('(max-width: 820px)').addEventListener('change', tideSyncNarrow); } catch (err) {}
+  }
+}
+function updateTodayFocusClock(r) {
+  var el = document.getElementById('todayDockClock');
+  if (!el) return;
+  var rem = r || (_tideActiveReminders || [])[0];
+  if (!rem) { el.innerHTML = ''; return; }
+  if (!rem.timezone) {
+    el.innerHTML = '<span class="micro">对方当地时间</span><span class="tide-clock">—</span><span class="tide-clock-note">时区未知，可到客户资料补充</span>';
+    return;
+  }
+  var ms = tideDayStartMs() + tideActiveMin() * 60000;
+  var p = tideDateParts(rem.timezone, ms);
+  var working = tideIsWorking(rem.timezone, ms);
+  el.innerHTML = '<span class="micro">对方当地时间</span><span class="tide-clock">' +
+    (p.hh < 10 ? '0' : '') + p.hh + ':' + (p.mm < 10 ? '0' : '') + p.mm + '</span>' +
+    '<span class="tide-clock-note">' + (working ? '工作时间' : '非工作时间') + ' · ' + escapeHtml(rem.timezone) + '</span>';
+}
+
 async function loadDashboard() {
   _pageDataLoadedAt = Date.now();
   _todayFactsCache = {};
+  initTodayTide();
   var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
@@ -3630,10 +4020,11 @@ async function loadDashboard() {
   clearError();
 
   // Keep each panel independent. A failed optional section must not turn the
-  // whole workbench into a misleading “没有待办” state.
+  // whole workbench into a misleading “没有待办” state. The two reminder reads
+  // are settled separately so a failed “未来 14 天” never blanks the table.
   var requests = await Promise.allSettled([
     api('/api/stats'),
-    Promise.all([api('/api/reminders/today'), api('/api/reminders/upcoming')]),
+    Promise.allSettled([api('/api/reminders/today'), api('/api/reminders/upcoming')]),
     api('/api/logs?limit=8'),
     api('/api/my-weekly-logs')
   ]);
@@ -3665,16 +4056,30 @@ async function loadDashboard() {
   }
 
   var reminderResult = requests[1];
-  if (reminderResult.status === 'fulfilled') {
-    dashboardReminders = reminderResult.value[0] || [];
-    var upcoming = reminderResult.value[1] || [];
+  var todayRes = reminderResult.status === 'fulfilled' ? reminderResult.value[0] : { status: 'rejected' };
+  var upRes = reminderResult.status === 'fulfilled' ? reminderResult.value[1] : { status: 'rejected' };
+  var upcoming = upRes.status === 'fulfilled' ? (upRes.value || []) : [];
+  _tideUpcomingCache = upcoming;
+  if (todayRes.status === 'fulfilled') {
+    dashboardReminders = todayRes.value || [];
+    _todayRendered = true;
+    clearTodayStale();
     updateTodaySummary(dashboardReminders);
     renderTodayTasks(dashboardReminders);
-    renderTodaySchedule(dashboardReminders.concat(upcoming));
+  } else if (_todayRendered) {
+    // Keep what is already on screen; say that the refresh failed instead of
+    // painting an empty day.
+    renderTodayStale();
   } else {
     dashboardReminders = [];
     renderTodayError();
-    showError('今日跟进暂时无法加载；待办未标记完成，客户数据未清空。');
+    showError('今日跟进暂时无法加载；待办没有被标记完成，客户数据也没有被清空。');
+  }
+  if (upRes.status === 'fulfilled') {
+    clearTodayUpcomingError();
+    renderTodaySchedule((dashboardReminders || []).concat(upcoming));
+  } else {
+    renderTodayUpcomingError();
   }
 
   var logsResult = requests[2];
@@ -3694,15 +4099,64 @@ function renderTodayError() {
   setTodayWorkspaceEmpty(true);
   updateTodayQueueLabel([]);
   var remEl = document.getElementById('todayReminders');
-  if (remEl) remEl.innerHTML = '';
+  if (remEl) {
+    remEl.innerHTML = '<div class="today-load-error" role="status"><strong>今天的待办没有加载出来</strong><span>这可能是网络或服务问题，不是「今天没有待办」。待办没有被标记完成，客户数据也没有被清空。</span></div>';
+  }
   var focus = document.getElementById('todayFocus');
-  if (focus) focus.innerHTML = '';
+  if (focus) {
+    focus.innerHTML = '';
+    delete focus.dataset.reminderId;
+    delete focus.dataset.customerId;
+  }
   var wide = document.getElementById('todayWideDetail');
   if (wide) {
     wide.innerHTML = '';
     delete wide.dataset.reminderId;
     delete wide.dataset.customerId;
   }
+  renderTideChart();
+  updateTideCaption();
+}
+
+function renderTodayStale() {
+  var el = document.getElementById('todayStaleBanner');
+  if (!el) return;
+  var at = _pageDataLoadedAt ? new Date(_pageDataLoadedAt) : null;
+  var hhmm = at ? (('0' + at.getHours()).slice(-2) + ':' + ('0' + at.getMinutes()).slice(-2)) : '';
+  el.hidden = false;
+  el.innerHTML = '<span>刷新失败 · 显示的是 ' + escapeHtml(hhmm) + ' 加载的内容，没有丢失任何待办</span><button type="button" class="btn btn-sm" onclick="loadDashboard()">重试</button>';
+}
+
+function clearTodayStale() {
+  var el = document.getElementById('todayStaleBanner');
+  if (el) { el.hidden = true; el.innerHTML = ''; }
+}
+
+function renderTodayUpcomingError() {
+  var el = document.getElementById('todayUpcomingError');
+  if (el) {
+    el.hidden = false;
+    el.innerHTML = '<span>未来 14 天暂时无法加载。</span><button type="button" class="btn btn-sm" onclick="reloadTodayUpcoming()">重试</button>';
+  }
+  var grid = document.getElementById('todayScheduleGrid');
+  if (grid) grid.innerHTML = '';
+  var detail = document.getElementById('todayScheduleDetail');
+  if (detail) detail.textContent = '加载失败后这里暂不显示';
+}
+
+function clearTodayUpcomingError() {
+  var el = document.getElementById('todayUpcomingError');
+  if (el) { el.hidden = true; el.innerHTML = ''; }
+}
+
+function reloadTodayUpcoming() {
+  clearTodayUpcomingError();
+  return api('/api/reminders/upcoming').then(function(upcoming) {
+    _tideUpcomingCache = upcoming || [];
+    renderTodaySchedule((dashboardReminders || []).concat(_tideUpcomingCache));
+  }).catch(function() {
+    renderTodayUpcomingError();
+  });
 }
 
 function setTodayWorkspaceEmpty(isEmpty) {
@@ -3714,14 +4168,22 @@ function setTodayWorkspaceEmpty(isEmpty) {
 
 function renderTodayTasks(reminders) {
   var remEl = document.getElementById('todayReminders');
+  if (!remEl) return;
+  _tideActiveReminders = reminders || [];
+  _tideWindowsCache = {};
   var isEmpty = !reminders || reminders.length === 0;
   setTodayWorkspaceEmpty(isEmpty);
   updateTodayQueueLabel(reminders);
   if (isEmpty) {
     toggleTodayQueue(false);
-    remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong></div>';
-    document.getElementById('todayFocus').innerHTML = '<div class="empty-state"><p>今天没有待处理事项</p></div>';
-    delete document.getElementById('todayFocus').dataset.reminderId;
+    clearTidePreview();
+    remEl.innerHTML = '<div class="today-clear"><strong>今天已经处理完了</strong><span>' + escapeHtml(tideEmptyNextText()) + '</span></div>';
+    var focusEmpty = document.getElementById('todayFocus');
+    if (focusEmpty) {
+      focusEmpty.innerHTML = '<div class="empty-state"><p>今天没有待处理事项</p></div>';
+      delete focusEmpty.dataset.reminderId;
+      delete focusEmpty.dataset.customerId;
+    }
     updateTodayRoomStatus();
     var wideEmpty = document.getElementById('todayWideDetail');
     if (wideEmpty) {
@@ -3729,6 +4191,8 @@ function renderTodayTasks(reminders) {
       delete wideEmpty.dataset.reminderId;
       delete wideEmpty.dataset.customerId;
     }
+    renderTideChart();
+    updateTideCaption();
     return;
   }
 
@@ -3740,27 +4204,47 @@ function renderTodayTasks(reminders) {
     key: function(item) { return 'reminder-' + item.id; },
     render: function(item, index) { return buildTodayTaskRow(item, index, Number(item.id) === selectedId); }
   });
-  initTodayTaskSorting();
   applyTodayGroups();
+  renderTideChart();
+  updateTideCaption();
   renderTodayFocus(reminders.filter(function(item) { return Number(item.id) === selectedId; })[0] || reminders[0]);
 }
 
+// One last thing to look forward to, when the day itself is clear.
+function tideEmptyNextText() {
+  var up = _tideUpcomingCache || [];
+  if (!up.length) return '接下来 14 天也没有安排。';
+  var first = up[0];
+  var date = String(first.remind_date || '').substring(0, 10);
+  var who = first.customer_company || first.customer_name || '客户';
+  return '下一件：' + formatChineseDate(date) + ' · ' + who;
+}
+
 function buildTodayTaskRow(r, index, selected) {
-    var today = localDateString();
-    var overdue = (r.remind_date || '').substring(0, 10) < today;
-    var name = r.customer_company || r.customer_name || '未命名客户';
-    var action = r.task_title || r.title || r.content || '联系客户';
-    var context = escapeHtml(r.why_today || '') + (r.last_activity ? (r.why_today ? ' · 最近：' : '最近：') + renderRichText(r.last_activity) : '');
-    var customerId = Number(r.customer_id);
-    var isMultiSelected = selectedTodayCustomers.has(customerId);
-    return '<div class="today-task-row' + (selected ? ' selected' : '') + (isMultiSelected ? ' is-multi-selected' : '') + '" data-reminder-id="' + r.id + '" data-customer-id="' + customerId + '" data-remind-date="' + escapeHtml(String(r.remind_date || '').substring(0, 10)) + '" data-due-group="' + todayDueGroup(r.remind_date) + '" role="button" tabindex="0" onclick="selectTodayReminder(' + r.id + ')" onkeydown="if(event.target===this&&(event.key===\'Enter\'||event.key===\' \')){event.preventDefault();selectTodayReminder(' + r.id + ')}">' +
-      '<span class="today-task-index-wrap">' +
-        '<span class="today-task-index">' + (index + 1) + '</span>' +
-        '<input type="checkbox" class="table-checkbox today-task-checkbox" data-id="' + customerId + '" onclick="event.stopPropagation()" onchange="updateTodaySelection()"' + (isMultiSelected ? ' checked' : '') + ' aria-label="选择 ' + escapeHtml(name) + '">' +
-      '</span>' +
-      '<span class="today-task-copy"><button type="button" class="today-task-customer" onclick="event.stopPropagation();openEditModal(' + customerId + ')">' + escapeHtml(name) + '</button><strong>' + escapeHtml(action) + '</strong><span>' + context + '</span></span>' +
-      '<span class="today-task-date' + (overdue ? ' overdue' : '') + '">' + (overdue ? formatChineseDate(r.remind_date) : '今天') + '</span>' +
-      '</div>';
+  var today = localDateString();
+  var date = String(r.remind_date || '').substring(0, 10);
+  var overdueDays = date ? Math.round((new Date(today + 'T00:00:00') - new Date(date + 'T00:00:00')) / 86400000) : 0;
+  var overdueLabel = overdueDays > 0 ? ('逾期 ' + overdueDays + ' 天') : '';
+  var name = r.customer_company || r.customer_name || '未命名客户';
+  var action = r.task_title || r.title || r.content || '联系客户';
+  var customerId = Number(r.customer_id);
+  var isMultiSelected = selectedTodayCustomers.has(customerId);
+  var t = tideActiveMin();
+  return '<div class="today-task-row tide-row' + (selected ? ' selected' : '') + (isMultiSelected ? ' is-multi-selected' : '') + '" data-reminder-id="' + r.id + '" data-customer-id="' + customerId + '" data-remind-date="' + escapeHtml(date) + '" data-due-group="' + todayDueGroup(r.remind_date) + '" data-tide-state="' + (r.timezone ? tideGroupOf(r, t) : 'unknown') + '" role="button" tabindex="0" onclick="selectTodayReminder(' + r.id + ')" onkeydown="if(event.target===this&&(event.key===\'Enter\'||event.key===\' \')){event.preventDefault();selectTodayReminder(' + r.id + ')}">' +
+    '<div class="tide-c1">' +
+      '<div class="tide-c1-top">' +
+        '<span class="today-task-index-wrap">' +
+          '<span class="today-task-index">' + (index + 1) + '</span>' +
+          '<input type="checkbox" class="table-checkbox today-task-checkbox" data-id="' + customerId + '" onclick="event.stopPropagation()" onchange="updateTodaySelection()"' + (isMultiSelected ? ' checked' : '') + ' aria-label="选择 ' + escapeHtml(name) + '">' +
+        '</span>' +
+        '<span class="tide-name"><button type="button" onclick="event.stopPropagation();openEditModal(' + customerId + ')">' + escapeHtml(name) + '</button></span>' +
+        (overdueLabel ? '<span class="tide-overdue">' + escapeHtml(overdueLabel) + '</span>' : '') +
+      '</div>' +
+      '<div class="tide-c1-bot"><span class="tide-action">' + escapeHtml(action) + '</span></div>' +
+    '</div>' +
+    '<div class="tide-track">' + tideTrackHtml(r, t) + '</div>' +
+    '<div class="tide-c3">' + tideC3Html(r, t) + '</div>' +
+  '</div>';
 }
 
 function todayTaskIdsFromDom() {
@@ -3774,12 +4258,9 @@ function refreshTodayTaskIndexes() {
     var indexEl = row.querySelector('.today-task-index');
     if (indexEl) indexEl.textContent = index + 1;
   });
-  applyTodayGroups();
 }
 
-// The agenda is one continuous list, but the day it belongs to is the first
-// thing a person needs to read. Group headings are inserted as siblings of the
-// rows and rebuilt after any render or reorder, so they can never go stale.
+// The day a task belongs to is still the first thing a person reads.
 function todayDueGroup(remindDate) {
   var date = String(remindDate || '').substring(0, 10);
   if (!date) return 'unscheduled';
@@ -3791,24 +4272,60 @@ function todayDueGroup(remindDate) {
 
 var TODAY_DUE_GROUP_LABELS = { overdue: '已逾期', today: '今天', later: '稍后', unscheduled: '未安排日期' };
 
+// Rebuild the table at the active moment: the three tide groups plus the quiet
+// "timezone unknown" group, then reflow with FLIP so the movement reads.
 function applyTodayGroups() {
   var list = document.getElementById('todayReminders');
   if (!list) return;
-  Array.prototype.slice.call(list.querySelectorAll('.today-group-label')).forEach(function(node) { node.remove(); });
-  var rows = Array.prototype.slice.call(list.querySelectorAll('.today-task-row'));
-  var lastGroup = null;
-  rows.forEach(function(row, index) {
-    var group = row.dataset.dueGroup || todayDueGroup(row.dataset.remindDate);
-    row.dataset.dueGroup = group;
-    if (group === lastGroup) return;
-    lastGroup = group;
+  var t = tideActiveMin();
+  var rowEls = Array.prototype.slice.call(list.querySelectorAll('.today-task-row'));
+  if (!rowEls.length) return;
+  var byId = {};
+  rowEls.forEach(function(row) { byId[row.dataset.reminderId] = row; });
+  var groups = tideOrderedGroups(_tideActiveReminders, t);
+  var reduceMotion = document.documentElement.classList.contains('reduce-motion') ||
+    !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var before = {};
+  if (!reduceMotion) rowEls.forEach(function(row) { before[row.dataset.reminderId] = row.getBoundingClientRect().top; });
+
+  var frag = document.createDocumentFragment();
+  TIDE_GROUP_ORDER.forEach(function(key) {
+    var entries = groups[key];
+    if (!entries || !entries.length) return;
     var label = document.createElement('div');
-    label.className = 'today-group-label';
-    label.dataset.dueGroup = group;
+    label.className = 'today-group-label' + (key === 'open' ? ' is-open' : '');
     label.setAttribute('role', 'presentation');
-    label.innerHTML = '<span>' + (TODAY_DUE_GROUP_LABELS[group] || '') + '</span>';
-    list.insertBefore(label, row);
+    label.innerHTML = '<span>' + TIDE_GROUP_LABELS[key] + ' · ' + entries.length + '</span>';
+    frag.appendChild(label);
+    entries.forEach(function(entry) {
+      var row = byId[entry.r.id];
+      if (!row) return;
+      row.dataset.tideState = entry.r.timezone ? entry.st.k : 'unknown';
+      row.dataset.dueGroup = todayDueGroup(entry.r.remind_date);
+      var c3 = row.querySelector('.tide-c3');
+      if (c3) c3.innerHTML = tideC3Html(entry.r, t);
+      var track = row.querySelector('.tide-track');
+      if (track) track.innerHTML = tideTrackHtml(entry.r, t);
+      frag.appendChild(row);
+    });
   });
+  list.textContent = '';
+  list.appendChild(frag);
+  refreshTodayTaskIndexes();
+
+  if (!reduceMotion) {
+    rowEls.forEach(function(row) {
+      var from = before[row.dataset.reminderId];
+      if (from == null || !row.animate) return;
+      var dy = from - row.getBoundingClientRect().top;
+      if (!dy) return;
+      row.animate(
+        [{ transform: 'translateY(' + dy + 'px)' }, { transform: 'translateY(0)' }],
+        { duration: 520, easing: 'cubic-bezier(.22,.61,.36,1)' }
+      );
+    });
+  }
+  updateTideLines();
 }
 
 var _todaySortRetryIds = null;
@@ -4148,8 +4665,10 @@ function renderTodayFocus(r) {
       '<button type="button" class="room-act" onclick="openEditModal(' + Number(r.customer_id) + ')">查看客户</button>' +
       (website ? '<a class="room-act" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') +
     '</div>' +
-    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
+    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>' +
+    '<div class="tide-dock-clock" id="todayDockClock"></div>';
   renderTodayWideDetail(r, name, meta, website);
+  updateTodayFocusClock(r);
   updateTodayRoomStatus();
   if (window.refreshDaylightRest) window.refreshDaylightRest();
 }
@@ -4178,6 +4697,7 @@ function updateTodayRoomStatus() {
 function updateTodayQueueLabel(reminders) {
   var label = document.getElementById('todayQueueLabel');
   var toggle = document.getElementById('todayQueueToggle');
+  if (!label && !toggle) return;
   var count = (reminders || []).length;
   var today = localDateString();
   var overdue = (reminders || []).filter(function(item) { return String(item.remind_date || '').substring(0, 10) < today; }).length;
@@ -4210,7 +4730,7 @@ document.addEventListener('keydown', function(e) {
   if (isRoomIndexOpen() || document.querySelector('.modal-overlay.show')) return;
   if (e.key === '[') { e.preventDefault(); stepTodayReminder(-1); }
   else if (e.key === ']') { e.preventDefault(); stepTodayReminder(1); }
-  else if (e.key === 'Escape') toggleTodayQueue(false);
+  else if (e.key === 'Escape') { clearTidePreview(); toggleTodayQueue(false); }
 });
 
 var _todayFactsToken = 0;

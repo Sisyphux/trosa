@@ -140,11 +140,11 @@ await customerModal.waitFor({state: 'hidden', timeout: 15000});
 // lookup to the Today container: an unscoped getByText can match the same text
 // in the customer workspace that is still in the DOM while its modal closes,
 // which made this assertion pass (or fail) for the wrong reason.
+// The tide renders every due row directly in the table; the old queue drawer
+// (#todayQueueToggle / #todayQueue) no longer exists, so the assertions below
+// read the row where it is actually drawn. The assertion itself is unchanged.
 await gotoPage('dashboard');
 await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
-// The room holds one due customer; the others wait in the queue drawer.
-await page.locator('#todayQueueToggle').click();
-await page.locator('#todayQueue.is-open').waitFor({state: 'visible', timeout: 15000});
 const todayTask = page.locator('#page-dashboard')
   .getByText('Browser acceptance: send sample quotation', {exact: true}).first();
 await todayTask.waitFor({state: 'visible', timeout: 15000});

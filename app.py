@@ -2279,6 +2279,52 @@ def _clean_task_title(reminder):
     return title or f'联系 {customer_name or "客户"}'
 
 
+def _attach_customer_timezones(conn, reminders):
+    """Expose each customer's display timezone for the Today tide.
+
+    The customer profile is the only place that decides a timezone (a country
+    lookup marked ``inferred`` or a manual pick).  Today never guesses here:
+    a customer with no stored timezone stays empty and is grouped separately by
+    the UI, so an inference is never presented as a business fact and nothing is
+    written back.
+    """
+    for reminder in reminders:
+        reminder['timezone'] = ''
+        reminder['timezone_source'] = ''
+    customer_ids = list({reminder.get('customer_id') for reminder in reminders if reminder.get('customer_id')})
+    if not customer_ids:
+        return reminders
+    placeholders = ','.join('?' for _ in customer_ids)
+    table = 'trosa.customer_records' if postgres_mode() else 'customers'
+    cursor = conn.cursor()
+    stored = {}
+    try:
+        rows = cursor.execute(
+            f'SELECT id, timezone, timezone_source FROM {table} WHERE id IN ({placeholders})',
+            customer_ids,
+        ).fetchall()
+    except Exception:
+        rows = []
+    for row in rows:
+        try:
+            row_id = row['id']
+            zone = row['timezone'] or ''
+            source = row['timezone_source'] or ''
+        except (TypeError, KeyError, IndexError):
+            continue
+        stored[row_id] = (zone, source)
+    for reminder in reminders:
+        zone, source = stored.get(reminder.get('customer_id'), ('', ''))
+        try:
+            zone = _normalize_customer_timezone(zone) if zone else ''
+        except Exception:
+            zone = ''
+        if zone:
+            reminder['timezone'] = zone
+            reminder['timezone_source'] = source or _TIMEZONE_SOURCE_MANUAL
+    return reminders
+
+
 def _enrich_reminders(conn, reminders):
     """Connect each Task with the latest Activity and a short reason for Today."""
     cursor = conn.cursor()
@@ -2390,6 +2436,8 @@ def _enrich_reminders(conn, reminders):
             reminder['last_contact'] = latest['date']
         reminder['why_today'] = f'已逾期 {overdue_days} 天' if overdue_days else '今天到期'
         reminder['priority_score'] = level_weight.get(reminder.get('level'), 0) + min(overdue_days, 30) * 3
+
+    _attach_customer_timezones(conn, reminders)
 
     reminders.sort(key=lambda item: (
         0 if (item.get('manual_order') or 0) > 0 else 1,

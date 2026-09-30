@@ -420,83 +420,200 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .lit-group--focus.has-lit .lit-row:not(.is-lit) { opacity: .5; }
 
 /* ============================================================================
-   4. TODAY — the room
+   4. TODAY — the tide room
+   ----------------------------------------------------------------------------
+   One day, whose working hours fall where. The gold "now" line is the page's
+   only instrument: it runs through the chart and the table below it.
    ============================================================================ */
 
-#trosa .today-room {
+#trosa .today-tide {
+  --c1: clamp(190px, 21vw, 300px);
+  --c3: clamp(150px, 15vw, 210px);
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(0, 1fr);
-  column-gap: clamp(2rem, 5vw, 5rem);
   min-height: calc(100dvh - 2 * var(--room-bar));
   padding: clamp(1.2rem, 3.4vh, 2.4rem) var(--room-gut) clamp(1.4rem, 4vh, 3rem);
 }
-#trosa .today-room > .page-header.page-header {
-  grid-column: 1;
-  grid-row: 1;
+#trosa .today-tide .page-header.today-page-header {
   width: auto !important;
   max-width: none !important;
   margin: 0 !important;
-  padding: 0 0 clamp(1rem, 3vh, 2rem) !important;
+  padding: 0 0 clamp(.9rem, 2.4vh, 1.6rem) !important;
   display: block !important;
 }
-#trosa .today-room .today-masthead { display: block; }
-#trosa .today-room .today-eyebrow {
+#trosa .today-tide .today-masthead { display: block; }
+#trosa .today-tide .today-eyebrow {
   font-size: .6rem;
   letter-spacing: .2em;
   text-transform: uppercase;
-  color: var(--dl-faint);
+  color: var(--dl-mut);
 }
-#trosa .today-room .page-header h2 {
+#trosa .today-tide .page-header h2 {
   margin: .35rem 0 0 !important;
   font-size: clamp(1.1rem, 1.6vw, 1.42rem) !important;
   letter-spacing: -.008em !important;
   line-height: 1.25 !important;
 }
-#trosa .today-room .today-summary.today-summary {
+#trosa .today-tide .today-summary.today-summary {
   margin: .45rem 0 0 !important;
   font-size: .72rem !important;
   color: var(--dl-mut) !important;
 }
-#trosa .today-room .command-shelf.command-shelf.command-shelf { margin-top: .9rem !important; }
-#trosa .today-room .command-shelf.command-shelf.command-shelf::before,
-#trosa .today-room .command-shelf.command-shelf.command-shelf::after { content: none !important; display: none !important; }
+#trosa .today-tide .command-shelf.command-shelf.command-shelf { margin-top: .9rem !important; }
+#trosa .today-tide .command-shelf.command-shelf.command-shelf::before,
+#trosa .today-tide .command-shelf.command-shelf.command-shelf::after { content: none !important; display: none !important; }
 
-/* the wrappers only group; their children are the room's own grid items */
-#trosa .today-room .today-fullscreen-shell.today-fullscreen-shell,
-#trosa .today-room .today-context-stack.today-context-stack,
-#trosa .today-room #todayWideDetail.today-wide-detail,
-#trosa .today-room .today-workspace.today-workspace { display: contents !important; }
-
-#trosa .today-room .room-ident {
-  grid-column: 1;
-  grid-row: 2;
-  min-width: 0;
-  padding-bottom: clamp(.9rem, 2.4vh, 1.6rem);
+/* a refresh that failed keeps what is already on screen and says so, once */
+#trosa .today-tide .tide-stale-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 clamp(.8rem, 2vh, 1.2rem);
+  padding: .6rem .85rem;
+  border: 1px solid var(--dl-hair-strong);
+  border-left: 3px solid var(--dl-warn);
+  border-radius: var(--dl-r-sm);
+  background: var(--dl-paper-2);
+  font-size: .78rem;
+  color: var(--dl-ink-2);
 }
-#trosa .today-room .room-company {
+#trosa .today-tide .tide-stale-banner[hidden] { display: none; }
+
+/* two macro columns: the table, and the quiet rail */
+#trosa .today-tide .tide-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(210px, 19vw, 270px);
+  column-gap: clamp(1.6rem, 4vw, 4rem);
+  align-items: start;
+}
+#trosa .today-tide .tide-main { grid-column: 1; min-width: 0; }
+#trosa .today-tide .tide-later { grid-column: 2; min-width: 0; }
+
+/* the chart head */
+#trosa .today-tide .tide-chart-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: .45rem;
+}
+#trosa .today-tide .tide-chart-title { min-width: 0; }
+#trosa .today-tide .tide-caption {
+  margin-top: .18rem;
+  font-family: var(--room-serif);
+  font-size: clamp(1rem, 1.3vw, 1.16rem);
+  line-height: 1.3;
+  color: var(--dl-ink);
+}
+#trosa .today-tide .tide-chart-tools { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+#trosa .today-tide .tide-keys { font-size: .64rem; letter-spacing: .06em; color: var(--dl-mut); }
+#trosa .today-tide .tide-keys kbd {
+  font: inherit;
+  font-size: .64rem;
+  padding: .05rem .3rem;
+  margin: 0 .06rem;
+  border: 1px solid var(--dl-hair-strong);
+  border-radius: var(--dl-r-xs);
+  color: var(--dl-ink-2);
+  background: var(--dl-paper);
+}
+
+/* one shared grid: name | window track | status */
+#trosa .today-tide .tide-grid-head,
+#trosa .today-tide .tide-grid { display: grid; grid-template-columns: var(--c1) minmax(0, 1fr) var(--c3); }
+#trosa .today-tide .tide-grid-head {
+  padding-bottom: .4rem;
+  border-bottom: 1px solid var(--dl-hair);
+  font-size: .6rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-tide .tide-grid-head span:nth-child(3) { text-align: right; }
+#trosa .today-tide .tide-grid { position: relative; }
+
+/* the chart sits in the window column, above the rows */
+#trosa .today-tide .tide-chart-cell { grid-column: 2; grid-row: 1; min-width: 0; }
+#trosa .today-tide .tide-chart {
+  position: relative;
+  height: 118px;
+  cursor: crosshair;
+  touch-action: none;
+  outline: none;
+  border-radius: var(--dl-r-sm);
+}
+#trosa .today-tide .tide-chart:focus-visible { box-shadow: 0 0 0 2px var(--dl-focus); }
+#trosa .today-tide .tide-svg {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  bottom: 1.15rem;
+  width: 100%;
+  height: calc(100% - 1.15rem);
+  overflow: visible;
+}
+#trosa .today-tide .tide-hrs { position: absolute; left: 0; right: 0; bottom: 0; height: 1rem; }
+#trosa .today-tide .tide-hrs span {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: .58rem;
+  letter-spacing: .04em;
+  color: var(--dl-mut);
+  font-variant-numeric: tabular-nums;
+}
+#trosa .today-tide .tide-svg .tide-gridv { stroke: var(--dl-hair); stroke-width: 1; }
+#trosa .today-tide .tide-svg .tide-base { stroke: var(--dl-hair-strong); stroke-width: 1; }
+#trosa .today-tide .tide-svg .tide-curve {
+  fill: none;
+  stroke: var(--dl-ink);
+  stroke-width: 1.3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+#trosa .today-tide .tide-svg .tide-curve.tide-ebb { opacity: .28; }
+#trosa .today-tide .tide-svg .tide-fill { fill: url(#tideFill); }
+#trosa .today-tide .tide-svg .tide-grad-a { stop-color: var(--dl-gold); stop-opacity: .22; }
+#trosa .today-tide .tide-svg .tide-grad-b { stop-color: var(--dl-gold); stop-opacity: 0; }
+
+/* the now line: one gold thread through the chart and the table */
+#trosa .today-tide .tide-nowline,
+#trosa .today-tide .tide-previewline,
+#trosa .today-tide .tide-ghostline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  pointer-events: none;
+  transition: left .5s var(--room-ease);
+}
+#trosa .today-tide .tide-nowline { border-left: 1.5px solid var(--dl-gold); z-index: 3; }
+#trosa .today-tide .tide-previewline { border-left: 1.5px dashed var(--dl-gold-ink); z-index: 4; display: none; }
+#trosa .today-tide .tide-ghostline { border-left: 1px solid var(--dl-hair-strong); z-index: 2; display: none; }
+#trosa .today-tide.is-previewing .tide-previewline { display: block; }
+#trosa .today-tide.is-ghosting .tide-ghostline { display: block; }
+
+#trosa .today-tide .room-ident { min-width: 0; }
+#trosa .today-tide .room-company {
   margin: 0;
   font-family: var(--room-serif);
-  font-size: clamp(1.1rem, 1.6vw, 1.42rem);
+  font-size: clamp(1rem, 1.3vw, 1.2rem);
   font-weight: 400;
   line-height: 1.25;
   letter-spacing: -.008em;
   color: var(--dl-ink);
 }
-#trosa .today-room .room-lines {
-  margin: .65rem 0 0;
-  font-size: .62rem;
+#trosa .today-tide .room-lines {
+  margin: .5rem 0 0;
+  font-size: .6rem;
   letter-spacing: .14em;
-  line-height: 1.95;
+  line-height: 1.9;
   text-transform: uppercase;
-  color: var(--dl-faint);
+  color: var(--dl-mut);
 }
 
-/* the dim column of recent facts */
-#trosa .today-room .room-panel {
-  grid-column: 1;
-  grid-row: 3;
+/* the quiet column of recent facts, in the dock */
+#trosa .today-tide .room-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -574,12 +691,10 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 }
 
 /* the focal: what the light is holding */
-#trosa .today-room #todayFocus.today-room-focus.lit-anchor {
-  grid-column: 2;
-  grid-row: 2 / 4;
-  align-self: center;
+#trosa .today-tide #todayFocus.today-room-focus.lit-anchor {
   position: static !important;
-  width: min(640px, 100%);
+  width: auto;
+  min-width: 0;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
@@ -589,7 +704,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-#trosa .today-room #todayFocus.today-room-focus::before { content: none !important; display: none !important; }
+#trosa .today-tide #todayFocus.today-room-focus::before { content: none !important; display: none !important; }
 #trosa .room-k { display: block; color: var(--dl-gold) !important; letter-spacing: .3em !important; }
 #trosa .room-next {
   margin: .8rem 0 0 !important;
@@ -621,50 +736,187 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .room-act.primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
 #trosa .room-act.primary:hover { background: #37342c; color: var(--dl-paper); border-color: transparent; }
 #trosa .room-hint { margin: 1rem 0 0; font-size: .68rem; letter-spacing: .04em; color: var(--dl-mut); }
-#trosa .today-room .today-room-focus .empty-state { padding: 0 !important; }
+#trosa .today-tide .today-room-focus .empty-state { padding: 0 !important; }
 
-/* the queue: other due customers, one deliberate step away */
-#trosa .today-queue-toggle {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  align-self: start;
-  display: inline-flex;
+/* the rows: one per customer, in the same three columns as the chart */
+#trosa .today-tide #todayReminders { display: contents; }
+#trosa .today-tide #todayReminders > * { grid-column: 1 / -1; }
+#trosa .today-tide .tide-row {
+  display: grid;
+  grid-template-columns: var(--c1) minmax(0, 1fr) var(--c3);
   align-items: center;
-  gap: .45rem;
-  padding: .32rem .2rem;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  background: none;
-  color: var(--dl-mut);
-  font-size: .74rem;
-  letter-spacing: .05em;
+  padding: .58rem 0;
+  border-bottom: 1px solid var(--dl-hair-2);
+  border-radius: var(--dl-r-sm);
   cursor: pointer;
-  transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
+  transition: background .3s var(--room-ease), box-shadow .3s var(--room-ease);
 }
-#trosa .today-queue-toggle:hover:not(:disabled),
-#trosa .today-queue-toggle.is-open { color: var(--dl-ink); border-bottom-color: var(--dl-gold); }
-#trosa .today-queue-toggle:disabled { cursor: default; opacity: .7; }
-#trosa .today-queue-toggle:disabled .today-queue-caret { display: none; }
-#trosa .today-room .today-task-section#todayQueue {
-  display: none;
+#trosa .today-tide .tide-row:hover { background: rgba(255, 253, 247, .68); }
+#trosa .today-tide .tide-row.selected { background: var(--dl-gold-soft); box-shadow: inset 0 0 0 1px rgba(188, 144, 82, .28); }
+#trosa .today-tide .tide-row:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dl-focus); }
+#trosa .today-tide .tide-c1 { min-width: 0; padding-right: 1rem; }
+#trosa .today-tide .tide-c1-top { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+#trosa .today-tide .today-task-index-wrap { flex: none; display: inline-flex; align-items: baseline; gap: .35rem; }
+#trosa .today-tide .today-task-index { font-size: .62rem; color: var(--dl-mut); font-variant-numeric: tabular-nums; }
+#trosa .today-tide .today-task-checkbox { display: none; }
+#trosa .today-tide #todayReminders.is-selection-mode .today-task-checkbox { display: inline-block; }
+#trosa .today-tide #todayReminders.is-selection-mode .today-task-index { display: none; }
+#trosa .today-tide .tide-name { min-width: 0; }
+#trosa .today-tide .tide-name button {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--room-serif);
+  font-size: .98rem;
+  text-align: left;
+  color: var(--dl-ink);
+  cursor: pointer;
+}
+#trosa .today-tide .tide-name button:hover { color: var(--dl-gold-ink); }
+#trosa .today-tide .tide-overdue { flex: none; font-size: .68rem; letter-spacing: .04em; color: var(--dl-danger); }
+#trosa .today-tide .tide-c1-bot { margin-top: .16rem; min-width: 0; }
+#trosa .today-tide .tide-action {
+  display: block;
+  font-size: .78rem;
+  line-height: 1.35;
+  color: var(--dl-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#trosa .today-tide .tide-track {
+  position: relative;
+  height: 1.45rem;
+  margin: 0 .6rem;
+  background-image: repeating-linear-gradient(to right, var(--dl-hair-2) 0 1px, transparent 1px 12.5%);
+}
+#trosa .today-tide .tide-win {
   position: absolute;
-  top: calc(clamp(1.2rem, 3.4vh, 2.4rem) + 2.6rem);
-  right: var(--room-gut);
-  z-index: 45;
-  width: min(480px, calc(100% - 2 * var(--room-gut)));
-  max-height: 68dvh;
-  overflow-y: auto;
-  padding: 1rem 1.1rem 1.2rem !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 16px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: var(--dl-shadow-3) !important;
+  top: 50%;
+  transform: translateY(-50%);
+  height: .6rem;
+  border-radius: 999px;
+  border: 1px solid var(--dl-gold);
+  background: var(--dl-gold-soft);
 }
-#trosa .today-room .today-task-section#todayQueue.is-open { display: block; }
+#trosa .today-tide .tide-win.is-open { background: var(--dl-gold); }
+#trosa .today-tide .tide-win.is-gone { border-style: dashed; border-color: var(--dl-hair-strong); background: none; }
+#trosa .today-tide .tide-nowtick { display: none; }
+#trosa .today-tide .tide-c3 { min-width: 0; padding-left: .6rem; text-align: right; }
+#trosa .today-tide .tide-status { display: block; font-size: .8rem; color: var(--dl-ink-2); }
+#trosa .today-tide .tide-status.is-open { color: var(--dl-gold-ink); }
+#trosa .today-tide .tide-count { display: block; margin-top: .1rem; font-size: .68rem; color: var(--dl-mut); font-variant-numeric: tabular-nums; }
 
-/* below the room: the rest of Today reads as a record, not a second screen */
-#trosa .today-page-body.today-page-body { padding-top: clamp(1.2rem, 4vh, 2.6rem) !important; }
+/* group headings, rebuilt on every render and every preview */
+#trosa .today-tide .today-group-label {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: .6rem;
+  margin: .85rem 0 .1rem;
+  font-size: .6rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--dl-mut);
+}
+#trosa .today-tide .today-group-label.is-open { color: var(--dl-gold-ink); }
+#trosa .today-tide .today-group-label::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--dl-hair-2); }
+
+#trosa .today-tide .today-clear,
+#trosa .today-tide .today-load-error { grid-column: 1 / -1; padding: 1.6rem .2rem; }
+#trosa .today-tide .today-clear strong,
+#trosa .today-tide .today-load-error strong { display: block; font-family: var(--room-serif); font-size: 1.1rem; color: var(--dl-ink); }
+#trosa .today-tide .today-clear span,
+#trosa .today-tide .today-load-error span { display: block; margin-top: .35rem; font-size: .8rem; color: var(--dl-mut); }
+#trosa .today-tide .today-dashboard-error { grid-column: 1 / -1; }
+#trosa .today-tide .today-batch-bar { grid-column: 1 / -1; }
+
+/* the dock: the one place with a solid button */
+#trosa .today-tide .tide-dock { margin-top: clamp(1.4rem, 4vh, 2.6rem); }
+#trosa .today-tide .tide-dock-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: clamp(1.4rem, 4vw, 3.6rem);
+  padding-top: clamp(1rem, 3vh, 1.6rem);
+  border-top: 1px solid var(--dl-hair);
+}
+#trosa .today-tide .tide-dock-clock { margin-top: 1.1rem; }
+#trosa .today-tide .tide-dock-clock .micro { display: block; color: var(--dl-mut); }
+#trosa .today-tide .tide-clock { display: block; margin-top: .15rem; font-family: var(--room-serif); font-size: 1.1rem; color: var(--dl-ink); font-variant-numeric: tabular-nums; }
+#trosa .today-tide .tide-clock-note { display: block; margin-top: .1rem; font-size: .68rem; color: var(--dl-mut); }
+
+/* the rail: the next 14 days, then this week's record folded away */
+#trosa .today-tide .tide-later-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  padding-bottom: .5rem;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .today-tide .tide-later-head h3 { margin: 0; font-size: .78rem; letter-spacing: .02em; color: var(--dl-ink); }
+#trosa .today-tide .tide-later-error {
+  margin-top: .7rem;
+  padding: .6rem .7rem;
+  border-left: 2px solid var(--dl-danger);
+  background: var(--dl-danger-soft);
+  font-size: .74rem;
+  line-height: 1.5;
+  color: #7d3229;
+}
+#trosa .today-tide .tide-later-error[hidden] { display: none; }
+#trosa .today-tide .tide-later-error button { margin-top: .4rem; }
+#trosa .today-tide .tide-later-actions { display: flex; gap: .9rem; margin-top: .7rem; }
+#trosa .today-tide .today-more { margin-top: 1.2rem; }
+/* the rail is narrow: a compact calendar, not the full-width one */
+#trosa .today-tide .today-schedule-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: .8rem; }
+#trosa .today-tide .today-schedule-day { min-height: 0; padding: .45rem .4rem; border-radius: var(--dl-r-sm); }
+#trosa .today-tide .today-schedule-detail { margin-top: .7rem; font-size: .74rem; line-height: 1.6; color: var(--dl-mut); }
+
+/* honest degradation: one column, the chart becomes a decorative crop */
+@media (max-width: 1000px) {
+  #trosa .today-tide { --c1: clamp(150px, 30vw, 220px); --c3: clamp(120px, 22vw, 170px); }
+}
+@media (max-width: 820px) {
+  #trosa .today-tide { --c1: auto; --c3: auto; }
+  #trosa .today-tide .tide-body { grid-template-columns: minmax(0, 1fr); }
+  #trosa .today-tide .tide-later { grid-column: 1; margin-top: 2rem; }
+  #trosa .today-tide .tide-grid-head { display: none; }
+  #trosa .today-tide .tide-chart-cell { grid-column: 1; grid-row: 1; opacity: .55; }
+  #trosa .today-tide .tide-chart { height: 60px; cursor: default; pointer-events: none; }
+  #trosa .today-tide .tide-keys { display: none; }
+  #trosa .today-tide .tide-nowline,
+  #trosa .today-tide .tide-previewline,
+  #trosa .today-tide .tide-ghostline { display: none; }
+  #trosa .today-tide .tide-row { grid-template-columns: minmax(0, 1fr); row-gap: .5rem; padding: .8rem 0; }
+  #trosa .today-tide .tide-c1 { padding-right: 0; }
+  #trosa .today-tide .tide-track { margin: 0; height: 1.1rem; }
+  #trosa .today-tide .tide-nowtick {
+    display: block;
+    position: absolute;
+    top: -.18rem;
+    bottom: -.18rem;
+    width: 0;
+    border-left: 1px solid var(--dl-gold);
+  }
+  #trosa .today-tide .tide-c3 { display: flex; align-items: baseline; gap: .6rem; padding-left: 0; text-align: left; }
+  #trosa .today-tide .tide-dock {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    margin: clamp(1.2rem, 4vh, 2rem) calc(-1 * var(--room-gut)) 0;
+    padding: .7rem var(--room-gut) .8rem;
+    background: var(--dl-hi);
+    border-top: 1px solid var(--dl-hair);
+  }
+  #trosa .today-tide .tide-dock-row { grid-template-columns: minmax(0, 1fr); gap: .9rem; padding-top: 0; border-top: 0; }
+}
 
 /* ============================================================================
    5. CUSTOMER WORKSPACE — one room: section bar, the next step, a quiet column

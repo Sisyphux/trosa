@@ -3527,6 +3527,23 @@ class CustomerContextRaceRegressionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('customer context race regression: OK', result.stdout)
 
+    def test_today_tide_time_arithmetic_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'today_tide_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('today tide time check: OK', result.stdout)
+
 
 class FrontendArchitectureInvariantTest(unittest.TestCase):
     """机制级不变量：异步写入必须绑定实体身份，防重复提交必须有传输层兜底。
