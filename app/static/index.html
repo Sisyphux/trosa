@@ -988,7 +988,7 @@
       <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">公司 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><input type="text" class="form-control" id="newCustomerName"></div>
+      <div class="form-group"><label class="form-label">公司 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><input type="text" class="form-control" id="newCustomerName" oninput="setFieldInlineError('newCustomerName','newCustomerNameError','')"><div class="field-inline-error" id="newCustomerNameError" role="alert" hidden></div></div>
       <div class="form-row add-customer-advanced new-customer-advanced">
         <div class="form-group"><label class="form-label">国家</label><input type="text" class="form-control" id="newCustomerCountry"></div>
         <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="newCustomerType"><option value="">待识别</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
@@ -1026,7 +1026,8 @@
         </div>
         <div class="form-group">
           <label class="form-label">公司 / 客户名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
-          <input type="text" class="form-control" id="addExistName" placeholder="识别后自动填入，也可手动修改">
+          <input type="text" class="form-control" id="addExistName" placeholder="识别后自动填入，也可手动修改" oninput="setFieldInlineError('addExistName','addExistNameError','')">
+          <div class="field-inline-error" id="addExistNameError" role="alert" hidden></div>
         </div>
       </div>
       <div class="smart-fill-review" id="existSmartFillReview" hidden></div>
@@ -1095,7 +1096,7 @@
       <button class="modal-close" onclick="closeModal('batchAddModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">客户列表</label><textarea class="form-control" id="batchAddText" rows="10" placeholder="每行一条：姓名, 公司, 国家, 行业, 备注&#10;例如：Mia, ABC GmbH, 德国, 工程塑料, 展会客户&#10;或只填写公司名称"></textarea></div>
+      <div class="form-group"><label class="form-label">客户列表</label><textarea class="form-control" id="batchAddText" rows="10" oninput="setFieldInlineError('batchAddText','batchAddTextError','')" placeholder="每行一条：姓名, 公司, 国家, 行业, 备注&#10;例如：Mia, ABC GmbH, 德国, 工程塑料, 展会客户&#10;或只填写公司名称"></textarea><div class="field-inline-error" id="batchAddTextError" role="alert" hidden></div></div>
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('batchAddModal')">取消</button>
@@ -1118,7 +1119,8 @@
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label" for="customerTaskTitle">具体动作 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
-        <textarea class="form-control task-action-textarea" id="customerTaskTitle" rows="4" placeholder="例如：确认样品测试结果，并根据反馈准备报价"></textarea>
+        <textarea class="form-control task-action-textarea" id="customerTaskTitle" rows="4" placeholder="例如：确认样品测试结果，并根据反馈准备报价" oninput="setFieldInlineError('customerTaskTitle','customerTaskTitleError','')"></textarea>
+        <div class="field-inline-error" id="customerTaskTitleError" role="alert" hidden></div>
       </div>
       <div class="form-group">
         <label class="form-label" for="customerTaskDate">什么时候做 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
@@ -1127,7 +1129,8 @@
           <button type="button" onclick="setCustomerTaskDate(15, this)">15 天</button>
           <button type="button" onclick="setCustomerTaskDate(30, this)">30 天</button>
         </div>
-        <input type="date" class="form-control" id="customerTaskDate">
+        <input type="date" class="form-control" id="customerTaskDate" onchange="setFieldInlineError('customerTaskDate','customerTaskDateError','')">
+        <div class="field-inline-error" id="customerTaskDateError" role="alert" hidden></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1143,15 +1146,16 @@
     <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle" hidden></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
       <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
-      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea><div class="field-inline-error" id="inboxReplyContentError" role="alert" hidden></div></div>
       <div class="quick-reply-analysis" id="inboxReplyAnalysis" hidden></div>
       <details class="communication-raw-source" id="inboxReplyRawSource" hidden><summary>原始记录</summary><pre id="inboxReplyRawSourceText"></pre></details>
       <div class="form-group" id="communicationConfirmKnownCustomer" hidden><span class="form-label">客户</span><p class="form-hint" id="communicationConfirmKnownCustomerName"></p></div>
       <div class="form-group" id="communicationConfirmCustomerPicker"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
         <div class="customer-picker" id="inboxReplyCustomerPicker">
           <input type="hidden" id="inboxReplyCustomer">
-          <input type="search" class="form-control customer-picker-input" id="inboxReplyCustomerSearch" placeholder="搜索公司、联系人、国家或业务领域" autocomplete="off">
+          <input type="search" class="form-control customer-picker-input" id="inboxReplyCustomerSearch" placeholder="搜索公司、联系人、国家或业务领域" autocomplete="off" oninput="setFieldInlineError('inboxReplyCustomerSearch','inboxReplyCustomerError','')">
           <div class="customer-picker-results" id="inboxReplyCustomerResults"></div>
+          <div class="field-inline-error" id="inboxReplyCustomerError" role="alert" hidden></div>
         </div>
       </div>
       <div class="quick-reply-row">
@@ -1217,6 +1221,7 @@
         <div class="modal-note-title" id="todayQuickEditTitle">将编辑 0 个客户</div>
         <div class="modal-note-hint">留空或选择"不修改"则保留原值</div>
       </div>
+      <div class="field-inline-error" id="todayQuickEditError" role="alert" hidden></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">等级</label><select class="form-control" id="todayQuickEditLevel"><option value="">不修改</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div>
         <div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="todayQuickEditBusinessStage"><option value="">不修改</option><option value="成交">成交</option><option value="流失">流失</option></select></div>

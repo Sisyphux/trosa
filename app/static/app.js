@@ -3293,6 +3293,8 @@ async function openCommunicationConfirm(options) {
       }
     } catch (e) { return; }
   }
+  setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '');
+  setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
   openModal('inboxReplyModal');
   setTimeout(function() { document.getElementById('inboxReplyContent').focus(); }, 0);
   if (context.autoAnalyze && context.content) analyzeInboxReply(true, { autoFillSummary: true });
@@ -3307,6 +3309,7 @@ function clearInboxReplyAnalysis() {
   _inboxReplyAnalysis = null;
   var panel = document.getElementById('inboxReplyAnalysis');
   if (panel) panel.hidden = true;
+  setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '');
 }
 
 function extractInboxReplyImage(input) {
@@ -3597,6 +3600,7 @@ function setAiFieldTag(inputId, tagId, isAi) {
 // 用户一旦改写预填内容，来源标记立刻消失：现在写的是他自己确认过的事实。
 function onCompleteNextTaskInput() {
   setAiFieldTag('completeNextTask', 'completeNextTaskAi', false);
+  setFieldInlineError('completeNextTask', 'completeNextError', '');
   updateCompleteSaveLabel();
 }
 
@@ -3614,6 +3618,7 @@ function chooseInboxReplyCandidate(customerId) {
   picker.querySelector('input[type="hidden"]').value = customer.id;
   picker.querySelector('input[type="search"]').value = customerPickerLabel(customer) + (customer.country ? ' · ' + customer.country : '');
   picker.querySelector('.customer-picker-results').classList.remove('show');
+  setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
 }
 
 function setInboxReplyBusy(button, busy) {
@@ -3633,8 +3638,18 @@ async function saveInboxReply() {
   var customerId = context.customerId || document.getElementById('inboxReplyCustomer').value;
   var content = document.getElementById('inboxReplyContent').value.trim();
   var followDate = document.getElementById('inboxReplyDate').value || localDateString();
-  if (!content) { showToast('请先记录沟通内容', 'warning'); document.getElementById('inboxReplyContent').focus(); return; }
-  if (!customerId) { showToast('请搜索并选择客户', 'warning'); document.getElementById('inboxReplyCustomerSearch').focus(); return; }
+  if (!content) {
+    setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '请先记录沟通内容');
+    document.getElementById('inboxReplyContent').focus();
+    return;
+  }
+  setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '');
+  if (!customerId) {
+    setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '请搜索并选择客户');
+    document.getElementById('inboxReplyCustomerSearch').focus();
+    return;
+  }
+  setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
   var button = document.getElementById('saveInboxReplyButton');
   setInboxReplyBusy(button, true);
   try {
@@ -3783,6 +3798,7 @@ function selectCustomerPicker(pickerId, index) {
   picker.querySelector('input[type="hidden"]').value = customer.id;
   picker.querySelector('input[type="search"]').value = customerPickerLabel(customer) + (customer.country ? ' · ' + customer.country : '');
   picker.querySelector('.customer-picker-results').classList.remove('show');
+  if (pickerId === 'inboxReplyCustomerPicker') setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
 }
 
 function formatChineseDate(dateStr) {
@@ -5377,6 +5393,7 @@ function openTodayQuickEdit() {
   document.getElementById('todayQuickEditDirection').value = 'unknown';
   document.getElementById('todayQuickEditContent').value = '';
   document.getElementById('todayQuickEditResult').value = '';
+  setFieldInlineError('', 'todayQuickEditError', '');
   openModal('todayQuickEditModal');
 }
 
@@ -5394,7 +5411,11 @@ async function submitTodayQuickEdit() {
     var result = document.getElementById('todayQuickEditResult').value.trim();
     var activityType = document.getElementById('todayQuickEditActivityType').value;
     var direction = document.getElementById('todayQuickEditDirection').value;
-    if (!level && !businessStage && !nextFollowUp && !content) { showToast('请至少选择一项要修改的字段，或填写跟进内容', 'warning'); return; }
+    setFieldInlineError('', 'todayQuickEditError', '');
+    if (!level && !businessStage && !nextFollowUp && !content) {
+      setFieldInlineError('', 'todayQuickEditError', '请至少选择一项要修改的字段，或填写跟进内容');
+      return;
+    }
     try {
       if (level) {
         await api('/api/customers/batch/level', { method: 'POST', body: JSON.stringify({ ids: ids, value: level }) });
@@ -7984,6 +8005,8 @@ function openCustomerTaskModal(mode, taskId) {
     choice.classList.remove('is-selected');
     choice.setAttribute('aria-pressed', 'false');
   });
+  setFieldInlineError('customerTaskTitle', 'customerTaskTitleError', '');
+  setFieldInlineError('customerTaskDate', 'customerTaskDateError', '');
   openModal('customerTaskModal');
   setTimeout(function() { document.getElementById('customerTaskTitle').focus(); }, 0);
 }
@@ -7993,6 +8016,7 @@ function setCustomerTaskDate(days, button) {
   date.setDate(date.getDate() + days);
   var value = date.toISOString().slice(0, 10);
   document.getElementById('customerTaskDate').value = value;
+  setFieldInlineError('customerTaskDate', 'customerTaskDateError', '');
   document.querySelectorAll('#customerTaskModal .task-date-choices button').forEach(function(choice) {
     choice.classList.toggle('is-selected', choice === button);
     choice.setAttribute('aria-pressed', choice === button ? 'true' : 'false');
@@ -8775,7 +8799,16 @@ async function createCustomerTask(button) {
   var customerId = (modal && modal.dataset.customerId) || document.getElementById('editCustomerId').value;
   var title = document.getElementById('customerTaskTitle').value.trim();
   var dueDate = document.getElementById('customerTaskDate').value;
-  if (!title || !dueDate) { showToast('请填写具体动作和日期', 'warning'); return; }
+  setFieldInlineError('customerTaskTitle', 'customerTaskTitleError', '');
+  setFieldInlineError('customerTaskDate', 'customerTaskDateError', '');
+  if (!title || !dueDate) {
+    if (!title) {
+      setFieldInlineError('customerTaskTitle', 'customerTaskTitleError', '请填写具体动作');
+      document.getElementById('customerTaskTitle').focus();
+    }
+    if (!dueDate) setFieldInlineError('customerTaskDate', 'customerTaskDateError', '请选择日期');
+    return;
+  }
   // The unsaved-changes 保存并退出 path calls this without a button, so the
   // visual disable alone cannot stop a second write.
   if (!beginWrite('customerTask')) return;
@@ -10084,11 +10117,25 @@ function syncCompleteAiButton() {
   if (busy) button.setAttribute('aria-busy', 'true'); else button.removeAttribute('aria-busy');
 }
 
+// 小型弹窗共用的字段级内联校验：错误句贴在字段下方（role=alert），
+// 字段下划线转为危险色；不用 toast，也不与金色聚焦线混用。
+function setFieldInlineError(inputId, errorId, message) {
+  var input = document.getElementById(inputId);
+  var error = document.getElementById(errorId);
+  if (error) { error.textContent = message || ''; error.hidden = !message; }
+  if (input) {
+    if (message) {
+      input.setAttribute('aria-invalid', 'true');
+      input.classList.add('is-invalid');
+    } else {
+      input.removeAttribute('aria-invalid');
+      input.classList.remove('is-invalid');
+    }
+  }
+}
+
 function showCompleteResultError(message) {
-  var el = document.getElementById('completeResultError');
-  if (!el) return;
-  el.textContent = message || '';
-  el.hidden = !message;
+  setFieldInlineError('completeResult', 'completeResultError', message);
 }
 function showCompleteNextError(message) {
   var el = document.getElementById('completeNextError');
@@ -10106,6 +10153,13 @@ function clearCompleteErrors() {
   showCompleteResultError('');
   showCompleteNextError('');
   showCompleteSubmitError('');
+  var taskInput = document.getElementById('completeNextTask');
+  if (taskInput) {
+    taskInput.removeAttribute('aria-invalid');
+    taskInput.classList.remove('is-invalid');
+  }
+  var dateChoices = document.getElementById('completeDateChoices');
+  if (dateChoices) dateChoices.classList.remove('is-invalid');
 }
 
 function completeRelativeDateLabel(days) {
@@ -10493,8 +10547,14 @@ async function runSubmitComplete() {
   }
   if (hasNext && (!nextTask || !nextDate)) {
     showCompleteNextError('请填写下一步动作和日期');
-    var taskInput = document.getElementById('completeNextTask');
-    if (taskInput && !nextTask) taskInput.focus();
+    if (!nextTask) {
+      setFieldInlineError('completeNextTask', 'completeNextError', '请填写下一步动作和日期');
+      var taskInput = document.getElementById('completeNextTask');
+      if (taskInput) taskInput.focus();
+    } else {
+      var dateChoices = document.getElementById('completeDateChoices');
+      if (dateChoices) dateChoices.classList.add('is-invalid');
+    }
     return;
   }
   var data = {
@@ -10789,6 +10849,7 @@ function openAddCustomerModal() {
   // Invalidate any in-flight 自动识别 so its preview cannot pop up later over an
   // unrelated page (or a reopened modal for another customer).
   _smartFillRequestToken++;
+  setFieldInlineError('addExistName', 'addExistNameError', '');
   openModal('addCustomerModal');
   markModalClean('addCustomerModal');
 }
@@ -10919,7 +10980,12 @@ async function submitExistCustomer(copyEmails) {
   var resetExist = setActionFeedback(document.getElementById('existCustomerSubmit'), 'pending', '保存中…');
   try {
     var name = document.getElementById('addExistName').value.trim();
-    if (!name) { showToast('请填写公司名称', 'warning'); return; }
+    if (!name) {
+      setFieldInlineError('addExistName', 'addExistNameError', '请填写公司名称');
+      var existNameInput = document.getElementById('addExistName');
+      if (existNameInput) existNameInput.focus();
+      return;
+    }
 
     var country = document.getElementById('addExistCountry').value.trim();
 
@@ -10975,6 +11041,7 @@ function openAddNewCustomerModal() {
   // See openAddCustomerModal: retire any in-flight recognition for a modal that
   // is no longer (or no longer the same) open.
   _smartFillRequestToken++;
+  setFieldInlineError('newCustomerName', 'newCustomerNameError', '');
   openModal('addNewCustomerModal');
   markModalClean('addNewCustomerModal');
 }
@@ -10984,7 +11051,12 @@ async function submitNewCustomer() {
   var resetNew = setActionFeedback(document.getElementById('newCustomerSubmit'), 'pending', '保存中…');
   try {
     var name = document.getElementById('newCustomerName').value.trim();
-    if (!name) { showToast('请填写公司名称', 'warning'); return; }
+    if (!name) {
+      setFieldInlineError('newCustomerName', 'newCustomerNameError', '请填写公司名称');
+      var newNameInput = document.getElementById('newCustomerName');
+      if (newNameInput) newNameInput.focus();
+      return;
+    }
     var contacts = collectDraftContacts('new');
     if (!validateDraftContacts(contacts)) return;
     var data = {
@@ -11014,6 +11086,7 @@ async function submitNewCustomer() {
 
 function openBatchAddModal() {
   document.getElementById('batchAddText').value = '';
+  setFieldInlineError('batchAddText', 'batchAddTextError', '');
   openModal('batchAddModal');
 }
 
@@ -11022,7 +11095,12 @@ async function submitBatchAdd() {
   var resetBatchAdd = setActionFeedback(document.getElementById('batchAddSubmit'), 'pending', '保存中…');
   try {
     var text = document.getElementById('batchAddText').value.trim();
-    if (!text) { showToast('请输入客户数据', 'warning'); return; }
+    if (!text) {
+      setFieldInlineError('batchAddText', 'batchAddTextError', '请输入客户数据');
+      document.getElementById('batchAddText').focus();
+      return;
+    }
+    setFieldInlineError('batchAddText', 'batchAddTextError', '');
     var lines = text.split('\n').filter(function(l) { return l.trim(); });
     var count = 0;
     for (var i = 0; i < lines.length; i++) {

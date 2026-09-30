@@ -656,8 +656,10 @@ class CalendarAndAccessTest(unittest.TestCase):
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
 
         # The quiet field language lives in visual-v5 §7 and never raises !important.
+        # §9 (complete modal) and §10 (sheet shell) come later and DO repeat the
+        # lower layers with !important on purpose, so the check stops at §8.
         forms_start = v5.index('7. FORMS')
-        forms_section = v5[forms_start:]
+        forms_section = v5[forms_start:v5.index('8. TRANSIENT CONTAINERS')]
         self.assertIn('#trosa .modal .form-control', forms_section)
         self.assertIn('border-bottom: 1px solid var(--dl-hair);', forms_section)
         self.assertNotIn('!important', forms_section)
@@ -694,7 +696,9 @@ class CalendarAndAccessTest(unittest.TestCase):
         javascript = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
 
         # visual-v5 §8 holds the container language and never raises !important.
-        section = v5[v5.index('8. TRANSIENT CONTAINERS'):]
+        # §9/§10 after it intentionally repeat lower layers with !important, so the
+        # scope stops at the §9 marker rather than running to EOF.
+        section = v5[v5.index('8. TRANSIENT CONTAINERS'):v5.index('9. COMPLETE MODAL')]
         self.assertNotIn('!important', section)
         self.assertIn('#trosa .modal .communication-context-summary[hidden] { display: none; }', section)
         # The boxes it replaces were removed at the source, not overridden.
@@ -711,8 +715,10 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertIn("if (button.closest && button.closest('.modal-footer')) return;", javascript)
 
         # The inline styles moved to classes rather than living in both places.
+        # (8bb4553 re-purposed #completeCustomerName as the dialog title, so its
+        # old modal-fact-value hook is now the complete-sheet what/task pair.)
         for moved in ('class="modal-note"', 'class="modal-subhead"', 'class="report-cat-section" id="reportCatSection"',
-                      'class="ical-subscription"', 'class="modal-fact-value" id="completeCustomerName"'):
+                      'class="ical-subscription"', 'class="complete-what" id="completeSummary"'):
             self.assertIn(moved, index)
         self.assertNotIn('style="margin-bottom:16px;padding:12px;background:var(--brand-50)', index)
         self.assertNotIn('data-cat="follow" style=', index)
@@ -3643,6 +3649,80 @@ class ModalSubmitStateRegressionTest(unittest.TestCase):
         for key in ('batchComplete', 'newCustomer', 'existCustomer', 'todayQuickEdit', 'followEdit', 'batchAdd'):
             self.assertIn("beginWrite('" + key + "')", self.js)
         self.assertIn("endWrite('followEdit'); resetFollow(0);", self.js)
+
+
+class ModalValidationRegressionTest(unittest.TestCase):
+    """Small-window required fields validate inline with a dangerous line, not a toast (U-04/U-08)."""
+
+    def setUp(self):
+        self.js = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        self.css = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+
+    def test_inline_validation_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'modal_validation_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('modal validation regression: OK', result.stdout)
+
+    def test_date_chips_meet_the_target_floor(self):
+        self.assertIn('#trosa .modal .next-date-choices button', self.css)
+        # 36px default, 44px on touch, both in the new section-10 block.
+        block = self.css[self.css.index('日期 chip 点击目标'):]
+        block = block[:block.index('必填校验内联错误')]
+        self.assertIn('min-height: 36px', block)
+        self.assertIn('@media (pointer: coarse)', block)
+        self.assertIn('min-height: 44px', block)
+
+    def test_inline_error_is_a_danger_sentence_and_line(self):
+        block = self.css[self.css.index('必填校验内联错误'):]
+        self.assertIn('color: var(--dl-danger)', block)
+        self.assertIn('.field-inline-error', block)
+        self.assertIn('border-bottom-color: var(--dl-danger)', block)
+        self.assertIn('.complete-seg.is-invalid', block)
+        # the shared helper marks the field, and every wire-up uses it
+        self.assertIn('function setFieldInlineError(inputId, errorId, message)', self.js)
+        self.assertIn("input.setAttribute('aria-invalid', 'true')", self.js)
+        for field, error in (
+            ('newCustomerName', 'newCustomerNameError'),
+            ('addExistName', 'addExistNameError'),
+            ('customerTaskTitle', 'customerTaskTitleError'),
+            ('customerTaskDate', 'customerTaskDateError'),
+            ('batchAddText', 'batchAddTextError'),
+            ('inboxReplyContent', 'inboxReplyContentError'),
+            ('inboxReplyCustomerSearch', 'inboxReplyCustomerError'),
+        ):
+            self.assertIn('id="' + error + '"', self.html, error)
+            self.assertIn("'" + field + "', '" + error + "'", self.js, field)
+        self.assertIn('id="todayQuickEditError"', self.html)
+        # required fields clear their own error on input
+        self.assertIn("oninput=\"setFieldInlineError('newCustomerName','newCustomerNameError','')\"", self.html)
+        self.assertIn("oninput=\"setFieldInlineError('addExistName','addExistNameError','')\"", self.html)
+        self.assertIn("oninput=\"setFieldInlineError('customerTaskTitle','customerTaskTitleError','')\"", self.html)
+        self.assertIn("oninput=\"setFieldInlineError('batchAddText','batchAddTextError','')\"", self.html)
+
+    def test_no_required_modal_falls_back_to_a_toast(self):
+        # Only the small-window required checks are in scope here. The Today wide
+        # panel and the Inbox inline decision card keep their own toasts (U-08
+        # covers 弹窗), so their messages are intentionally not asserted here.
+        for toast in (
+            "showToast('请填写公司名称', 'warning')",
+            "showToast('请输入客户数据', 'warning')",
+            "showToast('请至少选择一项要修改的字段，或填写跟进内容', 'warning')",
+            "showToast('请搜索并选择客户', 'warning')",
+        ):
+            self.assertNotIn(toast, self.js)
 
 
 class TimelineLocalEchoRegressionTest(unittest.TestCase):

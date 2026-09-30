@@ -2846,3 +2846,33 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .complete-sheet .complete-more-options[open] > summary::before { content: "–"; }
 #trosa .complete-sheet .complete-more-options > summary:hover { color: var(--dl-ink); }
 #trosa .complete-sheet .complete-submit-error { padding-left: 2.5rem; padding-right: 2.5rem; }
+
+/* --- 13 小窗口共用：日期 chip 点击目标 ≥36px，触屏 ≥44px（U-04） --- */
+#trosa .modal .date-choice,
+#trosa .modal .next-date-choices button,
+#trosa .modal .auto-direction-row button {
+  min-height: 36px;
+}
+@media (pointer: coarse) {
+  #trosa .modal .date-choice,
+  #trosa .modal .next-date-choices button,
+  #trosa .modal .auto-direction-row button {
+    min-height: 44px;
+  }
+}
+
+/* --- 13 小窗口共用：必填校验内联错误（红句 + 危险字段线，U-08） ---
+   规则和「完成这次跟进」已有的 .complete-inline-error 一致：一句话贴在字段
+   下方，字段下划线转为危险色，而不是 toast，也不与金色聚焦线混用。 */
+#trosa .modal .field-inline-error {
+  margin-top: .4rem;
+  color: var(--dl-danger);
+  font-size: .78rem;
+  line-height: 1.4;
+}
+#trosa .modal .form-control.is-invalid,
+#trosa .modal .form-control[aria-invalid="true"] {
+  border-bottom-color: var(--dl-danger);
+}
+/* 「接下来」的日期还没选时，把日期 chip 的下划线染成危险色 */
+#trosa .complete-sheet .complete-seg.is-invalid { border-bottom-color: var(--dl-danger) !important; }
