@@ -753,7 +753,7 @@
               </div>
               <div class="cw-compose-panel" data-compose-panel="history">
                 <div class="form-group"><label class="form-label" for="followHistoryType">沟通方式</label><select class="form-control" id="followHistoryType"><option value="WhatsApp">WhatsApp</option><option value="邮件">邮件</option><option value="电话">电话</option><option value="会议">会议</option><option value="报价">报价</option><option value="寄样">寄样</option><option value="展会现场">展会现场</option><option value="微信">微信</option><option value="视频会议">视频会议</option><option value="客户来访">客户来访</option><option value="其他跟进">其他跟进</option></select></div>
-                <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('history')">AI 帮我整理</button></div><div class="rich-text-area" id="followHistoryContent" contenteditable="true" data-placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容" role="textbox" aria-multiline="true" oninput="updateAutoDirectionPreview('history')"></div><div class="auto-direction-row"><span id="historyDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="followHistoryDirectionOverride" onchange="updateAutoDirectionPreview('history')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
+                <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><button type="button" class="text-action" onclick="analyzeCommunication('history')">AI 帮我整理</button></div><div class="rich-text-area" id="followHistoryContent" contenteditable="true" data-placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容" role="textbox" aria-multiline="true" oninput="updateAutoDirectionPreview('history')"></div><div class="auto-direction-row"><span id="historyDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="followHistoryDirectionOverride" onchange="updateAutoDirectionPreview('history')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
                 <div class="quick-reply-analysis" id="followHistoryAnalysis" hidden></div>
                 <div class="form-group"><label class="form-label">结果或判断</label><div class="rich-text-area rich-text-area-compact" id="followHistoryResult" contenteditable="true" data-placeholder="例如：客户接受交期，准备内部确认数量" role="textbox" aria-multiline="true"></div></div>
                 <div class="form-group"><div class="form-label-row"><label class="form-label" for="followHistoryNextTask">下一步做什么？</label><span class="ai-tag ai-field-tag" id="followHistoryNextTaskAi" hidden>AI 建议</span></div><input type="text" class="form-control" id="followHistoryNextTask" placeholder="可留空，例如：发送再生料方案报价" oninput="onFollowHistoryNextTaskInput()"></div>
@@ -764,8 +764,8 @@
                 <button type="button" class="btn btn-primary cw-act cw-primary btn-sm" id="followHistorySubmit" onclick="addFollowHistory()">只保存记录</button>
                 </div>
                 <div class="cw-compose-panel" data-compose-panel="outreach" data-module="outreach" hidden>
-                <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required">*</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="自动提取主题、正文和发送时间"></textarea><small class="email-import-hint">默认状态为“待回复”；退信或客户回复会自动调整。</small></div>
-                <details class="cw-fix"><summary>需要修正主题、时间或状态？</summary><div><div class="form-group"><label class="form-label">主题 <span class="required">*</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
+                <div class="form-group"><label class="form-label">粘贴整封邮件 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><textarea class="form-control" id="outreachPaste" rows="7" onpaste="setTimeout(parseOutreachPaste, 0)" placeholder="自动提取主题、正文和发送时间"></textarea><small class="email-import-hint">默认状态为“待回复”；退信或客户回复会自动调整。</small></div>
+                <details class="cw-fix"><summary>需要修正主题、时间或状态？</summary><div><div class="form-group"><label class="form-label">主题 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><input type="text" class="form-control" id="outreachSubject"></div><div class="form-row"><div class="form-group"><label class="form-label">发送日期</label><input type="date" class="form-control" id="outreachDate"></div><div class="form-group"><label class="form-label">回复状态</label><select class="form-control" id="outreachReply"><option value="pending">待回复</option><option value="replied">已回复</option><option value="bounced">退信</option><option value="no_reply">无回复</option></select></div></div></div></details>
                 <textarea id="outreachContent" hidden></textarea>
                 <button class="btn btn-primary cw-act cw-primary btn-sm" onclick="addOutreach()">保存邮件记录</button>
                 </div>
@@ -776,7 +776,7 @@
             <div class="cw-list" id="cwProfileView"></div>
             <div class="cw-form" id="cwProfileForm" hidden>
               <button type="button" class="cw-link cw-back" onclick="cancelCustomerProfileEdit()">← 返回</button>
-              <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required">*</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
+              <div class="form-row"><div class="form-group"><label class="form-label">名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><input type="text" class="form-control" id="editName" required></div><div class="form-group"><label class="form-label">公司</label><input type="text" class="form-control" id="editCompany"></div></div>
             <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
             <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
             <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
@@ -888,7 +888,7 @@
           <div class="ui-menu-list" id="completeActivityMenuList" role="listbox" aria-label="沟通方式" tabindex="-1" hidden
                onclick="uiMenuListClick(event, 'completeActivity')" onkeydown="uiMenuListKeydown(event, 'completeActivity')"></div>
         </div>
-        <span>沟通，发生了什么？<span class="required" aria-hidden="true">*</span></span>
+        <span>沟通，发生了什么？<span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></span>
       </div>
       <label class="sr-only" for="completeResult">这次发生了什么？（必填）</label>
       <textarea class="form-control complete-pad" id="completeResult" rows="4" oninput="onCompleteResultInput()" onkeydown="onCompleteResultKeydown(event)" placeholder="可以直接粘贴邮件、WhatsApp 或会议记录"></textarea>
@@ -988,7 +988,7 @@
       <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
-      <div class="form-group"><label class="form-label">公司 <span class="required">*</span></label><input type="text" class="form-control" id="newCustomerName"></div>
+      <div class="form-group"><label class="form-label">公司 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><input type="text" class="form-control" id="newCustomerName"></div>
       <div class="form-row add-customer-advanced new-customer-advanced">
         <div class="form-group"><label class="form-label">国家</label><input type="text" class="form-control" id="newCustomerCountry"></div>
         <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="newCustomerType"><option value="">待识别</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
@@ -1021,11 +1021,11 @@
     <div class="modal-body">
       <div class="add-customer-basics">
         <div class="form-group">
-          <label class="form-label">客户官网 <span class="required">*</span></label>
+          <label class="form-label">客户官网 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
           <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button class="btn btn-sm btn-primary" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>自动识别</button></div>
         </div>
         <div class="form-group">
-          <label class="form-label">公司 / 客户名称 <span class="required">*</span></label>
+          <label class="form-label">公司 / 客户名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
           <input type="text" class="form-control" id="addExistName" placeholder="识别后自动填入，也可手动修改">
         </div>
       </div>
@@ -1117,11 +1117,11 @@
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label class="form-label" for="customerTaskTitle">具体动作 <span class="required">*</span></label>
+        <label class="form-label" for="customerTaskTitle">具体动作 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
         <textarea class="form-control task-action-textarea" id="customerTaskTitle" rows="4" placeholder="例如：确认样品测试结果，并根据反馈准备报价"></textarea>
       </div>
       <div class="form-group">
-        <label class="form-label" for="customerTaskDate">什么时候做 <span class="required">*</span></label>
+        <label class="form-label" for="customerTaskDate">什么时候做 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
         <div class="next-date-choices task-date-choices">
           <button type="button" onclick="setCustomerTaskDate(7, this)">7 天</button>
           <button type="button" onclick="setCustomerTaskDate(15, this)">15 天</button>
@@ -1143,11 +1143,11 @@
     <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle" hidden></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
       <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
-      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required">*</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea></div>
+      <div class="form-group"><div class="form-label-row"><label class="form-label" for="inboxReplyContent" id="communicationConfirmContentLabel">这次发生了什么 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label><div class="quick-reply-tools"><label class="text-action image-upload-action">识别截图（可选）<input type="file" id="inboxReplyImage" accept="image/png,image/jpeg,image/webp" onchange="extractInboxReplyImage(this)"></label><button type="button" class="text-action" onclick="analyzeInboxReply(true, { autoFillSummary: true })">AI 重新整理</button></div></div><textarea class="form-control inbox-reply-textarea" id="inboxReplyContent" rows="6" oninput="clearInboxReplyAnalysis()" placeholder="邮件、聊天或会议记录"></textarea></div>
       <div class="quick-reply-analysis" id="inboxReplyAnalysis" hidden></div>
       <details class="communication-raw-source" id="inboxReplyRawSource" hidden><summary>原始记录</summary><pre id="inboxReplyRawSourceText"></pre></details>
       <div class="form-group" id="communicationConfirmKnownCustomer" hidden><span class="form-label">客户</span><p class="form-hint" id="communicationConfirmKnownCustomerName"></p></div>
-      <div class="form-group" id="communicationConfirmCustomerPicker"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required">*</span></label>
+      <div class="form-group" id="communicationConfirmCustomerPicker"><label class="form-label" for="inboxReplyCustomerSearch">关联客户 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
         <div class="customer-picker" id="inboxReplyCustomerPicker">
           <input type="hidden" id="inboxReplyCustomer">
           <input type="search" class="form-control customer-picker-input" id="inboxReplyCustomerSearch" placeholder="搜索公司、联系人、国家或业务领域" autocomplete="off">

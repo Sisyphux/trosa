@@ -3522,6 +3522,43 @@ class ModalA11yRegressionTest(unittest.TestCase):
         self.assertIn('modal a11y regression: OK', result.stdout)
 
 
+class ModalLabelRegressionTest(unittest.TestCase):
+    """Modal reading labels clear the paper floor; required flags are not colour-only (U-01/U-02)."""
+
+    def setUp(self):
+        self.css = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+        self.html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+
+    def _rule(self, marker):
+        start = self.css.index(marker)
+        return self.css[start:self.css.index('}', start)]
+
+    def test_modal_form_label_is_readable_on_paper(self):
+        rule = self._rule('#trosa .modal .form-label,')
+        self.assertIn('color: var(--dl-ink-3)', rule)
+        self.assertIn('font-size: var(--dl-fs-caption)', rule)
+        self.assertIn('letter-spacing: 0', rule)
+        self.assertIn('text-transform: none', rule)
+        self.assertNotIn('--dl-faint', rule)
+
+    def test_shared_modal_caption_is_readable_on_paper(self):
+        rule = self._rule('#trosa .modal .modal-fact-label,')
+        self.assertIn('color: var(--dl-ink-3)', rule)
+        self.assertIn('font-size: var(--dl-fs-caption)', rule)
+        self.assertIn('text-transform: none', rule)
+        self.assertNotIn('--dl-faint', rule)
+
+    def test_required_flags_carry_accessible_text(self):
+        self.assertNotIn('<span class="required">*</span>', self.html)
+        required = self.html.count('class="required"')
+        accessible = len(re.findall(
+            r'<span class="required" aria-hidden="true">\*</span><span class="sr-only">必填</span>',
+            self.html,
+        ))
+        self.assertGreaterEqual(required, 12, 'the modal required markers should still be present')
+        self.assertEqual(required, accessible, 'every required marker needs a visually hidden 必填')
+
+
 class TimelineLocalEchoRegressionTest(unittest.TestCase):
     """Customer timeline writes paint locally and use the shared motion states."""
 

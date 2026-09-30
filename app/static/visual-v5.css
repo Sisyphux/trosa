@@ -1012,7 +1012,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   font-size: .6em;
   letter-spacing: .2em;
   text-transform: uppercase;
-  color: var(--dl-faint);
+  color: var(--dl-mut);
   white-space: nowrap;
 }
 #trosa #customerEditModal .cw-nav { margin-left: auto; display: flex; gap: 1.15em; }
@@ -1124,7 +1124,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   letter-spacing: .14em;
   line-height: 1.95;
   text-transform: uppercase;
-  color: var(--dl-faint);
+  color: var(--dl-mut);
 }
 #trosa #customerEditModal .cw-lines b { font-weight: 400; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-lines a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--dl-hair); white-space: nowrap; }
@@ -1175,7 +1175,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .cw-act.cw-primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
 #trosa #customerEditModal .cw-act.cw-primary:hover { background: #37342c; color: #fffdf7; border-color: transparent; }
 #trosa #customerEditModal .cw-act:disabled { opacity: .55; cursor: default; }
-#trosa #customerEditModal .cw-quick { display: flex; align-items: baseline; gap: .45em; margin-top: .9rem; padding-left: 1.05rem; font-size: .68em; letter-spacing: .04em; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-quick { display: flex; align-items: baseline; gap: .45em; margin-top: .9rem; padding-left: 1.05rem; font-size: .68em; letter-spacing: .04em; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-quick[hidden] { display: none; }
 #trosa #customerEditModal .cw-quick .cw-link { color: var(--dl-mut); }
 
@@ -1336,16 +1336,16 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .cw-pmain { min-width: 0; }
 #trosa #customerEditModal .cw-prow b { font-size: .88em; font-weight: 400; color: var(--dl-ink-2); overflow-wrap: anywhere; transition: color .55s var(--room-ease); }
 #trosa #customerEditModal .cw-prow.is-lit b { color: var(--dl-ink); }
-#trosa #customerEditModal .cw-sm { display: block; margin-top: .26rem; font-size: .6em; letter-spacing: .12em; text-transform: uppercase; color: var(--dl-faint); }
-#trosa #customerEditModal .cw-sm2 { display: block; margin-top: .2rem; font-size: .66em; color: var(--dl-faint); overflow-wrap: anywhere; }
+#trosa #customerEditModal .cw-sm { display: block; margin-top: .26rem; font-size: .6em; letter-spacing: .12em; text-transform: uppercase; color: var(--dl-mut); }
+#trosa #customerEditModal .cw-sm2 { display: block; margin-top: .2rem; font-size: .66em; color: var(--dl-mut); overflow-wrap: anywhere; }
 #trosa #customerEditModal .cw-prow > a { font-size: .68em; color: var(--dl-ink-2); text-decoration: none; border-bottom: 1px solid var(--dl-hair); white-space: nowrap; }
-#trosa #customerEditModal .cw-prow > time { flex: 0 0 auto; font-size: .66em; color: var(--dl-faint); white-space: nowrap; }
+#trosa #customerEditModal .cw-prow > time { flex: 0 0 auto; font-size: .66em; color: var(--dl-mut); white-space: nowrap; }
 #trosa #customerEditModal .cw-prow.is-done b { color: var(--dl-faint); text-decoration: line-through; }
 #trosa #customerEditModal .cw-prow.is-missing b { color: var(--dl-mut); }
 
 /* 资料: a definition list, then checks and sela research */
 #trosa #customerEditModal .cw-dlg { display: grid; grid-template-columns: 6.4rem minmax(0, 1fr); gap: 0 1rem; margin: 0; padding-top: .2rem; }
-#trosa #customerEditModal .cw-dlg dt { margin: 0; padding: .4rem 0; font-size: .6em; letter-spacing: .14em; line-height: 2; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-dlg dt { margin: 0; padding: .4rem 0; font-size: .6em; letter-spacing: .14em; line-height: 2; text-transform: uppercase; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-dlg dd {
   min-width: 0;
   margin: 0;
@@ -1359,7 +1359,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 }
 #trosa #customerEditModal .cw-dlg a,
 #trosa #customerEditModal .cw-subs a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--dl-hair); }
-#trosa #customerEditModal .cw-none { color: var(--dl-faint); }
+#trosa #customerEditModal .cw-none { color: var(--dl-mut); }
 #trosa #customerEditModal .cw-inline { max-width: 100%; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 #trosa #customerEditModal .cw-level { display: inline-flex; align-items: baseline; gap: .4rem; }
 #trosa #customerEditModal .cw-level input {
@@ -1440,7 +1440,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   gap: clamp(1.2rem, 2.6vw, 2.4rem);
   text-align: right;
 }
-#trosa #customerEditModal .cw-readouts span { display: block; font-size: .58em; letter-spacing: .18em; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-readouts span { display: block; font-size: .58em; letter-spacing: .18em; text-transform: uppercase; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-readouts b { display: block; margin-top: .3rem; color: var(--dl-ink); font-family: var(--room-serif); font-size: 1.05em; font-weight: 400; }
 #trosa #customerEditModal .cw-bot {
   position: relative;
@@ -1469,8 +1469,8 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   transition: color .3s var(--room-ease);
 }
 #trosa #customerEditModal .cw-waitv:hover { color: var(--dl-ink); }
-#trosa #customerEditModal .cw-waitv.is-empty { color: var(--dl-faint); }
-#trosa #customerEditModal .cw-date { flex: 0 0 auto; margin-left: auto; font-size: .6em; letter-spacing: .16em; text-transform: uppercase; color: var(--dl-faint); }
+#trosa #customerEditModal .cw-waitv.is-empty { color: var(--dl-mut); }
+#trosa #customerEditModal .cw-date { flex: 0 0 auto; margin-left: auto; font-size: .6em; letter-spacing: .16em; text-transform: uppercase; color: var(--dl-mut); }
 
 /* ---- narrow: the room becomes one column; the sections stay reachable ---- */
 @media (max-width: 1024px) {
@@ -2152,21 +2152,28 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
    gate and the settings inline fields keep their own boxes.
    ============================================================================ */
 
-/* --- label: a quiet caption, not a bold heading --- */
+/* --- label: a readable caption on paper, never faint 9px all-caps ---
+   The old rule rendered every field label as 9px `--dl-faint` uppercase at
+   2.10:1, well under the 5.3:1 paper floor (U-01). Labels carry the meaning of
+   the field, so they are reading text: `--dl-ink-3` at `--dl-fs-caption`, no
+   tracking, no uppercasing. Only `.modal-eyebrow` stays a decorative micro-cap. */
 #trosa .modal .form-label,
 #trosa #customerEditModal .form-label {
   display: block;
   margin-bottom: .3rem;
-  color: var(--dl-faint);
+  color: var(--dl-ink-3);
   font-family: var(--dl-sans);
-  font-size: .6rem;
+  font-size: var(--dl-fs-caption);
   font-weight: 400;
-  letter-spacing: .14em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
+/* The star is a shape, not the message: it stays decorative and a visually
+   hidden 「必填」 next to it does the talking (U-02). Danger red also clears the
+   3:1 non-text floor the old gold 2.85:1 did not. */
 #trosa .modal .required,
 #trosa #customerEditModal .required {
-  color: var(--dl-gold);
+  color: var(--dl-danger);
   font-weight: 400;
 }
 
@@ -2359,7 +2366,8 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
    The v2/v3/style.css boxes these replace were removed at the source.
    ============================================================================ */
 
-/* the small caption every container label shares */
+/* the small caption every container label shares — readable on paper (U-01):
+   `--dl-ink-3` at `--dl-fs-caption`, no faint 9px uppercase */
 #trosa .modal .communication-context-summary span,
 #trosa .modal .modal-fact-label,
 #trosa .modal .report-cat-label,
@@ -2369,11 +2377,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal .draft-contact-title strong,
 #trosa .modal .draft-contacts-header strong {
   display: block;
-  color: var(--dl-faint);
-  font-size: .6rem;
+  color: var(--dl-ink-3);
+  font-size: var(--dl-fs-caption);
   font-weight: 400;
-  letter-spacing: .14em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 /* 记录沟通: four facts as a line of text above one hairline */
@@ -2471,7 +2479,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal .draft-contacts-section { border-top: 1px solid var(--dl-hair-2); }
 #trosa .modal .draft-contact-card { padding-top: .9rem; border-top: 1px solid var(--dl-hair-2); }
 #trosa .modal .draft-contact-card:first-child { padding-top: 0; border-top: 0; }
-#trosa .modal .draft-contact-title span { color: var(--dl-faint); font-size: .66rem; }
+#trosa .modal .draft-contact-title span { color: var(--dl-mut); font-size: var(--dl-fs-caption); }
 #trosa .modal .draft-email-import summary,
 #trosa .modal .manual-contact-entry > summary,
 #trosa .modal .draft-contact-more summary { color: var(--dl-ink-2); }
@@ -2628,7 +2636,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 /* --- footer: a shortcut whisper on the left, then the verbs --- */
 #trosa .modal .complete-kbd-hint {
   margin-right: auto;
-  color: var(--dl-faint);
+  color: var(--dl-mut);
   font-size: var(--dl-fs-micro);
   letter-spacing: .04em;
 }

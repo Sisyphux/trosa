@@ -3244,7 +3244,7 @@ async function openCommunicationConfirm(options) {
     subtitle.textContent = context.subtitle || '';
     subtitle.hidden = !context.subtitle;
   }
-  if (contentLabel) contentLabel.innerHTML = '这次发生了什么 <span class="required">*</span>';
+  if (contentLabel) contentLabel.innerHTML = '这次发生了什么 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span>';
   document.getElementById('inboxReplyContent').value = context.content || '';
   _inboxReplyRawContent = context.content || '';
   _inboxReplyAnalysis = null;
