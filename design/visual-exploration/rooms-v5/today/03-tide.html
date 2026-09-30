@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trosa · Today 03 潮汐</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&family=Inter:wght@300;400;500&family=Geist+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+/* ===== shared harness (inlined by build) — tokens mirror app/static/visual-v3.css :root ===== */
+:root{
+  --dl-hi:#faf8f2;--dl-canvas:#efeae0;--dl-canvas-low:#ded6c6;--dl-paper:#fffdf7;--dl-paper-2:#fbf8f1;--dl-paper-3:#f5f1e7;
+  --dl-ink:#24221d;--dl-ink-2:#57534a;--dl-ink-3:#6f6a5f;--dl-mut:#8a8478;--dl-faint:#b7b1a4;
+  --dl-gold:#bc9052;--dl-gold-ink:#8a6224;--dl-gold-soft:#f3e7d3;--dl-gold-wash:rgba(188,144,82,.10);
+  --dl-danger:#a4443a;
+  --dl-hair:rgba(36,34,29,.13);--dl-hair-2:rgba(36,34,29,.07);--dl-hair-strong:rgba(36,34,29,.26);
+  --dl-ink-wash:rgba(36,34,29,.05);--dl-ink-wash-2:rgba(36,34,29,.09);
+  --dl-display:"Newsreader","Source Serif 4",Georgia,"Iowan Old Style","PingFang SC","Noto Sans SC Variable","Source Han Sans SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --dl-sans:"Inter","Noto Sans SC Variable","Source Han Sans SC","PingFang SC","Microsoft YaHei UI",system-ui,-apple-system,sans-serif;
+  --dl-mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --dl-ease:cubic-bezier(.16,1,.3,1);
+  --gut:clamp(1rem,3.4vw,3rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--dl-sans);font-size:.95rem;line-height:1.5;color:var(--dl-ink);background:var(--dl-canvas);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+a{color:inherit}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:3px;border-radius:3px}
+svg :focus-visible{outline-offset:4px}
+[hidden]{display:none!important}
+
+/* the ONLY solid element on any room */
+.solid{display:inline-flex;align-items:center;gap:.5rem;background:var(--dl-ink);color:#f6f2e9;border-radius:999px;padding:.62rem 1.3rem;font-size:.86rem;letter-spacing:.03em;font-weight:500;transition:background .25s var(--dl-ease)}
+.solid:hover{background:#3a3730}
+.solid[disabled]{opacity:.6;cursor:progress}
+.solid:focus-visible{outline-color:var(--dl-ink);outline-offset:3px}
+.txt{font-size:.82rem;color:var(--dl-ink-2);padding:.4rem .2rem;border-bottom:1px solid transparent;transition:color .2s,border-color .2s}
+.txt:hover{color:var(--dl-ink);border-color:var(--dl-hair-strong)}
+.micro{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dl-ink-2)}
+.serif{font-family:var(--dl-display)}
+.ghostbtn{font-size:.8rem;color:var(--dl-ink);padding:.36rem .9rem;border:1px solid var(--dl-hair-strong);border-radius:999px;transition:background .2s}
+.ghostbtn:hover{background:var(--dl-paper)}
+.err-text{color:var(--dl-danger)}
+
+/* demo-state switcher (prototype-only chrome) */
+.proto-states{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .1rem;font-size:.7rem;color:var(--dl-ink-2)}
+.proto-states b{font-weight:400;letter-spacing:.14em;text-transform:uppercase;margin-right:.5rem;font-size:.62rem}
+.proto-states button{font-size:.72rem;color:var(--dl-ink-2);padding:.22rem .5rem;border-bottom:1px solid transparent}
+.proto-states button:hover{color:var(--dl-ink)}
+.proto-states button[aria-pressed="true"]{color:var(--dl-ink);border-color:var(--dl-gold)}
+
+/* toast (transient layer: hairline paper, no fill weight) */
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;width:min(92vw,460px)}
+.toast{pointer-events:auto;display:flex;align-items:center;gap:1rem;justify-content:space-between;width:100%;background:var(--dl-paper);border:1px solid var(--dl-hair-strong);border-radius:10px;padding:.55rem .9rem;font-size:.82rem;box-shadow:0 8px 24px rgba(36,34,29,.08);animation:toastIn .4s var(--dl-ease)}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}}
+
+/* composer */
+.cmp{display:grid;gap:.7rem;text-align:left}
+.cmp-f{display:grid;gap:.25rem}
+.cmp-f>span,.cmp legend{font-size:.72rem;letter-spacing:.06em;color:var(--dl-ink-2)}
+.cmp-f>span em{font-style:normal;color:var(--dl-gold-ink);margin-left:.3rem}
+.cmp textarea,.cmp input[type=text],.cmp input[type=date],.cmp select{width:100%;background:var(--dl-paper);border:1px solid var(--dl-hair);border-radius:8px;padding:.5rem .65rem;font-size:.88rem;line-height:1.45;resize:none}
+.cmp textarea:focus,.cmp input:focus,.cmp select:focus{outline:2px solid var(--dl-gold-ink);outline-offset:1px;border-color:transparent}
+.cmp-row{display:flex;flex-wrap:wrap;gap:.5rem 1.4rem}
+.cmp fieldset{border:0;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem}
+.cmp legend{float:left;margin-right:.6rem;padding:0;line-height:1.9}
+.cmp .chip{position:relative;display:inline-block}
+.cmp .chip input{position:absolute;opacity:0;inset:0;cursor:pointer;margin:0}
+.cmp .chip span{display:inline-block;font-size:.8rem;padding:.2rem .7rem;border:1px solid var(--dl-hair);border-radius:999px;color:var(--dl-ink-2);transition:all .2s}
+.cmp .chip input:checked+span{border-color:var(--dl-gold-ink);color:var(--dl-ink);background:var(--dl-gold-wash)}
+.cmp .chip input:focus-visible+span{outline:2px solid var(--dl-gold-ink);outline-offset:2px}
+.cmp-next{display:grid;gap:.5rem;padding-top:.2rem;border-top:1px solid var(--dl-hair-2)}
+.cmp-next .qd{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.cmp-next .qd .chip span{font-size:.74rem;padding:.14rem .55rem}
+.cmp-actions{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap}
+.cmp-msg{font-size:.78rem;min-height:1.1em}
+html.rm *,html.rm *::before,html.rm *::after{animation-duration:.001ms!important;animation-delay:0s!important;transition-duration:.001ms!important;transition-delay:0s!important}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-delay:0s!important;transition-duration:.001ms!important;transition-delay:0s!important;scroll-behavior:auto!important}}
+
+
+/* ================= 03 潮汐 · the tide table =================
+   Not a list of tasks: a timetable of WHEN the other side is at work. Every row is a customer;
+   its bar is their 09–18 window projected onto our day. The tide above counts how many windows are open. */
+body{overflow:hidden;background:linear-gradient(180deg,var(--dl-hi) 0%,var(--dl-canvas) 70%,var(--dl-canvas-low) 100%)}
+.app{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr);position:relative}
+.top{display:flex;align-items:center;gap:1.2rem;padding:0 var(--gut);height:clamp(48px,6vh,60px);border-bottom:1px solid var(--dl-hair-2)}
+.brand{font-family:var(--dl-display);font-size:1.05rem}
+.top h1{font-family:var(--dl-display);font-weight:400;font-size:1rem;color:var(--dl-ink-2)}
+.top .now{margin-left:auto;display:flex;gap:1rem;align-items:baseline;font-size:.78rem;color:var(--dl-ink-2)}
+.top .now b{font-family:var(--dl-mono);font-weight:400;font-size:.85rem;color:var(--dl-ink)}
+.banner{display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;padding:.5rem var(--gut);font-size:.82rem;color:var(--dl-ink-2);border-bottom:1px solid var(--dl-hair-2);background:var(--dl-paper-2)}
+.banner:empty{padding:0;border:0;min-height:0}
+.banner .ghostbtn{padding:.16rem .8rem}
+
+.page{display:grid;grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr) clamp(220px,19vw,270px);gap:0 clamp(1.2rem,2.6vw,2.6rem);padding:clamp(.6rem,2vh,1.3rem) var(--gut) 0;min-height:0}
+.main{display:flex;flex-direction:column;min-height:0;position:relative}
+:root{--c1:clamp(210px,19vw,270px);--c3:clamp(190px,17vw,240px)}
+.row3{display:grid;grid-template-columns:var(--c1) minmax(0,1fr) var(--c3);align-items:center}
+
+/* --- the tide --- */
+.tide{border-bottom:1px solid var(--dl-hair);padding-bottom:.2rem}
+.tide .row3{align-items:end}
+.tide h2{font-family:var(--dl-display);font-weight:400;font-size:1.25rem;line-height:1.15}
+.tide .lede{font-size:.8rem;color:var(--dl-ink-2);margin-top:.35rem;padding-right:1rem}
+.tide .lede .ghostbtn{padding:.1rem .7rem;margin-left:.3rem}
+.tide .sum{padding-left:1.1rem;font-size:.78rem;color:var(--dl-ink-2);padding-bottom:1.3rem;line-height:1.4}
+.tide .sum b{display:block;font-family:var(--dl-mono);font-weight:400;font-size:.85rem;color:var(--dl-ink)}
+.chartcol{position:relative;height:118px;cursor:crosshair;touch-action:none}
+.chartcol:focus-visible{outline-offset:2px}
+.chartcol svg{position:absolute;left:0;top:0;width:100%;height:96px;display:block;overflow:visible}
+.chartcol .hrs{position:absolute;left:0;right:0;bottom:0;height:20px}
+.chartcol .hrs span{position:absolute;transform:translateX(-50%);font-family:var(--dl-mono);font-size:.62rem;color:var(--dl-ink-2)}
+.chartcol .hrs span:first-child{transform:none}.chartcol .hrs span:last-child{transform:translateX(-100%)}
+.cnow,.cpv{display:none;position:absolute;top:0;height:88px;width:0;border-left:1.5px solid var(--dl-gold-ink);pointer-events:none}
+.cpv{border-left:1.5px dashed var(--dl-ink-3)}
+.curve{fill:none;stroke:var(--dl-ink);stroke-width:1.3;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.curve.ebb{opacity:.28}
+.tidefill{stroke:none}
+.baseline{stroke:var(--dl-hair-strong);stroke-width:1;vector-effect:non-scaling-stroke}
+.gridv{stroke:var(--dl-hair-2);stroke-width:1;vector-effect:non-scaling-stroke}
+.tide.flat .curve{stroke-dasharray:3 4}
+
+/* now / preview lines run through the whole table */
+.tt{position:relative}
+.vline{position:absolute;top:0;bottom:0;width:0;left:calc(var(--c1) + (100% - var(--c1) - var(--c3)) * var(--x));pointer-events:none;z-index:2;transition:left .5s var(--dl-ease)}
+.vline::before{content:"";position:absolute;top:0;bottom:0;left:-.5px;border-left:1.5px solid var(--dl-gold-ink)}
+.vline .tag{position:absolute;top:-2px;left:0;transform:translate(-50%,-100%);font-family:var(--dl-mono);font-size:.68rem;color:var(--dl-gold-ink);white-space:nowrap;background:linear-gradient(transparent,var(--dl-canvas) 40%);padding:0 .3rem}
+.vline.pv::before{border-left-style:dashed;border-color:var(--dl-ink-2);opacity:.9}
+.vline.pv .tag{color:var(--dl-ink-2)}
+.vline.ghost{opacity:.5;transition:none}
+.vline.ghost::before{border-left:1px solid var(--dl-ink-3)}
+.vline[hidden]{display:none}
+
+/* --- the table --- */
+.rows{flex:1;min-height:0;overflow:auto;padding:.2rem 0 .6rem;scrollbar-width:thin}
+.grp{padding:.75rem 0 .3rem;font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dl-ink-2)}
+.grp b{font-weight:500;color:var(--dl-ink);letter-spacing:.06em;margin-left:.5rem}
+.grp.open{color:var(--dl-gold-ink)}
+.rows ul{list-style:none}
+.trow{width:100%;text-align:left;border-bottom:1px solid var(--dl-hair-2);min-height:46px;position:relative;padding:.3rem 0;transition:background .3s var(--dl-ease);border-radius:2px}
+.trow:hover{background:rgba(255,253,247,.6)}
+.trow[aria-pressed="true"]{background:var(--dl-paper);box-shadow:0 0 0 1px var(--dl-hair),inset 3px 0 0 var(--dl-gold)}
+.trow .c1{display:grid;padding:0 .8rem 0 .7rem;min-width:0}
+.trow .nm{display:flex;justify-content:space-between;gap:.6rem;align-items:baseline}
+.trow .nm b{font-weight:500;font-size:.88rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow .nm i{font-style:normal;font-size:.72rem;color:var(--dl-ink-2);white-space:nowrap}
+.trow .ac{font-size:.78rem;color:var(--dl-ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow[aria-pressed="true"] .ac{color:var(--dl-ink-2)}
+.track{position:relative;height:16px;background:repeating-linear-gradient(90deg,transparent 0 calc(25% - 1px),var(--dl-hair-2) calc(25% - 1px) 25%);border-bottom:1px solid var(--dl-hair);display:block}
+.win{position:absolute;top:2px;bottom:1px;border:1px solid var(--dl-ink-3);background:rgba(255,253,247,.85);border-radius:2px}
+.win.gone{border-style:dashed;border-color:var(--dl-faint);background:transparent}
+.win.on{border-color:var(--dl-gold-ink);background:var(--dl-gold-wash)}
+.win.cut-l{border-left:0;border-radius:0 2px 2px 0}.win.cut-r{border-right:0;border-radius:2px 0 0 2px}
+.trow .c3{padding:0 .4rem 0 1.1rem;display:grid;font-size:.78rem;line-height:1.35}
+.trow .c3 b{font-weight:500;color:var(--dl-ink)}
+.trow .c3 b.on{color:var(--dl-gold-ink)}
+.trow .c3 span{color:var(--dl-ink-2);font-size:.74rem}
+.trow .nowtick{display:none}
+.trow.flip{will-change:transform}
+
+/* --- the dock (selected task) --- */
+.dock{border-top:1px solid var(--dl-hair-strong);background:linear-gradient(180deg,rgba(255,253,247,.55),var(--dl-paper));padding:.8rem 0 .9rem;position:relative;z-index:4}
+.dock .row3{align-items:start}
+.dock .k{padding:0 .8rem 0 .7rem}
+.dock .kick{font-size:.64rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dl-ink-2)}
+.dock .kick.gold{color:var(--dl-gold-ink)}
+.dock h3{font-family:var(--dl-display);font-weight:400;font-size:1.4rem;line-height:1.12;margin-top:.25rem;letter-spacing:-.01em}
+.dock .where{font-size:.76rem;color:var(--dl-ink-2);margin-top:.3rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.dock .mid{padding:0 1.4rem 0 0}
+.dock .act{font-family:var(--dl-display);font-size:1.2rem;line-height:1.2;margin-top:.25rem}
+.dock .last{font-family:var(--dl-display);font-style:italic;color:var(--dl-ink-2);font-size:.9rem;margin-top:.35rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dock .last small{font-family:var(--dl-sans);font-style:normal;color:var(--dl-ink-2);font-size:.72rem}
+.dock .acts{padding-left:1.1rem;display:flex;flex-direction:column;align-items:flex-start;gap:.3rem}
+.dock .acts .links{display:flex;gap:.6rem;flex-wrap:wrap}
+.dock.rec{position:absolute;left:0;right:0;bottom:0;padding:1rem 0 1.1rem;box-shadow:0 -18px 50px -20px rgba(36,34,29,.16);background:var(--dl-paper);border-top:1px solid var(--dl-hair-strong)}
+.dock.rec .recgrid{display:grid;grid-template-columns:var(--c1) minmax(0,1fr);gap:0}
+.dock.rec .recgrid>.cmpwrap{padding:0 1.4rem 0 1.2rem;max-width:720px}
+.dock.rec h3{font-size:1.25rem}
+.main.recording .rows,.main.recording .tide{opacity:.4;transition:opacity .4s var(--dl-ease);pointer-events:none}
+.sun{display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--dl-gold-ink);background:var(--dl-paper);box-shadow:0 0 8px 2px rgba(188,144,82,.55);flex:none}
+.sun.dusk{border-color:var(--dl-ink-2);box-shadow:0 0 5px 1px rgba(188,144,82,.25)}
+.sun.night{border:1.5px dashed var(--dl-faint);box-shadow:none}
+
+/* --- later column --- */
+.later{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--dl-hair);padding-left:clamp(1rem,1.8vw,1.6rem)}
+.later h2{font-family:var(--dl-display);font-weight:400;font-size:1.05rem;display:flex;justify-content:space-between;align-items:baseline}
+.later h2 small{font-family:var(--dl-sans);font-size:.66rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dl-ink-2)}
+.laterbody{display:flex;flex-direction:column;min-height:0;flex:1}
+.later ul{list-style:none;margin-top:.5rem;overflow:auto;min-height:0;flex:1}
+.later li button{display:grid;grid-template-columns:3.6rem 1fr;gap:.6rem;text-align:left;width:100%;padding:.55rem .2rem;border-bottom:1px solid var(--dl-hair-2);font-size:.8rem;transition:background .2s}
+.later li button:hover{background:rgba(255,253,247,.6)}
+.later li button[aria-pressed="true"]{box-shadow:inset 2px 0 0 var(--dl-gold);background:var(--dl-paper)}
+.later time{font-family:var(--dl-mono);font-size:.72rem;color:var(--dl-ink-2);padding-top:.1rem}
+.later b{font-weight:500;display:block;color:var(--dl-ink-2)}
+.later span{color:var(--dl-ink-2);font-size:.76rem;display:block}
+.later .msg{font-size:.82rem;color:var(--dl-ink-2);padding:.8rem 0}
+.wk{border-top:1px solid var(--dl-hair);margin-top:.4rem;padding:.4rem 0 .7rem}
+.wk summary{cursor:pointer;font-size:.8rem;color:var(--dl-ink-2);padding:.3rem 0;list-style:none;display:flex;justify-content:space-between}
+.wk summary::-webkit-details-marker{display:none}
+.wk summary::after{content:"+";color:var(--dl-ink-2)}
+.wk[open] summary::after{content:"–"}
+.wk summary:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:2px}
+.wk ul{max-height:34vh;margin-top:.3rem}
+.wk li{padding:.5rem 0;border-bottom:1px solid var(--dl-hair-2);font-size:.78rem;display:grid;grid-template-columns:3rem 1fr;gap:.5rem}
+.wk li time{color:var(--dl-ink-2);font-family:var(--dl-mono);font-size:.7rem}
+.wk li b{font-weight:500}
+.wk li span{display:block;color:var(--dl-ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.wk li small{color:var(--dl-ink-2)}
+.keys{font-size:.68rem;color:var(--dl-ink-2);display:flex;gap:.8rem;flex-wrap:wrap;padding:.4rem 0}
+.keys kbd{font-family:var(--dl-mono);font-size:.66rem;border:1px solid var(--dl-hair-strong);border-radius:4px;padding:0 .3rem;margin-right:.25rem;color:var(--dl-ink-2)}
+
+.sk-bar{display:block;height:11px;border-radius:5px;background:var(--dl-ink-wash);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.45}}
+.msg2{padding:2rem 0 1rem;max-width:44ch}
+.msg2 strong{display:block;font-family:var(--dl-display);font-weight:400;font-size:1.5rem;margin-bottom:.3rem}
+.msg2 p{color:var(--dl-ink-2);font-size:.88rem}
+.msg2 .row{margin-top:1rem;display:flex;gap:.8rem;align-items:center}
+
+.demo{padding:.4rem 0 .6rem}
+
+/* --- narrow: rows become stacked, the dock sticks to the bottom --- */
+@media (max-width:1000px){
+  :root{--c1:180px;--c3:170px}
+  .tide .sum{display:none}
+  .trow .c3{padding-left:.6rem}
+}
+@media (max-width:820px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%;grid-template-rows:auto auto auto}
+  .page{display:block;padding-bottom:1rem}
+  .later .laterbody{flex:none}
+  .main{min-height:0}
+  .row3{grid-template-columns:1fr}
+  .tide .row3{gap:.4rem}
+  .tide h2{font-size:1.1rem}
+  .chartcol{margin:.3rem 0 .3rem}
+  .vline{display:none}
+  .rows{overflow:visible}
+  .trow{padding:.55rem 0 .6rem;min-height:0}
+  .trow .c1{padding:0 .3rem}
+  .trow .track{margin:.4rem .3rem .2rem}
+  .trow .nowtick{display:block;position:absolute;top:-2px;bottom:-2px;left:calc(var(--x) * 100%);border-left:1.5px solid var(--dl-gold-ink);z-index:1}
+  .trow .c3{padding:0 .3rem;grid-template-columns:1fr;gap:0}
+  .dock{position:sticky;bottom:0;margin:0 calc(var(--gut) * -1);padding:.7rem var(--gut) .8rem;box-shadow:0 -12px 30px -16px rgba(36,34,29,.2);background:var(--dl-paper)}
+  .dock .row3{gap:.5rem}
+  .dock .k,.dock .acts{padding:0}
+  .dock .mid{display:none}
+  .dock .acts .solid{width:100%;justify-content:center}
+  .dock h3{font-size:1.2rem}
+  .dock.rec{position:fixed;inset:auto 0 0 0;margin:0;max-height:92vh;overflow:auto;padding:1rem var(--gut) 1.2rem;z-index:30}
+  .dock.rec .recgrid{grid-template-columns:1fr}
+  .dock.rec .recgrid>.cmpwrap{padding:.6rem 0 0}
+  .later{border-left:0;padding-left:0;border-top:1px solid var(--dl-hair);margin-top:1rem;padding-top:.8rem}
+  .later ul{overflow:visible}
+  .keys{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <span class="brand">Trosa</span><h1>今天</h1>
+    <div class="now"><span id="dateTxt"></span><b id="clockTxt" aria-label="现在时间"></b></div>
+  </header>
+  <div class="banner" id="banner" role="status"></div>
+  <div class="page">
+    <main class="main" id="main">
+      <div class="tt" id="tt">
+        <section class="tide" id="tide" aria-label="今日之潮"></section>
+        <div class="vline" id="lineNow" style="--x:0"><span class="tag" id="tagNow"></span></div>
+        <div class="vline pv" id="linePv" hidden><span class="tag" id="tagPv"></span></div>
+        <div class="vline ghost" id="lineGhost" hidden></div>
+      </div>
+      <div class="rows" id="rows"></div>
+      <section class="dock" id="dock" aria-live="polite" aria-label="当前选中的待办"></section>
+    </main>
+    <aside class="later" aria-label="接下来"><div id="later" class="laterbody"></div><div class="keys"><span><kbd>↑</kbd><kbd>↓</kbd>选行</span><span><kbd>←</kbd><kbd>→</kbd>预演时刻</span><span><kbd>R</kbd>记录</span><span><kbd>N</kbd>下一步</span></div><div class="demo" id="protoStates"></div></aside>
+  </div>
+</div>
+<div id="toast"></div>
+<div class="sr-only" id="live" aria-live="polite"></div>
+
+<script>
+/* ===== shared harness (inlined by build): fictional data, clock, store, states, composer ===== */
+window.Trosa = (function () {
+  'use strict';
+  var HOME_TZ = 'Asia/Shanghai', HOME_OFF = 480;
+  var RM = window.matchMedia('(prefers-reduced-motion: reduce)').matches || /[?&]rm=1\b/.test(location.search);
+  if (RM) document.documentElement.classList.add('rm');
+  var WD = ['日', '一', '二', '三', '四', '五', '六'];
+  var wdIdx = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  var qs = new URLSearchParams(location.search);
+  var fixedT = (qs.get('t') || '').match(/^(\d{1,2}):(\d{2})$/);
+
+  /* ---------- clock (viewer's "our clock" is fixed to Asia/Shanghai) ---------- */
+  var fmtCache = {};
+  function parts(tz, date) {
+    var f = fmtCache[tz] || (fmtCache[tz] = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short' }));
+    var o = {};
+    f.formatToParts(date).forEach(function (p) { o[p.type] = p.value; });
+    return { y: +o.year, m: +o.month, d: +o.day, h: (+o.hour) % 24, mi: +o.minute, wd: wdIdx[o.weekday] };
+  }
+  function now() {
+    if (fixedT) {
+      var p = parts(HOME_TZ, new Date());
+      return new Date(Date.UTC(p.y, p.m - 1, p.d, +fixedT[1], +fixedT[2]) - HOME_OFF * 60000);
+    }
+    return new Date();
+  }
+  function home() { return parts(HOME_TZ, now()); }
+  function iso(y, m, d) { return y + '-' + pad(m) + '-' + pad(d); }
+  function todayISO() { var h = home(); return iso(h.y, h.m, h.d); }
+  function addDays(s, n) {
+    var a = s.split('-');
+    var d = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2] + n));
+    return iso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  }
+  function diff(s) {
+    var a = s.split('-'), t = todayISO().split('-');
+    return Math.round((Date.UTC(+a[0], +a[1] - 1, +a[2]) - Date.UTC(+t[0], +t[1] - 1, +t[2])) / 864e5);
+  }
+  function wdOf(s) { var a = s.split('-'); return new Date(Date.UTC(+a[0], +a[1] - 1, +a[2])).getUTCDay(); }
+  function md(s) { var a = s.split('-'); return (+a[1]) + ' 月 ' + (+a[2]) + ' 日'; }
+  function mdShort(s) { var a = s.split('-'); return (+a[1]) + '/' + (+a[2]); }
+  function clock(date) { var p = parts(HOME_TZ, date || now()); return pad(p.h) + ':' + pad(p.mi); }
+  function relDay(s) {
+    var d = diff(s);
+    if (d === 0) return '今天';
+    if (d === 1) return '明天';
+    if (d === -1) return '昨天';
+    if (d < 0) return (-d) + ' 天前';
+    return d + ' 天后';
+  }
+  function offsetMin(tz, at) {
+    var p = parts(tz, at);
+    return (Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi) - Math.floor(at.getTime() / 60000) * 60000) / 60000;
+  }
+
+  /* Is the counterpart reachable now? (prototype rule: local 09–18 on weekdays) */
+  function localInfo(tz, at) {
+    at = at || now();
+    var p = parts(tz, at), mins = p.h * 60 + p.mi, weekend = p.wd === 0 || p.wd === 6;
+    var fit = 'closed', label;
+    if (weekend) { fit = 'closed'; label = '对方在周末'; }
+    else if (mins >= 540 && mins < 1080) { fit = 'open'; label = mins >= 1020 ? '快下班了，适合快速联系' : '现在适合联系'; }
+    else if ((mins >= 480 && mins < 540) || (mins >= 1080 && mins < 1200)) { fit = 'edge'; label = mins < 540 ? '刚上班，可以先发消息' : '已下班，只适合留言'; }
+    else { fit = 'closed'; label = mins < 480 ? '对方还没起床' : '对方已休息'; }
+    var h = p.h + p.mi / 60, sun = (h >= 6.5 && h < 17.5) ? 'day' : ((h >= 5 && h < 6.5) || (h >= 17.5 && h < 20)) ? 'dusk' : 'night';
+    return { time: pad(p.h) + ':' + pad(p.mi), mins: mins, fit: fit, sun: sun, label: label, weekend: weekend, wd: p.wd };
+  }
+
+  /* windows (minutes on OUR day axis 0..1440) when the counterpart is at work 09–18 */
+  function windows(tz, shift) {
+    shift = shift || 0;
+    var at = now(), h = home(), off = offsetMin(tz, at);
+    var homeMid = Date.UTC(h.y, h.m - 1, h.d + shift) - HOME_OFF * 60000;
+    var out = [];
+    for (var k = -1; k <= 1; k++) {
+      var L = new Date(Date.UTC(h.y, h.m - 1, h.d + shift + k));
+      var wd = L.getUTCDay();
+      if (wd === 0 || wd === 6) continue;
+      var s = (L.getTime() + 9 * 3600e3 - off * 60000 - homeMid) / 60000;
+      var e = (L.getTime() + 18 * 3600e3 - off * 60000 - homeMid) / 60000;
+      if (e <= 0 || s >= 1440) continue;
+      out.push([Math.max(0, s), Math.min(1440, e), s, e]);
+    }
+    return out;
+  }
+
+  /* ---------- fictional data (12–20 records, many countries, English company names) ---------- */
+  var CUST = [
+    [1, 'Northwind Marine Supply', 'Ingrid Solberg', '挪威', '奥斯陆', 'Europe/Oslo', '船用紧固件', 'A', 'northwind-marine.example'],
+    [2, 'Kestrel Fasteners Ltd', 'Oliver Grant', '英国', '伦敦', 'Europe/London', '不锈钢螺栓', 'B', 'kestrel-fasteners.example'],
+    [3, 'Atlas Ceramica S.A.', 'Mariana Duarte', '巴西', '圣保罗', 'America/Sao_Paulo', '陶瓷砖', 'B', 'atlas-ceramica.example'],
+    [4, 'Hanseatic Tooling GmbH', 'Jonas Keller', '德国', '汉堡', 'Europe/Berlin', '精密刀具', 'A', 'hanseatic-tooling.example'],
+    [5, 'Prairie Wind Energy', 'Dana Whitfield', '美国', '芝加哥', 'America/Chicago', '风电配件', 'A', 'prairie-wind.example'],
+    [6, 'Sakura Precision Co.', 'Haruto Mori', '日本', '东京', 'Asia/Tokyo', '精密轴承', 'B', 'sakura-precision.example'],
+    [7, 'Meridian Lighting Pty', 'Chloe Nguyen', '澳大利亚', '悉尼', 'Australia/Sydney', '商用灯具', 'C', 'meridian-lighting.example'],
+    [8, 'Casablanca Textile Group', 'Youssef Amrani', '摩洛哥', '卡萨布兰卡', 'Africa/Casablanca', '面料', 'B', 'casablanca-textile.example'],
+    [9, 'Lumen & Oak Furniture', 'Tessa Marlowe', '美国', '洛杉矶', 'America/Los_Angeles', '实木家具', 'B', 'lumen-oak.example'],
+    [10, 'Bergström Pumps AB', 'Elin Bergström', '瑞典', '斯德哥尔摩', 'Europe/Stockholm', '工业泵', 'A', 'bergstrom-pumps.example'],
+    [11, 'Andes Copper Trading', 'Matías Rojas', '智利', '圣地亚哥', 'America/Santiago', '铜材', 'C', 'andes-copper.example'],
+    [12, 'Cobalt Harbor Logistics', 'Wei Ling Tan', '新加坡', '新加坡', 'Asia/Singapore', '货代', 'B', 'cobalt-harbor.example'],
+    [13, 'Vesper Home Goods', 'Priya Nair', '加拿大', '多伦多', 'America/Toronto', '家居用品', 'C', 'vesper-home.example'],
+    [14, 'Zenith Auto Parts', 'Arjun Mehta', '印度', '加尔各答', 'Asia/Kolkata', '汽车配件', 'B', 'zenith-auto.example'],
+    [15, 'Tidewater Outdoors', 'Sipho Dlamini', '南非', '约翰内斯堡', 'Africa/Johannesburg', '户外装备', 'C', 'tidewater-outdoors.example'],
+    [16, 'Orchid Bay Trading', 'Naree Suksawat', '泰国', '曼谷', 'Asia/Bangkok', '礼品', 'C', 'orchid-bay.example'],
+    [17, 'Juniper Row Interiors', 'Aoife Brennan', '爱尔兰', '都柏林', 'Europe/Dublin', '软装', 'C', 'juniper-row.example']
+  ].map(function (a) { return { id: a[0], company: a[1], contact: a[2], country: a[3], city: a[4], tz: a[5], field: a[6], level: a[7], website: a[8] }; });
+  var byCust = {};
+  CUST.forEach(function (c) { byCust[c.id] = c; });
+
+  // [id, customer, dueOffset, task_title, last_activity, lastOffset|null, type]
+  var TASKS0 = [
+    [101, 1, -6, '确认 3 月装运窗口', 'Could the ETD move to week 12? Our warehouse closes for inventory in week 10.', -8, 'email'],
+    [102, 2, -3, '回复修改后的最小起订量', 'We can go to 2,000 pcs per size if the unit price stays.', -5, 'email'],
+    [103, 3, -2, '发送样品追踪号', 'Samples approved on the call — please ship this week.', -4, 'call'],
+    [104, 4, -1, '核对图纸 Rev C 的差异', 'Rev C changes the bore tolerance on item 4. Please confirm.', -3, 'email'],
+    [105, 5, 0, '跟进付款凭证是否到账', 'Wire sent Friday, will forward the SWIFT copy.', -4, 'email'],
+    [106, 6, 0, '确认验厂时间', 'Our QA lead can visit on the 14th or 15th.', -2, 'email'],
+    [107, 7, 0, '询问包装偏好', '', null, ''],
+    [108, 8, 0, '确认色卡编号', 'Swatch 4 and 7 are closest to what we need.', -6, 'email'],
+    [109, 9, 0, '跟进展会后的回复', 'Great meeting you in Guangzhou — sending our spec sheet next week.', -9, 'email'],
+    [110, 10, 1, '确认报价有效期', 'Please keep the quote valid until the end of the month.', -3, 'email'],
+    [111, 11, 2, '回访最终规格', 'Grade C11000, 3 mm sheet, first lot around 8 tons.', -7, 'call'],
+    [112, 12, 3, '对齐 FOB 港口', 'Can you load from Ningbo instead of Shanghai?', -5, 'email'],
+    [113, 13, 5, '发送 Q4 目录更新', 'Send the new catalogue once prices are final.', -10, 'email'],
+    [114, 14, 5, '确认首批订单数量', 'We are aiming for 600 sets as a trial order.', -6, 'email'],
+    [115, 15, 12, '回复第二轮报价', 'Round two after we hear back from the outdoor fair.', -12, 'email']
+  ];
+  var WEEKLY0 = [
+    { cid: 16, off: -1, content: 'Phone call: sample approved. They will place the PO after internal sign-off.', result: '等对方内部确认', channel: '电话' },
+    { cid: 17, off: -2, content: 'Sent the revised catalogue (PDF). Aoife acknowledged and will share it with her buyers.', result: '已收到', channel: '邮件' },
+    { cid: 6, off: -2, content: 'Our QA lead can visit on the 14th or 15th.', result: '对方回复', channel: '邮件' },
+    { cid: 3, off: -4, content: 'Samples approved on the call — please ship this week.', result: '对方回复', channel: '电话' },
+    { cid: 5, off: -4, content: 'Wire sent Friday, will forward the SWIFT copy.', result: '对方回复', channel: '邮件' },
+    { cid: 10, off: -3, content: 'Please keep the quote valid until the end of the month.', result: '对方回复', channel: '邮件' }
+  ];
+  var LEVEL_W = { A: 30, B: 20, C: 10 };
+  var nextId = 900;
+
+  function makeTask(t) {
+    var c = byCust[t[1]], due = addDays(todayISO(), t[2]);
+    return {
+      id: t[0], customer_id: c.id, customer_company: c.company, customer_name: c.contact, country: c.country, field: c.field,
+      level: c.level, website: c.website, remind_date: due, task_title: t[3], last_activity: t[4],
+      last_activity_date: t[5] == null ? '' : addDays(todayISO(), t[5]), last_activity_type: t[6], last_contact: t[5] == null ? '' : addDays(todayISO(), t[5]),
+      _tz: c.tz, _city: c.city
+    };
+  }
+  function decorate(t) {
+    var d = diff(t.remind_date);
+    t.overdue_days = Math.max(0, -d);
+    t.why_today = d < 0 ? '已逾期 ' + (-d) + ' 天' : (d === 0 ? '今天到期' : '');
+    t.priority_score = (LEVEL_W[t.level] || 0) + Math.min(t.overdue_days, 30) * 3;
+    return t;
+  }
+  var tasks = TASKS0.map(makeTask).map(decorate);
+  var weekly = WEEKLY0.map(function (w, i) {
+    var c = byCust[w.cid];
+    return { id: 500 + i, follow_date: addDays(todayISO(), w.off), customer_id: c.id, customer_company: c.company, content: w.content, result: w.result, channel: w.channel, has_next: tasks.some(function (t) { return t.customer_id === c.id; }) };
+  });
+  var undoStack = null;
+
+  function sortApi(list) {
+    return list.slice().sort(function (a, b) { return (b.priority_score - a.priority_score) || a.remind_date.localeCompare(b.remind_date) || a.id - b.id; });
+  }
+  function dueList() { return sortApi(tasks.filter(function (t) { return diff(t.remind_date) <= 0; })); }
+  function upcomingList() { return tasks.filter(function (t) { var d = diff(t.remind_date); return d > 0 && d <= 14; }).sort(function (a, b) { return a.remind_date.localeCompare(b.remind_date) || a.id - b.id; }); }
+
+  /* ---------- state machine ---------- */
+  var mode = 'loading', loadedAt = null, subs = [], holdTimer = null;
+  var view = function () {
+    var v = { mode: mode, due: [], upcoming: [], weekly: [], upcomingFailed: false, staleAt: loadedAt, home: home(), today: todayISO() };
+    if (mode === 'ready' || mode === 'stale' || mode === 'retrying') { v.due = dueList(); v.upcoming = upcomingList(); v.weekly = weekly; }
+    if (mode === 'empty') { v.upcoming = upcomingList(); v.weekly = weekly; }
+    if (mode === 'stale') v.upcomingFailed = true;
+    if (mode === 'retrying') { v.retrying = true; }
+    return v;
+  };
+  function emit() { subs.forEach(function (f) { f(view()); }); }
+  function setMode(m, opts) {
+    clearTimeout(holdTimer);
+    var go = function (t) { mode = t; if (t === 'ready' || t === 'stale' || t === 'empty') loadedAt = clock(); emit(); syncSwitcher(); };
+    var target = m;
+    if (m === 'loading') { mode = 'loading'; emit(); syncSwitcher(); return; }
+    if (RM || (opts && opts.instant)) { go(target); return; }
+    mode = 'loading'; emit(); syncSwitcher();
+    holdTimer = setTimeout(function () { go(target); }, 650);
+  }
+  function retry() {
+    // simulated retry: keeps what is on screen, then succeeds
+    var prev = mode;
+    mode = prev === 'cold' ? 'loading' : 'retrying'; emit();
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(function () { mode = 'ready'; loadedAt = clock(); emit(); syncSwitcher(); }, RM ? 0 : 800);
+  }
+  var stateNames = [['ready', '正常'], ['loading', '加载中'], ['empty', '今天已清空'], ['stale', '刷新失败'], ['cold', '首次加载失败']];
+  function syncSwitcher() {
+    var host = document.getElementById('protoStates'); if (!host) return;
+    var cur = mode === 'retrying' ? 'stale' : mode;
+    host.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.s === cur ? 'true' : 'false'); });
+  }
+  function buildSwitcher() {
+    var host = document.getElementById('protoStates'); if (!host) return;
+    host.classList.add('proto-states');
+    host.setAttribute('role', 'group'); host.setAttribute('aria-label', '演示状态');
+    host.innerHTML = '<b>演示状态</b>' + stateNames.map(function (s) { return '<button type="button" data-s="' + s[0] + '" aria-pressed="false">' + s[1] + '</button>'; }).join('');
+    host.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.s === 'ready') { tasks = TASKS0.map(makeTask).map(decorate); weekly = weekly.filter(function (w) { return w.id < 900; }); }
+      setMode(b.dataset.s);
+    });
+    syncSwitcher();
+  }
+
+  /* ---------- writes ---------- */
+  function snapshot() { undoStack = { tasks: JSON.parse(JSON.stringify(tasks)), weekly: JSON.parse(JSON.stringify(weekly)) }; }
+  function record(p) {
+    snapshot();
+    var c = byCust[p.customer_id];
+    if (p.taskId) tasks = tasks.filter(function (t) { return t.id !== p.taskId; });
+    weekly = [{ id: nextId++, follow_date: todayISO(), customer_id: c.id, customer_company: c.company, content: p.what, result: p.next ? '已安排：' + p.next.action + '（' + md(p.next.date) + '）' : '未设下一步', channel: p.channel || '邮件', has_next: !!p.next }].concat(weekly);
+    if (p.next) {
+      var t = makeTask([nextId++, c.id, diff(p.next.date), p.next.action, p.what, 0, 'follow_up']);
+      tasks.push(decorate(t));
+    }
+    emit();
+  }
+  function reschedule(id, action, date) {
+    snapshot();
+    tasks.forEach(function (t) { if (t.id === id) { t.task_title = action; t.remind_date = date; decorate(t); } });
+    emit();
+  }
+  function undo() {
+    if (!undoStack) return false;
+    tasks = undoStack.tasks; weekly = undoStack.weekly; undoStack = null; emit(); return true;
+  }
+
+  /* ---------- toast ---------- */
+  function toast(msg, undoFn) {
+    var host = document.getElementById('toast'); if (!host) return;
+    host.setAttribute('aria-live', 'polite');
+    var el = document.createElement('div'); el.className = 'toast';
+    el.innerHTML = '<span></span>'; el.firstChild.textContent = msg;
+    if (undoFn) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'txt'; b.textContent = '撤销';
+      b.onclick = function () { undoFn(); el.remove(); }; el.appendChild(b);
+    }
+    host.appendChild(el);
+    setTimeout(function () { el.remove(); }, 7000);
+  }
+
+  /* ---------- composer (shared logic, rooms restyle) ---------- */
+  var CH = ['邮件', '电话', '微信', '当面/其他'], DIR = ['对方回复', '我方发出'];
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function composer(host, o) {
+    var uid = 'c' + Math.random().toString(36).slice(2, 7);
+    var rec = o.mode !== 'schedule';
+    var opts = CUST.map(function (c) { return '<option value="' + c.id + '">' + esc(c.company) + '</option>'; }).join('');
+    var chips = function (name, arr, first) { return arr.map(function (v, i) { return '<label class="chip"><input type="radio" name="' + name + '" value="' + esc(v) + '"' + (i === first ? ' checked' : '') + '><span>' + esc(v) + '</span></label>'; }).join(''); };
+    var qd = [['明天', 1], ['3 天后', 3], ['下周一', 'mon'], ['两周后', 14]].map(function (q) { return '<button type="button" class="txt" data-qd="' + q[1] + '">' + q[0] + '</button>'; }).join('');
+    host.innerHTML =
+      '<form class="cmp" novalidate>' +
+      (o.customer ? '' : '<label class="cmp-f"><span>客户</span><select name="cid">' + opts + '</select></label>') +
+      (rec ? '<label class="cmp-f"><span>这次实际发生了什么<em>必填</em></span><textarea name="what" rows="' + (o.rows || 3) + '" placeholder="只写事实：谁、说了什么、结果。"></textarea></label>' +
+        '<div class="cmp-row"><fieldset><legend>渠道</legend>' + chips('ch' + uid, CH, 0) + '</fieldset><fieldset><legend>方向</legend>' + chips('dr' + uid, DIR, 0) + '</fieldset></div>' +
+        '<button type="button" class="txt cmp-toggle" aria-expanded="false" style="justify-self:start">安排下一步（可不填）</button>' : '') +
+      '<div class="cmp-next" ' + (rec ? 'hidden' : '') + '>' +
+      '<label class="cmp-f"><span>下一步要做什么</span><input type="text" name="action" placeholder="一句明确的动作" value="' + (rec ? '' : esc(o.taskTitle || '')) + '"></label>' +
+      '<label class="cmp-f"><span>什么时候</span><input type="date" name="date"></label>' +
+      '<div class="qd"><span class="micro" style="margin-right:.3rem">快选</span>' + qd + '</div>' +
+      '</div>' +
+      '<div class="cmp-msg" role="alert"></div>' +
+      '<div class="cmp-actions"><button type="submit" class="solid cmp-save">' + (rec ? '保存记录' : '保存下一步') + '</button><button type="button" class="txt cmp-cancel">取消</button>' +
+      (rec ? '<span class="micro" style="margin-left:auto">⌘ / Ctrl + Enter</span>' : '') + '</div></form>';
+    var f = host.querySelector('form'), msg = host.querySelector('.cmp-msg'), nextBox = host.querySelector('.cmp-next'), tog = host.querySelector('.cmp-toggle'), save = host.querySelector('.cmp-save');
+    var minDate = todayISO();
+    f.elements.date.min = minDate;
+    if (!rec) f.elements.date.value = addDays(minDate, 1);
+    function setDate(v) {
+      var d = v === 'mon' ? (function () { var w = wdOf(minDate); return addDays(minDate, ((8 - w) % 7) || 7); })() : addDays(minDate, +v);
+      f.elements.date.value = d;
+    }
+    host.querySelectorAll('[data-qd]').forEach(function (b) { b.onclick = function () { var v = b.dataset.qd; setDate(v === 'mon' ? 'mon' : +v); }; });
+    if (tog) tog.onclick = function () {
+      var open = nextBox.hidden; nextBox.hidden = !open; tog.setAttribute('aria-expanded', open ? 'true' : 'false');
+      tog.textContent = open ? '不安排下一步' : '安排下一步（可不填）';
+      if (open) { f.elements.action.focus(); if (!f.elements.date.value) setDate(1); }
+    };
+    host.querySelector('.cmp-cancel').onclick = function () { o.onCancel && o.onCancel(); };
+    f.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.stopPropagation(); o.onCancel && o.onCancel(); }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); f.requestSubmit(); }
+    });
+    f.addEventListener('submit', function (e) {
+      e.preventDefault(); msg.textContent = ''; msg.className = 'cmp-msg';
+      var what = rec ? f.elements.what.value.trim() : '';
+      var cid = o.customer ? o.customer.id : +f.elements.cid.value;
+      var next = null, showNext = !nextBox.hidden;
+      var a = f.elements.action.value.trim(), d = f.elements.date.value;
+      if (rec && !what) { msg.textContent = '请先写下实际发生了什么。'; msg.className = 'cmp-msg err-text'; f.elements.what.focus(); return; }
+      if (showNext && (a || d)) {
+        if (!a || !d) { msg.textContent = '下一步需要同时有动作和日期，或者两项都留空。'; msg.className = 'cmp-msg err-text'; (a ? f.elements.date : f.elements.action).focus(); return; }
+        if (d < minDate) { msg.textContent = '日期不能早于今天。'; msg.className = 'cmp-msg err-text'; f.elements.date.focus(); return; }
+        next = { action: a, date: d };
+      }
+      if (!rec && !next) { msg.textContent = '请写下下一步的动作和日期。'; msg.className = 'cmp-msg err-text'; return; }
+      var payload = { customer_id: cid, taskId: o.taskId || null, what: what, next: next, mode: rec ? 'record' : 'schedule' };
+      if (rec) {
+        var chk = f.querySelectorAll('input[type=radio]:checked');
+        payload.channel = chk[0] ? chk[0].value : '邮件'; payload.direction = chk[1] ? chk[1].value : '对方回复';
+      }
+      save.disabled = true; save.textContent = '正在保存…';
+      setTimeout(function () { o.onSave && o.onSave(payload); }, RM ? 0 : 320);
+    });
+    return { focus: function () { var t = f.elements.what || f.elements.action || f.elements.cid; t && t.focus(); }, destroy: function () { host.innerHTML = ''; } };
+  }
+
+  /* ---------- boot ---------- */
+  function start(onView, onTick) {
+    subs.push(onView);
+    buildSwitcher();
+    var s = qs.get('state') || 'ready';
+    if (s === 'loading') { setMode('loading'); }
+    else { mode = 'loading'; emit(); setMode(s, { instant: !!qs.get('instant') || RM }); }
+    if (onTick) setInterval(function () { onTick(view()); }, 30000);
+  }
+
+  return {
+    RM: RM, HOME_TZ: HOME_TZ, WD: WD, pad: pad, esc: esc, now: now, home: home, todayISO: todayISO, addDays: addDays, diff: diff, md: md, mdShort: mdShort, clock: clock, relDay: relDay,
+    localInfo: localInfo, windows: windows, offsetMin: offsetMin, wdOf: wdOf,
+    customers: CUST, cust: byCust, view: view, start: start, setMode: setMode, retry: retry,
+    record: record, reschedule: reschedule, undo: undo, toast: toast, composer: composer
+  };
+})();
+
+(function () {
+  var T = Trosa, $ = function (s) { return document.getElementById(s); }, esc = T.esc;
+  var view = null, sel = null, rec = null, cmp = null, pv = null /* preview minute */, ordered = [], winCache = {};
+  var mqNarrow = window.matchMedia('(max-width:820px)');
+  var NS = 'http://www.w3.org/2000/svg';
+
+  /* ---------- window maths (minutes on OUR day axis) ---------- */
+  function wins(tz) { return winCache[tz] || (winCache[tz] = T.windows(tz, 0)); }
+  function dur(m) { m = Math.max(0, Math.round(m)); var h = Math.floor(m / 60), r = m % 60; return h ? h + ' 小时' + (r ? ' ' + r + ' 分' : '') : r + ' 分'; }
+  function hm(m) { m = Math.round(m); return T.pad(Math.floor(m / 60) % 24) + ':' + T.pad(m % 60); }
+  function nextDayWindow(tz) {
+    for (var s = 1; s <= 6; s++) {
+      var w = T.windows(tz, s).filter(function (x) { return x[1] > 0 && x[0] < 1440; })[0];
+      if (w) { var dn = s === 1 ? '明天' : s === 2 ? '后天' : '周' + T.WD[(T.wdOf(T.addDays(T.todayISO(), s)))]; return { day: dn, s: Math.max(0, w[0]) }; }
+    }
+    return null;
+  }
+  function stateAt(t, m) {
+    var ws = wins(t._tz), cur = null, later = null;
+    ws.forEach(function (w) { if (w[0] <= m && m < w[1]) cur = w; else if (w[0] > m && (!later || w[0] < later[0])) later = w; });
+    if (cur) {
+      var after = ws.filter(function (w) { return w[0] >= cur[1]; }).sort(function (a, b) { return a[0] - b[0]; })[0];
+      var nd = after ? { day: '今天', s: after[0] } : nextDayWindow(t._tz);
+      return { k: 'open', left: cur[1] - m, closeAt: cur[1], again: nd };
+    }
+    if (later) return { k: 'later', inMin: later[0] - m, openAt: later[0] };
+    return { k: 'none', next: nextDayWindow(t._tz) };
+  }
+  function openCount(list, m) { var n = 0; list.forEach(function (t) { if (wins(t._tz).some(function (w) { return w[0] <= m && m < w[1]; })) n++; }); return n; }
+
+  /* ---------- ordering: by WHEN to move ---------- */
+  function build(v, m) {
+    var due = v.due.map(function (t) { return { t: t, s: stateAt(t, m) }; });
+    var A = due.filter(function (x) { return x.s.k === 'open'; }).sort(function (a, b) { return a.s.left - b.s.left || b.t.priority_score - a.t.priority_score; });
+    var B = due.filter(function (x) { return x.s.k === 'later'; }).sort(function (a, b) { return a.s.inMin - b.s.inMin || b.t.priority_score - a.t.priority_score; });
+    var C = due.filter(function (x) { return x.s.k === 'none'; }).sort(function (a, b) { return b.t.priority_score - a.t.priority_score; });
+    return { A: A, B: B, C: C, flat: A.concat(B, C) };
+  }
+  function nowMin() { return view.home.h * 60 + view.home.mi; }
+  function atMin() { return pv == null ? nowMin() : pv; }
+
+  /* ---------- tide chart ---------- */
+  function tideSVG(v, m0) {
+    var list = v.due, N = 145, pts = [], raw = [];
+    for (var i = 0; i <= 144; i++) raw.push(list.length ? openCount(list, i * 10) : 0);
+    var max = Math.max.apply(null, raw.concat([1]));
+    for (var j = 0; j <= 144; j++) { var a = 0, c = 0; for (var k = -4; k <= 4; k++) { var q = raw[Math.max(0, Math.min(144, j + k))]; a += q; c++; } pts.push(a / c / max); }
+    var y = function (h) { return 88 - h * 70; };
+    var d = pts.map(function (h, i) { return (i ? 'L' : 'M') + (i * 10) + ' ' + y(h).toFixed(1); }).join(' ');
+    var area = d + ' L1440 88 L0 88 Z';
+    var nowX = m0;
+    var svg = '<svg viewBox="0 0 1440 96" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="tf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#24221d" stop-opacity=".13"/><stop offset="1" stop-color="#24221d" stop-opacity="0"/></linearGradient><clipPath id="fut"><rect x="' + nowX + '" y="0" width="' + (1440 - nowX) + '" height="96"/></clipPath></defs>';
+    for (var h = 0; h <= 24; h += 3) svg += '<line class="gridv" x1="' + h * 60 + '" x2="' + h * 60 + '" y1="0" y2="88"/>';
+    svg += '<line class="baseline" x1="0" x2="1440" y1="88" y2="88"/>';
+    if (list.length) {
+      svg += '<path class="curve ebb" d="' + d + '"/><g clip-path="url(#fut)"><path class="tidefill" d="' + area + '" fill="url(#tf)"/><path class="curve" d="' + d + '"/></g>';
+    } else svg += '<path class="curve" d="M0 87 L1440 87"/>';
+    svg += '</svg>';
+    // peak range
+    var peakRange = null;
+    if (list.length && max > 0) {
+      var best = null, st = null;
+      for (var z = 0; z <= 144; z++) {
+        if (raw[z] === max) { if (st == null) st = z; } else if (st != null) { if (!best || z - st > best[1] - best[0]) best = [st, z]; st = null; }
+      }
+      if (st != null && (!best || 145 - st > best[1] - best[0])) best = [st, 144];
+      if (best) peakRange = [best[0] * 10, best[1] * 10, max];
+    }
+    return { svg: svg, peak: peakRange, total: list.length };
+  }
+
+  /* ---------- render pieces ---------- */
+  function tag(m) { return hm(m); }
+  function renderTide(v) {
+    var m0 = nowMin(), m = atMin(), host = $('tide'), ready = v.mode !== 'loading' && v.mode !== 'cold';
+    var t = tideSVG(ready ? v : { due: [] }, m0);
+    var open = ready ? openCount(v.due, m) : 0, tot = ready ? v.due.length : 0;
+    var hrs = ''; for (var h = 0; h <= 24; h += 3) hrs += '<span style="left:' + (h / 24 * 100) + '%">' + T.pad(h % 24 === 0 && h ? 24 : h) + '</span>';
+    var lede = !ready ? (v.mode === 'loading' ? '正在加载今天…' : '潮汐要等待办加载后才能画出。')
+      : tot === 0 ? '今天没有待办，潮线是平的。'
+        : (pv == null ? '此刻 ' + hm(m0) + ' · ' + open + ' / ' + tot + ' 位对方在工作时间' : '预演 ' + hm(pv) + ' · ' + open + ' / ' + tot + ' 位对方在工作时间 <button type="button" class="ghostbtn" data-act="now">回到现在</button>');
+    host.className = 'tide' + (!ready || !tot ? ' flat' : '');
+    host.innerHTML = '<div class="row3"><div><span class="micro">今日之潮</span><h2 class="serif" style="margin-top:.25rem">谁的窗口开着</h2><p class="lede" role="status">' + lede + '</p></div>' +
+      '<div class="chartcol" id="chart" role="slider" tabindex="0" aria-label="预演一个时刻：左右键移动，Home 回到现在" aria-valuemin="0" aria-valuemax="1440" aria-valuenow="' + m + '" aria-valuetext="' + hm(m) + '，' + open + ' 位对方在工作时间">' + t.svg + '<i class="cnow" style="left:' + (m0 / 14.4).toFixed(2) + '%"></i>' + (pv != null && ready ? '<i class="cpv" style="left:' + (pv / 14.4).toFixed(2) + '%"></i>' : '') + '<div class="hrs" aria-hidden="true">' + hrs + '</div></div>' +
+      '<div class="sum">' + (t.peak ? '最高潮<b>' + hm(t.peak[0]) + '–' + hm(t.peak[1]) + '</b>' + t.peak[2] + ' / ' + tot + ' 位同时在线' : (ready && tot ? '今天没有重叠的窗口' : '')) + '</div></div>';
+    $('lineNow').style.setProperty('--x', (m0 / 1440).toFixed(4));
+    $('tagNow').textContent = '现在 ' + hm(m0);
+    var lp = $('linePv'); lp.hidden = pv == null || !ready; if (!lp.hidden) { lp.style.setProperty('--x', (pv / 1440).toFixed(4)); $('tagPv').textContent = '预演 ' + hm(pv); }
+    $('lineNow').hidden = !ready;
+    bindChart();
+  }
+  function rowHTML(x, isSel, m) {
+    var t = x.t, s = x.s, d = T.diff(t.remind_date), ws = wins(t._tz);
+    var bars = ws.map(function (w) {
+      var l = w[0] / 1440 * 100, wd = (w[1] - w[0]) / 1440 * 100, on = w[0] <= m && m < w[1], gone = w[1] <= m;
+      return '<i class="win' + (on ? ' on' : gone ? ' gone' : '') + (w[2] < 0 ? ' cut-l' : '') + (w[3] > 1440 ? ' cut-r' : '') + '" style="left:' + l.toFixed(2) + '%;width:' + wd.toFixed(2) + '%"></i>';
+    }).join('');
+    var stat, sub;
+    if (s.k === 'open') { stat = '<b class="on">开窗中</b>'; sub = '还剩 ' + dur(s.left) + (s.left <= 120 ? ' · 错过则等到 ' + (s.again ? s.again.day + ' ' + hm(s.again.s) : '下周') : ''); }
+    else if (s.k === 'later') { stat = '<b>' + hm(s.openAt) + ' 开窗</b>'; sub = dur(s.inMin) + '后'; }
+    else { stat = '<b>今天没有窗口</b>'; sub = s.next ? s.next.day + ' ' + hm(s.next.s) + ' 开窗' : '本周内无窗口'; }
+    var od = d < 0 ? '逾期 ' + (-d) + ' 天' : '今天';
+    return '<li><button type="button" class="trow row3" data-id="' + t.id + '" aria-pressed="' + isSel + '" tabindex="' + (isSel ? 0 : -1) + '" aria-label="' + esc(t.customer_company + '，' + od + '，' + t.task_title + '，' + (s.k === 'open' ? '窗口开着，还剩 ' + dur(s.left) : s.k === 'later' ? hm(s.openAt) + ' 开窗' : '今天没有窗口')) + '">' +
+      '<span class="c1"><span class="nm"><b>' + esc(t.customer_company) + '</b><i>' + od + '</i></span><span class="ac">' + esc(t.task_title) + '</span></span>' +
+      '<span class="track" aria-hidden="true">' + bars + '<span class="nowtick" style="--x:' + (nowMin() / 1440).toFixed(4) + '"></span></span>' +
+      '<span class="c3">' + stat + '<span>' + esc(sub) + '</span></span></button></li>';
+  }
+  function renderRows(v, animate) {
+    var host = $('rows');
+    if (v.mode === 'loading') {
+      var sk = ''; for (var i = 0; i < 6; i++) sk += '<li class="trow row3" style="pointer-events:none" aria-hidden="true"><span class="c1"><span class="sk-bar" style="width:' + (50 + i * 6) + '%"></span><span class="sk-bar" style="width:' + (36 + (i % 3) * 12) + '%;margin-top:.4rem"></span></span><span class="track"><i class="win" style="left:' + (20 + i * 7) + '%;width:30%;opacity:.5"></i></span><span class="c3"><span class="sk-bar" style="width:60%"></span></span></li>';
+      host.innerHTML = '<div class="grp" role="status">正在加载今天…</div><ul>' + sk + '</ul>'; ordered = []; return;
+    }
+    if (v.mode === 'cold') {
+      host.innerHTML = '<div class="msg2" role="alert"><strong>今日跟进暂时无法加载</strong><p>待办没有被标记完成，客户数据也没有被清空。</p><div class="row"><button type="button" class="ghostbtn" data-act="retry">重新加载</button></div></div>'; ordered = []; return;
+    }
+    if (!v.due.length) {
+      var nx = v.upcoming[0];
+      host.innerHTML = '<div class="msg2"><strong>今天已经处理完了</strong><p>' + (nx ? '下一次要动的是' + T.relDay(nx.remind_date) + '：' + esc(nx.customer_company) + '，' + esc(nx.task_title) + '。' : (v.upcomingFailed ? '未来安排暂时无法加载。' : '接下来 14 天没有安排。')) + '</p></div>'; ordered = []; return;
+    }
+    var m = atMin(), g = build(v, m); ordered = g.flat;
+    var first = animate ? snap() : null;
+    var sec = function (cls, label, arr) { return arr.length ? '<div class="grp ' + cls + '">' + label + '<b>' + arr.length + '</b></div><ul>' + arr.map(function (x) { return rowHTML(x, x.t.id === sel, m); }).join('') + '</ul>' : ''; };
+    host.innerHTML = sec('open', '窗口已开', g.A) + sec('', '稍后开窗', g.B) + sec('', '今天没有窗口', g.C);
+    if (first) flip(first);
+  }
+  function snap() { var o = {}; document.querySelectorAll('#rows .trow[data-id]').forEach(function (e) { o[e.dataset.id] = e.getBoundingClientRect().top; }); return o; }
+  function flip(old) {
+    if (T.RM) return;
+    document.querySelectorAll('#rows .trow[data-id]').forEach(function (e) {
+      var p = old[e.dataset.id]; if (p == null) return; var dy = p - e.getBoundingClientRect().top;
+      if (Math.abs(dy) > 1 && e.animate) e.animate([{ transform: 'translateY(' + dy + 'px)' }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(.16,1,.3,1)' });
+    });
+  }
+
+  function atDate(v) { return new Date(Date.UTC(v.home.y, v.home.m - 1, v.home.d) - 480 * 60000 + atMin() * 60000); }
+  function taskById(id) { var all = view.due.concat(view.upcoming); for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i]; return null; }
+  function renderDock(v) {
+    var host = $('dock'), main = $('main');
+    main.classList.toggle('recording', !!rec); host.classList.toggle('rec', !!rec);
+    if (rec) return;
+    if (v.mode === 'loading') { host.innerHTML = '<div class="row3"><div class="k"><span class="sk-bar" style="width:60%;height:20px"></span><span class="sk-bar" style="width:40%;margin-top:.6rem"></span></div><div class="mid"><span class="sk-bar" style="width:70%"></span></div><div class="acts"><span class="sk-bar" style="width:120px;height:36px;border-radius:18px"></span></div></div>'; return; }
+    if (v.mode === 'cold') { host.innerHTML = '<div class="row3"><div class="k"><span class="kick">未能加载</span></div><div class="mid"></div><div class="acts"></div></div>'; return; }
+    var t = sel && taskById(sel), m = atMin();
+    if (!t) {
+      host.innerHTML = '<div class="row3"><div class="k"><span class="kick gold">今天</span><h3>没有要动的待办</h3></div><div class="mid"><p class="act" style="font-size:1rem;color:var(--dl-ink-2)">仍然可以补记一次沟通。</p></div><div class="acts"><button type="button" class="solid" data-act="rec">记录沟通</button></div></div>';
+      return;
+    }
+    var li = T.localInfo(t._tz, atDate(v)), d = T.diff(t.remind_date), s = stateAt(t, m);
+    var kick = (d < 0 ? '逾期 ' + (-d) + ' 天' : d === 0 ? '今天' : T.md(t.remind_date) + ' · ' + T.relDay(t.remind_date));
+    host.innerHTML = '<div class="row3"><div class="k"><span class="kick' + (d <= 0 ? ' gold' : '') + '">选中 · ' + kick + '</span><h3>' + esc(t.customer_company) + '</h3><div class="where"><span>' + esc(t.country + ' · ' + t._city) + '</span><span class="sun ' + li.sun + '" aria-hidden="true"></span><span>' + (pv == null ? '当地 ' : '预演时当地 ') + li.time + ' · ' + esc(li.label) + '</span></div></div>' +
+      '<div class="mid"><p class="act">' + esc(t.task_title) + '</p><p class="last">' + (t.last_activity ? '“' + esc(t.last_activity) + '” <small>' + (t.last_contact ? (-T.diff(t.last_contact)) + ' 天前' : '') + '</small>' : '暂无沟通记录') + '</p></div>' +
+      '<div class="acts"><button type="button" class="solid" data-act="rec">记录沟通</button><div class="links"><button type="button" class="txt" data-act="next">安排下一步</button><button type="button" class="txt" data-act="open">查看客户</button></div></div></div>';
+  }
+  function renderLater(v) {
+    var host = $('later'), ready = v.mode !== 'loading' && v.mode !== 'cold';
+    var body;
+    if (v.mode === 'loading') body = '<ul aria-hidden="true">' + [1, 2, 3, 4].map(function () { return '<li style="padding:.7rem 0;border-bottom:1px solid var(--dl-hair-2)"><span class="sk-bar" style="width:70%"></span><span class="sk-bar" style="width:45%;margin-top:.4rem"></span></li>'; }).join('') + '</ul>';
+    else if (v.mode === 'cold') body = '<p class="msg">加载失败后这里暂不显示。</p>';
+    else if (v.upcomingFailed) body = '<div class="msg" role="alert">未来 14 天暂时无法加载。<div style="margin-top:.6rem"><button type="button" class="ghostbtn" data-act="retry">重试</button></div></div>';
+    else if (!v.upcoming.length) body = '<p class="msg">接下来 14 天没有安排。</p>';
+    else body = '<ul>' + v.upcoming.map(function (t) { return '<li><button type="button" data-id="' + t.id + '" aria-pressed="' + (t.id === sel) + '"><time>' + T.mdShort(t.remind_date) + ' 周' + T.WD[T.wdOf(t.remind_date)] + '</time><span><b>' + esc(t.customer_company) + '</b><span>' + esc(t.task_title) + '</span></span></button></li>'; }).join('') + '</ul>';
+    var wkopen = document.querySelector('.wk') ? document.querySelector('.wk').open : false;
+    var wk = ready ? '<details class="wk"' + (wkopen ? ' open' : '') + '><summary>本周记录（' + v.weekly.length + '）</summary>' + (v.weekly.length ? '<ul>' + v.weekly.slice().sort(function (a, b) { return b.follow_date.localeCompare(a.follow_date); }).map(function (x) { return '<li><time>' + T.mdShort(x.follow_date) + '</time><div><b>' + esc(x.customer_company) + '</b> <small>' + esc(x.channel) + ' · ' + esc(x.result) + '</small><span>' + esc(x.content) + '</span></div></li>'; }).join('') + '</ul>' : '<p class="msg">本周暂无记录。</p>') + '</details>' : '';
+    host.innerHTML = '<h2>接下来<small>14 天</small></h2>' + body + wk;
+  }
+  function renderChrome(v) {
+    $('dateTxt').textContent = T.md(v.today) + ' · 周' + T.WD[T.wdOf(v.today)];
+    $('clockTxt').textContent = T.pad(v.home.h) + ':' + T.pad(v.home.mi);
+    var b = $('banner');
+    if (v.mode === 'stale') b.innerHTML = '<span role="alert">刷新失败 · 显示的是 ' + esc(v.staleAt || '') + ' 加载的内容，没有丢失任何待办。</span><button type="button" class="ghostbtn" data-act="retry">重试</button>';
+    else if (v.mode === 'retrying') b.innerHTML = '<span role="status">正在重试…</span>';
+    else b.innerHTML = '';
+  }
+
+  /* ---------- selection & chart interaction ---------- */
+  function select(id, focusRow) {
+    if (sel === id) return; sel = id;
+    document.querySelectorAll('#rows .trow').forEach(function (b) { var on = +b.dataset.id === id; b.setAttribute('aria-pressed', on); b.tabIndex = on ? 0 : -1; });
+    document.querySelectorAll('.later button[data-id]').forEach(function (b) { b.setAttribute('aria-pressed', +b.dataset.id === id); });
+    renderDock(view);
+    if (focusRow) { var e = document.querySelector('#rows .trow[data-id="' + id + '"]'); if (e) e.focus({ preventScroll: false }); }
+  }
+  function setPv(m) {
+    m = m == null ? null : Math.max(0, Math.min(1439, Math.round(m / 15) * 15));
+    if (m === pv) return; pv = m;
+    var ch = $('chart'), hadFocus = ch && document.activeElement === ch;
+    renderTide(view); renderRows(view, true); renderDock(view);
+    if (hadFocus) $('chart').focus({ preventScroll: true });
+  }
+  function chartMin(e) {
+    var r = $('chart').getBoundingClientRect(); return Math.max(0, Math.min(1440, (e.clientX - r.left) / r.width * 1440));
+  }
+  function bindChart() {
+    var c = $('chart'); if (!c) return;
+    var dragging = false;
+    c.addEventListener('pointerdown', function (e) { dragging = true; try { c.setPointerCapture(e.pointerId); } catch (x) { } setPv(chartMin(e)); });
+    c.addEventListener('pointermove', function (e) {
+      var g = $('lineGhost');
+      if (dragging) { setPv(chartMin(e)); g.hidden = true; return; }
+      g.hidden = false; g.style.setProperty('--x', (chartMin(e) / 1440).toFixed(4));
+    });
+    c.addEventListener('pointerup', function () { dragging = false; });
+    c.addEventListener('pointerleave', function () { $('lineGhost').hidden = true; });
+    c.addEventListener('keydown', function (e) {
+      var step = e.shiftKey ? 180 : 30, cur = atMin();
+      if (e.key === 'ArrowRight') { e.preventDefault(); setPv(cur + step); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); setPv(cur - step); }
+      else if (e.key === 'Home' || e.key === 'Escape') { e.preventDefault(); setPv(null); }
+    });
+  }
+
+  /* ---------- composer in the dock ---------- */
+  function openRec(mode) {
+    if (rec || !(view.mode === 'ready' || view.mode === 'stale' || view.mode === 'empty' || view.mode === 'retrying')) return;
+    var t = sel && taskById(sel); if (mode === 'schedule' && !t) return;
+    rec = mode;
+    var host = $('dock'); $('main').classList.add('recording'); host.classList.add('rec');
+    var li = t && T.localInfo(t._tz, atDate(view));
+    host.innerHTML = '<div class="recgrid"><div class="k" style="padding:0 .8rem 0 .7rem"><span class="kick gold">' + (mode === 'schedule' ? '安排下一步' : '记录沟通') + '</span><h3>' + esc(t ? t.customer_company : '选一位客户') + '</h3>' + (t ? '<div class="where"><span>' + esc(t.country + ' · ' + t._city) + '</span><span class="sun ' + li.sun + '" aria-hidden="true"></span><span>当地 ' + li.time + '</span></div><p class="act" style="font-size:1.05rem;margin-top:.7rem">' + esc(t.task_title) + '</p>' + (t.last_activity ? '<p class="last" style="margin-top:.5rem">“' + esc(t.last_activity) + '”</p>' : '') : '') + '</div><div class="cmpwrap" id="cmpHost"></div></div>';
+    cmp = T.composer($('cmpHost'), { customer: t ? { id: t.customer_id } : null, taskId: t ? t.id : null, mode: mode, taskTitle: t ? t.task_title : '', rows: 3, onCancel: closeRec, onSave: function (p) { save(p, t); } });
+    cmp.focus();
+  }
+  function closeRec() { rec = null; cmp = null; renderDock(view); var b = $('dock').querySelector('[data-act="rec"]'); if (b) b.focus(); }
+  function save(p, t) {
+    var name = t ? t.customer_company : T.cust[p.customer_id].company;
+    var idx = t ? ordered.findIndex(function (x) { return x.t.id === t.id; }) : 0;
+    var old = snap();
+    rec = null; cmp = null;
+    if (p.mode === 'schedule') T.reschedule(t.id, p.next.action, p.next.date); else T.record(p);
+    var v2 = T.view(), m = atMin(), g = build(v2, m).flat;
+    if (p.mode === 'schedule') sel = t.id; else sel = g.length ? g[Math.min(Math.max(idx, 0), g.length - 1)].t.id : null;
+    render(v2, old);
+    T.toast(p.mode === 'schedule' ? '已改为 ' + T.md(p.next.date) + ' · ' + p.next.action : '已记录 ' + name + (p.next ? '，下一步 ' + T.md(p.next.date) : '，未设下一步'), function () { T.undo(); });
+    var b = $('dock').querySelector('[data-act="rec"]'); if (b) b.focus();
+  }
+
+  /* ---------- master render ---------- */
+  function render(v, oldSnap) {
+    v = v && v.mode ? v : T.view();
+    view = v; winCache = {};
+    var ready = v.mode === 'ready' || v.mode === 'stale' || v.mode === 'retrying';
+    if (ready) {
+      var g = build(v, atMin()).flat.map(function (x) { return x.t.id; });
+      var all = g.concat(v.upcomingFailed ? [] : v.upcoming.map(function (t) { return t.id; }));
+      if (sel == null || all.indexOf(sel) < 0) sel = g.length ? g[0] : (v.upcoming[0] && !v.upcomingFailed ? v.upcoming[0].id : null);
+    } else sel = null;
+    renderChrome(v); renderTide(v);
+    var pre = oldSnap || null;
+    renderRows(v, false); if (pre) flip(pre);
+    renderDock(v); renderLater(v);
+  }
+
+  /* ---------- events ---------- */
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]');
+    if (b) {
+      var a = b.dataset.act;
+      if (a === 'retry') T.retry(); else if (a === 'rec') openRec('record'); else if (a === 'next') openRec('schedule');
+      else if (a === 'open') T.toast('原型：这里会打开客户详情。'); else if (a === 'now') setPv(null);
+      return;
+    }
+    var r = e.target.closest('.trow[data-id], .later button[data-id]');
+    if (r) select(+r.dataset.id);
+  });
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (rec) return;
+    if (e.target.id === 'chart') return;
+    var k = e.key.toLowerCase();
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (e.target.closest && e.target.closest('summary')) return;
+      var i = ordered.findIndex(function (x) { return x.t.id === sel; }); if (i < 0 && !ordered.length) return;
+      e.preventDefault(); var n = ordered[Math.max(0, Math.min(ordered.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]; if (n) select(n.t.id, true);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setPv(atMin() + (e.key === 'ArrowRight' ? 30 : -30)); }
+    else if (e.key === 'Escape' && pv != null) setPv(null);
+    else if (k === 'r') { e.preventDefault(); openRec('record'); }
+    else if (k === 'n') { e.preventDefault(); openRec('schedule'); }
+  });
+
+  T.start(function (v) { render(v); }, function (v) { if (pv == null) render(v); else { view = v; $('clockTxt').textContent = T.pad(v.home.h) + ':' + T.pad(v.home.mi); } });
+  var q = new URLSearchParams(location.search).get('pv');
+  if (q && /^\d{1,2}:\d{2}$/.test(q)) { var pp = q.split(':'); setTimeout(function () { setPv(+pp[0] * 60 + +pp[1]); }, 50); }
+})();
+</script>
+</body>
+</html>

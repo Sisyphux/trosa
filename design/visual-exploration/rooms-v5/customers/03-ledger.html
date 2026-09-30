@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>客户 · 03 台账</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;1,6..72,300;1,6..72,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* Shared Daylight material for the three customer-list rooms.
+   Tokens are copied from app/static/visual-v3.css :root (--dl-*). Nothing here
+   adds a colour family, a font family, glass, or a heavy shadow. */
+:root{
+  --dl-hi:#faf8f2; --dl-canvas:#efeae0; --dl-canvas-low:#ded6c6;
+  --dl-paper:#fffdf7; --dl-paper-2:#fbf8f1; --dl-paper-3:#f5f1e7;
+  --dl-ink:#24221d; --dl-ink-2:#57534a; --dl-ink-3:#6f6a5f; --dl-mut:#8a8478; --dl-faint:#b7b1a4;
+  --dl-gold:#bc9052; --dl-gold-ink:#8a6224; --dl-gold-soft:#f3e7d3; --dl-gold-wash:rgba(188,144,82,.10);
+  --dl-danger:#a4443a; --dl-danger-soft:#f6e6e3;
+  --dl-hair:rgba(36,34,29,.13); --dl-hair-2:rgba(36,34,29,.07); --dl-hair-strong:rgba(36,34,29,.26);
+  --dl-shadow-2:0 8px 24px rgba(36,34,29,.08);
+  --dl-display:"Newsreader","Source Serif 4",Georgia,"Iowan Old Style","PingFang SC","Noto Sans SC Variable","Source Han Sans SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --dl-sans:"Inter","Noto Sans SC Variable","Source Han Sans SC","PingFang SC","Microsoft YaHei UI",system-ui,-apple-system,sans-serif;
+  --dl-ease:cubic-bezier(.16,1,.3,1);
+  --gut:clamp(1rem,3.2vw,3rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--dl-sans);font-size:14px;line-height:1.5;color:var(--dl-ink);background:var(--dl-canvas);
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;overflow:hidden;overflow-x:hidden}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+a{color:inherit}
+.serif{font-family:var(--dl-display);font-weight:400}
+.micro{font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dl-ink-2)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:3px;border-radius:4px}
+mark.hl{background:none;color:inherit;box-shadow:inset 0 -.42em 0 var(--dl-gold-soft);border-radius:1px}
+
+/* the only solid element on a page: the primary action */
+.solid{display:inline-flex;align-items:center;gap:.55rem;height:40px;padding:0 1.15rem;border-radius:999px;
+  background:var(--dl-ink);color:var(--dl-paper);font-size:.84rem;letter-spacing:.02em;white-space:nowrap;
+  transition:background .2s var(--dl-ease)}
+.solid:hover{background:#37342c}
+.solid kbd{font:inherit;font-size:.72rem;color:var(--dl-paper);background:transparent;border-color:rgba(255,253,247,.38)}
+.ghost{display:inline-flex;align-items:center;height:32px;padding:0 .8rem;border-radius:999px;font-size:.8rem;color:var(--dl-ink-2);
+  border:1px solid transparent;white-space:nowrap}
+.ghost:hover{color:var(--dl-ink);border-color:var(--dl-hair);background:var(--dl-paper)}
+.ghost[aria-pressed=true]{color:var(--dl-ink);border-color:var(--dl-hair-strong);background:var(--dl-paper)}
+/* while a batch is active its action becomes the solid one; the open button steps down */
+body.has-sel .solid.is-open{background:transparent;color:var(--dl-ink);box-shadow:inset 0 0 0 1px var(--dl-hair-strong)}
+body.has-sel .solid.is-open:hover{background:var(--dl-paper)}
+body.has-sel .solid.is-open kbd{color:var(--dl-ink-2);border-color:var(--dl-hair)}
+
+kbd{font-family:var(--dl-sans);font-size:.7rem;color:var(--dl-ink-2);border:1px solid var(--dl-hair);border-radius:5px;padding:0 .35rem;line-height:1.35;background:var(--dl-paper-2)}
+
+/* search field (shape is room-specific; behaviour is shared) */
+.q{display:flex;align-items:center;gap:.6rem;min-width:0}
+.q input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:1rem}
+.q input::placeholder{color:var(--dl-ink-3)}
+.q .clear{display:none;font-size:.78rem;color:var(--dl-ink-2);padding:.2rem .4rem;border-radius:6px}
+.q.has-text .clear{display:inline-block}
+.q.has-text kbd{display:none}
+
+/* view row: dynamic views computed from real activity, counts included */
+.views{display:flex;flex-wrap:wrap;gap:.15rem .25rem;align-items:center}
+.views button{display:inline-flex;align-items:baseline;gap:.4rem;padding:.3rem .7rem;border-radius:999px;font-size:.84rem;color:var(--dl-ink-2);
+  border:1px solid transparent;transition:color .2s,background .2s}
+.views button i{font-style:normal;font-size:.72rem;color:var(--dl-ink-2)}
+.views button:hover{color:var(--dl-ink);background:var(--dl-paper)}
+.views button[aria-selected=true]{color:var(--dl-ink);border-color:var(--dl-hair-strong);background:var(--dl-paper)}
+.views button[aria-selected=true] i{color:var(--dl-gold-ink)}
+
+/* batch tray: appears only after the user explicitly selects several rows */
+.tray{display:none;align-items:center;gap:.4rem;padding:.35rem .5rem .35rem .95rem;border-radius:999px;background:var(--dl-paper);
+  border:1px solid var(--dl-hair-strong);box-shadow:var(--dl-shadow-2);font-size:.82rem;white-space:nowrap}
+.tray.on{display:inline-flex}
+.tray .n{margin-right:.5rem;color:var(--dl-ink-2)}
+.tray .n b{font-family:var(--dl-display);font-weight:400;font-size:1.1rem;color:var(--dl-ink);margin-right:.1rem}
+.tray .solid{height:34px;padding:0 1rem;font-size:.8rem}
+
+/* live status for actions that the prototype only simulates */
+#live{position:fixed;left:50%;bottom:1rem;transform:translate(-50%,8px);max-width:min(560px,calc(100vw - 2rem));z-index:60;padding:.55rem 1rem;border-radius:999px;
+  background:var(--dl-paper);border:1px solid var(--dl-hair-strong);box-shadow:var(--dl-shadow-2);font-size:.8rem;color:var(--dl-ink);
+  opacity:0;pointer-events:none;transition:opacity .25s,transform .25s var(--dl-ease);text-align:center}
+#live.on{opacity:1;transform:translate(-50%,0)}
+
+/* prototype-only control: switch data states */
+.devbar{position:fixed;right:.7rem;top:.3rem;z-index:55;display:flex;align-items:center;gap:.15rem;font-size:.68rem;color:var(--dl-ink-2)}
+.devbar b{font-weight:500;letter-spacing:.14em;text-transform:uppercase;margin-right:.3rem;font-size:.6rem}
+.devbar button{padding:.15rem .5rem;border-radius:999px;color:var(--dl-ink-2);font-size:.7rem}
+.devbar button:hover{background:var(--dl-paper);color:var(--dl-ink)}
+.devbar button[aria-pressed=true]{background:var(--dl-paper);box-shadow:inset 0 0 0 1px var(--dl-hair-strong);color:var(--dl-ink)}
+body.embed .devbar{display:none}
+@media (max-width:700px){.devbar{display:none}}
+
+/* four honest states. Same words for everyone; each room dresses them differently. */
+.st{display:none}
+.st[data-kind]{display:block}
+.st h3{font-family:var(--dl-display);font-weight:400}
+.st p{color:var(--dl-ink-2)}
+.st .code{font-size:.74rem;color:var(--dl-danger);letter-spacing:.04em}
+.st .sk{display:block;border-radius:3px;background:var(--dl-hair-2)}
+@keyframes shimmer{0%{opacity:.45}50%{opacity:1}100%{opacity:.45}}
+.st[data-kind=loading] .sk{animation:shimmer 1.4s ease-in-out infinite}
+.st[data-kind=loading] .sk:nth-child(3n){animation-delay:.2s}
+.st[data-kind=loading] .sk:nth-child(3n+1){animation-delay:.4s}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition-duration:.001s!important;scroll-behavior:auto!important}
+}
+
+.lnk{color:var(--dl-ink);text-decoration:underline;text-decoration-color:var(--dl-gold);text-underline-offset:3px;padding:0;text-align:left}
+.lnk:hover{color:var(--dl-gold-ink)}
+
+
+/* ====== 03 · Ledger — one long editorial scroll; rhythm and alignment, no table lines ====== */
+body{background:linear-gradient(180deg,var(--dl-hi),var(--dl-canvas))}
+.room{height:100vh;height:100dvh;display:grid;grid-template-rows:minmax(0,1fr) auto;--gut2:clamp(1rem,3.2vw,3rem);--mw:236px;--rw:60px;--erow:70px;--hrow:76px}
+.sheet{margin:clamp(1.4rem,3.4vh,2rem) var(--gut2) clamp(.6rem,1.8vh,1.2rem);background:var(--dl-paper);border:1px solid var(--dl-hair);border-radius:16px;display:grid;grid-template-rows:auto minmax(0,1fr);min-height:0;overflow:hidden}
+
+.head{display:grid;grid-template-columns:var(--mw) minmax(0,1fr) var(--rw);align-items:end;padding-top:clamp(1rem,2.6vh,1.7rem)}
+.head .mh{padding:0 1.4rem 0 clamp(1.2rem,2vw,2rem)}
+.head h1{font-family:var(--dl-display);font-weight:400;font-size:clamp(2rem,4.6vh,2.8rem);line-height:.98;letter-spacing:-.02em}
+.head h1 small{display:block;margin-top:.55rem;font-family:var(--dl-sans);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dl-ink-2)}
+.head .mc{padding:0 1.6rem 0 0}
+.q{border-bottom:1px solid var(--dl-hair-strong);padding:.3rem 0}
+.q:focus-within{border-color:var(--dl-gold-ink)}
+.q input{font-family:var(--dl-display);font-size:1.5rem}
+.q svg{width:18px;height:18px;flex:none;fill:none;stroke:var(--dl-ink-3);stroke-width:1.6;stroke-linecap:round}
+.views-row{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1.2rem;padding:.7rem 0 .8rem;margin-left:-.7rem}
+.views-row .add{margin-left:auto}
+.views button{padding:.28rem .6rem}
+.head .rr{align-self:stretch}
+
+.body{position:relative;display:grid;grid-template-columns:var(--mw) minmax(0,1fr) var(--rw);min-height:0;border-top:1px solid var(--dl-hair)}
+/* margin: the running head, like guide words at the top of a dictionary page */
+.margin{position:relative;padding:1.4rem 1.4rem 0 clamp(1.2rem,2vw,2rem);min-height:0}
+.rh{position:sticky;top:1.4rem}
+.rh .p{font-family:var(--dl-display);font-size:clamp(1.9rem,4.4vh,2.6rem);line-height:1;letter-spacing:-.02em}
+.rh .t{margin-top:.6rem;font-size:.74rem;color:var(--dl-ink-3);line-height:1.6}
+.rh .fo{margin-top:1.6rem;font-family:var(--dl-display);font-size:1.05rem;color:var(--dl-gold-ink)}
+.rh .fo i{font-style:normal;font-size:.8rem;color:var(--dl-ink-3)}
+.rh .keys{margin-top:1.6rem;display:grid;gap:.45rem;font-size:.72rem;color:var(--dl-ink-3)}
+.rh .keys span{display:flex;gap:.4rem;align-items:center}
+
+.scroll{position:relative;overflow-y:auto;overflow-x:hidden;min-height:0;outline:none;scrollbar-width:none}
+.scroll::-webkit-scrollbar{display:none}
+.scroll:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:-3px;border-radius:6px}
+.host{position:relative;width:100%}
+.ent,.grp{position:absolute;left:0;right:0;z-index:0}
+.grp{display:flex;align-items:flex-end;gap:1rem;padding:0 calc(1.6rem + 6.6rem) .55rem 0}
+.grp .l{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dl-gold-ink);white-space:nowrap}
+.grp .r{flex:1;text-align:right;font-size:.74rem;color:var(--dl-ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grp .r b{font-weight:500;color:var(--dl-ink-2)}
+.grp .r .o{color:var(--dl-danger)}
+.grp::after{content:"";position:absolute;left:0;right:1.6rem;bottom:0;height:1px;background:var(--dl-hair-strong)}
+.ent{padding:.55rem calc(1.6rem + 6.6rem) .45rem 0;cursor:pointer;color:var(--dl-ink-2)}
+.ent .l1{display:flex;align-items:baseline;gap:.5rem;min-width:0}
+.ent .co{font-family:var(--dl-display);font-size:1.2rem;line-height:1.25;color:var(--dl-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.ent .lead{flex:1 1 1.5rem;min-width:1.5rem;align-self:flex-end;height:.82em;margin-bottom:.1em;border-bottom:1px dotted var(--dl-hair-strong)}
+.ent .wh{font-size:.84rem;color:var(--dl-ink);white-space:nowrap}
+.ent .wh i{font-style:normal;color:var(--dl-ink-3);margin-left:.5rem;font-size:.76rem}
+.ent .l2{display:grid;grid-template-columns:190px minmax(0,1fr) 232px;gap:0 1.2rem;margin-top:.15rem;font-size:.78rem;line-height:1.45}
+.ent .l2 span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ent .l2 .nx{text-align:right}
+.ent .l2 .nx em{font-style:normal;color:var(--dl-ink)}
+.ent .l2 .nx.over em{color:var(--dl-danger)}
+.ent .l2 .nx.none{font-family:var(--dl-display);font-style:italic;font-size:.9rem;color:var(--dl-ink-3)}
+.ent .l2 .sn{color:var(--dl-ink-3)}
+/* margin glyphs: selection and position live in the gutter, never in the text */
+.ent .ck{position:absolute;left:-1.5rem;top:1rem;width:15px;height:15px;border-radius:4px;box-shadow:inset 0 0 0 1.5px var(--dl-hair-strong);opacity:0;cursor:pointer;background:transparent}
+.ent:hover .ck,.ent.cur .ck,body.has-sel .ent .ck{opacity:1}
+.ent.sel .ck{background:var(--dl-ink);box-shadow:none;opacity:1}
+.ent.sel .ck::after{content:"";position:absolute;left:4.5px;top:2px;width:4px;height:8px;border:solid var(--dl-paper);border-width:0 1.6px 1.6px 0;transform:rotate(40deg)}
+/* the lit entry — full ink, a paper wash to the margin edge, gold tick = "you are here" */
+.ent.cur{color:var(--dl-ink-2)}
+.ent.cur .lit{position:absolute;left:-.7rem;right:.6rem;top:0;bottom:0;border-radius:10px;background:var(--dl-gold-wash);z-index:-1}
+.ent.cur .tick{position:absolute;left:-1.5rem;top:0;bottom:0;width:0}
+.ent .lit,.ent .tick{display:none}
+.ent.cur .lit{display:block}
+.ent.cur .sn{color:var(--dl-ink-2)}
+.ent .opn{display:none;position:absolute;right:1.6rem;top:50%;transform:translateY(-50%);z-index:2}
+.ent.cur .opn{display:inline-flex}
+.ent.cur .l2 .nx,.ent.cur .wh{visibility:visible}
+.dim .ent:not(.cur) .co{color:var(--dl-ink-2)}
+
+/* ruler: every customer is a tick; drag to scrub the whole ledger */
+.ruler{position:relative;border-left:1px solid var(--dl-hair-2);cursor:ns-resize;touch-action:none}
+.ruler canvas{position:absolute;inset:0;width:100%;height:100%}
+.lens{position:absolute;right:calc(var(--rw) - 8px);transform:translateY(-50%);padding:.35rem .7rem;border-radius:8px;background:var(--dl-paper);border:1px solid var(--dl-hair-strong);box-shadow:var(--dl-shadow-2);
+  font-size:.78rem;white-space:nowrap;max-width:min(420px,60vw);overflow:hidden;text-overflow:ellipsis;pointer-events:none;opacity:0;transition:opacity .12s;z-index:5}
+.lens.on{opacity:1}
+.lens b{font-family:var(--dl-display);font-weight:400;font-size:1rem;margin-right:.5rem}
+.lens i{font-style:normal;color:var(--dl-ink-3)}
+
+.tray-slot{position:absolute;left:50%;bottom:1rem;transform:translateX(-50%);z-index:8}
+
+/* --- four states, dressed as ledger --- */
+.state{position:absolute;inset:0;display:none;z-index:3;padding:1.4rem 1.6rem 0 0;background:var(--dl-paper)}
+.state.on{display:block}
+.state h3{font-size:clamp(1.7rem,4vh,2.4rem);line-height:1.12;letter-spacing:-.015em;margin:.5rem 0 .6rem}
+.state .acts{display:flex;align-items:center;gap:.8rem;margin-top:1.1rem;flex-wrap:wrap}
+.state .hint{font-size:.74rem;color:var(--dl-ink-3)}
+.state .st{max-width:560px;padding-top:.5rem}
+.state em{font-style:italic;text-decoration:line-through;text-decoration-color:var(--dl-gold);text-decoration-thickness:1.5px}
+/* empty: a blank ledger page, rules only. loading: placeholder lines with leaders. error: a struck-through band. none: the query, struck out. */
+.state[data-kind=empty]{background:repeating-linear-gradient(to bottom,transparent 0,transparent 69px,var(--dl-hair-2) 69px,var(--dl-hair-2) 70px)}
+.state[data-kind=empty] .st{background:var(--dl-paper);padding:1.4rem 1.6rem 1.6rem 0;margin-top:1.2rem}
+.state[data-kind=loading] .st{max-width:none}
+.state[data-kind=loading] h3{font-family:var(--dl-sans);font-size:.9rem;color:var(--dl-ink-2);margin:0 0 1.2rem}
+.state[data-kind=loading] .micro{display:none}
+.state[data-kind=loading] .sks{display:grid;gap:1.55rem}
+.state[data-kind=loading] .sk{height:12px;width:58%;position:relative;background:none;border-bottom:1px dotted var(--dl-hair-strong);border-radius:0;height:14px}
+.state[data-kind=loading] .sk::before{content:"";position:absolute;left:0;top:0;height:12px;width:34%;background:var(--dl-hair-2);border-radius:3px}
+.state[data-kind=loading] .sk::after{content:"";position:absolute;right:0;top:2px;height:9px;width:9%;background:var(--dl-hair-2);border-radius:3px}
+.state[data-kind=loading] .sk:nth-child(2n){width:72%}.state[data-kind=loading] .sk:nth-child(3n){width:50%}
+.state[data-kind=error] .st{border-left:3px solid var(--dl-danger);padding:1rem 0 1rem 1.4rem;margin-top:1rem}
+.state[data-kind=none] .st{padding-top:1.4rem}
+
+.dock{display:none;align-items:center;gap:.8rem;padding:.55rem 1rem .7rem;border-top:1px solid var(--dl-hair-strong);background:var(--dl-paper)}
+.dock .n{flex:1;min-width:0}
+.dock .n b{display:block;font-family:var(--dl-display);font-weight:400;font-size:1.02rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock .n span{font-size:.74rem;color:var(--dl-ink-3)}
+@media (max-width:1180px){
+  .ent .l2{grid-template-columns:150px minmax(0,1fr) 200px}
+  .rh .keys{display:none}
+}
+@media (max-width:900px){
+  .room{--mw:0px;--erow:96px;--hrow:64px;--rw:26px}
+  .margin{display:none}
+  .head{grid-template-columns:minmax(0,1fr) var(--rw)}
+  .head .mh{grid-column:1/-1;display:flex;align-items:baseline;justify-content:space-between;padding:0 1rem}
+  .head .mh small{display:none}
+  .head .mc{padding:.5rem 0 0 1rem;grid-column:1}
+  .body{grid-template-columns:minmax(0,1fr) var(--rw)}
+  .body .scroll{grid-column:1}
+  .body .ruler{grid-column:2}
+  .sheet{margin:0;border-radius:0;border-left:0;border-right:0}
+  .ent{padding:.6rem .8rem .5rem 1rem}
+  .grp{padding:0 .8rem .5rem 1rem}
+  .grp::after{left:1rem;right:.8rem}
+  .ent .co{font-size:1.1rem}
+  .ent .l2{grid-template-columns:minmax(0,1fr);gap:0;margin-top:.1rem}
+  .ent .l2 .sn{display:none}
+  .ent .l2 .nx{text-align:left;margin-top:.1rem}
+  .ent .ck{display:none}
+  .ent.cur .lit{left:.35rem;right:.35rem}
+    .ent .opn{display:none!important}
+  .dock{display:flex}
+  .lens{right:calc(var(--rw) - 4px)}
+  .views-row{overflow-x:auto;flex-wrap:nowrap;white-space:nowrap;padding:.5rem 1rem .6rem;margin:0;scrollbar-width:none}
+  .views-row::-webkit-scrollbar{display:none}
+  .views-row .views{flex-wrap:nowrap}
+  .views-row .add{display:none}
+  .state{padding-left:1rem}
+  .state[data-kind=error] .st{margin-left:0}
+}
+@media (max-height:720px){.rh .keys{display:none}}
+</style>
+</head>
+<body data-room="ledger">
+<div class="room" id="room">
+  <div class="sheet">
+    <header class="head">
+      <div class="mh"><h1>客户<small id="sub">台账 · 按最近发生</small></h1></div>
+      <div class="mc">
+        <label class="q" id="qbox"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+          <span class="sr">搜索客户</span>
+          <input id="q" type="search" autocomplete="off" placeholder="公司、联系人、国家、行业、邮箱…" aria-label="搜索客户">
+          <kbd>/</kbd><button class="clear" type="button">清除</button></label>
+        <div class="views-row"><nav class="views" id="views"></nav><button class="ghost add" type="button" data-act="add">添加客户</button></div>
+      </div>
+      <div class="rr"></div>
+    </header>
+    <div class="body" id="body">
+      <aside class="margin" aria-hidden="true">
+        <div class="rh" id="rh"><div class="p" id="rhP">本周</div><div class="t" id="rhT"></div><div class="fo" id="rhF"></div>
+          <div class="keys"><span><kbd>↑</kbd><kbd>↓</kbd> 逐条</span><span><kbd>↵</kbd> 打开</span><span><kbd>X</kbd> 选入 · <kbd>/</kbd> 搜索</span><span>拖右侧尺子速览</span></div></div>
+      </aside>
+      <div class="scroll" id="scroll" tabindex="0" role="listbox" aria-label="客户台账，上下方向键逐条，回车打开"><div class="host" id="host"></div>
+        <div class="state" id="state"></div></div>
+      <div class="ruler" id="ruler" aria-hidden="true"><canvas id="cv"></canvas><div class="lens" id="lens"></div></div>
+      <div class="tray-slot" id="tray"></div>
+    </div>
+  </div>
+  <div class="dock" id="dock"></div>
+</div>
+<script id="tr-data" type="application/json">[{"id":1000,"company":"Keldex Gifting GmbH","person":"Felix Vogel","email":"felix@keldex-group.de","web":"keldex-group.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"终端","field":"礼品","hasContact":false,"waiting":false,"evt":4,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1001,"company":"Navcor Paper & Desk S.p.A.","person":"Giulia Conti","email":"giulia@navcor.it","web":"navcor.it","iso":"IT","country":"意大利","en":"Italy","city":"罗马","tz":"Europe/Rome","type":"终端","field":"文具","hasContact":true,"waiting":false,"evt":1,"kind":"电话","snip":"视频会议后约定把新款目录再发一份","next":"补发材质证书与检测报告","due":10},{"id":1002,"company":"Vorta Promotional Goods A.Ş.","person":"Elif Yildiz","email":"elif@vorta-pack.tr","web":"vorta-pack.tr","iso":"TR","country":"土耳其","en":"Turkey","city":"伊斯坦布尔","tz":"Europe/Istanbul","type":"","field":"礼品","hasContact":true,"waiting":false,"evt":9,"kind":"WhatsApp","snip":"对方回复了打样周期问题，等我们确认下周排期","next":"确认对方采购负责人姓名","due":5},{"id":1003,"company":"Branis Sign Works Limited","person":"Priya Reyes","email":"priya@branis-pack.nz","web":"branis-pack.nz","iso":"NZ","country":"新西兰","en":"New Zealand","city":"奥克兰","tz":"Pacific/Auckland","type":"终端","field":"广告标识","hasContact":true,"waiting":false,"evt":0,"kind":"会议","snip":"询问最小起订量与不同厚度的价格档位","next":"询问 PO 进展并核对付款方式","due":0},{"id":1004,"company":"Ilofield Interiors Ltd.","person":"Hannah Novak","email":"hannah@ilofield-co.com","web":"ilofield-co.com","iso":"CA","country":"加拿大","en":"Canada","city":"温哥华","tz":"America/Vancouver","type":"终端","field":"家居","hasContact":true,"waiting":false,"evt":9,"kind":"WhatsApp","snip":"发送报价 PDF，对方表示需要与采购确认","next":"再发一封跟进邮件","due":-9},{"id":1005,"company":"Silro Sign Works SARL","person":"Julien Faure","email":"julien@silro-pack.fr","web":"silro-pack.fr","iso":"FR","country":"法国","en":"France","city":"巴黎","tz":"Europe/Paris","type":"终端","field":"广告标识","hasContact":true,"waiting":false,"evt":210,"kind":"WhatsApp","snip":"报价后没有进一步消息","next":"发送新款目录并询问选型","due":0},{"id":1006,"company":"Tordra Sign Works Co., Ltd.","person":"Quang Nguyen","email":"quang@tordra-co.vn","web":"tordra-co.vn","iso":"VN","country":"越南","en":"Vietnam","city":"胡志明市","tz":"Asia/Ho_Chi_Minh","type":"中间商","field":"广告标识","hasContact":false,"waiting":false,"evt":18,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":null,"due":null},{"id":1007,"company":"Dalbel Acrylics Limited","person":"Mei Chan","email":"mei@dalbel-pack.com","web":"dalbel-pack.com","iso":"HK","country":"中国香港","en":"Hong Kong","city":"香港","tz":"Asia/Hong_Kong","type":"终端","field":"亚克力加工","hasContact":false,"waiting":false,"evt":6,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"发送新款目录并询问选型","due":10},{"id":1008,"company":"Ilomera Office Goods Sp. z o.o.","person":"Piotr Nowak","email":"piotr@ilomera-group.pl","web":"ilomera-group.pl","iso":"PL","country":"波兰","en":"Poland","city":"华沙","tz":"Europe/Warsaw","type":"中间商","field":"文具","hasContact":true,"waiting":false,"evt":216,"kind":"WhatsApp","snip":"对方暂停了项目，说明年初重新评估","next":null,"due":null},{"id":1009,"company":"Dovbor Visual Communications (Pty) Ltd","person":"Daniel Reyes","email":"daniel@dovbor-pack.za","web":"dovbor-pack.za","iso":"ZA","country":"南非","en":"South Africa","city":"约翰内斯堡","tz":"Africa/Johannesburg","type":"终端","field":"广告标识","hasContact":true,"waiting":false,"evt":8,"kind":"会议","snip":"客户对交期有顾虑，想比较海运与空运","next":"发送新款目录并询问选型","due":3},{"id":1010,"company":"Kelbel Gesellschaft für Werbetechnik, Präsentationssysteme und Handelsausstattung Mitteleuropa GmbH & Co. KG","person":"Jonas Vogel","email":"jonas@kelbel-pack.de","web":"kelbel-pack.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"","field":"门店设计","hasContact":true,"waiting":false,"evt":218,"kind":"邮件","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1011,"company":"Silvon Jewellery Display AG","person":"Katrin Keller","email":"katrin@silvon.de","web":"silvon.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"终端","field":"珠宝展示","hasContact":true,"waiting":false,"evt":5,"kind":"会议","snip":"视频会议后约定把新款目录再发一份","next":null,"due":null},{"id":1012,"company":"Silcor Display Systems GmbH & Co. KG","person":"Felix Keller","email":"felix@silcor-group.de","web":"silcor-group.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"","field":"展示器材","hasContact":true,"waiting":false,"evt":0,"kind":"WhatsApp","snip":"客户要求补充材质证书与检测报告","next":"发送新款目录并询问选型","due":0},{"id":1013,"company":"Quaquil Signage Inc.","person":"Minjun Jung","email":"minjun@quaquil-pack.kr","web":"quaquil-pack.kr","iso":"KR","country":"韩国","en":"South Korea","city":"首尔","tz":"Asia/Seoul","type":"终端","field":"广告标识","hasContact":false,"waiting":false,"evt":7,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"提醒对方本周内答复打样结果","due":-6},{"id":1014,"company":"Vellix International Trading and Distribution of Commercial Display Fixtures, Acrylic Fabrication and Point-of-Sale Materials Ltda","person":"Rafael Almeida","email":"rafael@vellix.br","web":"vellix.br","iso":"BR","country":"巴西","en":"Brazil","city":"圣保罗","tz":"America/Sao_Paulo","type":"终端","field":"门店设计","hasContact":true,"waiting":false,"evt":9,"kind":"WhatsApp","snip":"对方确认收到样品，说本周内反馈","next":"再发一封跟进邮件","due":-11},{"id":1015,"company":"Gorta Display Systems S.A.","person":"Javier Ortega","email":"javier@gorta-group.es","web":"gorta-group.es","iso":"ES","country":"西班牙","en":"Spain","city":"马德里","tz":"Europe/Madrid","type":"","field":"展示器材","hasContact":true,"waiting":false,"evt":0,"kind":"会议","snip":"客户对交期有顾虑，想比较海运与空运","next":"确认 MOQ 与阶梯价是否可接受","due":0},{"id":1016,"company":"Falvon Beauty Supply S.A. de C.V.","person":"Marta Navarro","email":"marta@falvon.mx","web":"falvon.mx","iso":"MX","country":"墨西哥","en":"Mexico","city":"墨西哥城","tz":"America/Mexico_City","type":"终端","field":"化妆品包装","hasContact":false,"waiting":false,"evt":8,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1017,"company":"Navlund Packaging Corp.","person":"Priya Novak","email":"priya@navlund-pack.com","web":"navlund-pack.com","iso":"US","country":"美国","en":"United States","city":"纽约","tz":"America/New_York","type":"中间商","field":"包装","hasContact":true,"waiting":false,"evt":1,"kind":"邮件","snip":"讨论了 logo 丝印与包装贴标方案","next":"询问 PO 进展并核对付款方式","due":0},{"id":1018,"company":"Venro Office Goods Ltd","person":"Kiptoo Mwangi","email":"kiptoo@venro.ke","web":"venro.ke","iso":"KE","country":"肯尼亚","en":"Kenya","city":"内罗毕","tz":"Africa/Nairobi","type":"","field":"文具","hasContact":false,"waiting":false,"evt":53,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"询问 PO 进展并核对付款方式","due":2},{"id":1019,"company":"Halquil Pack Solutions Ltd","person":"Adaeze Okoro","email":"adaeze@halquil-co.ng","web":"halquil-co.ng","iso":"NG","country":"尼日利亚","en":"Nigeria","city":"拉各斯","tz":"Africa/Lagos","type":"终端","field":"包装","hasContact":true,"waiting":true,"evt":11,"kind":"WhatsApp","snip":"询问对方采购计划，等待回复","next":"整理下一批样品清单","due":0},{"id":1020,"company":"Velta Paper & Desk PLC","person":"Grace Novak","email":"grace@velta-co.com","web":"velta-co.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"终端","field":"文具","hasContact":false,"waiting":false,"evt":19,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1021,"company":"Navquil Stationery S.A.","person":"Rafael Souza","email":"rafael@navquil.br","web":"navquil.br","iso":"BR","country":"巴西","en":"Brazil","city":"圣保罗","tz":"America/Sao_Paulo","type":"终端","field":"文具","hasContact":true,"waiting":false,"evt":121,"kind":"电话","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1022,"company":"Estdra Accessories (Pty) Ltd","person":"Priya Ashford","email":"priya@estdra-group.za","web":"estdra-group.za","iso":"ZA","country":"南非","en":"South Africa","city":"约翰内斯堡","tz":"Africa/Johannesburg","type":"终端","field":"电子配件","hasContact":true,"waiting":true,"evt":3,"kind":"会议","snip":"询问对方采购计划，等待回复","next":null,"due":null},{"id":1023,"company":"Mormont Gifting B.V.","person":"Femke de Boer","email":"femke@mormont-co.nl","web":"mormont-co.nl","iso":"NL","country":"荷兰","en":"Netherlands","city":"阿姆斯特丹","tz":"Europe/Amsterdam","type":"终端","field":"礼品","hasContact":true,"waiting":false,"evt":5,"kind":"电话","snip":"询问最小起订量与不同厚度的价格档位","next":null,"due":null},{"id":1024,"company":"Zardra Exhibition Systems LLC","person":"Omar Haddad","email":"omar@zardra-pack.com","web":"zardra-pack.com","iso":"AE","country":"阿联酋","en":"United Arab Emirates","city":"迪拜","tz":"Asia/Dubai","type":"终端","field":"展会搭建","hasContact":true,"waiting":false,"evt":1,"kind":"邮件","snip":"展会上交换名片，约定会后寄目录与价目表","next":"询问 PO 进展并核对付款方式","due":3},{"id":1025,"company":"Quata Consolidated Retail Environments, Visual Merchandising Supply and Shop-fitting Contractors PT","person":"Putri Santoso","email":"putri@quata.id","web":"quata.id","iso":"ID","country":"印度尼西亚","en":"Indonesia","city":"雅加达","tz":"Asia/Jakarta","type":"中间商","field":"亚克力加工","hasContact":false,"waiting":false,"evt":19,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"整理下一批样品清单","due":-7},{"id":1026,"company":"Vorbel Visual Communications GmbH & Co. KG","person":"Katrin Lange","email":"katrin@vorbel-group.de","web":"vorbel-group.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"中间商","field":"广告标识","hasContact":true,"waiting":false,"evt":9,"kind":"会议","snip":"讨论了 logo 丝印与包装贴标方案","next":"发送新款目录并询问选型","due":21},{"id":1027,"company":"Silwick Gifts & Premiums B.V.","person":"Femke van Dijk","email":"femke@silwick-co.nl","web":"silwick-co.nl","iso":"NL","country":"荷兰","en":"Netherlands","city":"阿姆斯特丹","tz":"Europe/Amsterdam","type":"终端","field":"礼品","hasContact":true,"waiting":false,"evt":74,"kind":"邮件","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1028,"company":"Belta Acrylics Co., Ltd.","person":"Somchai Wong","email":"somchai@belta-group.th","web":"belta-group.th","iso":"TH","country":"泰国","en":"Thailand","city":"曼谷","tz":"Asia/Bangkok","type":"终端","field":"亚克力加工","hasContact":true,"waiting":false,"evt":14,"kind":"邮件","snip":"讨论了 logo 丝印与包装贴标方案","next":null,"due":null},{"id":1029,"company":"Umadra Cosmetic Packs Pty Ltd","person":"Hannah Ashford","email":"hannah@umadra.com","web":"umadra.com","iso":"AU","country":"澳大利亚","en":"Australia","city":"珀斯","tz":"Australia/Perth","type":"","field":"化妆品包装","hasContact":true,"waiting":false,"evt":231,"kind":"会议","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1030,"company":"Navta Jewellery Display S.p.A.","person":"Matteo Marino","email":"matteo@navta-group.it","web":"navta-group.it","iso":"IT","country":"意大利","en":"Italy","city":"罗马","tz":"Europe/Rome","type":"","field":"珠宝展示","hasContact":true,"waiting":false,"evt":10,"kind":"WhatsApp","snip":"视频会议后约定把新款目录再发一份","next":"提醒对方本周内答复打样结果","due":10},{"id":1031,"company":"Dovquil Jewellery Display S.p.A.","person":"Luca Ferraro","email":"luca@dovquil-group.it","web":"dovquil-group.it","iso":"IT","country":"意大利","en":"Italy","city":"罗马","tz":"Europe/Rome","type":"中间商","field":"珠宝展示","hasContact":true,"waiting":false,"evt":1,"kind":"会议","snip":"发送报价 PDF，对方表示需要与采购确认","next":null,"due":null},{"id":1032,"company":"Halta Acrylic Fabrication SAS","person":"Julien Delacroix","email":"julien@halta-co.fr","web":"halta-co.fr","iso":"FR","country":"法国","en":"France","city":"巴黎","tz":"Europe/Paris","type":"终端","field":"亚克力加工","hasContact":true,"waiting":true,"evt":2,"kind":"WhatsApp","snip":"已寄出样品并告知运单号，等待确认收到","next":"提醒对方本周内答复打样结果","due":1},{"id":1033,"company":"Ravta Boxes Pty Ltd","person":"Hannah Reyes","email":"hannah@ravta.com","web":"ravta.com","iso":"AU","country":"澳大利亚","en":"Australia","city":"珀斯","tz":"Australia/Perth","type":"中间商","field":"包装","hasContact":true,"waiting":false,"evt":14,"kind":"邮件","snip":"展会上交换名片，约定会后寄目录与价目表","next":"确认 MOQ 与阶梯价是否可接受","due":14},{"id":1034,"company":"Sorvon Showcase Co. Ltd","person":"Mei Chan","email":"mei@sorvon-co.com","web":"sorvon-co.com","iso":"HK","country":"中国香港","en":"Hong Kong","city":"香港","tz":"Asia/Hong_Kong","type":"","field":"珠宝展示","hasContact":true,"waiting":false,"evt":12,"kind":"邮件","snip":"客户要求补充材质证书与检测报告","next":"发送新款目录并询问选型","due":21},{"id":1035,"company":"Zenbor Interiors Ltd","person":"Marcus Whitlock","email":"marcus@zenbor-co.com","web":"zenbor-co.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"终端","field":"家居","hasContact":false,"waiting":false,"evt":14,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":null,"due":null},{"id":1036,"company":"Harbor Jewellery Display S.A.","person":"Lucía Salas","email":"lucía@harbor-group.es","web":"harbor-group.es","iso":"ES","country":"西班牙","en":"Spain","city":"马德里","tz":"Europe/Madrid","type":"终端","field":"珠宝展示","hasContact":false,"waiting":false,"evt":58,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"发送新款目录并询问选型","due":1},{"id":1037,"company":"Wesfield Homeware Co., Ltd.","person":"Seo-yeon Jung","email":"seo-yeon@wesfield-pack.kr","web":"wesfield-pack.kr","iso":"KR","country":"韩国","en":"South Korea","city":"首尔","tz":"Asia/Seoul","type":"终端","field":"家居","hasContact":false,"waiting":false,"evt":9,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"补发材质证书与检测报告","due":-10},{"id":1038,"company":"Elydex Retail Displays S.A.E.","person":"Layla Haddad","email":"layla@elydex-co.eg","web":"elydex-co.eg","iso":"EG","country":"埃及","en":"Egypt","city":"开罗","tz":"Africa/Cairo","type":"终端","field":"展示器材","hasContact":true,"waiting":true,"evt":9,"kind":"邮件","snip":"已寄出样品并告知运单号，等待确认收到","next":"询问 PO 进展并核对付款方式","due":14},{"id":1039,"company":"Umaro Accessories GmbH","person":"Lena Brandt","email":"lena@umaro-pack.de","web":"umaro-pack.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"终端","field":"电子配件","hasContact":true,"waiting":true,"evt":12,"kind":"邮件","snip":"已寄出样品并告知运单号，等待确认收到","next":"发送新款目录并询问选型","due":5},{"id":1040,"company":"Fenwick Merchandising Sp. z o.o.","person":"Piotr Kaminski","email":"piotr@fenwick.pl","web":"fenwick.pl","iso":"PL","country":"波兰","en":"Poland","city":"华沙","tz":"Europe/Warsaw","type":"终端","field":"零售陈列","hasContact":false,"waiting":false,"evt":5,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":"确认对方采购负责人姓名","due":10},{"id":1041,"company":"Dovton Shopfitting Corp.","person":"Oliver Reyes","email":"oliver@dovton.com","web":"dovton.com","iso":"US","country":"美国","en":"United States","city":"纽约","tz":"America/New_York","type":"终端","field":"零售陈列","hasContact":false,"waiting":false,"evt":4,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"确认对方采购负责人姓名","due":10},{"id":1042,"company":"Pelvane Display Systems LLP","person":"Aidar Nurlan","email":"aidar@pelvane-co.kz","web":"pelvane-co.kz","iso":"KZ","country":"哈萨克斯坦","en":"Kazakhstan","city":"阿拉木图","tz":"Asia/Almaty","type":"终端","field":"展示器材","hasContact":false,"waiting":false,"evt":6,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":null,"due":null},{"id":1043,"company":"Teston Store Design Inc.","person":"Grace Ashford","email":"grace@teston.com","web":"teston.com","iso":"US","country":"美国","en":"United States","city":"丹佛","tz":"America/Denver","type":"终端","field":"门店设计","hasContact":false,"waiting":false,"evt":31,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":"发送新款目录并询问选型","due":10},{"id":1044,"company":"Fencor Interiors S.p.A.","person":"Giulia Conti","email":"giulia@fencor-co.it","web":"fencor-co.it","iso":"IT","country":"意大利","en":"Italy","city":"罗马","tz":"Europe/Rome","type":"终端","field":"家居","hasContact":true,"waiting":false,"evt":56,"kind":"WhatsApp","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1045,"company":"Corria Display Systems K.K.","person":"Kobayashi Yuki","email":"kobayashi@corria-co.jp","web":"corria-co.jp","iso":"JP","country":"日本","en":"Japan","city":"东京","tz":"Asia/Tokyo","type":"终端","field":"展示器材","hasContact":true,"waiting":false,"evt":7,"kind":"WhatsApp","snip":"对方确认收到样品，说本周内反馈","next":"整理下一批样品清单","due":3},{"id":1046,"company":"Yorta Exhibition Systems SAS","person":"Baptiste Faure","email":"baptiste@yorta.fr","web":"yorta.fr","iso":"FR","country":"法国","en":"France","city":"巴黎","tz":"Europe/Paris","type":"中间商","field":"展会搭建","hasContact":false,"waiting":false,"evt":33,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1047,"company":"Elycor Boxes Sdn Bhd","person":"Siti Lim","email":"siti@elycor-co.my","web":"elycor-co.my","iso":"MY","country":"马来西亚","en":"Malaysia","city":"吉隆坡","tz":"Asia/Kuala_Lumpur","type":"中间商","field":"包装","hasContact":true,"waiting":false,"evt":173,"kind":"电话","snip":"报价后没有进一步消息","next":null,"due":null},{"id":1048,"company":"Corta Showcase Sp. z o.o.","person":"Katarzyna Kaminski","email":"katarzyna@corta.pl","web":"corta.pl","iso":"PL","country":"波兰","en":"Poland","city":"华沙","tz":"Europe/Warsaw","type":"中间商","field":"珠宝展示","hasContact":true,"waiting":false,"evt":158,"kind":"电话","snip":"上次沟通：对方说预算在下个季度才批","next":null,"due":null},{"id":1049,"company":"Velsen Gifting K.K.","person":"Tanaka Haruto","email":"tanaka@velsen.jp","web":"velsen.jp","iso":"JP","country":"日本","en":"Japan","city":"东京","tz":"Asia/Tokyo","type":"终端","field":"礼品","hasContact":true,"waiting":true,"evt":25,"kind":"会议","snip":"询问对方采购计划，等待回复","next":"补发材质证书与检测报告","due":10},{"id":1050,"company":"Ostvon Event Structures Pty Ltd","person":"Priya Okafor","email":"priya@ostvon-pack.com","web":"ostvon-pack.com","iso":"AU","country":"澳大利亚","en":"Australia","city":"珀斯","tz":"Australia/Perth","type":"","field":"展会搭建","hasContact":true,"waiting":false,"evt":182,"kind":"会议","snip":"报价后没有进一步消息","next":null,"due":null},{"id":1051,"company":"Dallund Showcase LLC","person":"Marcus Novak","email":"marcus@dallund-co.com","web":"dallund-co.com","iso":"US","country":"美国","en":"United States","city":"洛杉矶","tz":"America/Los_Angeles","type":"中间商","field":"珠宝展示","hasContact":true,"waiting":false,"evt":4,"kind":"邮件","snip":"展会上交换名片，约定会后寄目录与价目表","next":null,"due":null},{"id":1052,"company":"Hallund Cosmetic Packs Co.","person":"Omar Haddad","email":"omar@hallund.sa","web":"hallund.sa","iso":"SA","country":"沙特阿拉伯","en":"Saudi Arabia","city":"利雅得","tz":"Asia/Riyadh","type":"终端","field":"化妆品包装","hasContact":false,"waiting":false,"evt":6,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"整理下一批样品清单","due":3},{"id":1053,"company":"Vensen Paper & Desk Ltd","person":"Oliver Reyes","email":"oliver@vensen-group.com","web":"vensen-group.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"中间商","field":"文具","hasContact":false,"waiting":false,"evt":2,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":null,"due":null},{"id":1054,"company":"Xandex Homeware Pte Ltd","person":"Hannah Whitlock","email":"hannah@xandex-pack.com","web":"xandex-pack.com","iso":"SG","country":"新加坡","en":"Singapore","city":"新加坡","tz":"Asia/Singapore","type":"中间商","field":"家居","hasContact":false,"waiting":false,"evt":1,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":"确认对方采购负责人姓名","due":10},{"id":1055,"company":"Falta Electronics Inc.","person":"Marcus Ashford","email":"marcus@falta-pack.com","web":"falta-pack.com","iso":"US","country":"美国","en":"United States","city":"纽约","tz":"America/New_York","type":"终端","field":"电子配件","hasContact":false,"waiting":false,"evt":9,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":null,"due":null},{"id":1056,"company":"Sorwick Homeware Ltd. Şti.","person":"Zeynep Yildiz","email":"zeynep@sorwick-pack.tr","web":"sorwick-pack.tr","iso":"TR","country":"土耳其","en":"Turkey","city":"伊斯坦布尔","tz":"Europe/Istanbul","type":"","field":"家居","hasContact":false,"waiting":false,"evt":10,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"补发材质证书与检测报告","due":0},{"id":1057,"company":"Lordra Environments Ltd","person":"Oliver Novak","email":"oliver@lordra.com","web":"lordra.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"","field":"门店设计","hasContact":true,"waiting":false,"evt":11,"kind":"电话","snip":"客户对交期有顾虑，想比较海运与空运","next":"补发材质证书与检测报告","due":1},{"id":1058,"company":"Navro Plastics S.A. de C.V.","person":"Andrés Ortega","email":"andres@navro.mx","web":"navro.mx","iso":"MX","country":"墨西哥","en":"Mexico","city":"墨西哥城","tz":"America/Mexico_City","type":"中间商","field":"亚克力加工","hasContact":false,"waiting":false,"evt":14,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":"确认对方采购负责人姓名","due":0},{"id":1059,"company":"Velcor Acrylics S.A. de C.V.","person":"Marta Ortega","email":"marta@velcor.mx","web":"velcor.mx","iso":"MX","country":"墨西哥","en":"Mexico","city":"墨西哥城","tz":"America/Mexico_City","type":"终端","field":"亚克力加工","hasContact":false,"waiting":false,"evt":16,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1060,"company":"Umabor Promotional Goods Sdn Bhd","person":"Aiman Lim","email":"aiman@umabor-co.my","web":"umabor-co.my","iso":"MY","country":"马来西亚","en":"Malaysia","city":"吉隆坡","tz":"Asia/Kuala_Lumpur","type":"终端","field":"礼品","hasContact":false,"waiting":false,"evt":13,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"整理下一批样品清单","due":0},{"id":1061,"company":"Kelton Merchandising FZ-LLC","person":"Omar Nasser","email":"omar@kelton-pack.com","web":"kelton-pack.com","iso":"AE","country":"阿联酋","en":"United Arab Emirates","city":"迪拜","tz":"Asia/Dubai","type":"终端","field":"零售陈列","hasContact":false,"waiting":false,"evt":48,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1062,"company":"Elymont Exhibition Systems AG","person":"Sabine Lange","email":"sabine@elymont-pack.de","web":"elymont-pack.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"","field":"展会搭建","hasContact":true,"waiting":true,"evt":0,"kind":"会议","snip":"我们发出更新后的报价，等待对方回复","next":"提醒对方本周内答复打样结果","due":10},{"id":1063,"company":"Elyfield Store Design Inc.","person":"Daniel Reyes","email":"daniel@elyfield-group.com","web":"elyfield-group.com","iso":"CA","country":"加拿大","en":"Canada","city":"多伦多","tz":"America/Toronto","type":"终端","field":"门店设计","hasContact":true,"waiting":false,"evt":3,"kind":"电话","snip":"讨论了 logo 丝印与包装贴标方案","next":"电话确认展会后的具体需求","due":1},{"id":1064,"company":"Morbel Vitrine S.R.L.","person":"Javier Navarro","email":"javier@morbel-pack.ar","web":"morbel-pack.ar","iso":"AR","country":"阿根廷","en":"Argentina","city":"布宜诺斯艾利斯","tz":"America/Argentina/Buenos_Aires","type":"终端","field":"珠宝展示","hasContact":true,"waiting":true,"evt":19,"kind":"WhatsApp","snip":"发送了目录与 MOQ 说明，等待对方评估","next":"确认对方采购负责人姓名","due":0},{"id":1065,"company":"Norbor Pack Solutions Pvt. Ltd.","person":"Ananya Banerjee","email":"ananya@norbor.in","web":"norbor.in","iso":"IN","country":"印度","en":"India","city":"孟买","tz":"Asia/Kolkata","type":"中间商","field":"包装","hasContact":false,"waiting":false,"evt":5,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"电话确认展会后的具体需求","due":0},{"id":1066,"company":"Ravwick Homeware Corp.","person":"Grace Reyes","email":"grace@ravwick-co.com","web":"ravwick-co.com","iso":"US","country":"美国","en":"United States","city":"丹佛","tz":"America/Denver","type":"","field":"家居","hasContact":false,"waiting":false,"evt":39,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":null,"due":null},{"id":1067,"company":"Corvon Display Solutions Pty Ltd","person":"Daniel Okafor","email":"daniel@corvon-group.com","web":"corvon-group.com","iso":"AU","country":"澳大利亚","en":"Australia","city":"珀斯","tz":"Australia/Perth","type":"中间商","field":"展示器材","hasContact":true,"waiting":false,"evt":10,"kind":"会议","snip":"视频会议后约定把新款目录再发一份","next":"再发一封跟进邮件","due":5},{"id":1068,"company":"Belmont Retail Fixtures Ltd. Şti.","person":"Zeynep Yildiz","email":"zeynep@belmont-group.tr","web":"belmont-group.tr","iso":"TR","country":"土耳其","en":"Turkey","city":"伊斯坦布尔","tz":"Europe/Istanbul","type":"","field":"零售陈列","hasContact":true,"waiting":false,"evt":24,"kind":"会议","snip":"展会上交换名片，约定会后寄目录与价目表","next":"确认样品寄出并跟进反馈","due":-8},{"id":1069,"company":"Navmera Gifts & Premiums S.A.","person":"Javier Navarro","email":"javier@navmera.es","web":"navmera.es","iso":"ES","country":"西班牙","en":"Spain","city":"马德里","tz":"Europe/Madrid","type":"终端","field":"礼品","hasContact":false,"waiting":false,"evt":10,"kind":"开发邮件","snip":"开发邮件已发送，附产品目录，暂无回复","next":"确认样品寄出并跟进反馈","due":-3},{"id":1070,"company":"Sildex Beauty Supply Ltda","person":"Rafael Souza","email":"rafael@sildex-pack.br","web":"sildex-pack.br","iso":"BR","country":"巴西","en":"Brazil","city":"圣保罗","tz":"America/Sao_Paulo","type":"中间商","field":"化妆品包装","hasContact":true,"waiting":false,"evt":239,"kind":"WhatsApp","snip":"对方暂停了项目，说明年初重新评估","next":null,"due":null},{"id":1071,"company":"Torlund Beauty Packaging LLP","person":"Ananya Banerjee","email":"ananya@torlund.in","web":"torlund.in","iso":"IN","country":"印度","en":"India","city":"新德里","tz":"Asia/Kolkata","type":"终端","field":"化妆品包装","hasContact":true,"waiting":true,"evt":3,"kind":"邮件","snip":"询问对方采购计划，等待回复","next":"补发材质证书与检测报告","due":-1},{"id":1072,"company":"Vormera Homeware B.V.","person":"Sanne van Dijk","email":"sanne@vormera-group.nl","web":"vormera-group.nl","iso":"NL","country":"荷兰","en":"Netherlands","city":"阿姆斯特丹","tz":"Europe/Amsterdam","type":"中间商","field":"家居","hasContact":true,"waiting":false,"evt":232,"kind":"电话","snip":"上一次订单已出货，之后没有新的沟通","next":"确认样品寄出并跟进反馈","due":7},{"id":1073,"company":"Yordra Acrylic Fabrication Co., Ltd.","person":"Quang Nguyen","email":"quang@yordra-pack.vn","web":"yordra-pack.vn","iso":"VN","country":"越南","en":"Vietnam","city":"胡志明市","tz":"Asia/Ho_Chi_Minh","type":"终端","field":"亚克力加工","hasContact":true,"waiting":true,"evt":15,"kind":"电话","snip":"已寄出样品并告知运单号，等待确认收到","next":"确认样品寄出并跟进反馈","due":0},{"id":1074,"company":"Lumnis Promotional Goods CV","person":"Budi Santoso","email":"budi@lumnis-pack.id","web":"lumnis-pack.id","iso":"ID","country":"印度尼西亚","en":"Indonesia","city":"雅加达","tz":"Asia/Jakarta","type":"终端","field":"礼品","hasContact":true,"waiting":false,"evt":251,"kind":"邮件","snip":"报价后没有进一步消息","next":null,"due":null},{"id":1075,"company":"Belmera Showcase Ltd.","person":"Daniel Okafor","email":"daniel@belmera.com","web":"belmera.com","iso":"CA","country":"加拿大","en":"Canada","city":"温哥华","tz":"America/Vancouver","type":"","field":"珠宝展示","hasContact":true,"waiting":false,"evt":96,"kind":"电话","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1076,"company":"Brasen Pack Solutions LLC","person":"Yusuf Nasser","email":"yusuf@brasen-co.com","web":"brasen-co.com","iso":"AE","country":"阿联酋","en":"United Arab Emirates","city":"迪拜","tz":"Asia/Dubai","type":"终端","field":"包装","hasContact":true,"waiting":true,"evt":13,"kind":"电话","snip":"发送了目录与 MOQ 说明，等待对方评估","next":"确认对方采购负责人姓名","due":10},{"id":1077,"company":"Vorsen Display Systems Co., Ltd.","person":"Malee Wong","email":"malee@vorsen-co.th","web":"vorsen-co.th","iso":"TH","country":"泰国","en":"Thailand","city":"曼谷","tz":"Asia/Bangkok","type":"终端","field":"展示器材","hasContact":true,"waiting":false,"evt":11,"kind":"WhatsApp","snip":"讨论了 logo 丝印与包装贴标方案","next":"发送新款目录并询问选型","due":-12},{"id":1078,"company":"Quanis Showcase SpA","person":"Javier Ortega","email":"javier@quanis.cl","web":"quanis.cl","iso":"CL","country":"智利","en":"Chile","city":"圣地亚哥","tz":"America/Santiago","type":"中间商","field":"珠宝展示","hasContact":true,"waiting":true,"evt":22,"kind":"电话","snip":"已寄出样品并告知运单号，等待确认收到","next":"整理下一批样品清单","due":7},{"id":1079,"company":"Falsen Display Solutions Pvt. Ltd.","person":"Aarav Banerjee","email":"aarav@falsen-group.in","web":"falsen-group.in","iso":"IN","country":"印度","en":"India","city":"孟买","tz":"Asia/Kolkata","type":"终端","field":"展示器材","hasContact":true,"waiting":true,"evt":17,"kind":"WhatsApp","snip":"询问对方采购计划，等待回复","next":"确认 MOQ 与阶梯价是否可接受","due":3},{"id":1080,"company":"Fenfield Gifts & Premiums Ltd","person":"Hannah Ashford","email":"hannah@fenfield-co.com","web":"fenfield-co.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"终端","field":"礼品","hasContact":false,"waiting":false,"evt":69,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":null,"due":null},{"id":1081,"company":"Velquil Promotional Goods S.A.E.","person":"Noor Al-Farsi","email":"noor@velquil-pack.eg","web":"velquil-pack.eg","iso":"EG","country":"埃及","en":"Egypt","city":"开罗","tz":"Africa/Cairo","type":"中间商","field":"礼品","hasContact":true,"waiting":true,"evt":1,"kind":"会议","snip":"发送了目录与 MOQ 说明，等待对方评估","next":"跟进海运与空运两种交期方案","due":21},{"id":1082,"company":"Xandra Jewellery Display LLP","person":"Dana Sarsen","email":"dana@xandra-pack.kz","web":"xandra-pack.kz","iso":"KZ","country":"哈萨克斯坦","en":"Kazakhstan","city":"阿拉木图","tz":"Asia/Almaty","type":"","field":"珠宝展示","hasContact":true,"waiting":false,"evt":235,"kind":"WhatsApp","snip":"上一次订单已出货，之后没有新的沟通","next":null,"due":null},{"id":1083,"company":"Karlix Sign Works Pvt. Ltd.","person":"Meera Kapoor","email":"meera@karlix-pack.in","web":"karlix-pack.in","iso":"IN","country":"印度","en":"India","city":"孟买","tz":"Asia/Kolkata","type":"终端","field":"广告标识","hasContact":true,"waiting":true,"evt":6,"kind":"电话","snip":"发送了目录与 MOQ 说明，等待对方评估","next":null,"due":null},{"id":1084,"company":"株式会社Elynis・ディスプレイ","person":"Tanaka Sakura","email":"tanaka@elynis-group.jp","web":"elynis-group.jp","iso":"JP","country":"日本","en":"Japan","city":"东京","tz":"Asia/Tokyo","type":"终端","field":"包装","hasContact":true,"waiting":false,"evt":116,"kind":"邮件","snip":"上次沟通：对方说预算在下个季度才批","next":null,"due":null},{"id":1085,"company":"Ravton Vitrine SAS","person":"Camille Marchand","email":"camille@ravton-co.fr","web":"ravton-co.fr","iso":"FR","country":"法国","en":"France","city":"巴黎","tz":"Europe/Paris","type":"","field":"珠宝展示","hasContact":true,"waiting":false,"evt":13,"kind":"邮件","snip":"客户对交期有顾虑，想比较海运与空运","next":"提醒对方本周内答复打样结果","due":7},{"id":1086,"company":"Morlix Jewellery Display S.A.S.","person":"Marta Ortega","email":"marta@morlix.co","web":"morlix.co","iso":"CO","country":"哥伦比亚","en":"Colombia","city":"波哥大","tz":"America/Bogota","type":"终端","field":"珠宝展示","hasContact":true,"waiting":false,"evt":12,"kind":"电话","snip":"对方回复了打样周期问题，等我们确认下周排期","next":"整理下一批样品清单","due":1},{"id":1087,"company":"Umawick Paper & Desk PLC","person":"Grace Ashford","email":"grace@umawick-co.com","web":"umawick-co.com","iso":"GB","country":"英国","en":"United Kingdom","city":"伦敦","tz":"Europe/London","type":"终端","field":"文具","hasContact":false,"waiting":false,"evt":47,"kind":"开发邮件","snip":"跟进邮件已发送，暂无回复","next":null,"due":null},{"id":1088,"company":"Aurdex Store Design GmbH & Co. KG","person":"Matthias Lange","email":"matthias@aurdex-co.de","web":"aurdex-co.de","iso":"DE","country":"德国","en":"Germany","city":"柏林","tz":"Europe/Berlin","type":"终端","field":"门店设计","hasContact":true,"waiting":false,"evt":5,"kind":"WhatsApp","snip":"展会上交换名片，约定会后寄目录与价目表","next":"补发材质证书与检测报告","due":7},{"id":1089,"company":"Xanria Acrylic Fabrication Trading Est.","person":"Omar Nasser","email":"omar@xanria-group.sa","web":"xanria-group.sa","iso":"SA","country":"沙特阿拉伯","en":"Saudi Arabia","city":"利雅得","tz":"Asia/Riyadh","type":"终端","field":"亚克力加工","hasContact":true,"waiting":false,"evt":27,"kind":"WhatsApp","snip":"客户对交期有顾虑，想比较海运与空运","next":"补发材质证书与检测报告","due":3},{"id":1090,"company":"Zarbel Gifting Pte Ltd","person":"Marcus Reyes","email":"marcus@zarbel.com","web":"zarbel.com","iso":"SG","country":"新加坡","en":"Singapore","city":"新加坡","tz":"Asia/Singapore","type":"终端","field":"礼品","hasContact":false,"waiting":false,"evt":44,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"再发一封跟进邮件","due":21},{"id":1091,"company":"Junta Store Design FZ-LLC","person":"Yusuf Al-Farsi","email":"yusuf@junta-co.com","web":"junta-co.com","iso":"AE","country":"阿联酋","en":"United Arab Emirates","city":"迪拜","tz":"Asia/Dubai","type":"","field":"门店设计","hasContact":false,"waiting":false,"evt":9,"kind":"开发邮件","snip":"开发邮件已发送，暂无回复","next":"发送新款目录并询问选型","due":-11}]</script>
+<script>
+/* Shared behaviour for the three customer-list rooms: data, views, search,
+   states, selection, keyboard, time zones, fixed-size windowing.
+   Everything is read-only; nothing here talks to a backend. */
+(function () {
+  'use strict';
+  var TR = window.TR = {};
+  var qs = new URLSearchParams(location.search);
+  if (qs.has('embed')) document.body.classList.add('embed');
+  TR.reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  TR.ME_TZ = 'Asia/Shanghai';
+
+  /* ---------------------------------------------------------------- data */
+  var raw = JSON.parse(document.getElementById('tr-data').textContent);
+  var stress = parseInt(qs.get('n') || '0', 10);
+  if (stress > raw.length) {           // ?n=1500 — same rows, cloned, to feel the scale
+    var out = raw.slice(), k = 1;
+    while (out.length < stress) {
+      raw.forEach(function (c, i) {
+        if (out.length >= stress) return;
+        var j = ((c.id * 7919 + k * 104729) % 97);
+        var d = Object.assign({}, c, { id: c.id + k * 10000, company: c.company + ' · ' + (k + 1) });
+        d.evt = Math.max(0, c.evt + (j % 23) - 8);
+        if (d.next) d.due = c.due + (j % 9) - 4;
+        out.push(d);
+      });
+      k++;
+    }
+    raw = out;
+  }
+  var data = raw;
+  data.forEach(function (c) {
+    c.overdue = !!c.next && c.due < 0;
+    c.silent = c.hasContact && c.evt >= 30;
+    c._s = norm([c.company, c.person, c.country, c.en || '', c.iso, c.city, c.field, c.web, c.email].join(' \n '));
+  });
+  TR.all = data;
+  TR.byId = {};
+  data.forEach(function (c) { TR.byId[c.id] = c; });
+
+  function norm(s) { return String(s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, ''); }
+  TR.norm = norm;
+  TR.esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (m) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]; });
+  };
+
+  /* ---------------------------------------------------------------- dates */
+  var WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  var base = new Date(); base.setHours(0, 0, 0, 0);
+  TR.dateOf = function (offsetDays) { return new Date(base.getFullYear(), base.getMonth(), base.getDate() + offsetDays); };
+  TR.md = function (offsetDays) { var d = TR.dateOf(offsetDays); return (d.getMonth() + 1) + '/' + d.getDate(); };
+  TR.rel = function (evt) {
+    if (evt <= 0) return '今天';
+    if (evt === 1) return '昨天';
+    if (evt < 14) return evt + ' 天前';
+    if (evt < 60) return Math.round(evt / 7) + ' 周前';
+    if (evt < 365) return Math.round(evt / 30) + ' 个月前';
+    return Math.floor(evt / 365) + ' 年前';
+  };
+  TR.lastText = function (c) { return TR.rel(c.evt); };
+  TR.lastWhat = function (c) {
+    return c.hasContact ? (c.waiting ? '等待回复' : '已有联系') : '未获回复';
+  };
+  TR.due = function (c) {   // -> {t: short text, full: with date, cls}
+    if (!c.next) return { t: '尚无下一步', full: '尚无下一步', cls: 'none' };
+    var d = c.due;
+    if (d < 0) return { t: '逾期 ' + (-d) + ' 天', full: '逾期 ' + (-d) + ' 天 · ' + TR.md(d), cls: 'over' };
+    if (d === 0) return { t: '今天', full: '今天', cls: 'soon' };
+    if (d === 1) return { t: '明天', full: '明天 · ' + TR.md(d), cls: 'soon' };
+    if (d < 7) return { t: WD[TR.dateOf(d).getDay()], full: WD[TR.dateOf(d).getDay()] + ' · ' + TR.md(d), cls: 'soon' };
+    return { t: TR.md(d), full: TR.md(d), cls: 'later' };
+  };
+  TR.bucket = function (c) {   // guide-card buckets by "最近发生"
+    var e = c.evt;
+    if (e <= 7) return { id: 'w', label: '本周', order: 0 };
+    if (e <= 30) return { id: 'm', label: '本月', order: 1 };
+    if (e <= 90) return { id: 'q', label: '一至三个月', order: 2 };
+    return { id: 'o', label: '更早', order: 3 };
+  };
+
+  /* ---------------------------------------------------------------- views */
+  TR.views = [
+    { id: 'all', label: '全部', test: function () { return true; } },
+    { id: 'uncontacted', label: '未获回复', test: function (c) { return !c.hasContact; } },
+    { id: 'communicated', label: '已有联系', test: function (c) { return c.hasContact; } },
+    { id: 'waiting', label: '等待回复', test: function (c) { return c.waiting; } },
+    { id: 'silent', label: '很久未联系', test: function (c) { return c.silent; } },
+    { id: 'no_next', label: '尚无下一步', test: function (c) { return !c.next; } }
+  ];
+  TR.viewById = {}; TR.views.forEach(function (v) { TR.viewById[v.id] = v; });
+
+  /* --------------------------------------------------------------- model */
+  TR.view = 'all'; TR.q = ''; TR.state = 'loading'; TR.sel = new Set();
+  var subs = [];
+  TR.on = function (fn) { subs.push(fn); };
+  TR.emit = function (why) { subs.forEach(function (fn) { fn(why); }); };
+
+  var FIELDS = [['company', '公司'], ['person', '联系人'], ['country', '国家'], ['en', '国家'], ['city', '城市'], ['field', '行业'], ['web', '网站'], ['email', '邮箱'], ['iso', '国家代码']];
+  function tokens() { return norm(TR.q).split(/\s+/).filter(Boolean); }
+  TR.tokens = tokens;
+  function matches(c, toks) { for (var i = 0; i < toks.length; i++) if (c._s.indexOf(toks[i]) < 0) return false; return true; }
+  TR.reasons = function (c) {
+    var toks = tokens(); if (!toks.length) return [];
+    var out = [];
+    FIELDS.forEach(function (f) {
+      var v = norm(c[f[0]] || '');
+      if (toks.some(function (t) { return v.indexOf(t) >= 0; })) out.push(f[1]);
+    });
+    return out;
+  };
+  TR.hl = function (text) {
+    var toks = TR.q.trim().split(/\s+/).filter(Boolean);
+    var s = TR.esc(text);
+    if (!toks.length) return s;
+    toks.forEach(function (t) {
+      var re = new RegExp('(' + TR.esc(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+      s = s.replace(re, '<mark class="hl">$1</mark>');
+    });
+    return s;
+  };
+
+  var memo = { key: '', list: [] };
+  TR.list = function () {           // filtered + sorted by "最近发生"
+    if (TR.state !== 'ok') return [];
+    var key = TR.view + '|' + TR.q;
+    if (memo.key === key) return memo.list;
+    var toks = tokens(), v = TR.viewById[TR.view];
+    var l = data.filter(function (c) { return v.test(c) && matches(c, toks); });
+    l.sort(function (a, b) { return a.evt - b.evt || a.id - b.id; });
+    memo = { key: key, list: l };
+    return l;
+  };
+  TR.counts = function () {         // per-view counts under the current search
+    var toks = tokens(), out = {};
+    TR.views.forEach(function (v) { out[v.id] = 0; });
+    if (TR.state !== 'ok') return out;
+    data.forEach(function (c) {
+      if (!matches(c, toks)) return;
+      TR.views.forEach(function (v) { if (v.test(c)) out[v.id]++; });
+    });
+    return out;
+  };
+  TR.kind = function () {
+    if (TR.state !== 'ok') return TR.state;
+    return TR.list().length ? 'ok' : 'none';
+  };
+  TR.setView = function (id) { if (TR.view === id) return; TR.view = id; memo.key = ''; TR.emit('view'); };
+  TR.setQuery = function (q) {
+    q = q || '';
+    if (q === TR.q) return;
+    TR.q = q; memo.key = '';
+    document.querySelectorAll('.q').forEach(function (b) {
+      var i = b.querySelector('input'); if (i && i.value !== q) i.value = q;
+      b.classList.toggle('has-text', !!q);
+    });
+    TR.emit('q');
+  };
+  TR.setState = function (s) {
+    if (s === 'none') { TR.state = 'ok'; TR.view = 'all'; memo.key = ''; TR.setQuery('zzqx'); TR.emit('state'); return; }
+    TR.state = s; memo.key = '';
+    if (TR.q === 'zzqx') TR.setQuery('');
+    TR.sel.clear(); document.body.classList.remove('has-sel');
+    TR.emit('state');
+  };
+  TR.retry = function () {
+    TR.setState('loading');
+    setTimeout(function () { TR.setState('ok'); }, TR.reduce ? 0 : 650);
+  };
+  TR.clearSearch = function () { TR.view = 'all'; TR.setQuery(''); TR.emit('view'); };
+
+  /* ----------------------------------------------------------- selection */
+  TR.toggleSel = function (id) { if (TR.sel.has(id)) TR.sel.delete(id); else TR.sel.add(id); TR.selChanged(); };
+  TR.rangeSel = function (ids, a, b) {
+    var i = ids.indexOf(a), j = ids.indexOf(b); if (i < 0 || j < 0) return TR.toggleSel(b);
+    for (var k = Math.min(i, j); k <= Math.max(i, j); k++) TR.sel.add(ids[k]);
+    TR.selChanged();
+  };
+  TR.clearSel = function () { if (!TR.sel.size) return; TR.sel.clear(); TR.selChanged(); };
+  TR.selChanged = function () { document.body.classList.toggle('has-sel', TR.sel.size > 0); TR.emit('sel'); };
+
+  TR.mountTray = function (el) {
+    el.classList.add('tray');
+    el.setAttribute('role', 'region'); el.setAttribute('aria-label', '批量操作');
+    el.innerHTML = '<span class="n" aria-live="polite"><b>0</b> 项已选</span>' +
+      '<button class="solid" data-tray="export">导出邮箱</button>' +
+      '<button class="ghost" data-tray="archive">归档</button>' +
+      '<button class="ghost" data-tray="cancel">取消</button>';
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-tray]'); if (!b) return;
+      var n = TR.sel.size, a = b.dataset.tray;
+      if (a === 'export') TR.say('已导出 ' + n + ' 个客户的邮箱（原型，未写入任何数据）');
+      if (a === 'archive') TR.say('将归档 ' + n + ' 个客户（原型，未写入；真实实现会先生成可恢复快照）');
+      TR.clearSel();
+    });
+    TR.on(function () {
+      var n = TR.sel.size;
+      el.classList.toggle('on', n > 0);
+      el.querySelector('.n').innerHTML = '<b>' + n + '</b> 项已选';
+    });
+  };
+
+  var liveTimer = 0;
+  TR.say = function (msg) {
+    var el = document.getElementById('live');
+    if (!el) { el = document.createElement('div'); el.id = 'live'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); document.body.appendChild(el); }
+    el.textContent = msg; el.classList.add('on');
+    clearTimeout(liveTimer); liveTimer = setTimeout(function () { el.classList.remove('on'); }, 2800);
+  };
+  var openSubs = [];
+  TR.onOpen = function (fn) { openSubs.push(fn); };
+  TR.open = function (c) {
+    if (!c) return;
+    TR.say('打开客户 · ' + c.company + '（原型不跳转，真实页面进入客户工作台）');
+    openSubs.forEach(function (fn) { fn(c); });
+  };
+
+  /* --------------------------------------------------------------- states */
+  TR.suggest = function (q) {
+    var t = norm(q).trim().split(/\s+/)[0]; if (!t || t.length < 3) return null;
+    function lev(a, b) {
+      var m = a.length, n = b.length, d = [], i, j;
+      for (i = 0; i <= m; i++) { d[i] = [i]; }
+      for (j = 1; j <= n; j++) d[0][j] = j;
+      for (i = 1; i <= m; i++) for (j = 1; j <= n; j++)
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      return d[m][n];
+    }
+    var best = null, bd = 3;
+    data.forEach(function (c) {
+      var w = norm(c.company).split(/\s+/)[0], dd = lev(t, w.slice(0, t.length + 1));
+      if (dd < bd) { bd = dd; best = c; }
+    });
+    return best;
+  };
+  var SK = function (n, cls) { var s = ''; for (var i = 0; i < n; i++) s += '<i class="sk ' + (cls || '') + '"></i>'; return s; };
+  TR.stateHTML = function (kind) {
+    if (kind === 'empty') return '<div class="st" data-kind="empty"><p class="micro">尚无客户</p><h3>这里还没有客户</h3>' +
+      '<p>添加第一位客户，或导入 Excel 与邮件里的联系人。有了沟通记录，「最近发生」会自动排好。</p>' +
+      '<div class="acts"><button class="solid" data-act="add">添加客户</button><button class="ghost" data-act="import">导入联系人</button></div></div>';
+    if (kind === 'loading') return '<div class="st" data-kind="loading" role="status" aria-busy="true"><p class="micro">正在读取</p><h3>正在读取客户…</h3><div class="sks">' + SK(10) + '</div></div>';
+    if (kind === 'error') return '<div class="st" data-kind="error" role="alert"><p class="code">错误 · 服务暂无响应（503）</p><h3>客户列表暂时无法加载</h3>' +
+      '<p>这不是「没有客户」：网络或服务出了问题，已保存的客户都还在。</p>' +
+      '<div class="acts"><button class="solid" data-act="retry">重新加载</button><span class="hint">已自动重试 2 次 · 请求 ID trosa-7f3a</span></div></div>';
+    if (kind === 'none') {
+      var q = TR.q.trim(), sug = q ? TR.suggest(q) : null;
+      if (!q) return '<div class="st" data-kind="none"><p class="micro">此视图为空</p><h3>「' + TR.esc(TR.viewById[TR.view].label) + '」里暂时没有客户</h3><p>视图由实际活动自动计算，无需手动维护。</p><div class="acts"><button class="ghost" data-act="clear">回到全部</button></div></div>';
+      return '<div class="st" data-kind="none" role="status"><p class="micro">没有匹配</p><h3>没有找到「<em>' + TR.esc(q) + '</em>」</h3>' +
+        '<p>已搜索公司、联系人、国家、行业、网站与邮箱。</p>' +
+        (sug ? '<p class="sug">你是想找 <button class="lnk" data-act="pick" data-q="' + TR.esc(sug.company.split(' ')[0]) + '">' + TR.esc(sug.company.length > 44 ? sug.company.slice(0, 42) + '…' : sug.company) + '</button> 吗？</p>' : '') +
+        '<div class="acts"><button class="ghost" data-act="clear">清除搜索</button></div></div>';
+    }
+    return '';
+  };
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-act]'); if (!b) return;
+    var a = b.dataset.act;
+    if (a === 'retry') TR.retry();
+    else if (a === 'clear') { TR.clearSearch(); var i = document.querySelector('.q input'); if (i) i.focus(); }
+    else if (a === 'pick') { TR.setQuery(b.dataset.q); }
+    else if (a === 'add') TR.say('打开「添加客户」（原型）');
+    else if (a === 'import') TR.say('打开「导入联系人」（原型）');
+  });
+
+  /* ------------------------------------------------------ search + keys */
+  TR.bindSearch = function (box) {
+    var input = box.querySelector('input'), t = 0;
+    input.addEventListener('input', function () {
+      box.classList.toggle('has-text', !!input.value);
+      clearTimeout(t); t = setTimeout(function () { TR.setQuery(input.value); }, 80);
+    });
+    var clr = box.querySelector('.clear');
+    if (clr) clr.addEventListener('click', function () { TR.setQuery(''); input.focus(); });
+  };
+  TR.bindViews = function (nav) {
+    nav.setAttribute('role', 'tablist'); nav.setAttribute('aria-label', '动态视图');
+    nav.innerHTML = TR.views.map(function (v, i) {
+      return '<button role="tab" data-v="' + v.id + '" title="按 ' + (i + 1) + '">' + v.label + ' <i>0</i></button>';
+    }).join('');
+    nav.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) TR.setView(b.dataset.v); });
+    function paint() {
+      var c = TR.counts();
+      nav.querySelectorAll('button').forEach(function (b) {
+        b.setAttribute('aria-selected', b.dataset.v === TR.view ? 'true' : 'false');
+        b.querySelector('i').textContent = TR.state === 'ok' ? c[b.dataset.v] : '–';
+      });
+    }
+    TR.on(function (why) { if (why !== 'sel') paint(); });
+    paint();
+  };
+  TR.bindKeys = function (h) {
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target, inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+      var input = document.querySelector('.q input');
+      if (!inField && e.key === '/') { e.preventDefault(); if (input) { input.focus(); input.select(); } return; }
+      if (e.key === 'Escape') {
+        if (inField && t.type !== 'range') {
+          if (t.value) { t.value = ''; TR.setQuery(''); e.preventDefault(); return; }
+          t.blur(); if (h.focusList) h.focusList(); return;
+        }
+        if (TR.sel.size) { TR.clearSel(); e.preventDefault(); }
+        return;
+      }
+      if (inField) {
+        if (t.type === 'range') return;
+        if (e.key === 'ArrowDown' || e.key === 'Enter') { e.preventDefault(); t.blur(); if (h.focusList) h.focusList(); }
+        return;
+      }
+      if (/^[1-6]$/.test(e.key)) { TR.setView(TR.views[+e.key - 1].id); e.preventDefault(); return; }
+      if (h.key && h.key(e)) e.preventDefault();
+    });
+  };
+  TR.mountDevbar = function () {
+    var el = document.createElement('div'); el.className = 'devbar';
+    var S = [['ok', '正常'], ['loading', '加载'], ['empty', '空'], ['error', '失败'], ['none', '无结果']];
+    el.innerHTML = '<b>原型状态</b>' + S.map(function (s) { return '<button data-s="' + s[0] + '" aria-pressed="false">' + s[1] + '</button>'; }).join('');
+    document.body.appendChild(el);
+    el.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) TR.setState(b.dataset.s); });
+    TR.on(function () {
+      var k = TR.kind() === 'none' ? 'none' : TR.state;
+      el.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.s === k ? 'true' : 'false'); });
+    });
+  };
+  window.addEventListener('message', function (e) {
+    var d = e.data; if (d && d.trState) TR.setState(d.trState);
+  });
+  TR.start = function () {
+    var s = qs.get('state');
+    if (s) { TR.setState(s); return; }
+    if (TR.reduce) { TR.state = 'ok'; TR.emit('state'); return; }
+    TR.emit('state');
+    setTimeout(function () { if (TR.state === 'loading') TR.setState('ok'); }, 420);
+  };
+
+  /* ------------------------------------------------------------ time zones */
+  var fmts = {};
+  function fmt(tz) {
+    return fmts[tz] || (fmts[tz] = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' }));
+  }
+  TR.local = function (tz, ms) {
+    var p = {}; fmt(tz).formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = +x.value; });
+    var h = p.hour % 24;
+    var utc = Date.UTC(p.year, p.month - 1, p.day, h, p.minute);
+    return { h: h, m: p.minute, frac: h + p.minute / 60, wd: new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay(),
+      off: Math.round((utc - Math.floor(ms / 60000) * 60000) / 60000) };
+  };
+  TR.hhmm = function (l) { return (l.h < 10 ? '0' : '') + l.h + ':' + (l.m < 10 ? '0' : '') + l.m; };
+  TR.WD = WD;
+  TR.inWindow = function (f) { return f >= 9 && f < 18; };
+  TR.light = function (f) {          // 0 night … 1 working daylight
+    function ss(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
+    if (f >= 9 && f < 18) return 1;
+    if (f >= 6 && f < 9) return ss((f - 6) / 3);
+    if (f >= 18 && f < 22) return ss((22 - f) / 4);
+    return 0;
+  };
+  TR.phase = function (f) {
+    if (f < 5 || f >= 22) return '深夜';
+    if (f < 9) return '清晨';
+    if (f < 12) return '上午';
+    if (f < 14) return '午间';
+    if (f < 18) return '下午';
+    return '傍晚';
+  };
+  var NIGHT = [213, 204, 185], DAY = [255, 253, 247], GOLD = [243, 231, 211];
+  TR.tone = function (f) {
+    var L = TR.light(f), c = NIGHT.map(function (n, i) { return n + (DAY[i] - n) * L; });
+    var ramp = 4 * L * (1 - L);
+    if (ramp > 0) c = c.map(function (v, i) { return v + (GOLD[i] - v) * ramp * .7; });
+    return 'rgb(' + c.map(Math.round).join(',') + ')';
+  };
+
+  /* -------------------------------------------- fixed-size windowing (x or y) */
+  TR.vwin = function (o) {
+    var axis = o.axis || 'y', sc = o.scroller, host = o.host, offs = new Float64Array(1), nodes = new Map(), raf = 0, n = 0;
+    var P = axis === 'y' ? { st: 'scrollTop', vp: 'clientHeight', pos: 'top', size: 'height' } : { st: 'scrollLeft', vp: 'clientWidth', pos: 'left', size: 'width' };
+    function build() {
+      n = o.count(); offs = new Float64Array(n + 1);
+      for (var i = 0; i < n; i++) offs[i + 1] = offs[i] + o.size(i);
+      host.style[P.size] = offs[n] + 'px';
+    }
+    function find(px) {
+      var lo = 0, hi = n - 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (offs[mid] <= px) lo = mid; else hi = mid - 1; }
+      return lo;
+    }
+    function paint() {
+      if (!n) return;
+      var over = o.overscan || 400, st = sc[P.st], vp = sc[P.vp];
+      var a = find(Math.max(0, st - over)), b = find(st + vp + over);
+      nodes.forEach(function (el, i) { if (i < a || i > b) { el.remove(); nodes.delete(i); } });
+      for (var i = a; i <= b; i++) {
+        if (nodes.has(i)) continue;
+        var el = o.render(i);
+        el.style.position = 'absolute'; el.style[P.pos] = offs[i] + 'px'; el.style[P.size] = o.size(i) + 'px';
+        host.appendChild(el); nodes.set(i, el);
+      }
+      if (o.onPaint) o.onPaint();
+    }
+    sc.addEventListener('scroll', function () { if (!raf) raf = requestAnimationFrame(function () { raf = 0; paint(); }); }, { passive: true });
+    var api = {
+      refresh: function () { nodes.forEach(function (el) { el.remove(); }); nodes.clear(); build(); paint(); },
+      repaint: paint,
+      offset: function (i) { return offs[i]; },
+      size: function (i) { return offs[i + 1] - offs[i]; },
+      find: find,
+      node: function (i) { return nodes.get(i); },
+      each: function (fn) { nodes.forEach(fn); },
+      total: function () { return offs[n] || 0; },
+      count: function () { return n; },
+      reveal: function (i, mode) {   // 'nearest' | 'center' | 'start'
+        var top = offs[i], len = offs[i + 1] - offs[i], st = sc[P.st], vp = sc[P.vp], to = st;
+        var pad = o.pad || 0;
+        if (mode === 'center' || mode === 'jump') to = top + len / 2 - vp / 2;
+        else if (mode === 'start') to = top - pad;
+        else if (top - pad < st) to = top - pad;
+        else if (top + len + pad > st + vp) to = top + len + pad - vp;
+        else return;
+        var beh = TR.reduce ? 'auto' : 'smooth';
+        var opt = {}; opt[P.pos] = Math.max(0, to); opt.behavior = mode === 'jump' ? 'auto' : beh; sc.scrollTo(opt);
+        if (opt.behavior === 'auto') paint();
+      }
+    };
+    build(); paint();
+    return api;
+  };
+})();
+
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var sc = $('#scroll'), host = $('#host'), cv = $('#cv'), ruler = $('#ruler'), lens = $('#lens');
+  var items = [], idxOf = {}, order = [], groupsAt = [], cur = null, anchor = null, win, cssPx = function (v, d) { return parseFloat(getComputedStyle(document.querySelector('.room')).getPropertyValue(v)) || d; };
+  TR.bindSearch($('#qbox')); TR.bindViews($('#views')); TR.mountTray($('#tray')); TR.mountDevbar();
+
+  function build() {
+    var list = TR.list(); items = []; idxOf = {}; order = list.map(function (c) { return c.id; }); groupsAt = [];
+    var by = {}; list.forEach(function (c) {
+      var b = TR.bucket(c), g = by[b.id] = by[b.id] || { b: b, n: 0, over: 0, wait: 0, none: 0, silent: 0 };
+      g.n++; if (c.overdue) g.over++; if (c.waiting) g.wait++; if (!c.next) g.none++; if (c.silent) g.silent++;
+    });
+    var last = null;
+    list.forEach(function (c, i) {
+      var b = TR.bucket(c);
+      if (b.id !== last) { groupsAt.push({ at: items.length, g: by[b.id], first: i }); items.push({ g: by[b.id] }); last = b.id; }
+      idxOf[c.id] = items.length; items.push({ c: c, i: i });
+    });
+  }
+  function grpHTML(g) {
+    var parts = ['<b>' + g.n + ' 家</b>'];
+    if (g.over) parts.push('<span class="o">逾期 ' + g.over + '</span>');
+    if (g.wait) parts.push('等待回复 ' + g.wait);
+    if (g.none) parts.push('尚无下一步 ' + g.none);
+    if (g.silent) parts.push('很久未联系 ' + g.silent);
+    return '<span class="l">' + g.b.label + '</span><span class="r">' + parts.join(' · ') + '</span>';
+  }
+  function entHTML(c) {
+    var d = TR.due(c);
+    return '<i class="lit"></i><i class="ck" data-ck></i>' +
+      '<div class="l1"><span class="co" title="' + TR.esc(c.company) + '">' + TR.hl(c.company) + '</span><i class="lead"></i><span class="wh">' + TR.rel(c.evt) + '<i>' + TR.lastWhat(c) + '</i></span></div>' +
+      '<div class="l2"><span>' + TR.hl(c.country) + ' · ' + TR.hl(c.field) + '</span><span class="sn">' + TR.esc(c.kind) + ' · ' + TR.esc(c.snip) + '</span>' +
+      (c.next ? '<span class="nx ' + (d.cls === 'over' ? 'over' : '') + '"><em>' + d.t + '</em> · ' + TR.esc(c.next) + '</span>' : '<span class="nx none">尚无下一步</span>') + '</div>' +
+      '<button class="solid is-open opn" type="button" data-open="' + c.id + '" tabindex="-1">打开 <kbd>↵</kbd></button>';
+  }
+  function render(i) {
+    var it = items[i], el = document.createElement('div');
+    if (it.g) { el.className = 'grp'; el.innerHTML = grpHTML(it.g); el.setAttribute('role', 'presentation'); return el; }
+    var c = it.c; el.className = 'ent'; el.id = 'e-' + c.id; el.dataset.id = c.id; el.setAttribute('role', 'option');
+    el.setAttribute('aria-label', c.company + '，' + c.country + '，' + TR.rel(c.evt) + '，' + TR.due(c).t);
+    el.innerHTML = entHTML(c); mark(el, c.id); return el;
+  }
+  function mark(el, id) { el.classList.toggle('cur', id === cur); el.classList.toggle('sel', TR.sel.has(id)); el.setAttribute('aria-selected', id === cur ? 'true' : 'false'); }
+  function paintMarks() { win.each(function (el) { if (el.dataset.id) mark(el, +el.dataset.id); }); }
+
+  /* margin running head follows the scroll position */
+  function running() {
+    if (!items.length) return;
+    var top = sc.scrollTop + 4, i = win.find(top), it = items[i];
+    var gi = 0; for (var k = 0; k < groupsAt.length; k++) if (groupsAt[k].at <= i) gi = k;
+    var g = groupsAt[gi].g, n = order.length;
+    $('#rhP').textContent = g.b.label;
+    var bits = [g.n + ' 家']; if (g.over) bits.push('逾期 ' + g.over); if (g.wait) bits.push('等待回复 ' + g.wait); if (g.none) bits.push('尚无下一步 ' + g.none);
+    $('#rhT').innerHTML = bits.join('<br>');
+    var rowI = it.c ? it.i : (items[i + 1] && items[i + 1].i) || 0, cc = cur != null ? order.indexOf(cur) : rowI;
+    $('#rhF').innerHTML = '第 ' + (cc + 1) + ' 条 <i>/ ' + n + '</i>';
+    drawRuler();
+  }
+
+  /* ruler: canvas ticks; overdue long, no-next short, viewport = gold bar */
+  function drawRuler() {
+    var r = ruler.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, W = Math.max(1, r.width), H = Math.max(1, r.height);
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    var n = order.length; if (!n) return;
+    var pad = 14, h = H - pad * 2, css = getComputedStyle(document.documentElement);
+    var ink = '#24221d', faint = '#b7b1a4', gold = '#bc9052', danger = '#a4443a';
+    var buckets = Math.min(n, Math.floor(h)), best = new Array(buckets);
+    order.forEach(function (id, i) {
+      var c = TR.byId[id], b = Math.min(buckets - 1, Math.floor(i / n * buckets)), w = c.overdue ? 3 : (c.next ? 2 : 1);
+      if (!best[b] || w > best[b]) best[b] = w;
+    });
+    var small = W < 40, base = small ? 5 : 10, mx = small ? 12 : 26;
+    for (var b = 0; b < buckets; b++) {
+      var w = best[b]; if (!w) continue; var y = pad + (b + .5) / buckets * h;
+      g.fillStyle = w === 3 ? danger : (w === 2 ? '#8a8478' : faint);
+      var len = w === 3 ? mx : (w === 2 ? base + 4 : base); g.fillRect(W - len - 4, y - .5, len, 1);
+    }
+    groupsAt.forEach(function (ga) { var y = pad + ga.first / n * h; g.fillStyle = gold; g.fillRect(4, y, W - 8, 1); });
+    var vt = sc.scrollTop / Math.max(1, win.total()), vb = (sc.scrollTop + sc.clientHeight) / Math.max(1, win.total());
+    g.fillStyle = gold; g.fillRect(0, pad + vt * h, 2, Math.max(4, (Math.min(1, vb) - vt) * h));
+    if (cur != null) { var y = pad + (order.indexOf(cur) + .5) / n * h; g.fillStyle = ink; g.fillRect(W - 6, y - 2, 6, 4); }
+  }
+  function rulerIndex(clientY) {
+    var r = ruler.getBoundingClientRect(), pad = 14, f = (clientY - r.top - pad) / Math.max(1, r.height - pad * 2);
+    return Math.max(0, Math.min(order.length - 1, Math.floor(f * order.length))) ;
+  }
+  var dragging = false;
+  function scrubTo(e) {
+    if (!order.length) return; var i = rulerIndex(e.clientY), c = TR.byId[order[i]], r = ruler.getBoundingClientRect();
+    lens.innerHTML = '<b>' + TR.esc(c.company.length > 46 ? c.company.slice(0, 44) + '…' : c.company) + '</b><i>' + TR.esc(c.country) + ' · ' + TR.rel(c.evt) + '</i>';
+    lens.style.top = (e.clientY - r.top) + 'px'; lens.classList.add('on');
+    if (dragging) { var ii = idxOf[c.id]; sc.scrollTop = Math.max(0, win.offset(ii) - sc.clientHeight / 3); win.repaint(); setCursor(c.id, { noReveal: true }); }
+  }
+  ruler.addEventListener('pointermove', scrubTo);
+  ruler.addEventListener('pointerleave', function () { if (!dragging) lens.classList.remove('on'); });
+  ruler.addEventListener('pointerdown', function (e) { dragging = true; ruler.setPointerCapture(e.pointerId); scrubTo(e); });
+  ruler.addEventListener('pointerup', function (e) { dragging = false; lens.classList.remove('on'); try { ruler.releasePointerCapture(e.pointerId); } catch (x) {} });
+
+  /* cursor */
+  function setCursor(id, o) {
+    o = o || {}; if (id == null || idxOf[id] == null) return;
+    cur = id; sc.setAttribute('aria-activedescendant', 'e-' + id);
+    if (!o.noReveal) win.reveal(idxOf[id], 'nearest');
+    paintMarks(); running(); dockUpdate();
+  }
+  function dockUpdate() {
+    var c = cur != null ? TR.byId[cur] : null, d = $('#dock');
+    if (!c || TR.kind() !== 'ok') { d.innerHTML = ''; return; }
+    d.innerHTML = '<div class="n"><b>' + TR.esc(c.company) + '</b><span>' + TR.esc(c.country) + ' · ' + TR.rel(c.evt) + ' · ' + TR.due(c).t + '</span></div><button class="solid is-open" data-open="' + c.id + '">打开客户</button>';
+  }
+
+  function refresh(why) {
+    var kind = TR.kind(), st = $('#state');
+    if (why === 'sel') { paintMarks(); return; }
+    $('#sub').textContent = TR.state === 'ok' ? '台账 · 共 ' + TR.all.length + ' 位 · 按最近发生' : '台账';
+    if (kind !== 'ok') {
+      st.className = 'state on'; st.dataset.kind = kind; st.innerHTML = TR.stateHTML(kind);
+      items = []; order = []; groupsAt = []; win.refresh(); cur = null; running0(); dockUpdate(); drawRuler(); return;
+    }
+    st.className = 'state'; st.innerHTML = '';
+    build(); win.refresh(); sc.scrollTop = 0;
+    var keep = order.indexOf(cur) >= 0 ? cur : order[0]; cur = null; setCursor(keep, { noReveal: true });
+  }
+  function running0() { $('#rhP').textContent = '—'; $('#rhT').textContent = ''; $('#rhF').innerHTML = ''; }
+
+  win = TR.vwin({ scroller: sc, host: host, axis: 'y', overscan: 500, pad: 8,
+    count: function () { return items.length; },
+    size: function (i) { return items[i].g ? cssPx('--hrow', 76) : cssPx('--erow', 70); },
+    render: render, onPaint: function () { running(); }
+  });
+  addEventListener('resize', function () { win.refresh(); running(); });
+
+  host.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'touch') return;
+    var el = e.target.closest('.ent'); if (el && +el.dataset.id !== cur) setCursor(+el.dataset.id, { noReveal: true });
+  });
+  host.addEventListener('click', function (e) {
+    var op = e.target.closest('[data-open]'); if (op) { TR.open(TR.byId[+op.dataset.open]); return; }
+    var el = e.target.closest('.ent'); if (!el) return; var id = +el.dataset.id;
+    if (e.target.closest('[data-ck]')) { TR.toggleSel(id); anchor = id; }
+    else if (e.shiftKey && anchor != null) TR.rangeSel(order, anchor, id);
+    else if (e.metaKey || e.ctrlKey) { TR.toggleSel(id); anchor = id; }
+    else anchor = id;
+    setCursor(id, { noReveal: true }); sc.focus({ preventScroll: true });
+  });
+  host.addEventListener('dblclick', function (e) { var el = e.target.closest('.ent'); if (el) TR.open(TR.byId[+el.dataset.id]); });
+  $('#dock').addEventListener('click', function (e) { var b = e.target.closest('[data-open]'); if (b) TR.open(TR.byId[+b.dataset.open]); });
+
+  function step(n, shift) {
+    var i = order.indexOf(cur); if (i < 0) return;
+    var j = Math.max(0, Math.min(order.length - 1, i + n)); if (j === i) return;
+    if (shift) { if (anchor == null) anchor = cur; TR.rangeSel(order, anchor, order[j]); } else anchor = order[j];
+    setCursor(order[j]);
+  }
+  TR.bindKeys({
+    focusList: function () { sc.focus({ preventScroll: true }); },
+    key: function (e) {
+      if (TR.kind() !== 'ok') return false;
+      switch (e.key) {
+        case 'ArrowDown': case 'j': step(1, e.shiftKey); return true;
+        case 'ArrowUp': case 'k': step(-1, e.shiftKey); return true;
+        case 'PageDown': step(Math.max(4, Math.floor(sc.clientHeight / cssPx('--erow', 70)) - 1)); return true;
+        case 'PageUp': step(-Math.max(4, Math.floor(sc.clientHeight / cssPx('--erow', 70)) - 1)); return true;
+        case 'Home': step(-1e9); return true;
+        case 'End': step(1e9); return true;
+        case 'Enter': TR.open(TR.byId[cur]); return true;
+        case 'x': case 'X': case ' ': TR.toggleSel(cur); anchor = cur; return true;
+      }
+      return false;
+    }
+  });
+  TR.on(refresh); TR.start();
+})();
+</script>
+</body>
+</html>

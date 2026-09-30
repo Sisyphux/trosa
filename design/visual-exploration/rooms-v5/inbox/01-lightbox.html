@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trosa — Inbox 房间 A · 灯箱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== 共用底座：token 取自 app/static/visual-v3.css :root（--dl-*），不新增色系/字体 ===== */
+:root{
+  --dl-hi:#faf8f2; --dl-canvas:#efeae0; --dl-canvas-low:#ded6c6;
+  --dl-paper:#fffdf7; --dl-paper-2:#fbf8f1; --dl-paper-3:#f5f1e7;
+  --dl-ink:#24221d; --dl-ink-2:#57534a; --dl-ink-3:#6f6a5f; --dl-mut:#8a8478; --dl-faint:#b7b1a4;
+  --dl-gold:#bc9052; --dl-gold-ink:#8a6224; --dl-gold-soft:#f3e7d3; --dl-gold-wash:rgba(188,144,82,.10);
+  --dl-danger:#a4443a; --dl-danger-soft:#f6e6e3; --dl-ok:#5c7a5a; --dl-ok-soft:#e7eee3;
+  --dl-hair:rgba(36,34,29,.13); --dl-hair-2:rgba(36,34,29,.07); --dl-hair-strong:rgba(36,34,29,.26);
+  --dl-ink-wash:rgba(36,34,29,.05);
+  --dl-display:"Newsreader","Source Serif 4",Georgia,"Iowan Old Style","PingFang SC","Noto Sans SC Variable","Source Han Sans SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --dl-sans:"Inter","Noto Sans SC Variable","Source Han Sans SC","PingFang SC","Microsoft YaHei UI",system-ui,-apple-system,sans-serif;
+  --dl-ease:cubic-bezier(.16,1,.3,1);
+  --gut:clamp(1rem,3.2vw,2.6rem);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--dl-sans);font-size:14.25px;line-height:1.55;color:var(--dl-ink);background:var(--dl-canvas);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,input,textarea,select{font:inherit;color:inherit}
+.app{grid-template-columns:minmax(0,1fr)}
+button{background:none;border:0;cursor:pointer;text-align:inherit}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.sr-only{position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.micro{font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dl-ink-2)}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:2px;border-radius:4px}
+kbd{font:500 .68rem/1 var(--dl-sans);font-variant-numeric:tabular-nums;display:inline-block;min-width:1.35em;padding:.22em .4em;margin-left:.5em;text-align:center;
+  color:var(--dl-ink-3);border:1px solid var(--dl-hair-strong);border-radius:4px;background:transparent}
+.solid kbd{color:#e9e3d5;border-color:rgba(255,253,247,.35)}
+
+/* 唯一实心元素：当前信号最主要的处理动作 */
+.solid{display:inline-flex;align-items:center;justify-content:center;gap:.2rem;min-height:40px;padding:.5rem 1.15rem;border-radius:999px;
+  background:var(--dl-ink);color:#fffdf7;font-weight:500;font-size:.9rem;letter-spacing:.01em;transition:background .2s var(--dl-ease),transform .2s var(--dl-ease)}
+.solid:hover{background:#3a372f}
+.solid:active{transform:translateY(1px)}
+.solid[disabled]{background:var(--dl-hair-strong);color:var(--dl-ink-2);cursor:not-allowed}
+.text-btn{display:inline-flex;align-items:center;min-height:36px;padding:.35rem .7rem;border-radius:999px;color:var(--dl-ink-2);font-size:.86rem;
+  border:1px solid transparent;transition:color .2s,background .2s,border-color .2s}
+.text-btn:hover{color:var(--dl-ink);background:rgba(255,253,247,.85);border-color:var(--dl-hair)}
+.text-btn[disabled]{color:var(--dl-ink-3);opacity:.6;cursor:not-allowed;background:none;border-color:transparent}
+
+/* AI 标注：所有 AI 内容必须带这个标签 */
+.ai-tag{display:inline-flex;align-items:center;height:1.35rem;padding:0 .5rem;border-radius:999px;border:1px solid var(--dl-gold);color:var(--dl-gold-ink);
+  font-size:.7rem;font-weight:500;letter-spacing:.04em;background:var(--dl-gold-wash);white-space:nowrap;vertical-align:middle}
+.conf{font-size:.76rem;color:var(--dl-ink-2);margin-left:.35rem}
+.intent{font-size:.72rem;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--dl-hair);color:var(--dl-ink-2)}
+.intent-neg{color:var(--dl-danger);border-color:rgba(164,68,58,.4)}
+mark.hot{background:none;color:var(--dl-ink);font-weight:600;box-shadow:inset 0 -.42em 0 var(--dl-gold-soft)}
+
+/* 分析 / 证据 */
+.an-h{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;font-size:.8rem;color:var(--dl-ink-2)}
+.an-s{margin-top:.55rem;font-size:.95rem;line-height:1.6}
+.an-f{margin-top:.6rem;display:flex;flex-wrap:wrap;gap:.35rem;list-style:none}
+.an-f li{font-size:.8rem;padding:.18rem .6rem;border:1px solid var(--dl-hair);border-radius:999px;color:var(--dl-ink-2);background:var(--dl-paper-2)}
+.an-n{margin-top:.55rem;font-size:.84rem;color:var(--dl-ink-2)}
+.an-n span{display:inline-block;margin-right:.6rem;font-size:.72rem;letter-spacing:.1em;color:var(--dl-ink-3)}
+.an-n em{display:block;font-style:normal;color:var(--dl-ink-3);font-size:.8rem;margin-top:.15rem}
+.an-note{margin-top:.6rem;font-size:.82rem;color:var(--dl-ink-2);padding-left:.7rem;border-left:2px solid var(--dl-gold)}
+.ev-i{margin-top:.6rem}
+.ev-i figcaption{display:flex;justify-content:space-between;gap:1rem;font-size:.74rem;letter-spacing:.06em;color:var(--dl-ink-3)}
+.ev-i blockquote{margin-top:.3rem;font-size:.92rem;line-height:1.65;color:var(--dl-ink)}
+
+/* 表单（三个房间共用结构，各自改皮） */
+.frm{display:flex;flex-direction:column;gap:.85rem}
+.frm-row{display:flex;flex-direction:column;gap:.4rem}
+.frm label,.frm-lab{font-size:.78rem;letter-spacing:.04em;color:var(--dl-ink-2);display:flex;align-items:center;gap:.5rem}
+.req{font-size:.68rem;color:var(--dl-gold-ink);letter-spacing:.06em}
+.frm-in{width:100%;padding:.55rem .75rem;border-radius:10px;border:1px solid var(--dl-hair-strong);background:var(--dl-paper);font-size:.92rem;line-height:1.5;resize:vertical}
+.frm-in:focus-visible{outline:2px solid var(--dl-gold-ink);outline-offset:1px}
+input[type=date].frm-in{width:auto;min-width:9.5rem}
+.frm-date{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
+.frm-when{font-size:.84rem;color:var(--dl-ink-2)}
+.frm-err{font-size:.8rem;color:var(--dl-danger)}
+.frm-help{font-size:.8rem;color:var(--dl-ink-3)}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem}
+.chip{min-height:34px;padding:.3rem .8rem;border-radius:999px;border:1px solid var(--dl-hair-strong);font-size:.82rem;color:var(--dl-ink-2);background:transparent;transition:border-color .2s,background .2s,color .2s}
+.chip:hover{border-color:var(--dl-ink-3);color:var(--dl-ink)}
+.chip[aria-pressed=true],.chip[aria-checked=true]{border-color:var(--dl-ink);color:var(--dl-ink);background:var(--dl-paper);box-shadow:inset 0 0 0 1px var(--dl-ink)}
+.chip .num{color:var(--dl-ink-3);font-size:.76rem}
+.cands{display:flex;flex-direction:column;gap:.35rem}
+.cand{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.1rem .8rem;padding:.6rem .8rem;border:1px solid var(--dl-hair);border-radius:10px;background:var(--dl-paper)}
+.cand:hover{border-color:var(--dl-ink-3)}
+.cand[aria-checked=true]{border-color:var(--dl-ink);box-shadow:inset 0 0 0 1px var(--dl-ink)}
+.cand-n{font-weight:500;font-size:.9rem}
+.cand-m{grid-column:1;font-size:.78rem;color:var(--dl-ink-3)}
+.cand-s{grid-column:2;grid-row:1/3;align-self:center;font-size:.84rem;color:var(--dl-ink-2)}
+.frm-fx{font-size:.8rem;color:var(--dl-ink-2);display:flex;flex-direction:column;gap:.25rem;padding:.6rem .75rem;border-radius:10px;background:var(--dl-ink-wash)}
+.frm-fx b{font-weight:600;margin-right:.5rem;color:var(--dl-ink)}
+.frm-act{position:sticky;bottom:0;z-index:3;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:10px 0 4px;background:var(--dl-paper);border-top:1px solid var(--dl-hair-2)}
+.frm-next{display:flex;flex-direction:column;gap:.85rem;margin-top:.5rem;padding:.8rem;border:1px dashed var(--dl-hair-strong);border-radius:10px}
+.frm-opt{align-items:flex-start}
+
+/* 原型状态条：不属于产品，仅供切换加载/失败/空态 */
+.statebar{position:fixed;z-index:90;right:var(--gut);bottom:8px;display:flex;align-items:center;gap:.15rem;padding:.2rem .35rem .2rem .7rem;
+  border:1px dashed var(--dl-hair-strong);border-radius:999px;background:rgba(250,248,242,.92);max-width:calc(100vw - 16px);overflow:auto}
+.statebar .micro{margin-right:.35rem;font-size:.62rem}
+.statebar button{min-height:28px;padding:0 .6rem;border-radius:999px;font-size:.74rem;color:var(--dl-ink-2);white-space:nowrap}
+.statebar button:hover{color:var(--dl-ink)}
+.statebar button[aria-pressed=true]{color:var(--dl-ink);box-shadow:inset 0 0 0 1px var(--dl-ink)}
+
+/* 骨架（加载态） */
+.sk{position:relative;overflow:hidden;background:var(--dl-ink-wash);border-radius:6px}
+.sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,253,247,.75),transparent);animation:sk 1.4s infinite}
+@keyframes sk{to{transform:translateX(100%)}}
+.banner{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;padding:.5rem .9rem;border:1px solid rgba(164,68,58,.4);background:var(--dl-danger-soft);border-radius:10px;font-size:.84rem;color:var(--dl-ink)}
+.banner b{color:var(--dl-danger);font-weight:600}
+.banner .text-btn{margin-left:auto;border-color:var(--dl-hair-strong)}
+
+@media (max-width:760px){.statebar{right:auto;left:50%;transform:translateX(-50%)}}
+html.rm *,html.rm *::before,html.rm *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+html.rm .sk::after{display:none}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  .sk::after{display:none}
+}
+
+
+/* ==========================================================================
+   房间 A · 灯箱
+   空间：昏暗的房间里只有一块亮着的灯箱面板；底片排成一条，逐张放大到面板上。
+   ========================================================================== */
+body{background:linear-gradient(180deg,var(--dl-canvas) 0%,var(--dl-canvas-low) 100%);min-height:100vh}
+.app{position:relative;height:100vh;height:100dvh;display:grid;grid-template-rows:52px minmax(0,1fr) 34px 150px 46px;overflow:hidden}
+.app::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(70% 70% at 50% 40%,rgba(255,253,247,.0) 35%,rgba(36,34,29,.14) 100%)}
+.app>*{position:relative;z-index:1}
+
+/* 顶部：楼层 + 房间名 */
+.top{display:flex;align-items:center;gap:1rem;padding:0 var(--gut);border-bottom:1px solid var(--dl-hair-2)}
+.brand{font-family:var(--dl-display);font-size:1.05rem}
+.top .where{font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dl-ink-2)}
+.top .count{margin-left:auto;font-size:.8rem;color:var(--dl-ink-2)}
+.top .count b{font-family:var(--dl-display);font-weight:400;font-size:1.15rem;color:var(--dl-ink);margin-right:.2rem}
+.who{display:flex;align-items:center;gap:.5rem;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dl-ink-2)}
+.who i{width:6px;height:6px;border-radius:50%;background:var(--dl-gold);box-shadow:0 0 0 3px rgba(188,144,82,.16)}
+
+/* 舞台：灯箱面板 */
+.stage{position:relative;padding:14px var(--gut) 0;display:flex;flex-direction:column;min-height:0}
+.stage::before{content:"";position:absolute;left:50%;top:44%;width:min(1500px,120%);height:120%;transform:translate(-50%,-50%);pointer-events:none;
+  background:radial-gradient(closest-side,rgba(255,253,247,.9),rgba(255,253,247,.55) 55%,rgba(255,253,247,0));filter:blur(8px)}
+.banner{position:relative;max-width:1240px;width:100%;margin:0 auto 10px}
+.panel{position:relative;flex:1;min-height:0;width:100%;max-width:1240px;margin:0 auto;display:flex;flex-direction:column;
+  background:var(--dl-paper);border:1px solid var(--dl-hair);border-radius:14px;overflow:hidden}
+.panel.flash{animation:flash .5s var(--dl-ease)}
+@keyframes flash{0%{filter:brightness(.94)}100%{filter:none}}
+.ph{display:flex;gap:1.5rem;align-items:flex-start;padding:22px 30px 16px;border-bottom:1px solid var(--dl-hair-2)}
+.ph-l{min-width:0;flex:1}
+.kicker{display:flex;flex-wrap:wrap;gap:.35rem .8rem;align-items:center}
+.kicker .pos{color:var(--dl-gold-ink);font-weight:600}
+.kicker .rv{color:var(--dl-ink);border:1px dashed var(--dl-ink-3);padding:.05rem .5rem;border-radius:999px;font-size:.68rem;letter-spacing:.08em}
+.ph h1{margin-top:.35rem;font-family:var(--dl-display);font-weight:400;font-size:clamp(1.6rem,2.7vw,2.3rem);line-height:1.12;letter-spacing:-.015em;overflow-wrap:anywhere}
+.ph h1:focus-visible{outline:none}
+.ph .sub{margin-top:.4rem;font-size:.84rem;color:var(--dl-ink-2);overflow-wrap:anywhere}
+.ph .hd{flex:none;text-align:right;max-width:22ch}
+.ph .hd p{font-family:var(--dl-display);font-size:1.02rem;line-height:1.3;color:var(--dl-ink)}
+.cols{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1fr)}
+.c-src{padding:18px 30px 18px;overflow:auto;border-right:1px solid var(--dl-hair-2)}
+.c-src h2{display:flex;align-items:center;justify-content:space-between;gap:1rem;font-weight:500}
+.c-src h2 button{font-size:.72rem;letter-spacing:.06em;color:var(--dl-ink-2);padding:.1rem .55rem;border:1px solid var(--dl-hair-strong);border-radius:999px;text-transform:none}
+.c-src h2 button[aria-pressed=false]{color:var(--dl-ink-3);border-style:dashed}
+.c-src.dim mark.hot{font-weight:400;box-shadow:none}
+.ev-i blockquote{font-size:1rem;line-height:1.7}
+.c-src .tr{margin-top:.9rem;font-size:.78rem;color:var(--dl-ink-3)}
+.c-ai{position:relative;display:flex;flex-direction:column;min-height:0;padding:18px 30px 18px}
+.ana{position:absolute;right:22px;top:10px;min-height:30px;padding:.1rem .6rem;font-size:.78rem;z-index:2}
+.ana[aria-pressed=true]{border-color:var(--dl-hair-strong)}
+.ai-box .an-h{padding-right:7rem}
+.ai-box{flex:1;min-height:0;overflow:auto;padding-right:2px}
+.ai-box .an-s{font-size:1.02rem}
+.an-next{margin-top:.8rem;padding:.65rem .8rem;border:1px dashed var(--dl-gold);border-radius:10px;background:var(--dl-gold-wash)}
+.an-next span{display:block;font-size:.68rem;letter-spacing:.14em;color:var(--dl-gold-ink)}
+.an-next p{margin-top:.15rem;font-size:.92rem}
+.pv{margin-top:.7rem;display:flex;flex-direction:column;gap:.3rem}
+.pv div{display:flex;justify-content:space-between;gap:1rem;padding:.45rem .7rem;border:1px solid var(--dl-hair);border-radius:9px;font-size:.86rem}
+.pv em{font-style:normal;color:var(--dl-ink-3);font-size:.78rem}
+.why{margin-top:.8rem;font-size:.82rem;color:var(--dl-ink-2)}
+.why span{display:block;font-size:.68rem;letter-spacing:.14em;color:var(--dl-ink-3)}
+.ai-box .known{margin-top:.6rem;font-size:.8rem;color:var(--dl-ink-3);list-style:none}
+.work{flex:none;padding-top:14px;margin-top:10px;border-top:1px solid var(--dl-hair-2)}
+.acts{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem}
+.acts .sp{flex:1}
+.acts .hint{flex-basis:100%;font-size:.8rem;color:var(--dl-ink-2);margin-bottom:.1rem}
+.panel.forming .an-f,.panel.forming .an-n,.panel.forming .an-note,.panel.forming .an-next,.panel.forming .pv,.panel.forming .why,.panel.forming .known{display:none}
+.panel.forming .an-s{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.panel.forming .work{border-top:0;margin-top:6px}
+.panel.forming .c-ai{overflow:auto}
+.panel.forming .ai-box{flex:none}
+.frm-fx{background:var(--dl-paper-3)}
+
+/* 投影：底片被光投到面板上 */
+.cone{position:relative;pointer-events:none}
+.cone::before{content:"";position:absolute;left:0;right:0;top:0;bottom:0;margin:0 auto;width:min(1240px,calc(100% - 2 * var(--gut)));
+  clip-path:polygon(0 0,100% 0,54% 100%,46% 100%);background:linear-gradient(180deg,rgba(255,253,247,.65),rgba(255,253,247,.0))}
+.cone::after{content:"";position:absolute;left:50%;bottom:0;width:1px;height:14px;background:var(--dl-gold);transform:translateX(-.5px)}
+
+/* 底片带 */
+.strip{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:0;padding:0 0 0 0;border-top:1px solid var(--dl-hair);background:rgba(36,34,29,.06)}
+.perf{position:absolute;left:0;right:0;height:6px;pointer-events:none;background:repeating-linear-gradient(90deg,var(--dl-hair-strong) 0 2px,transparent 2px 14px);opacity:.55}
+.perf.t{top:5px}.perf.b{bottom:5px}
+.track-w{position:relative;overflow:hidden;padding:20px 0}
+.track{display:flex;gap:10px;height:100%;align-items:stretch;transition:transform .55s var(--dl-ease);will-change:transform;padding:0 1rem}
+.frame{position:relative;flex:none;width:132px;display:flex;flex-direction:column;justify-content:space-between;padding:.5rem .6rem;text-align:left;
+  border:1px solid var(--dl-hair-strong);border-radius:6px;background:var(--dl-paper-3);color:var(--dl-ink-2);opacity:.8;
+  transition:opacity .35s var(--dl-ease),transform .35s var(--dl-ease),background .35s,border-color .35s}
+.frame:hover{opacity:.9}
+.frame .fn{display:flex;justify-content:space-between;font-size:.68rem;letter-spacing:.08em;color:var(--dl-ink-2)}
+.frame .fc{font-family:var(--dl-display);font-size:.9rem;line-height:1.15;color:var(--dl-ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.frame .ft{font-size:.7rem;color:var(--dl-ink-2)}
+.frame.rv{border-style:dashed}
+.frame[aria-current=true]{opacity:1;background:var(--dl-paper);border-color:var(--dl-ink);transform:translateY(-4px);box-shadow:0 0 0 1px var(--dl-ink),0 0 28px 6px rgba(255,253,247,.9)}
+.frame[aria-current=true]::before{content:"";position:absolute;left:50%;top:-11px;width:1px;height:9px;background:var(--dl-gold);transform:translateX(-.5px)}
+.frame.leaving{opacity:0;transform:translateY(-46px) scale(.96)}
+.frame.entering{animation:enter .5s var(--dl-ease)}
+@keyframes enter{from{opacity:0;transform:translateY(22px) scale(.92)}}
+.frame.sk{opacity:1;background:var(--dl-ink-wash);border-color:var(--dl-hair)}
+
+/* 收片盒：处理后的底片在这里，随时撤销 */
+.tray{display:flex;flex-direction:column;gap:.3rem;padding:12px 16px 10px 16px;border-left:1px solid var(--dl-hair);background:rgba(255,253,247,.55);min-width:0;overflow:hidden}
+.tray h3{display:flex;justify-content:space-between;font-weight:500}
+.tray ul{list-style:none;display:flex;flex-direction:column;gap:.3rem;overflow:auto;min-height:0}
+.tray li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.5rem;align-items:center;font-size:.78rem;line-height:1.35;padding:.3rem .45rem;border-radius:8px;border:1px solid var(--dl-hair-2);background:var(--dl-paper)}
+.tray li b{display:block;font-weight:500;color:var(--dl-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tray li span{display:block;color:var(--dl-ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tray li .text-btn{min-height:30px;padding:.1rem .55rem;font-size:.78rem;border-color:var(--dl-hair-strong)}
+.tray .none{font-size:.78rem;color:var(--dl-ink-3)}
+.foot{display:flex;align-items:center;gap:1.4rem;padding:0 var(--gut);font-size:.74rem;color:var(--dl-ink-2);border-top:1px solid var(--dl-hair-2)}
+.foot kbd{margin:0 .35rem 0 0}
+.foot span{white-space:nowrap}
+
+/* 状态：空 / 失败 / 加载 */
+.center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.9rem;text-align:center;padding:2rem;max-width:44ch;margin:0 auto}
+.center h1{font-family:var(--dl-display);font-weight:400;font-size:2rem;letter-spacing:-.015em}
+.center p{color:var(--dl-ink-2)}
+.panel.off{background:transparent;border-style:dashed;border-color:var(--dl-hair-strong)}
+.sk-lines{display:flex;flex-direction:column;gap:.7rem;padding:0}
+.sk-h{height:2rem;width:60%}.sk-l{height:.9rem}
+
+@media (max-width:1100px){
+  .cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .strip{grid-template-columns:minmax(0,1fr) 220px}
+  .foot span:nth-child(n+4){display:none}
+  .ph{padding:18px 22px 12px}.c-src,.c-ai{padding:14px 22px}
+}
+@media (max-width:760px){
+  body{overflow-y:auto}
+  .app{height:auto;min-height:100vh;grid-template-rows:auto auto auto auto auto;overflow:visible;padding-bottom:56px}
+  .top{height:48px;flex-wrap:nowrap}.top .where{display:none}
+  .stage{padding:10px 12px 0}
+  .panel{max-width:none;flex:none;overflow:visible}
+  .ph{padding:16px 16px 12px;flex-direction:column;gap:.4rem}.ph .hd{text-align:left;max-width:none}
+  .cols{display:flex;flex-direction:column}
+  .c-ai{order:1;padding:14px 16px}.c-src{order:2;padding:14px 16px;border-right:0;border-top:1px solid var(--dl-hair-2)}
+  .ai-box{overflow:visible}
+  .cone{display:none}
+  .stage::before{display:none}
+  .strip{grid-template-columns:1fr;border-top:1px solid var(--dl-hair);margin-top:12px}
+  .track-w{padding:22px 0 14px}
+  .tray{border-left:0;border-top:1px solid var(--dl-hair)}
+  .frame{width:118px}
+  .foot{display:none}
+  .acts .text-btn,.acts .solid{min-height:44px}
+  .chip{min-height:40px}
+  .statebar{bottom:6px}
+  .frm-fx{font-size:.78rem}
+}
+</style>
+</head>
+<body class="room-a">
+<div class="app" id="app">
+  <header class="top">
+    <span class="brand">Trosa</span>
+    <span class="where">Inbox · 灯箱</span>
+    <span class="count" id="count" aria-live="off"></span>
+    <span class="who"><i></i>Amy</span>
+  </header>
+  <main class="stage" id="stage" aria-label="待判断信号"></main>
+  <div class="cone" aria-hidden="true"></div>
+  <section class="strip" aria-label="底片带：待判断信号，按到达顺序">
+    <span class="perf t" aria-hidden="true"></span><span class="perf b" aria-hidden="true"></span>
+    <div class="track-w" id="trackW"><div class="track" id="track" role="group" aria-label="信号，按到达顺序"></div></div>
+    <aside class="tray" id="tray" aria-label="刚处理的信号，可撤销"></aside>
+  </section>
+  <footer class="foot" aria-label="快捷键">
+    <span><kbd>J</kbd><kbd>K</kbd>下一张 / 上一张</span>
+    <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>处理</span>
+    <span><kbd>↵</kbd>主要动作</span>
+    <span><kbd>A</kbd>查看分析</span>
+    <span><kbd>H</kbd>承诺高亮</span>
+    <span><kbd>Z</kbd>撤销</span>
+  </footer>
+</div>
+
+<script>
+/* ============================================================================
+   共用虚构数据 · 三个房间读同一份
+   字段全部来自现有 /api/inbox 问题模型（app.py _question_* / app.js renderInboxQuestionHtml）
+   与 /api/inbox/analyze-reply 的 analysis（summary / needs / key_facts / intent /
+   direction / message_date / suggested_next_action）。没有任何后端不存在的字段。
+   时间用本地墙钟字符串，避免时区抖动；“现在”固定为 2026-09-29（周二）20:41。
+   ============================================================================ */
+var TROSA_DATA = (function () {
+  var CUSTOMERS = [
+    { id: 'c-nordwind',  company: 'Nordwind Lichttechnik GmbH', country: '德国',   contact: 'Jonas Keller' },
+    { id: 'c-ferrovia',  company: 'Ferrovia Tools S.r.l.',      country: '意大利', contact: 'Marta Bellini' },
+    { id: 'c-harbor',    company: 'Harbor & Pine Living',       country: '美国',   contact: 'Dana Whitfield' },
+    { id: 'c-kestrel',   company: 'Kestrel Packaging Ltd',      country: '英国',   contact: 'Tom Rayner' },
+    { id: 'c-tanabe',    company: 'Tanabe Display K.K.',        country: '日本',   contact: 'Aiko Tanabe' },
+    { id: 'c-volta',     company: 'Volta Lighting S.L.',        country: '西班牙', contact: 'Carlos Mena' },
+    { id: 'c-meridian-au', company: 'Meridian Signs Pty Ltd',   country: '澳大利亚', contact: 'Peter Walsh' },
+    { id: 'c-meridian-nz', company: 'Meridian Signage Co.',     country: '新西兰', contact: 'Paula West' },
+    { id: 'c-sunrise',   company: 'Sunrise Retail Group',       country: '澳大利亚', contact: 'Mei Tran' },
+    { id: 'c-cascade',   company: 'Cascade Signs Inc.',         country: '加拿大', contact: 'Owen Marsh' },
+    { id: 'c-blueanchor', company: 'Blue Anchor Marine AS',     country: '挪威',   contact: 'Ingrid Solheim' },
+    { id: 'c-andes',     company: 'Andes Craft Co.',            country: '智利',   contact: 'Sofía Rojas' },
+    { id: 'c-lumen',     company: 'Lumen Displays B.V.',        country: '荷兰',   contact: 'Bram de Vries' },
+    { id: 'c-zenit',     company: 'Zenit Verpackung GmbH',      country: '德国',   contact: 'Klara Vogt' },
+    { id: 'c-pacifica',  company: 'Pacifica Wayfinding Ltd',    country: '新西兰', contact: 'Hemi Ratana' },
+    { id: 'c-nordic',    company: 'Nordic Light AB',            country: '瑞典',   contact: 'Erik Lund' }
+  ];
+
+  function C(id) { for (var i = 0; i < CUSTOMERS.length; i++) if (CUSTOMERS[i].id === id) return CUSTOMERS[i]; return null; }
+
+  // kind: reply | identity | identity_review | sela_request（与服务端 question kind 一致）
+  // source: gmail | browser | sela（question.source_type）
+  var SIGNALS = [
+    { id: 's01', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-26 16:20',
+      customer: C('c-kestrel'), sender: 'tom.rayner@kestrel-pack.co.uk', subject: 'Automatic reply: Carton quote',
+      lead: 'defer',
+      headline: '收到自动回复，对方休假',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-26 16:20',
+        text: 'Thank you for your email. I am out of the office until 10 October with limited access to mail. For urgent matters please contact accounts@kestrel-pack.co.uk. Kind regards, Tom Rayner' }],
+      ai: { summary: '对方休假至 10 月 10 日，这是自动回复，没有业务内容。', intent: '未知',
+            facts: ['休假至 10 月 10 日'], needs: [], next: '', direction: '客户来信',
+            deferHint: 'monitoring', note: '没有需要回复的内容；AI 不建议安排下一步。' } },
+
+    { id: 's02', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-27 08:05',
+      customer: C('c-harbor'), sender: 'dana@harborpine.com', subject: 'Re: Revised quote — 5,000 pcs',
+      lead: 'record',
+      headline: '客户说竞品价格更低，暂停新订单到明年 Q1',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-27 08:05',
+        text: 'Hi Amy, thanks for the revised quote. Honestly we found a supplier about 12% lower for the same spec, so we will pause new orders until Q1 next year. Happy to revisit then. Best, Dana' }],
+      ai: { summary: '客户认为报价比竞品高约 12%，决定暂停新订单至明年 Q1，愿意到时再谈。', intent: '消极',
+            facts: ['报价比竞品高约 12%', '暂停新订单至明年 Q1'], needs: ['明年 Q1 重新沟通'],
+            next: '', direction: '客户来信', deferHint: 'no_near_term_need',
+            note: '客户已说明近期无需求；AI 没有给出下一步建议。' } },
+
+    { id: 's03', kind: 'identity', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-27 19:33',
+      customer: null, sender: 'purchasing@zenith-pack.com', subject: 'Catalogue and MOQ request',
+      lead: 'choose', suggested: null, candidates: [],
+      headline: '这条沟通属于哪个客户？',
+      why: '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。',
+      review: 'NONE',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-27 19:33', identity: 'purchasing@zenith-pack.com',
+        text: 'Dear Sir, we visited your booth at Cosmoprof Asia. Please send your full catalogue and the MOQ for 200 ml PET bottles. Regards, Purchasing Dept., Zenith Pack' }],
+      ai: { summary: '发件人自称来自 Zenith Pack，索取完整目录和 200 ml PET 瓶的起订量。', intent: '积极',
+            facts: ['展会：Cosmoprof Asia', '200 ml PET 瓶', '索取目录与起订量'], needs: ['目录', '起订量'],
+            next: '发送目录，并确认 200 ml PET 瓶起订量', direction: '客户来信',
+            note: '发件邮箱没有匹配到任何客户；不会自动建档。' } },
+
+    { id: 's04', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-28 07:48',
+      customer: C('c-ferrovia'), sender: 'marta.bellini@ferrovia-tools.it', subject: 'FT-220 — MOQ and lead time?',
+      lead: 'record',
+      headline: '询问 FT-220 的起订量和交期',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-28 07:48',
+        text: 'Ciao Amy, for the FT-220 housing, what is your minimum order quantity and the lead time from order confirmation? We would like to place a first order of 800 units before the end of October if it works. Grazie, Marta' }],
+      ai: { summary: '客户询问 FT-220 外壳的起订量与交期，计划 10 月底前首批下单 800 件。', intent: '积极',
+            facts: ['型号 FT-220', '首批 800 件', '10 月底前下单'], needs: ['起订量', '交期'],
+            next: '确认 FT-220 起订量与交期后回复 Marta', direction: '客户来信',
+            note: '涉及交期答复，由你亲自确认后回复。' } },
+
+    { id: 's05', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail · 附件 1', at: '2026-09-28 10:15',
+      customer: C('c-tanabe'), sender: 'a.tanabe@tanabe-display.jp', subject: 'Revised specification v3',
+      lead: 'record',
+      headline: '发来规格 v3，询问 11 月底能否交货',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件 · FT_spec_v3.pdf', at: '2026-09-28 10:15',
+        text: 'Hello Amy, attached is our revised specification (v3). Could you confirm whether 2.0 mm cast acrylic with UV print can be delivered by the end of November? We need to lock the schedule with our client this week. Best, Aiko' }],
+      ai: { summary: '客户发来规格 v3 附件，询问 2.0 mm 浇铸亚克力加 UV 打印能否 11 月底前交货，本周要与其客户锁定排期。', intent: '积极',
+            facts: ['规格 v3（PDF 附件）', '2.0 mm 浇铸亚克力 + UV 打印', '11 月底前交货', '本周锁定排期'],
+            needs: ['确认交期'], next: '核对规格 v3 并确认 11 月底交期后回复 Aiko', direction: '客户来信',
+            note: '交期是承诺，AI 不会替你答复。' } },
+
+    { id: 's06', kind: 'identity', source: 'browser', channel: 'WhatsApp Web 采集', at: '2026-09-28 11:02',
+      customer: null, sender: 'Aiko T. (+81 ••• •• 4421)', subject: 'WhatsApp 对话',
+      lead: 'assign',
+      suggested: { customerId: 'c-tanabe', company: 'Tanabe Display K.K.', reason: '发件名与联系人 Aiko Tanabe 相似，但手机号没有精确匹配', score: 74 },
+      candidates: [{ customerId: 'c-tanabe', reason: '发件名与联系人 Aiko Tanabe 相似，手机号未精确匹配', score: 74 }],
+      headline: '这可能属于 Tanabe Display K.K.，请确认归属',
+      why: '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。',
+      review: 'SUGGESTED',
+      evidence: [{ label: 'WhatsApp Web · 采集', at: '2026-09-28 11:02', identity: 'Aiko T. (+81 ••• •• 4421)',
+        text: 'Thanks for the quick reply! One more thing — could you also quote the 3 mm version of the same panel? Same quantity is fine.' }],
+      ai: { summary: '对方追问同一面板 3 mm 版本的报价，数量不变。', intent: '积极',
+            facts: ['3 mm 版本', '数量与之前相同'], needs: ['报价'],
+            next: '报价 3 mm 版本并回复 Aiko', direction: '客户来信',
+            note: '归属只是 AI 建议，确认后才会写入 Tanabe 名下。' } },
+
+    { id: 's07', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail · 3 封', at: '2026-09-28 14:26',
+      customer: C('c-volta'), sender: 'carlos.mena@volta-lighting.es', subject: 'Re: Sample shipment',
+      lead: 'record',
+      headline: '连续三封追问样品是否已发出',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [
+        { label: 'Gmail · 收件', at: '2026-09-28 09:40', text: 'Hi Amy, were the samples shipped already? Our team is waiting.' },
+        { label: 'Gmail · 收件', at: '2026-09-28 12:10', text: 'Sorry to chase — do you have the tracking number? The showroom opens on 12 October.' },
+        { label: 'Gmail · 收件', at: '2026-09-28 14:26', text: 'If it is possible to expedite, we can pay the difference. Please let me know today. Carlos' }],
+      ai: { summary: '客户连续追问样品是否已发出并索要快递单号，10 月 12 日展厅开业，愿意为加急支付差价。', intent: '中性',
+            facts: ['样品是否已发出', '需要快递单号', '展厅 10 月 12 日开业', '愿意支付加急差价'],
+            needs: ['快递单号', '是否能加急'], next: '查询样品快递单号并回复 Carlos', direction: '客户来信',
+            note: '加急费用由你决定，AI 不会替你答复。' } },
+
+    { id: 's08', kind: 'identity', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-28 17:40',
+      customer: null, sender: 'peter.w@outlook.com', subject: 'Reorder — 300 x 40 frames',
+      lead: 'choose',
+      suggested: null,
+      candidates: [
+        { customerId: 'c-meridian-au', reason: '公司名前缀相同，联系人 Peter Walsh 与发件名一致', score: 62 },
+        { customerId: 'c-meridian-nz', reason: '公司名前缀相同，发件域 outlook.com 不能唯一确定', score: 58 }],
+      headline: '来源同时匹配到多个客户',
+      why: '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。',
+      review: 'MULTIPLE',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-28 17:40', identity: 'peter.w@outlook.com',
+        text: 'Hi, Peter here from Meridian. We would like to reorder the 300 x 40 frames from last month, same colour as before please. Can you send an updated quote?' }],
+      ai: { summary: '对方想按上月同款再订 300 x 40 画框，颜色不变，并要求更新报价。', intent: '积极',
+            facts: ['300 x 40 画框', '与上月同款同色', '要求更新报价'], needs: ['更新报价'],
+            next: '按上月同款准备 300 x 40 画框的更新报价', direction: '客户来信',
+            note: '两个客户都有 Meridian 前缀；AI 不会替你选择。' } },
+
+    { id: 's09', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-28 21:12',
+      customer: C('c-sunrise'), sender: 'mei.tran@sunriseretail.com.au', subject: 'Sample freight to Melbourne',
+      lead: 'record',
+      headline: '询问样品运费和到货时间',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-28 21:12',
+        text: 'Hi Amy, how much would the freight be for a sample set to our Melbourne warehouse, and how long will it take? If the cost is reasonable we will go ahead with the trial order next month. Thanks, Mei' }],
+      ai: { summary: '客户询问样品寄到墨尔本仓库的运费和时效，费用合适的话下月开始试单。', intent: '积极',
+            facts: ['寄往墨尔本仓库', '询问运费与时效', '下月试单'], needs: ['运费', '到货时间'],
+            next: '确认样品运费与到货时间后亲自回复 Mei', direction: '客户来信',
+            note: '运费与时效是承诺，AI 不会替你答复。' } },
+
+    { id: 's10', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 03:50',
+      customer: C('c-cascade'), sender: 'owen.marsh@cascadesigns.ca', subject: 'Call next week?',
+      lead: 'record',
+      headline: '约下周二 15:00（CET）通话',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-29 03:50',
+        text: 'Hi Amy, the board approved the pilot. Could we do a call next Tuesday at 3 pm CET to go through the schedule and payment terms? Thanks, Owen' }],
+      ai: { summary: '客户董事会已批准试点，约下周二 15:00（CET）通话，商定排期与付款条款。', intent: '积极',
+            facts: ['董事会已批准试点', '下周二 15:00 CET 通话', '议题：排期与付款条款'], needs: ['确认通话时间'],
+            next: '确认下周二 15:00 CET 通话并回复 Owen', direction: '客户来信',
+            note: '付款条款由你亲自谈，AI 不会替你答复。' } },
+
+    { id: 's11', kind: 'identity_review', source: 'sela', channel: 'Sela 同步', at: '2026-09-29 08:22',
+      customer: C('c-lumen'), sender: 'info@lumen-display.group', subject: 'Sela · 主体待确认',
+      lead: 'same',
+      headline: '确认这是否是同一个业务主体',
+      why: '仅凭名称或来源无法安全判定是否为同一主体，需要你的业务判断。',
+      review: 'IDENTITY',
+      selaReview: { company: 'Lumen Display Group', website: 'lumen-display.group', email: 'info@lumen-display.group',
+        reason: '来源身份与已有客户的资料冲突，需要人工判断是否为同一主体。', match: 'Lumen Displays B.V. · 荷兰' },
+      evidence: [{ label: 'Sela · 身份核对', at: '2026-09-29 08:22', identity: 'Lumen Display Group',
+        text: '网站 lumen-display.group 与已有客户 Lumen Displays B.V. 的联系人邮箱域不同，但名称高度相似；Sela 无法安全判定是否同一主体。' }],
+      ai: { summary: 'Sela 在公开资料里找到 Lumen Display Group，与已有客户 Lumen Displays B.V. 名称相近、邮箱域不同。', intent: '未知',
+            facts: ['名称高度相似', '邮箱域不同', '网站 lumen-display.group'], needs: ['判断是否同一主体'],
+            next: '', direction: '身份核对',
+            note: '你的判断只更新主体关系，不会修改客户或联系人资料。' } },
+
+    { id: 's12', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 09:12',
+      customer: C('c-nordwind'), sender: 'jonas.keller@nordwind-licht.de', subject: 'Re: Sample set — colour approved',
+      lead: 'record',
+      headline: '样品颜色通过，要 3,000 件报价，周五前',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-29 09:12',
+        text: 'Hi Amy, the sample set arrived yesterday and the colour is approved by our design team. Could you send a quotation for 3,000 pcs, delivered to Hamburg, by Friday? If the unit price is under €2.40 we can confirm the order next week. Best regards, Jonas' }],
+      ai: { summary: '样品已到货，颜色通过。客户要 3,000 件送到汉堡的报价，周五前；单价低于 €2.40 下周可下单。', intent: '积极',
+            facts: ['样品颜色通过', '3,000 件', '送到汉堡', '周五前报价', '单价低于 €2.40 可下单'], needs: ['报价'],
+            next: '整理 3,000 件送汉堡的报价，周五前发给 Jonas', direction: '客户来信',
+            note: '价格与交期由你亲自确认，AI 不会替你报价。' } },
+
+    { id: 's13', kind: 'identity', source: 'browser', channel: 'LinkedIn 采集', at: '2026-09-29 09:40',
+      customer: null, sender: 'Lars Ekberg · LinkedIn', subject: 'LinkedIn 消息',
+      lead: 'choose',
+      suggested: null,
+      candidates: [{ customerId: 'c-nordic', reason: '名称相似（Nordic），没有其他线索', score: 41 }],
+      headline: '这条沟通属于哪个客户？',
+      why: '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。',
+      review: 'WEAK',
+      evidence: [{ label: 'LinkedIn · 采集', at: '2026-09-29 09:40', identity: 'Lars Ekberg · Nordic Sign Co.',
+        text: 'Hej! Saw your LED edge-lit panels — do you ship to Sweden? We need about 40 pcs for a hotel lobby, delivery in November.' }],
+      ai: { summary: '自称 Nordic Sign Co. 的 Lars 询问能否发货到瑞典，需要约 40 件用于酒店大堂，11 月交付。', intent: '积极',
+            facts: ['LED 边光面板', '发往瑞典', '约 40 件', '11 月交付'], needs: ['能否发货到瑞典'],
+            next: '确认能否发往瑞典并回复 Lars', direction: '客户来信',
+            note: '唯一候选只有 41% 相似，很可能是新的询盘；AI 不会自动建档。' } },
+
+    { id: 's14', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 10:30',
+      customer: C('c-ferrovia'), sender: 'marta.bellini@ferrovia-tools.it', subject: 'Re: FT-220 — MOQ and lead time?',
+      lead: 'record',
+      headline: '补充：报价里加上 FT-330，并问模具费',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-29 10:30',
+        text: 'Ciao Amy, one more thing: please include the FT-330 in the same quotation, and tell us whether there is a one-time tooling cost. Grazie, Marta' }],
+      ai: { summary: '客户补充要求：同一份报价里加入 FT-330，并询问是否有一次性模具费。', intent: '积极',
+            facts: ['加入 FT-330', '询问一次性模具费'], needs: ['FT-330 报价', '模具费'],
+            next: '把 FT-330 加进报价并确认模具费', direction: '客户来信',
+            note: '模具费属于价格承诺，AI 不会替你答复。' } },
+
+    { id: 's15', kind: 'sela_request', source: 'sela', channel: 'Sela 同步', at: '2026-09-29 11:05',
+      customer: null, sender: 'Orbit Signage Ltd（Sela prospect）', subject: 'Sela 请求',
+      lead: 'answer',
+      headline: 'Sela 需要补充一项业务判断',
+      why: 'Sela 请求了补充事实或业务判断。回答会先保存在 Trosa；符合条件时才会排入公开研究或未发送草稿续跑。',
+      review: 'SELA',
+      selaReview: { company: 'Orbit Signage Ltd', website: 'orbit-signage.co.uk', email: '', reason: '需要补充事实', match: '' },
+      evidence: [{ label: 'Sela · 请求', at: '2026-09-29 11:05', identity: 'Orbit Signage Ltd',
+        text: '对方官网显示已有一家长期亚克力供应商。这条冷线索是否仍值得继续研究并起草开发信？（Sela 不会发送任何邮件。）' }],
+      ai: { summary: 'Sela 想知道：对方官网显示已有长期亚克力供应商，是否仍值得继续研究并起草未发送的开发信。', intent: '未知',
+            facts: ['官网写有长期亚克力供应商', '目标是英国标识制造商'], needs: ['是否继续研究'],
+            next: '', direction: 'Sela 请求',
+            note: '你的回答只会保存在 Trosa；不会发送邮件，也不会创建客户或待办。' } },
+
+    { id: 's16', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 12:05',
+      customer: C('c-cascade'), sender: 'owen.marsh@cascadesigns.ca', subject: 'Re: Call next week?',
+      lead: 'record',
+      headline: '改期：通话改到周三 15:00（CET）',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-29 12:05',
+        text: 'Small change — the board meeting moved, so could we do Wednesday at 3 pm CET instead of Tuesday? Same agenda. Thanks, Owen' }],
+      ai: { summary: '客户改期：通话从下周二改到周三 15:00（CET），议题不变。这是对上一封邮件的更正。', intent: '中性',
+            facts: ['改到周三 15:00 CET', '议题不变'], needs: ['确认新时间'],
+            next: '确认改到周三 15:00 CET 并回复 Owen', direction: '客户来信',
+            note: '与同一客户 03:50 的邮件冲突（原约周二）；建议一起处理。' } },
+
+    { id: 's17', kind: 'reply', source: 'browser', channel: 'WhatsApp Web 采集', at: '2026-09-29 13:18',
+      customer: C('c-blueanchor'), sender: 'Ingrid Solheim (+47 ••• •• 208)', subject: 'WhatsApp 对话',
+      lead: 'record',
+      headline: '客户说已付款，问什么时候发货',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'WhatsApp Web · 采集', at: '2026-09-29 13:18', identity: 'Ingrid Solheim (+47 ••• •• 208)',
+        text: 'Payment was sent this morning, please confirm when you receive it. And when will the order ship? Tack!' }],
+      ai: { summary: '客户称今天上午已付款，请求确认到账，并询问订单何时发货。', intent: '积极',
+            facts: ['今天上午已付款', '请求确认到账', '询问发货时间'], needs: ['确认到账', '发货时间'],
+            next: '核对收款并回复 Ingrid 发货时间', direction: '客户来信',
+            note: '到账以银行记录为准；发货时间由你确认。' } },
+
+    { id: 's18', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 14:02',
+      customer: C('c-andes'), sender: 'sofia.rojas@andescraft.cl', subject: 'Introducing our purchaser',
+      lead: 'record',
+      headline: '介绍了新的采购联系人 Lina Ortiz',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [
+        { label: 'Gmail · 收件', at: '2026-09-29 14:02', text: 'Hi Amy, from now on our purchaser Lina Ortiz (lina.ortiz@andescraft.cl) will handle all quotations. I am copying her here. Please send her the updated price list.' }],
+      ai: { summary: '客户介绍新的采购联系人 Lina Ortiz，之后报价都由她负责，并要求把更新后的价格表发给她。', intent: '中性',
+            facts: ['新联系人 Lina Ortiz', 'lina.ortiz@andescraft.cl', '之后由她负责报价', '要求更新价格表'],
+            needs: ['更新价格表'], next: '确认价格表版本并发送给 Lina Ortiz', direction: '客户来信',
+            note: '发现新联系人：AI 不会自动添加，需要你确认。' } },
+
+    { id: 's19', kind: 'reply', source: 'gmail', channel: '邮件 · Gmail', at: '2026-09-29 15:20',
+      customer: C('c-nordwind'), sender: 'jonas.keller@nordwind-licht.de', subject: 'Re: Sample set — colour approved',
+      lead: 'record',
+      headline: '补充：托盘需要 ISPM-15，条款 DAP 汉堡',
+      why: '沟通事实与下一步需要人工确认后才写入客户时间线和待办。',
+      evidence: [{ label: 'Gmail · 收件', at: '2026-09-29 15:20',
+        text: 'P.S. Amy, the pallets must be ISPM-15 certified, and we would like the delivery term to be DAP Hamburg. Please reflect that in the quotation. Jonas' }],
+      ai: { summary: '客户补充：托盘需要 ISPM-15 认证，交货条款要 DAP 汉堡，并要求写进报价。', intent: '积极',
+            facts: ['托盘需 ISPM-15', '条款 DAP 汉堡', '写进报价'], needs: ['更新报价条款'],
+            next: '确认 ISPM-15 托盘与 DAP 汉堡条款后更新报价', direction: '客户来信',
+            note: '贸易条款是承诺，AI 不会替你答复。' } }
+  ];
+
+  return { CUSTOMERS: CUSTOMERS, SIGNALS: SIGNALS };
+})();
+
+/* ============================================================================
+   共用判断引擎：状态、动作、撤销、表单、快捷键、加载/失败/空态。
+   三个房间只负责“空间”，判断规则完全一致，便于公平比较。
+   真实实现映射（README 有表）：
+     记录最新进展 → recordInboxReply / record_customer_communication（返回 undo_token → undo_action）
+     安排下一步   → POST /api/customers/{id}/tasks；撤销 DELETE /api/reminders/{id}
+     暂不安排     → POST /api/inbox/{id}/decide（archive）+ 关注状态；撤销端点需补
+     归属/身份    → /api/inbox/auto-attribute 同款 undo_token；identity_review 走 decide
+   ============================================================================ */
+var Engine = (function () {
+  'use strict';
+  var D = TROSA_DATA;
+  var NOW = new Date(2026, 8, 29, 20, 41);
+  var TODAY = new Date(2026, 8, 29);
+  var WD = ['日', '一', '二', '三', '四', '五', '六'];
+  var reduced = /[?&]rm=1/.test(location.search) || !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); // ?rm=1：评审时强制“减少动效”
+  if (reduced) document.documentElement.classList.add('rm');
+
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function parse(s) { // 'YYYY-MM-DD HH:mm' | 'YYYY-MM-DD'
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)) : null;
+  }
+  function ymd(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function md(d) { return (d.getMonth() + 1) + '/' + d.getDate(); }
+  function hm(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function dayDiff(a, b) { return Math.round((new Date(a.getFullYear(), a.getMonth(), a.getDate()) - new Date(b.getFullYear(), b.getMonth(), b.getDate())) / 864e5); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  function when(str) { // 今天 09:12 / 昨天 21:12 / 9/26 周六 16:20
+    var d = parse(str), n = dayDiff(TODAY, d);
+    if (n === 0) return '今天 ' + hm(d);
+    if (n === 1) return '昨天 ' + hm(d);
+    return md(d) + ' 周' + WD[d.getDay()] + ' ' + hm(d);
+  }
+  function ago(str) {
+    var d = parse(str), h = Math.max(1, Math.round((NOW - d) / 36e5));
+    if (h < 24) return h + ' 小时前';
+    return Math.round(h / 24) + ' 天前';
+  }
+  function ageHours(str) { return Math.round((NOW - parse(str)) / 36e5); }
+  function dateLabel(s) { // 2026-10-02 -> 10/2 周五 · 3 天后
+    var d = parse(s); if (!d) return '';
+    var n = dayDiff(d, TODAY);
+    return md(d) + ' 周' + WD[d.getDay()] + ' · ' + (n === 0 ? '今天' : n === 1 ? '明天' : n < 0 ? Math.abs(n) + ' 天前（已过期）' : n + ' 天后');
+  }
+  function addDays(n) { var d = new Date(TODAY); d.setDate(d.getDate() + n); return d; }
+  function nextWeekday(wd, minDays) { var n = minDays || 1; var d = addDays(n); while (d.getDay() !== wd) d.setDate(d.getDate() + 1); return d; }
+  function dateChips() {
+    return [
+      { label: '明天', d: addDays(1) }, { label: '周五', d: nextWeekday(5, 1) },
+      { label: '下周二', d: nextWeekday(2, 4) }, { label: '两周后', d: addDays(14) }
+    ];
+  }
+  function reviewChips() {
+    return [{ label: '一周后', d: addDays(7) }, { label: '两周后', d: addDays(14) }, { label: '下月初', d: new Date(2026, 9, 1) }, { label: '明年 Q1', d: new Date(2027, 0, 5) }];
+  }
+
+  /* ---------- 承诺高亮（纯前端，只读原文）：数量、价格、日期、交期 ---------- */
+  var HOT = /(€\s?\d[\d,.]*|\$\s?\d[\d,.]*|\d[\d,.]*\s?(?:pcs|units|件|个|套|mm|ml|%|x\s?\d+)|\b(?:next\s)?(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day\b|\b\d{1,2}\s(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\b\d{1,2}\s?(?:am|pm)\b\s?(?:CET)?|\bend of (?:the )?(?:October|November|December)\b|\bbefore the end of October\b|\bQ[1-4]\b|\bby (?:the )?end of (?:the )?\w+\b|\bthis week\b|\bnext month\b)/gi;
+  function lit(text) { return esc(text).replace(HOT, '<mark class="hot">$1</mark>'); }
+
+  /* ---------- 状态 ---------- */
+  var S = { phase: 'ready', stale: false, hasLoaded: true, items: [], history: [], listeners: [], analysis: {}, loadedAt: '20:38', scenario: 'ok' };
+  function fresh() {
+    return D.SIGNALS.map(function (s, i) {
+      var c = JSON.parse(JSON.stringify(s));
+      c.customer = s.customer; c.status = 'open'; c.order = i; c.outcome = null; return c;
+    });
+  }
+  S.items = fresh();
+  function emit(ev) { S.listeners.slice().forEach(function (fn) { fn(ev || { type: 'change' }); }); }
+  function on(fn) { S.listeners.push(fn); }
+  function byId(id) { for (var i = 0; i < S.items.length; i++) if (S.items[i].id === id) return S.items[i]; return null; }
+  function open() { return S.items.filter(function (s) { return s.status === 'open'; }).sort(function (a, b) { return a.order - b.order; }); }
+  function later(fn, ms) { if (reduced || !ms) fn(); else setTimeout(fn, ms); }
+
+  /* ---------- 标签 ---------- */
+  var KIND = { reply: '客户回复', identity: '待归属', identity_review: '身份待确认', sela_request: 'Sela 请求' };
+  var SOURCE = { gmail: 'Gmail', browser: '浏览器采集', sela: 'Sela' };
+  var DEFER = { waiting_reply: '等待客户回复', no_near_term_need: '近期无需求', monitoring: '暂时观察' };
+  function titleOf(s) { if (s.customer) return s.customer.company; if (s.selaReview) return s.selaReview.company; return (s.evidence[0] && s.evidence[0].identity) || s.sender; }
+  function needsReview(s) { return s.kind === 'identity' || s.kind === 'identity_review'; }
+
+  /* ---------- 动作清单：每种信号固定编号，Enter = lead ---------- */
+  function actionsFor(s) {
+    var list = [];
+    var who = s.customer ? s.customer.company : '';
+    if (s.kind === 'reply' || (s.kind === 'identity' && s.customer)) {
+      list.push({ id: 'record', label: '记录最新进展', form: 'record', submit: '记录到时间线' });
+      list.push({ id: 'next', label: '安排下一步', form: 'next', submit: '安排下一步' });
+      list.push({ id: 'defer', label: '暂不安排下一步', form: 'defer', submit: '暂不安排' });
+    } else if (s.kind === 'identity') {
+      if (s.suggested) {
+        list.push({ id: 'assign', label: '归到 ' + s.suggested.company, direct: true, customerId: s.suggested.customerId });
+        list.push({ id: 'choose', label: '选择其他客户…', form: 'choose', submit: '归到所选客户' });
+      } else {
+        list.push({ id: 'choose', label: (s.candidates && s.candidates.length > 1) ? '选择归属…' : '选择客户…', form: 'choose', submit: '归到所选客户' });
+      }
+      list.push({ id: 'dismiss', label: '不是客户沟通', direct: true });
+    } else if (s.kind === 'identity_review') {
+      list.push({ id: 'same', label: '是同一主体', direct: true });
+      list.push({ id: 'different', label: '不是同一主体', direct: true });
+    } else if (s.kind === 'sela_request') {
+      list.push({ id: 'answer', label: '记录你的判断', form: 'answer', submit: '记录判断' });
+      list.push({ id: 'skip', label: '本轮跳过', direct: true });
+    }
+    list.forEach(function (a, i) { a.num = String(i + 1); a.lead = (a.id === (s.lead || list[0].id)); });
+    if (!list.some(function (a) { return a.lead; })) list[0].lead = true;
+    return list;
+  }
+  function leadOf(s) { var a = actionsFor(s); return a.filter(function (x) { return x.lead; })[0] || a[0]; }
+
+  /* 每个去向“会发生 / 不会发生”（对应服务端 completion_effects / will_not_do） */
+  function effects(s, actId, p) {
+    var who = s.customer ? s.customer.company : '所选客户';
+    var will = [], wont = [];
+    if (actId === 'record') {
+      will.push('把摘要写入 ' + who + ' 的沟通时间线，附来源 ' + s.channel.split(' · ')[0] + ' 与原文');
+      if (p && p.next) will.push('新增待办：' + p.next.title + ' · ' + md(parse(p.next.due)));
+      wont.push('不会发送邮件或报价，也不会承诺价格、交期');
+    } else if (actId === 'next') {
+      will.push('为 ' + who + ' 新增 1 条待办（动作 + 日期）');
+      wont.push('不会写入沟通时间线，也不会发送任何消息');
+    } else if (actId === 'defer') {
+      will.push('关闭这条信号，记下“' + ((p && DEFER[p.reason]) || '暂时观察') + '”' + (p && p.review ? '，' + md(parse(p.review)) + ' 再复查' : ''));
+      wont.push('不会创建待办，也不会写入沟通时间线');
+    } else if (actId === 'assign' || actId === 'choose') {
+      will.push('把这条沟通归到所选客户，之后可以记录进展');
+      wont.push('不会创建客户或联系人，也不会写入时间线');
+    } else if (actId === 'dismiss') {
+      will.push('关闭这条信号，不写任何客户记录');
+      wont.push('不会创建客户、联系人或待办');
+    } else if (actId === 'same') {
+      will.push('记录“是同一主体”并关联到已有客户');
+      wont.push('不会修改客户或联系人资料');
+    } else if (actId === 'different') {
+      will.push('记录“不是同一主体”并关闭');
+      wont.push('不会修改客户或联系人资料');
+    } else if (actId === 'answer') {
+      will.push('把你的回答保存在 Trosa，符合条件时排入公开研究续跑');
+      wont.push('不会发送邮件，也不会创建客户、联系人或待办');
+    } else if (actId === 'skip') {
+      will.push('本轮跳过并关闭这条请求');
+      wont.push('不会发送邮件，也不会创建任何记录');
+    }
+    return { will: will, wont: wont };
+  }
+
+  /* ---------- 提交 & 撤销 ---------- */
+  var undoSeq = 0;
+  function snapshot(s) { return { status: s.status, kind: s.kind, customer: s.customer, outcome: s.outcome, assigned: !!s.assigned, headline: s.headline, why: s.why, ai: s.ai, lead: s.lead }; }
+  function commit(id, actId, p) {
+    var s = byId(id); if (!s || s.status !== 'open') return null;
+    p = p || {};
+    var snap = snapshot(s), label = '', detail = '', stays = false, company = s.customer ? s.customer.company : '';
+    if (actId === 'record') {
+      label = '已记录进展'; detail = '记入 ' + company + ' 的时间线' + (p.next ? ' · 并安排「' + p.next.title + '」' + md(parse(p.next.due)) : '');
+      s.status = 'done';
+    } else if (actId === 'next') {
+      label = '已安排下一步'; detail = '「' + p.title + '」· ' + md(parse(p.due)) + ' 周' + WD[parse(p.due).getDay()];
+      s.status = 'done';
+    } else if (actId === 'defer') {
+      label = '暂不安排下一步'; detail = DEFER[p.reason] + (p.review ? ' · ' + md(parse(p.review)) + ' 复查' : '');
+      s.status = 'done';
+    } else if (actId === 'assign' || actId === 'choose') {
+      var cid = actId === 'assign' ? (actionsFor(s)[0].customerId) : p.customerId, c = null;
+      D.CUSTOMERS.forEach(function (x) { if (x.id === cid) c = x; });
+      if (!c) return null;
+      s.customer = c; s.kind = 'reply'; s.assigned = true; s.lead = 'record'; stays = true;
+      s.headline = '已归到 ' + c.company + '，接下来记录进展或安排下一步';
+      s.why = '沟通事实与下一步需要人工确认后才写入客户时间线和待办。';
+      s.ai = Object.assign({}, s.ai, { note: '归属已由你确认；记录、下一步仍需你逐项确认。' });
+      label = '已确认归属'; detail = '归到 ' + c.company + '；现在可以记录进展或安排下一步';
+    } else if (actId === 'dismiss') { label = '已标为非客户沟通'; detail = s.sender; s.status = 'done'; }
+    else if (actId === 'same') { label = '已确认同一主体'; detail = s.selaReview.company + ' = ' + s.selaReview.match; s.status = 'done'; }
+    else if (actId === 'different') { label = '已确认不是同一主体'; detail = s.selaReview.company; s.status = 'done'; }
+    else if (actId === 'answer') { label = '已记录判断'; detail = truncate(p.text, 32); s.status = 'done'; }
+    else if (actId === 'skip') { label = '本轮已跳过'; detail = s.selaReview.company; s.status = 'done'; }
+    else return null;
+    s.outcome = { act: actId, payload: p };
+    var entry = { id: id, act: actId, label: label, detail: detail, who: s.customer ? s.customer.company : (s.selaReview ? s.selaReview.company : s.sender),
+      token: 'undo-' + (++undoSeq), snap: snap, stays: stays, seq: undoSeq };
+    S.history.unshift(entry);
+    if (S.history.length > 40) S.history.pop();
+    announce(label + '：' + detail + '。按 Z 可撤销。');
+    emit({ type: 'commit', id: id, entry: entry });
+    return entry;
+  }
+  function truncate(t, n) { t = String(t || '').replace(/\s+/g, ' '); return t.length > n ? t.slice(0, n) + '…' : t; }
+  function undo(id) {
+    var idx = -1;
+    for (var i = 0; i < S.history.length; i++) if (!id || S.history[i].id === id) { idx = i; break; }
+    if (idx < 0) { announce('没有可撤销的处理'); return null; }
+    var e = S.history.splice(idx, 1)[0], s = byId(e.id);
+    s.status = e.snap.status; s.kind = e.snap.kind; s.customer = e.snap.customer; s.outcome = e.snap.outcome; s.assigned = e.snap.assigned;
+    if (e.snap.headline !== undefined) { s.headline = e.snap.headline; s.why = e.snap.why; s.ai = e.snap.ai; s.lead = e.snap.lead; }
+    announce('已撤销：' + e.label + '，信号回到原位。');
+    emit({ type: 'undo', id: e.id, entry: e });
+    return e;
+  }
+
+  /* ---------- 加载 / 失败 / 空态（原型控制） ---------- */
+  var timer = null;
+  function setScenario(name) {
+    clearTimeout(timer);
+    S.scenario = name; S.stale = false;
+    if (name === 'ok') { S.items = fresh(); S.history = []; S.phase = 'ready'; S.hasLoaded = true; }
+    else if (name === 'loading') { S.phase = 'loading'; S.hasLoaded = false; }
+    else if (name === 'error') { S.phase = 'error'; S.hasLoaded = false; }
+    else if (name === 'stale') { if (!S.hasLoaded || !open().length) { S.items = fresh(); S.history = []; } S.phase = 'ready'; S.hasLoaded = true; S.stale = true; }
+    else if (name === 'empty') {
+      S.items.forEach(function (s) { s.status = 'done'; });
+      if (!S.history.length) S.items.slice(-3).reverse().forEach(function (s) { // 演示：空态里最近处理的三条仍可撤销
+        S.history.push({ id: s.id, act: 'defer', label: '暂不安排下一步', detail: '暂时观察', who: titleOf(s), token: 'seed-' + s.id, stays: false, seq: 0,
+          snap: { status: 'open', kind: s.kind, customer: s.customer, outcome: null, assigned: false } });
+      });
+      S.phase = 'ready'; S.hasLoaded = true;
+    }
+    try { history.replaceState(null, '', '#state=' + name); } catch (e) {}
+    announce({ ok: '内容已重置', loading: '正在加载', error: '加载失败', stale: '刷新失败，已保留已加载内容', empty: 'Inbox 已清空' }[name]);
+    emit({ type: 'phase' });
+  }
+  function retry() {
+    clearTimeout(timer);
+    var keep = S.hasLoaded;
+    S.phase = 'loading'; S.stale = false; emit({ type: 'phase' });
+    timer = setTimeout(function () {
+      if (!keep) { S.items = fresh(); S.history = []; }
+      S.phase = 'ready'; S.hasLoaded = true; S.scenario = 'ok';
+      try { history.replaceState(null, '', '#state=ok'); } catch (e) {}
+      announce('已重新加载');
+      emit({ type: 'phase' });
+    }, reduced ? 0 : 900);
+  }
+
+  /* ---------- 朗读区 ---------- */
+  var live;
+  function announce(msg) {
+    if (!live) { live = document.createElement('div'); live.className = 'sr-only'; live.setAttribute('aria-live', 'polite'); live.setAttribute('role', 'status'); document.body.appendChild(live); }
+    live.textContent = ''; setTimeout(function () { live.textContent = msg || ''; }, 30);
+  }
+
+  /* ---------- 小片段 ---------- */
+  var h = {
+    aiTag: function (t) { return '<span class="ai-tag">' + (t || 'AI 建议') + '</span>'; },
+    conf: function (n) { return '<span class="conf num">' + n + '%</span>'; },
+    kbd: function (k) { return '<kbd>' + esc(k) + '</kbd>'; },
+    intent: function (v) { return '<span class="intent intent-' + (v === '积极' ? 'pos' : v === '消极' ? 'neg' : 'neu') + '">' + esc(v) + '</span>'; }
+  };
+  /* 分析面板：AI 的一切内容都带“AI 建议”，来源原文单独列出 */
+  function analysisHTML(s, o) {
+    o = o || {};
+    var a = s.ai || {};
+    var html = '<div class="an">';
+    html += '<div class="an-h">' + h.aiTag(s.source === 'sela' ? 'AI 建议 · Sela' : 'AI 建议') + '<span class="an-t">整理草稿 · ' + esc(a.direction || '') + '</span>' + (a.intent ? h.intent(a.intent) : '') + '</div>';
+    html += '<p class="an-s">' + esc(a.summary || '') + '</p>';
+    if ((a.facts || []).length) html += '<ul class="an-f">' + a.facts.map(function (f) { return '<li>' + esc(f) + '</li>'; }).join('') + '</ul>';
+    if ((a.needs || []).length) html += '<p class="an-n"><span>对方需要</span>' + a.needs.map(esc).join('、') + '</p>';
+    if (s.suggested) html += '<p class="an-n"><span>归属建议</span>' + esc(s.suggested.company) + ' ' + h.conf(s.suggested.score) + '<em>' + esc(s.suggested.reason) + '</em></p>';
+    if (a.note) html += '<p class="an-note">' + esc(a.note) + '</p>';
+    return html + '</div>';
+  }
+  function evidenceHTML(s, o) {
+    o = o || {};
+    return '<div class="ev">' + s.evidence.map(function (e) {
+      return '<figure class="ev-i"><figcaption><span>' + esc(e.label) + '</span><time class="num">' + esc(when(e.at)) + '</time></figcaption>' +
+        '<blockquote>' + (o.lit === false ? esc(e.text) : lit(e.text)) + '</blockquote></figure>';
+    }).join('') + '</div>';
+  }
+  function candidatesFor(s) {
+    return (s.candidates || []).map(function (c) {
+      var cu = null; D.CUSTOMERS.forEach(function (x) { if (x.id === c.customerId) cu = x; });
+      return cu ? { customer: cu, reason: c.reason, score: c.score } : null;
+    }).filter(Boolean);
+  }
+
+  /* ---------- 表单：一份实现，房间只换样式 ---------- */
+  var fid = 0;
+  function mountForm(host, s, act, cb) {
+    var id = 'f' + (++fid), ai = s.ai || {};
+    var kind = act.form, html = '';
+    function nextFields(pre, prefix, tagged) {
+      var chips = dateChips().map(function (c) { return '<button type="button" class="chip" data-d="' + ymd(c.d) + '" aria-pressed="false">' + c.label + '<span class="num"> ' + md(c.d) + '</span></button>'; }).join('');
+      return '<div class="frm-row"><label for="' + id + '-t">下一步动作 ' + (tagged ? '<span class="ai-tag" data-tag>AI 建议</span>' : '') + '</label>' +
+        '<input id="' + id + '-t" class="frm-in" type="text" autocomplete="off" value="' + esc(pre) + '" placeholder="具体动作，例如：把报价发给客户" ' + (prefix ? 'data-nx' : '') + '>' +
+        '<p class="frm-err" role="alert" data-e="t" hidden>请写清楚具体动作</p></div>' +
+        '<div class="frm-row"><label for="' + id + '-d">日期 <span class="req">必填</span></label>' +
+        '<div class="chips" role="group" aria-label="快捷日期">' + chips + '</div>' +
+        '<div class="frm-date"><input id="' + id + '-d" class="frm-in" type="date" min="' + ymd(TODAY) + '" ' + (prefix ? 'data-nx' : '') + '><span class="frm-when num" data-when></span></div>' +
+        '<p class="frm-err" role="alert" data-e="d" hidden>请选择日期：下一步必须有动作和日期</p></div>';
+    }
+    if (kind === 'next') {
+      html = nextFields(ai.next || '', false, !!ai.next);
+    } else if (kind === 'record') {
+      html = '<div class="frm-row"><label for="' + id + '-s">进展摘要 <span class="ai-tag" data-tag>AI 建议</span></label>' +
+        '<textarea id="' + id + '-s" class="frm-in" rows="3">' + esc(ai.summary || '') + '</textarea>' +
+        '<p class="frm-err" role="alert" data-e="s" hidden>摘要不能为空</p></div>' +
+        '<div class="frm-row frm-opt"><button type="button" class="text-btn" data-toggle aria-expanded="false">＋ 同时安排下一步（可选）</button>' +
+        (ai.next ? '<button type="button" class="text-btn" data-adopt hidden>采用 AI 建议：' + esc(ai.next) + '</button>' : '') +
+        '<div class="frm-next" hidden>' + nextFields('', true, false) + '</div></div>';
+    } else if (kind === 'defer') {
+      var pre = ai.deferHint || 'monitoring';
+      html = '<div class="frm-row"><span class="frm-lab" id="' + id + '-rl">原因 ' + (ai.deferHint ? '<span class="ai-tag" data-tag>AI 建议</span>' : '') + '</span>' +
+        '<div class="chips" role="radiogroup" aria-labelledby="' + id + '-rl">' + Object.keys(DEFER).map(function (k) {
+          return '<button type="button" class="chip" role="radio" data-r="' + k + '" aria-checked="' + (k === pre) + '">' + DEFER[k] + '</button>';
+        }).join('') + '</div></div>' +
+        '<div class="frm-row"><label for="' + id + '-d">复查日期（可选）</label><div class="chips" role="group" aria-label="快捷复查日期">' +
+        reviewChips().map(function (c) { return '<button type="button" class="chip" data-d="' + ymd(c.d) + '" aria-pressed="false">' + c.label + '<span class="num"> ' + md(c.d) + '</span></button>'; }).join('') + '</div>' +
+        '<div class="frm-date"><input id="' + id + '-d" class="frm-in" type="date" min="' + ymd(TODAY) + '"><span class="frm-when num" data-when></span></div></div>';
+    } else if (kind === 'choose') {
+      var cands = candidatesFor(s);
+      html = '<div class="frm-row"><span class="frm-lab" id="' + id + '-cl">' + (cands.length ? '候选客户 ' + h.aiTag() : '选择已有客户') + '</span>' +
+        (cands.length > 1 ? '<p class="frm-help">多个候选，AI 不会替你选择。</p>' : '') +
+        '<div class="cands" role="radiogroup" aria-labelledby="' + id + '-cl" data-cands>' + cands.map(function (c) { return candHTML(c.customer, c.reason, c.score); }).join('') + '</div>' +
+        '<label for="' + id + '-q" class="frm-lab">搜索其他客户</label><input id="' + id + '-q" class="frm-in" type="search" autocomplete="off" placeholder="公司、联系人或国家">' +
+        '<div class="cands" role="radiogroup" aria-label="搜索结果" data-found></div>' +
+        '<p class="frm-err" role="alert" data-e="c" hidden>请选择一个客户</p></div>';
+    } else if (kind === 'answer') {
+      html = '<div class="frm-row"><label for="' + id + '-a">你的判断 <span class="req">必填</span></label>' +
+        '<textarea id="' + id + '-a" class="frm-in" rows="3" placeholder="例如：仍值得研究，但先不要起草开发信"></textarea>' +
+        '<p class="frm-err" role="alert" data-e="a" hidden>请写下你的判断</p></div>';
+    }
+    var fx = effects(s, act.id);
+    host.innerHTML = '<form class="frm frm-' + kind + '" novalidate aria-label="' + esc(act.label) + '">' + html +
+      '<div class="frm-fx"><p class="fx-will"><b>会</b>' + esc(fx.will.join('；')) + '</p><p class="fx-wont"><b>不会</b>' + esc(fx.wont.join('；')) + '</p></div>' +
+      '<div class="frm-act"><button type="submit" class="solid">' + esc(act.submit) + '<kbd>' + ((kind === 'record' || kind === 'answer') ? '⌘↵' : '↵') + '</kbd></button><button type="button" class="text-btn" data-cancel>取消<kbd>Esc</kbd></button></div></form>';
+    var form = host.querySelector('form'), state = { d: '', r: (ai.deferHint || 'monitoring'), rv: '', cid: '' };
+    function q(sel) { return form.querySelector(sel); }
+    function err(k, on) { var e = q('[data-e="' + k + '"]'); if (e) e.hidden = !on; }
+    function chipsSync(container, val) { container.querySelectorAll('.chip[data-d]').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.d === val)); }); }
+    function whenText(el, v) { if (el) el.textContent = v ? dateLabel(v) : ''; }
+
+    // 日期 chip / input
+    form.querySelectorAll('.chips').forEach(function (box) {
+      box.addEventListener('click', function (ev) {
+        var b = ev.target.closest('.chip'); if (!b) return;
+        if (b.dataset.d) {
+          var row = box.closest('.frm-row'), inp = row.querySelector('input[type=date]');
+          inp.value = b.dataset.d; chipsSync(box, b.dataset.d); whenText(row.querySelector('[data-when]'), b.dataset.d); err('d', false);
+        } else if (b.dataset.r) {
+          state.r = b.dataset.r; box.querySelectorAll('.chip').forEach(function (x) { x.setAttribute('aria-checked', String(x === b)); });
+          var tg = q('[data-tag]'); if (tg && kind === 'defer' && b.dataset.r !== (ai.deferHint || 'monitoring')) tg.textContent = '已改选';
+        }
+      });
+    });
+    form.querySelectorAll('input[type=date]').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var row = inp.closest('.frm-row');
+        chipsSync(row.querySelector('.chips'), inp.value); whenText(row.querySelector('[data-when]'), inp.value); err('d', false);
+      });
+    });
+    var ti = q('#' + id + '-t');
+    if (ti) ti.addEventListener('input', function () { var tg = kind === 'next' ? q('[data-tag]') : null; if (tg && ti.value !== (ai.next || '')) tg.textContent = '已改写'; err('t', false); });
+    var sm = q('#' + id + '-s');
+    if (sm) sm.addEventListener('input', function () { var tg = q('[data-tag]'); if (tg && sm.value !== ai.summary) tg.textContent = '已改写'; err('s', false); });
+    // record: 可选的下一步
+    var tog = q('[data-toggle]'), nx = q('.frm-next'), adopt = q('[data-adopt]');
+    function openNext(v) {
+      nx.hidden = !v; tog.setAttribute('aria-expanded', String(v)); tog.textContent = v ? '－ 不安排下一步' : '＋ 同时安排下一步（可选）';
+      if (adopt) adopt.hidden = !v || !!(nx.querySelector('input[type=text]').value);
+      if (v) nx.querySelector('input[type=text]').focus();
+    }
+    if (tog) {
+      tog.addEventListener('click', function () { openNext(nx.hidden); });
+      if (adopt) {
+        adopt.addEventListener('click', function () { var t = nx.querySelector('input[type=text]'); t.value = ai.next; adopt.hidden = true; t.focus(); });
+        nx.querySelector('input[type=text]').addEventListener('input', function () { adopt.hidden = !!this.value; });
+      }
+      openNext(false);
+    }
+    // choose
+    var found = q('[data-found]'), search = q('input[type=search]');
+    function pick(cid) { state.cid = cid; form.querySelectorAll('.cand').forEach(function (c) { c.setAttribute('aria-checked', String(c.dataset.c === cid)); }); err('c', false); }
+    if (kind === 'choose') {
+      form.addEventListener('click', function (ev) { var c = ev.target.closest('.cand'); if (c) pick(c.dataset.c); });
+      search.addEventListener('input', function () {
+        var v = search.value.trim().toLowerCase(), have = {};
+        (candidatesFor(s)).forEach(function (c) { have[c.customer.id] = 1; });
+        var res = v ? D.CUSTOMERS.filter(function (c) { return !have[c.id] && (c.company + c.contact + c.country).toLowerCase().indexOf(v) >= 0; }).slice(0, 4) : [];
+        found.innerHTML = res.map(function (c) { return candHTML(c, c.contact + ' · ' + c.country); }).join('') || (v ? '<p class="frm-help">没有匹配的客户。</p>' : '');
+      });
+      var first = candidatesFor(s);
+      if (first.length === 1) pick(first[0].customer.id);
+    }
+    form.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); cb.cancel && cb.cancel(); }
+      if (ev.key === 'Enter' && ev.target.tagName === 'TEXTAREA' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); form.requestSubmit ? form.requestSubmit() : submit(); }
+      if (ev.key === 'Enter' && ev.target.classList && ev.target.classList.contains('cand')) {
+        ev.preventDefault(); if (state.cid === ev.target.dataset.c) submit(); else pick(ev.target.dataset.c); return;
+      }
+      if (ev.target.classList && ev.target.classList.contains('chip') && ev.target.dataset.r) { // 原因单选：方向键切换，Enter 提交
+        if (ev.key === 'Enter') { ev.preventDefault(); submit(); return; }
+        if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+          var rs = Array.prototype.slice.call(form.querySelectorAll('.chip[data-r]')), ri = rs.indexOf(ev.target), step = (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') ? 1 : rs.length - 1;
+          var rn = rs[(ri + step) % rs.length]; ev.preventDefault(); rn.focus(); rn.click(); return;
+        }
+      }
+      if (ev.target.classList && ev.target.classList.contains('cand') && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+        var all = Array.prototype.slice.call(form.querySelectorAll('.cand')), i = all.indexOf(ev.target);
+        var n = all[(i + (ev.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]; if (n) { ev.preventDefault(); n.focus(); pick(n.dataset.c); }
+      }
+    });
+    q('[data-cancel]').addEventListener('click', function () { cb.cancel && cb.cancel(); });
+    function readNext(prefix) {
+      var t = q('#' + id + '-t'), d = q('#' + id + '-d');
+      return { title: t.value.trim(), due: d.value };
+    }
+    function submit() {
+      var p = {}, ok = true;
+      if (kind === 'next') {
+        var v = readNext(); p = v;
+        if (!v.title) { err('t', true); ok = false; } if (!v.due) { err('d', true); ok = false; }
+        if (!ok) { focusFirstError(); return; }
+      } else if (kind === 'record') {
+        var text = sm.value.trim(); p = { text: text };
+        if (!text) { err('s', true); sm.focus(); return; }
+        if (!nx.hidden) {
+          var t2 = q('#' + id + '-t'), d2 = q('#' + id + '-d');
+          var tt = t2.value.trim(), dd = d2.value;
+          if (tt || dd) {
+            if (!tt) { err('t', true); ok = false; } if (!dd) { err('d', true); ok = false; }
+            if (!ok) { focusFirstError(); return; }
+            p.next = { title: tt, due: dd };
+          }
+        }
+      } else if (kind === 'defer') {
+        p = { reason: state.r, review: (q('input[type=date]').value || '') };
+      } else if (kind === 'choose') {
+        if (!state.cid) { err('c', true); (q('.cand') || search).focus(); return; }
+        p = { customerId: state.cid };
+      } else if (kind === 'answer') {
+        var a = q('textarea').value.trim(); if (!a) { err('a', true); q('textarea').focus(); return; } p = { text: a };
+      }
+      var entry = commit(s.id, act.id, p);
+      cb.done && cb.done(entry);
+    }
+    function focusFirstError() { var e = form.querySelector('.frm-err:not([hidden])'); if (!e) return; var f = e.parentNode.querySelector('input,textarea'); f && f.focus(); }
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); submit(); });
+    var firstField = form.querySelector('input:not([type=date]),textarea,.cand,.chip');
+    return { focus: function () { (firstField || form.querySelector('button')).focus(); }, destroy: function () { host.innerHTML = ''; } };
+  }
+  function candHTML(c, reason, score) {
+    return '<button type="button" class="cand" role="radio" aria-checked="false" data-c="' + c.id + '"><span class="cand-n">' + esc(c.company) + '</span><span class="cand-m">' + esc(c.country) + ' · ' + esc(reason) + '</span>' + (score ? '<span class="cand-s num">' + score + '%</span>' : '') + '</button>';
+  }
+
+  /* ---------- 快捷键：三个房间同一套肌肉记忆 ---------- */
+  function typing(t) { return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
+  function bindKeys(map) {
+    document.addEventListener('keydown', function (e) {
+      if (e.defaultPrevented) return;
+      var k = e.key;
+      if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === 'z') { if (typing(e.target) && e.target.value) return; e.preventDefault(); map.undo && map.undo(); return; }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (typing(e.target)) return;
+      var lk = k.toLowerCase();
+      if (lk === 'z') { e.preventDefault(); map.undo && map.undo(); }
+      else if (lk === 'j') { e.preventDefault(); map.next && map.next(); }
+      else if (lk === 'k') { e.preventDefault(); map.prev && map.prev(); }
+      else if (lk === 'a') { e.preventDefault(); map.analysis && map.analysis(); }
+      else if (/^[1-4]$/.test(k)) { e.preventDefault(); map.action && map.action(k); }
+      else if (k === 'Escape') { map.esc && map.esc(); }
+      else if (k === 'Enter' && !(e.target.closest && e.target.closest('button,a,input,textarea,select,[role=radio],summary'))) { e.preventDefault(); map.enter && map.enter(); }
+      else if (map.extra && map.extra[k]) { map.extra[k](e); }
+    });
+  }
+
+  /* ---------- 原型状态条 ---------- */
+  function mountStateBar() {
+    if (/[?&]bare=1/.test(location.search)) return;
+    var bar = document.createElement('div');
+    bar.className = 'statebar'; bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', '原型状态切换');
+    var items = [['ok', '正常'], ['loading', '加载'], ['error', '失败'], ['stale', '刷新失败'], ['empty', '已清空']];
+    bar.innerHTML = '<span class="micro">原型</span>' + items.map(function (i) { return '<button type="button" data-s="' + i[0] + '" aria-pressed="false">' + i[1] + '</button>'; }).join('');
+    document.body.appendChild(bar);
+    bar.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setScenario(b.dataset.s); });
+    function sync() { bar.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.s === S.scenario)); }); }
+    on(sync); sync();
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data; if (d && typeof d.trosaState === 'string' && /^(ok|loading|error|stale|empty)$/.test(d.trosaState)) setScenario(d.trosaState);
+  });
+  function initFromHash() {
+    var m = /state=(ok|loading|error|stale|empty)/.exec(location.hash + location.search);
+    if (m && m[1] !== 'ok') setScenario(m[1]);
+  }
+
+  return { S: S, NOW: NOW, TODAY: TODAY, esc: esc, when: when, ago: ago, ageHours: ageHours, dateLabel: dateLabel, md: md, parse: parse, ymd: ymd, WD: WD,
+    KIND: KIND, SOURCE: SOURCE, DEFER: DEFER, on: on, byId: byId, open: open, later: later, reduced: reduced,
+    actionsFor: actionsFor, leadOf: leadOf, effects: effects, commit: commit, undo: undo, setScenario: setScenario, retry: retry,
+    announce: announce, h: h, analysisHTML: analysisHTML, evidenceHTML: evidenceHTML, candidatesFor: candidatesFor, lit: lit,
+    mountForm: mountForm, bindKeys: bindKeys, mountStateBar: mountStateBar, titleOf: titleOf, initFromHash: initFromHash, needsReview: needsReview,
+    dateChips: dateChips, CUSTOMERS: D.CUSTOMERS, truncate: truncate, hm: hm };
+})();
+
+(function () {
+  var E = Engine, S = E.S, esc = E.esc;
+  var $ = function (id) { return document.getElementById(id); };
+  var st = { cur: null, form: null, analysis: false, hot: true, busy: false, formCtl: null };
+
+  function title(s) { return E.titleOf(s); }
+  function shortTitle(s) { return s.customer ? s.customer.company : title(s); }
+
+  /* ---------- 底片带 ---------- */
+  function renderStrip(enterId) {
+    var track = $('track');
+    if (S.phase === 'loading') {
+      track.innerHTML = new Array(9).join('<div class="frame sk" aria-hidden="true"></div>');
+      track.style.transform = 'none'; return;
+    }
+    var list = S.phase === 'error' ? [] : E.open();
+    var all = S.items;
+    track.innerHTML = list.map(function (s) {
+      var n = all.indexOf(s) + 1;
+      return '<button type="button" class="frame' + (E.needsReview(s) ? ' rv' : '') + (enterId === s.id ? ' entering' : '') + '" data-id="' + s.id + '" tabindex="' + (s.id === st.cur ? 0 : -1) +
+        '" aria-current="' + (s.id === st.cur) + '" aria-label="第 ' + n + ' 张，' + esc(shortTitle(s)) + '，' + esc(E.KIND[s.kind]) + '，' + esc(E.when(s.at)) + '">' +
+        '<span class="fn num"><span>№ ' + (n < 10 ? '0' + n : n) + '</span><span>' + (E.needsReview(s) ? '待审阅' : esc(E.SOURCE[s.source])) + '</span></span>' +
+        '<span class="fc">' + esc(shortTitle(s)) + '</span><span class="ft num">' + esc(E.when(s.at)) + '</span></button>';
+    }).join('');
+    center();
+  }
+  function center() {
+    var track = $('track'), w = $('trackW'), el = track.querySelector('[aria-current=true]');
+    if (!el) { track.style.transform = 'none'; return; }
+    var x = w.clientWidth / 2 - (el.offsetLeft + el.offsetWidth / 2);
+    track.style.transform = 'translateX(' + Math.round(x) + 'px)';
+  }
+
+  /* ---------- 收片盒（撤销） ---------- */
+  function renderTray() {
+    var t = $('tray'), h = S.history.slice(0, 2);
+    t.innerHTML = '<h3 class="micro"><span>已收走</span><span class="num">' + S.history.length + '</span></h3>' +
+      (h.length ? '<ul>' + h.map(function (e, i) {
+        return '<li><div><b>' + esc(e.label) + '</b><span>' + esc(e.who) + ' · ' + esc(e.detail) + '</span></div>' +
+          '<button type="button" class="text-btn" data-undo="' + e.id + '" aria-label="撤销：' + esc(e.label + '，' + e.who) + '">撤销' + (i === 0 ? '<kbd>Z</kbd>' : '') + '</button></li>';
+      }).join('') + '</ul>' : '<p class="none">处理过的底片会收在这里，随时可以撤销。</p>');
+  }
+
+  /* ---------- 面板 ---------- */
+  function ensureCur() {
+    var list = E.open();
+    if (!list.length) { st.cur = null; return; }
+    if (!st.cur || !list.some(function (s) { return s.id === st.cur; })) st.cur = list[0].id;
+  }
+  function pos(s) { var l = E.open(); return l.indexOf(s) + 1; }
+
+  function aiBox(s) {
+    var a = s.ai || {};
+    if (st.analysis) {
+      return E.analysisHTML(s) + '<p class="why"><span>为什么需要你</span>' + esc(s.why) + '</p>' +
+        (s.selaReview ? '<p class="why"><span>Sela 上下文</span>' + esc(s.selaReview.reason) + '</p>' : '') +
+        '<ul class="known"><li>系统已知：' + esc(s.customer ? s.customer.company + ' · ' + s.customer.country + ' · ' + s.customer.contact : '尚未关联任何客户') + '</li></ul>';
+    }
+    var h = '<div class="an-h">' + E.h.aiTag(s.source === 'sela' ? 'AI 建议 · Sela' : 'AI 建议') + '<span class="an-t">整理草稿</span>' + (a.intent && a.intent !== '未知' ? E.h.intent(a.intent) : '') + '</div>' +
+      '<p class="an-s">' + esc(a.summary || '') + '</p>';
+    if (a.next) h += '<div class="an-next"><span>AI 建议的下一步（需你确认动作与日期）</span><p>' + esc(a.next) + '</p></div>';
+    if (s.kind === 'identity' && s.candidates && s.candidates.length) {
+      h += '<div class="pv" aria-label="AI 建议的归属候选">' + E.candidatesFor(s).map(function (c) {
+        return '<div><span>' + esc(c.customer.company) + '<br><em>' + esc(c.reason) + '</em></span><span class="num">' + c.score + '%</span></div>';
+      }).join('') + '</div>';
+    }
+    if (a.note) h += '<p class="an-note">' + esc(a.note) + '</p>';
+    return h;
+  }
+
+  function actionsRow(s) {
+    var acts = E.actionsFor(s), html = '';
+    var blocked = s.kind === 'identity' && !s.customer;
+    if (blocked) html += '<p class="hint">先确认归属；AI 的建议不会自动写入任何客户。</p>';
+    acts.forEach(function (a) {
+      html += '<button type="button" class="' + (a.lead ? 'solid' : 'text-btn') + '" data-act="' + a.id + '">' + esc(a.label) + '<kbd>' + a.num + '</kbd></button>';
+    });
+    return html;
+  }
+
+  function renderStage() {
+    var stg = $('stage'), n = E.open().length;
+    $('count').innerHTML = S.phase === 'ready' ? '<b class="num">' + n + '</b>条待判断' : '';
+    var banner = '';
+    if (S.phase === 'ready' && S.stale) banner = '<div class="banner" role="alert"><b>刷新失败</b><span>下面仍是 ' + S.loadedAt + ' 加载的内容，可以继续判断；恢复网络后再重试。</span><button type="button" class="text-btn" data-retry>重试</button></div>';
+
+    if (S.phase === 'loading') {
+      stg.innerHTML = '<div class="panel off" aria-busy="true" aria-label="正在加载"><div class="ph"><div class="ph-l sk-lines"><div class="sk sk-h"></div><div class="sk sk-l" style="width:40%"></div></div></div>' +
+        '<div class="cols"><div class="c-src"><div class="sk-lines"><div class="sk sk-l"></div><div class="sk sk-l" style="width:92%"></div><div class="sk sk-l" style="width:70%"></div></div></div>' +
+        '<div class="c-ai"><div class="sk-lines"><div class="sk sk-l" style="width:30%"></div><div class="sk sk-l"></div><div class="sk sk-l" style="width:80%"></div></div></div></div></div>';
+      $('trackW').setAttribute('aria-busy', 'true'); renderTray(); return;
+    }
+    $('trackW').removeAttribute('aria-busy');
+    if (S.phase === 'error') {
+      stg.innerHTML = '<div class="panel off"><div class="center" role="alert"><h1>灯箱暂时点不亮</h1><p>Inbox 暂时无法加载。这不代表没有待判断的信号；已有内容没有丢失。</p>' +
+        '<button type="button" class="solid" data-retry>重新加载<kbd>↵</kbd></button></div></div>';
+      return;
+    }
+    if (!n) {
+      stg.innerHTML = '<div class="panel off"><div class="center"><h1>灯箱已熄</h1><p>所有信号都判断完了，没有待处理的事项。新的客户回复或待归属沟通会在这里亮起。</p>' +
+        (S.history.length ? '<p class="micro">刚处理的 ' + S.history.length + ' 条仍可撤销 · 按 Z</p>' : '') + '</div></div>';
+      return;
+    }
+    var s = E.byId(st.cur), i = pos(s), acts = E.actionsFor(s);
+    var subParts = [];
+    if (s.customer) subParts.push(s.customer.contact + ' · ' + s.customer.country);
+    subParts.push(s.sender); if (s.subject && s.source === 'gmail') subParts.push('主题：' + s.subject);
+    stg.innerHTML = banner + '<article class="panel' + (st.form ? ' forming' : '') + '" aria-labelledby="pt">' +
+      '<header class="ph"><div class="ph-l"><p class="micro kicker"><span class="pos num">№ ' + (S.items.indexOf(s) + 1) + ' / ' + S.items.length + '</span><span>' + esc(E.KIND[s.kind]) + '</span><span>' + esc(s.channel) + '</span><span class="num">' + esc(E.when(s.at)) + ' · ' + esc(E.ago(s.at)) + '</span>' +
+        (E.needsReview(s) ? '<span class="rv">待审阅</span>' : '') + '</p>' +
+        '<h1 id="pt" tabindex="-1">' + esc(title(s)) + '</h1><p class="sub">' + esc(subParts.join(' · ')) + '</p></div>' +
+        '<div class="hd"><p>' + esc(s.headline) + '</p></div></header>' +
+      '<div class="cols"><section class="c-src' + (st.hot ? '' : ' dim') + '" aria-label="来源原文"><h2 class="micro"><span>来源原文</span><button type="button" data-hot aria-pressed="' + st.hot + '">承诺高亮 ' + (st.hot ? '开' : '关') + '<kbd>H</kbd></button></h2>' +
+        E.evidenceHTML(s, { lit: st.hot }) + (s.evidence.length > 1 ? '<p class="tr">共 ' + s.evidence.length + ' 条来源，按时间排列。</p>' : '') + '</section>' +
+      '<section class="c-ai" aria-label="AI 建议与处理"><button type="button" class="text-btn ana" data-analysis aria-pressed="' + st.analysis + '">' + (st.analysis ? '收起分析' : '查看分析') + '<kbd>A</kbd></button><div class="ai-box" id="aiBox">' + aiBox(s) + '</div><div class="work" id="work">' + (st.form ? '' : '<div class="acts">' + actionsRow(s) + '</div>') + '</div></section></div></article>';
+    if (st.form) {
+      var act = acts.filter(function (a) { return a.id === st.form; })[0];
+      if (act) st.formCtl = E.mountForm($('work'), s, act, { cancel: closeForm, done: function () {} });
+      else st.form = null;
+    }
+  }
+
+  function renderAll(enterId, focusTitle) {
+    ensureCur(); renderStage(); renderStrip(enterId); renderTray();
+    if (focusTitle) { var t = $('pt'); if (t) t.focus({ preventScroll: true }); }
+  }
+
+  /* ---------- 行为 ---------- */
+  function go(delta) {
+    if (S.phase !== 'ready' || st.busy) return;
+    var l = E.open(); if (!l.length) return;
+    var i = l.findIndex(function (s) { return s.id === st.cur; }), n = Math.max(0, Math.min(l.length - 1, i + delta));
+    if (n === i) return;
+    st.cur = l[n].id; st.form = null; st.analysis = false; renderAll(null, true);
+  }
+  function closeForm() { st.form = null; renderAll(); var b = document.querySelector('.acts .solid'); if (b) b.focus(); }
+  function runAction(num) {
+    if (S.phase !== 'ready' || st.busy || !st.cur) return;
+    var s = E.byId(st.cur), a = E.actionsFor(s).filter(function (x) { return x.num === String(num); })[0];
+    if (!a) return;
+    if (a.direct) { E.commit(s.id, a.id, {}); return; }
+    st.form = a.id; renderAll();
+    if (st.formCtl) st.formCtl.focus();
+  }
+  function runLead() { var s = E.byId(st.cur); if (s) { var a = E.leadOf(s); runAction(a.num); } }
+
+  E.on(function (ev) {
+    if (ev.type === 'commit') {
+      st.form = null; st.analysis = false;
+      if (ev.entry.stays) { renderAll(null, true); return; }
+      st.busy = true;
+      var f = document.querySelector('.frame[data-id="' + ev.id + '"]'); if (f) f.classList.add('leaving');
+      var p = document.querySelector('.panel'); if (p) p.classList.add('flash');
+      E.later(function () {
+        var l = E.open(), all = S.items.filter(function (x) { return x.status === 'open' || x.id === ev.id; }).sort(function (a, b) { return a.order - b.order; });
+        var idx = all.findIndex(function (x) { return x.id === ev.id; });
+        var nxt = all.slice(idx + 1).filter(function (x) { return x.status === 'open'; })[0] || all.slice(0, idx).reverse().filter(function (x) { return x.status === 'open'; })[0];
+        st.cur = nxt ? nxt.id : null; st.busy = false; renderAll(null, true);
+      }, 300);
+    } else if (ev.type === 'undo') {
+      st.cur = ev.id; st.form = null; st.analysis = false; st.busy = false; renderAll(ev.id, true);
+    } else { st.form = null; st.busy = false; renderAll(); }
+  });
+
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act],[data-analysis],[data-hot],[data-retry],[data-undo],.frame'); if (!t) return;
+    if (t.dataset.act) { var s = E.byId(st.cur), a = E.actionsFor(s).filter(function (x) { return x.id === t.dataset.act; })[0]; runAction(a.num); }
+    else if ('analysis' in t.dataset) { st.analysis = !st.analysis; renderAll(); }
+    else if ('hot' in t.dataset) { st.hot = !st.hot; renderAll(); }
+    else if ('retry' in t.dataset) E.retry();
+    else if (t.dataset.undo) E.undo(t.dataset.undo);
+    else if (t.classList.contains('frame') && !st.busy) { st.cur = t.dataset.id; st.form = null; st.analysis = false; renderAll(null, true); }
+  });
+
+  E.bindKeys({
+    next: function () { go(1); }, prev: function () { go(-1); },
+    action: runAction, enter: function () { if (S.phase === 'error') E.retry(); else runLead(); },
+    analysis: function () { if (S.phase === 'ready' && st.cur) { st.analysis = !st.analysis; renderAll(); } },
+    undo: function () { E.undo(); },
+    esc: function () { if (st.form) closeForm(); else if (st.analysis) { st.analysis = false; renderAll(); } },
+    extra: { ArrowRight: function () { go(1); }, ArrowLeft: function () { go(-1); }, h: function () { st.hot = !st.hot; renderAll(); }, H: function () { st.hot = !st.hot; renderAll(); } }
+  });
+  window.addEventListener('resize', center);
+  E.mountStateBar(); E.initFromHash(); renderAll();
+})();
+</script>
+</body>
+</html>

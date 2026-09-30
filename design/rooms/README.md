@@ -6,7 +6,12 @@
 
 **边界**：房间可以在空间模型、隐喻、构图、招牌交互上自由发挥；但不得引入新材质（新色系、新字体家族、玻璃、重阴影），也不得放松 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md) 的底线。
 
-目前还没有房间文档，选定第一个原型后再添加。
+目前已有四个房间文档：
+
+- [`today.md`](today.md) —— 今天，来源原型 [`../visual-exploration/rooms-v5/today/03-tide.html`](../visual-exploration/rooms-v5/today/03-tide.html)（2026-09-30 选定）：已选定，尚未实现。
+- [`customers.md`](customers.md) —— 客户列表，来源原型 [`../visual-exploration/rooms-v5/customers/03-ledger.html`](../visual-exploration/rooms-v5/customers/03-ledger.html)（2026-09-30 选定）：已选定，尚未实现。
+- [`customer.md`](customer.md) —— 客户详情，无原型，来源是分支 `agent/ui-daylight-perpage` 的实现（2026-09-30 选定）：已选定，实现在分支、未发布。
+- [`inbox.md`](inbox.md) —— Inbox，来源原型 [`../visual-exploration/rooms-v5/inbox/01-lightbox.html`](../visual-exploration/rooms-v5/inbox/01-lightbox.html)（2026-09-30 选定）：已选定，尚未实现。
 
 ## 模板
 
