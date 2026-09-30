@@ -894,7 +894,15 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   #trosa .today-tide .tide-nowline,
   #trosa .today-tide .tide-previewline,
   #trosa .today-tide .tide-ghostline { display: none; }
-  #trosa .today-tide .tide-row { grid-template-columns: minmax(0, 1fr); row-gap: .5rem; padding: .8rem 0; }
+  /* The legacy `.today-task-row` grid lives in earlier layers; the tide row
+     reuses that class name, so this override must outrank those older
+     declarations (which use !important at <=620px) to become a single column. */
+  #trosa .today-tide .tide-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-auto-flow: row;
+    row-gap: .5rem;
+    padding: .8rem 0;
+  }
   #trosa .today-tide .tide-c1 { padding-right: 0; }
   #trosa .today-tide .tide-track { margin: 0; height: 1.1rem; }
   #trosa .today-tide .tide-nowtick {
