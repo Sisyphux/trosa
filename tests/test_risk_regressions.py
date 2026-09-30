@@ -3610,6 +3610,41 @@ class ModalSolidButtonRegressionTest(unittest.TestCase):
             self.assertNotIn('btn-sm', tag)
 
 
+class ModalSubmitStateRegressionTest(unittest.TestCase):
+    """Footer pills hold their width and every small-window submit shows a busy state (U-05)."""
+
+    def setUp(self):
+        self.js = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        self.html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        self.css = (ROOT / 'app' / 'static' / 'visual-v5.css').read_text(encoding='utf-8')
+
+    def test_footer_primaries_keep_a_stable_width(self):
+        self.assertIn('#trosa .complete-footer #completeSubmitBtn { min-width: 10rem; }', self.css)
+        self.assertIn('min-width: 7.5rem', self.css)
+
+    def test_complete_verb_does_not_grow_with_the_date(self):
+        label = self.js[self.js.index('function updateCompleteSaveLabel() {'):]
+        label = label[:label.index('\n}')]
+        self.assertIn("'完成并安排下一步'", label)
+        self.assertNotIn('formatChineseDate', label)
+
+    def test_small_window_submits_carry_ids_and_busy_state(self):
+        for button_id in (
+            'batchCompleteSubmit', 'newCustomerSubmit', 'existCustomerSubmit',
+            'todayQuickEditSubmit', 'followEditSubmit', 'batchAddSubmit',
+            'saveInboxReplyButton',
+        ):
+            self.assertIn('id="' + button_id + '"', self.html, button_id)
+        # one shared busy helper for the inbox confirm, plus the complete dialog
+        self.assertIn('function setInboxReplyBusy(button, busy)', self.js)
+        self.assertIn("button.setAttribute('aria-busy', 'true');", self.js)
+        self.assertIn('function setActionFeedback(button, state, label)', self.js)
+        # re-entrancy guards
+        for key in ('batchComplete', 'newCustomer', 'existCustomer', 'todayQuickEdit', 'followEdit', 'batchAdd'):
+            self.assertIn("beginWrite('" + key + "')", self.js)
+        self.assertIn("endWrite('followEdit'); resetFollow(0);", self.js)
+
+
 class TimelineLocalEchoRegressionTest(unittest.TestCase):
     """Customer timeline writes paint locally and use the shared motion states."""
 

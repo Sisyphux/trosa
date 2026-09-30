@@ -975,7 +975,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('batchCompleteModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="submitBatchComplete()">确认完成</button>
+      <button class="btn btn-primary cw-act cw-primary" id="batchCompleteSubmit" onclick="submitBatchComplete()">确认完成</button>
     </div>
   </div>
 </div>
@@ -1006,7 +1006,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('addNewCustomerModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="submitNewCustomer()">添加客户</button>
+      <button class="btn btn-primary cw-act cw-primary" id="newCustomerSubmit" onclick="submitNewCustomer()">添加客户</button>
     </div>
   </div>
 </div>
@@ -1064,7 +1064,7 @@
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('addCustomerModal')">取消</button>
       <button class="btn cw-act" onclick="submitExistCustomer(false)">仅保存</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="submitExistCustomer(true)">保存并复制邮箱</button>
+      <button class="btn btn-primary cw-act cw-primary" id="existCustomerSubmit" onclick="submitExistCustomer(true)">保存并复制邮箱</button>
     </div>
   </div>
 </div>
@@ -1099,7 +1099,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('batchAddModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="submitBatchAdd()">批量添加</button>
+      <button class="btn btn-primary cw-act cw-primary" id="batchAddSubmit" onclick="submitBatchAdd()">批量添加</button>
     </div>
   </div>
 </div>
@@ -1235,7 +1235,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('todayQuickEditModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="submitTodayQuickEdit()">应用</button>
+      <button class="btn btn-primary cw-act cw-primary" id="todayQuickEditSubmit" onclick="submitTodayQuickEdit()">应用</button>
     </div>
   </div>
 </div>
@@ -1265,7 +1265,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('followEditModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" onclick="saveFollowEdit()">保存</button>
+      <button class="btn btn-primary cw-act cw-primary" id="followEditSubmit" onclick="saveFollowEdit()">保存</button>
     </div>
   </div>
 </div>

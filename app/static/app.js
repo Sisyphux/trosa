@@ -3616,6 +3616,18 @@ function chooseInboxReplyCandidate(customerId) {
   picker.querySelector('.customer-picker-results').classList.remove('show');
 }
 
+function setInboxReplyBusy(button, busy) {
+  if (!button) return;
+  button.disabled = !!busy;
+  if (busy) {
+    button.textContent = '正在记录…';
+    button.setAttribute('aria-busy', 'true');
+  } else {
+    button.removeAttribute('aria-busy');
+    button.textContent = '确认并记录';
+  }
+}
+
 async function saveInboxReply() {
   var context = _communicationConfirmContext || {};
   var customerId = context.customerId || document.getElementById('inboxReplyCustomer').value;
@@ -3624,8 +3636,7 @@ async function saveInboxReply() {
   if (!content) { showToast('请先记录沟通内容', 'warning'); document.getElementById('inboxReplyContent').focus(); return; }
   if (!customerId) { showToast('请搜索并选择客户', 'warning'); document.getElementById('inboxReplyCustomerSearch').focus(); return; }
   var button = document.getElementById('saveInboxReplyButton');
-  button.disabled = true;
-  button.textContent = '正在记录…';
+  setInboxReplyBusy(button, true);
   try {
     var saved = null;
     if (context.agentProposalId) {
@@ -3684,13 +3695,11 @@ async function saveInboxReply() {
       var total = context.queueSize || 1;
       showToast('已记录，待归属沟通还剩 ' + (nextItem ? Math.max(total - 1, 1) : 0) + ' 条', 'success');
       if (nextItem) {
-        button.disabled = false;
-        button.textContent = '确认并记录';
+        setInboxReplyBusy(button, false);
         recordInboxCapture(nextItem.id);
       } else {
         closeModal('inboxReplyModal', true);
-        button.disabled = false;
-        button.textContent = '确认并记录';
+        setInboxReplyBusy(button, false);
       }
       return;
     }
@@ -3700,10 +3709,7 @@ async function saveInboxReply() {
     if (currentPage === 'dashboard') loadDashboard();
   } catch (e) {
   } finally {
-    if (!context.autoPipeline) {
-      button.disabled = false;
-      button.textContent = '确认并记录';
-    }
+    if (!context.autoPipeline) setInboxReplyBusy(button, false);
   }
 }
 
@@ -5376,6 +5382,8 @@ function openTodayQuickEdit() {
 
 async function submitTodayQuickEdit() {
   if (!beginWrite('todayQuickEdit')) return;
+  var todayButton = document.getElementById('todayQuickEditSubmit');
+  var resetToday = setActionFeedback(todayButton, 'pending', '保存中…');
   try {
     var ids = Array.from(selectedTodayCustomers);
     if (ids.length === 0) { closeModal('todayQuickEditModal'); return; }
@@ -5410,6 +5418,7 @@ async function submitTodayQuickEdit() {
     } catch(e) {}
   } finally {
     endWrite('todayQuickEdit');
+    resetToday(0);
   }
 }
 
@@ -7577,6 +7586,7 @@ async function batchCompleteGroup(groupKey) {
 
 async function submitBatchComplete() {
   if (!beginWrite('batchComplete')) return;
+  var resetBatch = setActionFeedback(document.getElementById('batchCompleteSubmit'), 'pending', '保存中…');
   try {
     var result = document.getElementById('batchCompleteResult').value.trim() || '继续跟进';
     var nextDate = document.getElementById('batchCompleteNext').value.trim();
@@ -7611,6 +7621,7 @@ async function submitBatchComplete() {
     _batchCompleteTargets = [];
   } finally {
     endWrite('batchComplete');
+    resetBatch(0);
   }
 }
 
@@ -8620,12 +8631,15 @@ function setActionFeedback(button, state, label) {
   var original = button.dataset.actionLabel || button.textContent.trim();
   button.dataset.actionLabel = original;
   button.disabled = state === 'pending';
+  if (state === 'pending') button.setAttribute('aria-busy', 'true');
+  else button.removeAttribute('aria-busy');
   button.classList.toggle('is-pending', state === 'pending');
   button.classList.toggle('is-confirmed', state === 'success');
   button.textContent = label || original;
   return function resetActionFeedback(delay) {
     setTimeout(function() {
       button.disabled = false;
+      button.removeAttribute('aria-busy');
       button.classList.remove('is-pending', 'is-confirmed');
       button.textContent = original;
     }, delay || 0);
@@ -10429,7 +10443,9 @@ function updateCompleteSaveLabel() {
   var date = document.getElementById('completeNextFollow').value;
   var task = document.getElementById('completeNextTask').value.trim();
   var hasNext = document.getElementById('completeHasNext').checked;
-  button.textContent = hasNext && task && date ? '完成并安排下一步 · ' + formatChineseDate(date) : '完成跟进';
+  // One stable width: the chosen date already reads large in `.complete-when`,
+  // so the pill keeps a constant two-state verb instead of growing with it (U-05).
+  button.textContent = hasNext && task && date ? '完成并安排下一步' : '完成跟进';
 }
 
 // 周报分类面板：勾选“同步到周报”时展开，并在折叠标题旁亮出小标记。
@@ -10900,6 +10916,7 @@ function confirmSmartFillResult() {
 
 async function submitExistCustomer(copyEmails) {
   if (!beginWrite('existCustomer')) return;
+  var resetExist = setActionFeedback(document.getElementById('existCustomerSubmit'), 'pending', '保存中…');
   try {
     var name = document.getElementById('addExistName').value.trim();
     if (!name) { showToast('请填写公司名称', 'warning'); return; }
@@ -10934,6 +10951,7 @@ async function submitExistCustomer(copyEmails) {
     } catch(e) {}
   } finally {
     endWrite('existCustomer');
+    resetExist(0);
   }
 }
 
@@ -10963,6 +10981,7 @@ function openAddNewCustomerModal() {
 
 async function submitNewCustomer() {
   if (!beginWrite('newCustomer')) return;
+  var resetNew = setActionFeedback(document.getElementById('newCustomerSubmit'), 'pending', '保存中…');
   try {
     var name = document.getElementById('newCustomerName').value.trim();
     if (!name) { showToast('请填写公司名称', 'warning'); return; }
@@ -10989,6 +11008,7 @@ async function submitNewCustomer() {
     } catch(e) {}
   } finally {
     endWrite('newCustomer');
+    resetNew(0);
   }
 }
 
@@ -10999,6 +11019,7 @@ function openBatchAddModal() {
 
 async function submitBatchAdd() {
   if (!beginWrite('batchAdd')) return;
+  var resetBatchAdd = setActionFeedback(document.getElementById('batchAddSubmit'), 'pending', '保存中…');
   try {
     var text = document.getElementById('batchAddText').value.trim();
     if (!text) { showToast('请输入客户数据', 'warning'); return; }
@@ -11430,6 +11451,8 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else initHighlightInteractions();
 
 async function saveFollowEdit() {
+  if (!beginWrite('followEdit')) return;
+  var resetFollow = setActionFeedback(document.getElementById('followEditSubmit'), 'pending', '保存中…');
   var id = document.getElementById('followEditId').value;
   var data = {
     follow_date: document.getElementById('followEditDate').value,
@@ -11458,6 +11481,7 @@ async function saveFollowEdit() {
     if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
     else loadHistory();
   } catch(e) { showToast('更新失败', 'error'); }
+  finally { endWrite('followEdit'); resetFollow(0); }
 }
 
 async function deleteFollowLog(logId) {

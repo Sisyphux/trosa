@@ -167,7 +167,7 @@ function openFilled(overrides) {
     assert.equal(doc.activeElement && doc.activeElement.id, 'completeNextTask');
     assert.match(doc.getElementById('completeNextFollow').value, /^\d{4}-\d{2}-\d{2}$/);
   });
-  await check('the primary label reads 完成跟进 then 完成并安排下一步 · M月D日', () => {
+  await check('the primary label reads 完成跟进 then a width-stable 完成并安排下一步', () => {
     openFilled();
     assert.equal(doc.getElementById('completeSubmitBtn').textContent, '完成跟进');
     doc.getElementById('completeResult').value = '客户确认';
@@ -176,7 +176,24 @@ function openFilled(overrides) {
     win.toggleCompleteNext();
     doc.getElementById('completeNextTask').value = '发送报价';
     win.updateCompleteSaveLabel();
-    assert.match(doc.getElementById('completeSubmitBtn').textContent, /^完成并安排下一步 · \d+月\d+日$/);
+    // The chosen date reads big in `.complete-when`; the pill keeps a constant
+    // verb so its width does not jump (U-05).
+    assert.equal(doc.getElementById('completeSubmitBtn').textContent, '完成并安排下一步');
+  });
+
+  await check('the complete submit button holds still while saving', () => {
+    openFilled();
+    doc.getElementById('completeResult').value = '客户确认';
+    win.onCompleteResultInput();
+    win.setCompleteSubmitting(true);
+    const button = doc.getElementById('completeSubmitBtn');
+    assert.equal(button.textContent, '保存中…');
+    assert.equal(button.disabled, true);
+    assert.equal(button.getAttribute('aria-busy'), 'true');
+    win.setCompleteSubmitting(false);
+    assert.equal(button.disabled, false);
+    assert.equal(button.hasAttribute('aria-busy'), false);
+    assert.equal(button.textContent, '完成跟进');
   });
 
   await check('an AI-suggested next step keeps an AI 建议 marker until the user edits it', () => {

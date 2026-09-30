@@ -2712,6 +2712,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 }
 #trosa .modal .modal-footer .btn.btn-primary:hover:not(:disabled),
 #trosa .modal .modal-footer .btn.cw-primary:hover:not(:disabled) { background: #3a372f !important; color: #fffdf7 !important; }
+/* the pill keeps one width while its verb changes (U-05): a fixed floor, plus a
+   wider one for the complete dialog's two-state verb */
+#trosa .modal .modal-footer .btn.btn-primary,
+#trosa .modal .modal-footer .btn.cw-primary { min-width: 7.5rem; text-align: center; }
+#trosa .complete-footer #completeSubmitBtn { min-width: 10rem; }
 #trosa .modal .modal-footer .btn.btn-danger { color: var(--dl-danger) !important; }
 #trosa .modal .modal-footer .btn:disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 560px) {
