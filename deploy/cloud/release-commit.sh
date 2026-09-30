@@ -39,6 +39,11 @@ WORK_TMPDIR="${TMPDIR:-/tmp}"
 source "$SCRIPT_DIR/lib-release-lock.sh"
 LOCK_DIR=""
 DRY_RUN=0
+# 由常驻发布流水线（release-pipeline.sh）调用时置 1：不是“跳过安全”，而是把
+# “开发方是否跑过门禁”这条前置条件换成“流水线自己强制重跑完整门禁”。因此它
+# 同时 (a) 不要求任务清单里已有 verify_result=ok 证据，(b) 禁用按对象身份复用，
+# 保证门禁是流水线本次独立算出的，而不是相信开发方交来的结论。
+PIPELINE=0
 ALLOW_DESTRUCTIVE="${TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB:-0}"
 # Local archive is optional by default. Setting this to 1 restores the old
 # (stricter) behavior where a database-sensitive release also requires a
@@ -64,6 +69,8 @@ Usage:
   --base <ref>     仅用于计算 --branch 的 commit 范围；发布基线始终是 origin/main
   --release-id ID  使用指定 release id（仅影响远端 release 记录）
   --dry-run        只做 cherry-pick、数据库预检与完整回归，不推送、不发布
+  --pipeline       常驻流水线调用：不要求开发方已有门禁证据，改为流水线自己强制
+                   重跑完整门禁（并禁用按对象身份复用）。仅发布流水线使用。
   --allow-destructive-db
                    显式允许疑似破坏性数据库操作（仍会先备份）
   --require-local-backup
@@ -106,6 +113,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --pipeline) PIPELINE=1; shift ;;
     --allow-destructive-db) ALLOW_DESTRUCTIVE=1; shift ;;
     --require-local-backup) REQUIRE_LOCAL_BACKUP=1; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -158,7 +166,7 @@ if [[ "${TRADE_OS_RELEASE_DRIVER_MAIN:-0}" != "1" ]]; then
   run_step_guard_label="发布基础设施版本检查"
   printf '\n==> %s（要求来自最新 origin/%s）\n' "$run_step_guard_label" "$TARGET_BRANCH"
   git -C "$SOURCE_DIR" fetch --quiet origin "$TARGET_BRANCH" \
-    || fail "无法同步 origin/$TARGET_BRANCH，不能确认发布脚本是否为最新；拒绝用旧脚本发布（fail closed）"
+    || fail "无法同步 origin/${TARGET_BRANCH}，不能确认发布脚本是否为最新；拒绝用旧脚本发布（fail closed）"
   DRIVER_BASE="$(git -C "$SOURCE_DIR" rev-parse --verify --quiet "$BASE_REF" || true)"
   [[ -n "$DRIVER_BASE" ]] || fail "无法读取 origin/$TARGET_BRANCH"
   if release_driver_is_behind "$DRIVER_BASE"; then
@@ -245,10 +253,10 @@ if [[ "$ENV_FILE" != /* ]]; then
 fi
 if [[ ! -r "$ENV_FILE" ]]; then
   if [[ "$DRY_RUN" == 1 ]]; then
-    printf '%s\n' "提示：dry-run 未找到发布配置 $ENV_FILE；本次不会访问 ECS。" >&2
+    printf '%s\n' "提示：dry-run 未找到发布配置 ${ENV_FILE}；本次不会访问 ECS。" >&2
     ENV_FILE=""
   else
-    fail "找不到发布配置 $ENV_FILE；请把 workbench.env.example 复制到 $(trosa_config_home)/workbench.env，或用 TRADE_OS_WORKBENCH_ENV 指向它"
+    fail "找不到发布配置 ${ENV_FILE}；请把 workbench.env.example 复制到 $(trosa_config_home)/workbench.env，或用 TRADE_OS_WORKBENCH_ENV 指向它"
   fi
 fi
 trosa_warn_legacy_workbench_env "$ENV_FILE"
@@ -256,7 +264,7 @@ trosa_warn_legacy_workbench_env "$ENV_FILE"
 if [[ "$DRY_RUN" != 1 ]]; then
   LOCK_DIR="$GIT_COMMON_DIR/trosa-release.lock"
   trosa_lock_acquire "$LOCK_DIR" "${TRADE_OS_RELEASE_LOCK_WAIT:-1800}" 7200 \
-    || fail "已有另一个本地发布正在运行（锁：$LOCK_DIR，等待 ${TRADE_OS_RELEASE_LOCK_WAIT:-1800}s 超时）；确认无进程后重试，或删除该目录"
+    || fail "已有另一个本地发布正在运行（锁：${LOCK_DIR}，等待 ${TRADE_OS_RELEASE_LOCK_WAIT:-1800}s 超时）；确认无进程后重试，或删除该目录"
 fi
 
 cd "$SOURCE_DIR"
@@ -292,10 +300,11 @@ enforce_agent_branch_ready() {
   local spec=$1 branch_sha=$2 task meta status verify verified
   [[ "$spec" == agent/* ]] || return 0
   [[ "$DRY_RUN" == 1 ]] && return 0
+  [[ "${PIPELINE:-0}" == 1 ]] && return 0
   task="${spec#agent/}"
   meta="$GIT_COMMON_DIR/trosa-tasks/$task.json"
   [[ -r "$meta" ]] \
-    || fail "发布被拒绝：任务 $task 缺少完成证据清单 $meta；请先 test --task $task 生成证据"
+    || fail "发布被拒绝：任务 $task 缺少完成证据清单 ${meta}；请先 test --task $task 生成证据"
   read -r status verify verified < <(python3 - "$meta" <<'PY'
 import json
 import sys
@@ -311,7 +320,7 @@ PY
   [[ "$verified" == "$branch_sha" ]] \
     || fail "发布被拒绝：任务 $task 的证据对应 commit ${verified:0:9}，与分支 tip ${branch_sha:0:9} 不一致；重新 test --task $task"
   git merge-base --is-ancestor "$BASE_SHA" "$branch_sha" \
-    || fail "发布被拒绝：任务 $task 未基于最新 origin/$TARGET_BRANCH；先 sync --task $task 并重新 test"
+    || fail "发布被拒绝：任务 $task 未基于最新 origin/${TARGET_BRANCH}；先 sync --task $task 并重新 test"
 }
 
 # 批量发布：每个 --commit 输入都与 --branch 使用同一完成证据判定。将被发布的
@@ -321,6 +330,7 @@ PY
 enforce_agent_commit_ready() {
   local spec=$1 sha=$2 meta found=0 status verify verified
   [[ "$DRY_RUN" == 1 ]] && return 0
+  [[ "${PIPELINE:-0}" == 1 ]] && return 0
   for meta in "$GIT_COMMON_DIR"/trosa-tasks/*.json; do
     [[ -r "$meta" ]] || continue
     read -r status verify verified < <(python3 - "$meta" <<'PY'
@@ -338,7 +348,7 @@ PY
     [[ "$verify" == "ok" ]] \
       || fail "发布被拒绝：commit ${sha:0:9} 没有有效门禁证据（verify_result=${verify:-无}）；先 test --task"
     git merge-base --is-ancestor "$BASE_SHA" "$sha" \
-      || fail "发布被拒绝：commit ${sha:0:9} 未基于最新 origin/$TARGET_BRANCH；先 sync 并重新 test"
+      || fail "发布被拒绝：commit ${sha:0:9} 未基于最新 origin/${TARGET_BRANCH}；先 sync 并重新 test"
     break
   done
   [[ "$found" == 1 ]] \
@@ -348,7 +358,7 @@ PY
 if [[ ${#COMMIT_SPECS[@]} -gt 0 ]]; then
   for spec in "${COMMIT_SPECS[@]}"; do
     resolved="$(git rev-parse --verify --quiet --end-of-options "${spec}^{commit}" || true)"
-    [[ -n "$resolved" ]] || fail "本地仓库找不到 commit：$spec（先在任务区完成 commit）"
+    [[ -n "$resolved" ]] || fail "本地仓库找不到 commit：${spec}（先在任务区完成 commit）"
     # 已包含在 origin/main 的输入会被 add_commit 跳过，无需证据；其余输入必须
     # 与 --branch 一样对应到 ready 任务的完成证据。
     if ! git merge-base --is-ancestor "$resolved" "$BASE_SHA"; then
@@ -381,7 +391,7 @@ fi
 
 if [[ ${#RELEASE_COMMITS[@]} -eq 0 ]]; then
   printf '\nRELEASE_COMMIT_ALREADY_PRESENT base=%s commits=0\n' "$BASE_SHA"
-  printf '%s\n' "所有输入 commit 已经包含在 origin/$TARGET_BRANCH；无需创建 release worktree、推送或发布。"
+  printf '%s\n' "所有输入 commit 已经包含在 origin/${TARGET_BRANCH}；无需创建 release worktree、推送或发布。"
   exit 0
 fi
 
@@ -500,7 +510,11 @@ fi
 GATE_REUSE=0
 GATE_TREE="$(git -C "$REL_DIR" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null || true)"
 GATE_IDENTITY="$(release_gate_identity "$REL_DIR" "$SOURCE_DIR" "$BASE_SHA" 2>/dev/null || true)"
-if [[ -n "$GATE_TREE" && -n "$GATE_IDENTITY" ]]; then
+if [[ "$PIPELINE" == 1 ]]; then
+  # 流水线必须自己独立算出结论：不读账本、不复用，任何“开发方/他人写下的验收
+  # 结论”都不参与判定。账本里的 tree 只用于报告，不作为通过依据。
+  printf '\n==> 门禁复用判定：流水线模式强制重跑全量门禁（不复用已验收树）。\n'
+elif [[ -n "$GATE_TREE" && -n "$GATE_IDENTITY" ]]; then
   if GATE_HIT="$(release_gate_lookup "$GIT_COMMON_DIR" "$GATE_IDENTITY" 2>/dev/null)"; then
     GATE_REUSE=1
     GATE_TASK="$(printf '%s\n' "$GATE_HIT" | sed -n 's/.* task=\([^ ]*\).*/\1/p')"
@@ -564,7 +578,7 @@ run_step "推送 release commit 到 GitHub $TARGET_BRANCH" \
   "--force-with-lease=refs/heads/$TARGET_BRANCH:$BASE_SHA"
 remote_after="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk 'NR == 1 {print $1}')"
 [[ "$remote_after" == "$RELEASE_SHA" ]] \
-  || fail "GitHub $TARGET_BRANCH 未确认到本次 release commit：期望 $RELEASE_SHA，实际 ${remote_after:-（空）}"
+  || fail "GitHub $TARGET_BRANCH 未确认到本次 release commit：期望 ${RELEASE_SHA}，实际 ${remote_after:-（空）}"
 
 RELEASE_ID="${RELEASE_ID_SPEC:-${TRADE_OS_RELEASE_ID:-rel-$(date -u +%Y%m%d%H%M%S)-${RELEASE_SHA:0:12}}}"
 [[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]] \

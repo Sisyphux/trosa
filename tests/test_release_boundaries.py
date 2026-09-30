@@ -156,7 +156,7 @@ class TaskEvidenceContractTests(unittest.TestCase):
 
     def test_role_guard_runs_before_clean_check_on_publish(self):
         guard = self.script.index("trosa_require_release_role || fail '当前角色没有发布权限")
-        clean = self.script.index('require_clean "$wt" "任务 $task（改动先 commit')
+        clean = self.script.index('require_clean "$wt" "任务 ${task}（改动先 commit')
         self.assertLess(guard, clean)
 
     def test_task_meta_records_completion_verdict(self):

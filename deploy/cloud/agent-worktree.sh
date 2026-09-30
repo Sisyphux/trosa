@@ -95,7 +95,7 @@ begin_migration_lock() {
   MIGRATION_LOCK_DIR="$TASK_META_DIR/.reserve.lock"
   mkdir -p -- "$TASK_META_DIR"
   trosa_lock_acquire "$MIGRATION_LOCK_DIR" 30 120 \
-    || fail "无法获取迁移编号预留锁 $MIGRATION_LOCK_DIR（另一个任务正在预留，请稍后重试）"
+    || fail "无法获取迁移编号预留锁 ${MIGRATION_LOCK_DIR}（另一个任务正在预留，请稍后重试）"
 }
 
 usage() {
@@ -484,7 +484,7 @@ require_main_workspace() {
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
   [[ "$top" == "$MAIN_ROOT" ]] \
-    || fail "create/adopt 必须在主工作区（$MAIN_ROOT）执行，不能在任务隔离区 $top 中创建任务"
+    || fail "create/adopt 必须在主工作区（${MAIN_ROOT}）执行，不能在任务隔离区 $top 中创建任务"
 }
 
 # 任务同步/门禁校验用的基线：优先最新 origin/<main>，否则本地 <main>。
@@ -648,7 +648,7 @@ cmd_start() {
   if [[ -n "$dirty" ]]; then
     printf '主工作区有未提交改动：\n' >&2
     git -C "$MAIN_ROOT" status --short >&2
-    fail "主工作区不干净，不能用 start 建新任务；若这些改动属于任务 $task，请改用 adopt --task $task（会把改动搬进隔离区并保留 stash 备份）"
+    fail "主工作区不干净，不能用 start 建新任务；若这些改动属于任务 ${task}，请改用 adopt --task ${task}（会把改动搬进隔离区并保留 stash 备份）"
   fi
   printf '主工作区干净。\n'
   # 并发体检：只提示，不阻断。已知的其它任务迁移号冲突等不应挡住建区，
@@ -730,7 +730,7 @@ cmd_create() {
   [[ -e "$(path_of "$task")" ]] && fail "目录 $(path_of "$task") 已存在"
   if [[ "$fetch_base" == 1 ]]; then
     git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" \
-      || fail "fetch origin/$TARGET_BRANCH 失败（网络不可用时去掉 --fetch-base，用本地 $TARGET_BRANCH）"
+      || fail "fetch origin/$TARGET_BRANCH 失败（网络不可用时去掉 --fetch-base，用本地 ${TARGET_BRANCH}）"
     base="origin/$TARGET_BRANCH"
   fi
   git -C "$MAIN_ROOT" rev-parse --verify --quiet "$base" >/dev/null \
@@ -843,7 +843,7 @@ cmd_test() {
     base_ref="$(task_base_ref)"
     if git -C "$wt" rev-parse --verify --quiet "$base_ref" >/dev/null 2>&1; then
       head_contains "$wt" "$base_ref" \
-        || fail "任务 $task 尚未同步到最新 $TARGET_BRANCH（HEAD 不包含 $base_ref）；先 sync --task $task 再 test"
+        || fail "任务 $task 尚未同步到最新 ${TARGET_BRANCH}（HEAD 不包含 ${base_ref}）；先 sync --task $task 再 test"
     else
       printf '警告：找不到基线 %s，跳过基线包含检查（先 fetch origin/%s）。\n' "$base_ref" "$TARGET_BRANCH" >&2
     fi
@@ -898,7 +898,7 @@ cmd_test() {
     merge_task_meta "$task" \
       "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log" \
       "reusable_tree=0"
-    fail "任务 $task 门禁未通过，不可发布（证据：$log，退出码 $status）"
+    fail "任务 $task 门禁未通过，不可发布（证据：${log}，退出码 ${status}）"
   fi
 }
 
@@ -1058,7 +1058,7 @@ cmd_sync() {
   base="$(task_base_ref)"
   # 先消除并行迁移编号碰撞，再变基；改名会作为本任务的一个 commit 保留。
   reconcile_task_migrations "$task" "$wt"
-  require_clean "$wt" "任务 $task（迁移改名未提交）"
+  require_clean "$wt" "任务 ${task}（迁移改名未提交）"
   if git -C "$wt" rebase "$base"; then
     iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     # 变基后旧的门禁证据不再对应当前 HEAD，必须重跑完整门禁才能发布。
@@ -1088,12 +1088,12 @@ cmd_publish() {
   local wt branch head
   wt="$(find_task_path "$task")"
   branch="$(branch_of "$task")"
-  require_clean "$wt" "任务 $task（改动先 commit 到 $branch）"
+  require_clean "$wt" "任务 ${task}（改动先 commit 到 ${branch}）"
   # 发布只接受真正 ready 的任务：基线要最新，门禁证据要对应当前 HEAD。
   git -C "$MAIN_ROOT" fetch --quiet origin "$TARGET_BRANCH" \
     || fail "publish 需要最新 origin/$TARGET_BRANCH 才能判定任务是否 ready；fetch 失败"
   reconcile_task_migrations "$task" "$wt"
-  require_clean "$wt" "任务 $task（迁移改名未提交）"
+  require_clean "$wt" "任务 ${task}（迁移改名未提交）"
   check_task_ready "$task" "$wt" \
     || fail "任务 $task 未达到发布条件；先 sync --task $task 再 test --task $task"
   head="$(git -C "$wt" rev-parse HEAD)"
@@ -1131,7 +1131,7 @@ cmd_publish() {
       "verified_commit=$head" \
       "verified_at=$iso" \
       "evidence=$log"
-    fail "任务 $task 发布未完成（证据：$log）；未标记为完成"
+    fail "任务 $task 发布未完成（证据：${log}）；未标记为完成"
   fi
 }
 
@@ -1186,10 +1186,10 @@ cmd_guard() {
   case "$role" in
     dev|development|review|readonly|read-only)
       if [[ "$top" == "$MAIN_ROOT" ]]; then
-        fail "开发/审查角色（$role）不得在主工作区开始任务：主工作区只做集成/验收/发布。请在 $MAIN_ROOT 运行 create（已有在途改动则用 adopt）进入 agent/<id> 隔离区后再改代码，避免先把主工作区写脏。"
+        fail "开发/审查角色（${role}）不得在主工作区开始任务：主工作区只做集成/验收/发布。请在 $MAIN_ROOT 运行 create（已有在途改动则用 adopt）进入 agent/<id> 隔离区后再改代码，避免先把主工作区写脏。"
       fi
       if [[ -z "$task" ]]; then
-        fail "开发/审查角色（$role）当前不在 agent/<id> 任务隔离区（目录 $top，分支 $branch）。请回到主工作区 $MAIN_ROOT 用 create/adopt 建立任务。"
+        fail "开发/审查角色（${role}）当前不在 agent/<id> 任务隔离区（目录 ${top}，分支 ${branch}）。请回到主工作区 $MAIN_ROOT 用 create/adopt 建立任务。"
       fi
       printf 'guard：可以开始任务\n  角色：%s\n  任务：%s\n  目录：%s\n  分支：%s\n' \
         "$role" "$task" "$top" "$branch"
@@ -1367,7 +1367,7 @@ cmd_remove() {
   local wt
   wt="$(find_task_path "$task")"
   if [[ "$force" != 1 ]]; then
-    require_clean "$wt" "任务 $task（未提交改动会丢失；确认丢弃请加 --force）"
+    require_clean "$wt" "任务 ${task}（未提交改动会丢失；确认丢弃请加 --force）"
     git -C "$MAIN_ROOT" worktree remove -- "$wt"
   else
     git -C "$MAIN_ROOT" worktree remove --force -- "$wt"
@@ -1408,5 +1408,5 @@ case "$command" in
   publish) cmd_publish "$@" ;;
   remove) cmd_remove "$@" ;;
   --help|-h|help) usage ;;
-  *) fail "未知命令：$command（用 --help 查看）" ;;
+  *) fail "未知命令：${command}（用 --help 查看）" ;;
 esac

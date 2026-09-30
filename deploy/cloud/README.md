@@ -151,7 +151,13 @@ deploy/cloud/logs-workbench.sh
 ```
 
 `auto-publish.sh` 是日常入口；`release-commit.sh` 负责构建发布候选，
-`trosa-release publish` 是 ECS 统一发布器。`release-commit.sh` 先在干净临时
+`trosa-release publish` 是 ECS 统一发布器。`release-pipeline.sh` 是常驻发布流水线
+（能力分权）：开发方用 `agent-worktree.sh ship` 把分支写进队列
+`trosa-tasks/.ship-queue`，流水线消费该队列、按候选 diff 用 `tools/release_tier.py`
+重新计算 T0/T1/T2，再调 `release-commit.sh --pipeline`（强制重跑完整门禁、不读开发方
+证据、禁用已验收树复用）发布 T1。`run` 默认 dry-run，`--publish` 才真正发布；T2 停在
+`awaiting-approval`，T0 合入 main 不部署。`classify --task <id>` 与 `status` 为只读。
+流水线自身不存放凭据。`release-commit.sh` 先在干净临时
 worktree 中完成 cherry-pick、回归、只读 ECS 状态和必要备份，再推送唯一的
 release commit，最后调用 `trosa-release publish`。底层发布器让 ECS 后台任务下载指定 commit 的公开归档，
 按阶段执行：fetch → db-plan（显式迁移分类）→ backup（仅有数据库变化时，

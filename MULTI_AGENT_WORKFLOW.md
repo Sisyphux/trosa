@@ -163,7 +163,41 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
   重新 `publish`。这个规则保证后上线者包含先前所有已上线改动，任何一方都不会被静默
   覆盖；无法证明安全的比较一律 fail closed。
 
-### 门禁执行结构与已验收树复用（对象身份）
+### 常驻发布流水线（能力分权，阶段4）
+
+`ship` 只把交付写进队列。消费队列的是一个常驻的、持有发布凭据的发布方
+（`deploy/cloud/release-pipeline.sh`），它**自己重新计算一切**，不信任开发方交来的
+`verify.log`：
+
+```bash
+# 只读：按任务已交付的 commit 相对 origin/main 的改动计算风险级别
+deploy/cloud/release-pipeline.sh classify --task <id>
+# 只读：打印交付队列与已处置结果
+deploy/cloud/release-pipeline.sh status
+# 消费队列（默认 dry-run：cherry-pick + 全量门禁 + 数据库预检，不推送不发布）
+deploy/cloud/release-pipeline.sh run
+# 真正发布（阶段4 只对 T1 生效；要求 release 能力）
+deploy/cloud/release-pipeline.sh run --publish
+```
+
+- **分级由流水线算，不由开发方声明**（`tools/release_tier.py`，规则属于流水线一侧）：
+  - **T0**：只改 `docs/`、`design/`、`tests/` 或以 `.md` 结尾 → 合入 main，不部署；
+  - **T1**：其余常规代码 → 门禁绿后自动发布，健康检查失败由 ECS 自动回滚；
+  - **T2**：触及 `migrations/`、`deploy/`、`serve.py`、`config.py`、`AGENTS.md`，
+    或发布/迁移/备份工具与流水线自身 → 停在 `awaiting-approval`，人工放行后才发布。
+    T2 优先于 T0/T1，所以任何流水线自身的改动永远是 T2。
+- **不信任开发方的结论**：流水线调 `release-commit.sh --pipeline`，它不要求任务清单里
+  已有 `verify_result=ok`，但**强制重跑完整门禁**并禁用“按对象身份复用”，保证门禁是
+  流水线本次独立算出的。伪造一份 `verify.log` 或账本记录都无法让流水线跳过门禁。
+- **队列与游标**：队列 `trosa-tasks/.ship-queue`（`ship` 追加），游标
+  `trosa-tasks/.pipeline-state`（每个 commit 的处置：`landed` / `dry-run-ok` /
+  `awaiting-approval` / `merge-only` / `failed` / `refused`）。队列记录必须与任务清单
+  的 `shipped_commit` 一致、且 commit 确在该 agent 分支上，否则按伪造处理并拒绝。
+- **凭据边界**：流水线自身不存放任何凭据；发布能力来自仓库外的发布配置与云 AK，
+  开发会话读不到（阶段4 先在仓库内实现 runner；常驻的 launchd/专用账号与凭据落位
+  见后续阶段，需要人工确认）。
+
+
 
 一次完整发布门禁仍只有一份实现 `deploy/cloud/release-test.sh`，dev 任务区、release
 候选与正式发布共用它。为了不把同一棵树重算一遍，门禁现在按下面的结构执行，并在
