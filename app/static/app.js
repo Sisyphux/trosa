@@ -10111,8 +10111,10 @@ function syncCompleteAiButton() {
   var button = document.getElementById('completeAiBtn');
   if (!button) return;
   var textarea = document.getElementById('completeResult');
-  var busy = _completeAnalyzeBusy || _completeSubmitting;
-  button.disabled = busy || !(textarea && textarea.value.trim());
+  // `整理中…` belongs to an actual analysis; while the record is being saved the
+  // button only needs to go quiet (disabled), not claim it is analysing (U-05).
+  var busy = _completeAnalyzeBusy;
+  button.disabled = busy || _completeSubmitting || !(textarea && textarea.value.trim());
   button.textContent = busy ? '整理中…' : 'AI 帮我整理';
   if (busy) button.setAttribute('aria-busy', 'true'); else button.removeAttribute('aria-busy');
 }

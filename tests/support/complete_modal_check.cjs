@@ -185,11 +185,17 @@ function openFilled(overrides) {
     openFilled();
     doc.getElementById('completeResult').value = '客户确认';
     win.onCompleteResultInput();
+    win._completeSubmitting = true;
     win.setCompleteSubmitting(true);
     const button = doc.getElementById('completeSubmitBtn');
     assert.equal(button.textContent, '保存中…');
     assert.equal(button.disabled, true);
     assert.equal(button.getAttribute('aria-busy'), 'true');
+    const ai = doc.getElementById('completeAiBtn');
+    assert.equal(ai.disabled, true);
+    assert.equal(ai.textContent, 'AI 帮我整理', 'saving must not claim the AI is analysing');
+    assert.equal(ai.hasAttribute('aria-busy'), false);
+    win._completeSubmitting = false;
     win.setCompleteSubmitting(false);
     assert.equal(button.disabled, false);
     assert.equal(button.hasAttribute('aria-busy'), false);
