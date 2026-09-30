@@ -862,58 +862,63 @@
 
 <!-- Complete Reminder Modal -->
 <div class="modal-overlay" id="completeModal" data-initial-focus="#completeResult">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal modal-sheet complete-sheet" role="dialog" aria-modal="true" aria-label="完成这次跟进" style="max-width:600px;">
     <div class="modal-header">
-      <h3>完成这次跟进</h3>
+      <div class="modal-head-copy">
+        <span class="modal-eyebrow">完成这次跟进</span>
+        <h3 id="completeCustomerName"></h3>
+        <p class="complete-what" id="completeSummary"><span class="complete-what-task" id="completeContent"></span><span class="complete-what-due" id="completeDue"></span></p>
+      </div>
       <button class="modal-close" onclick="closeModal('completeModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
       <input type="hidden" id="completeReminderId">
-      <!-- 顶部信息压缩：客户 · 任务，单行省略 -->
-      <div class="complete-summary" id="completeSummary">
-        <span class="modal-fact-value" id="completeCustomerName"></span>
-        <span class="complete-summary-sep" aria-hidden="true">·</span>
-        <span class="complete-summary-task" id="completeContent"></span>
+      <!-- 第一句：今天的 [方式] 沟通，发生了什么？方式是句中的一个词，值仍写入 completeActivityType -->
+      <div class="complete-line" id="completeMethodLabel">
+        <span>今天的</span>
+        <div class="ui-menu ui-menu-word" id="completeActivityMenu">
+          <button type="button" class="ui-menu-trigger" id="completeActivityTrigger"
+                  aria-haspopup="listbox" aria-expanded="false" aria-labelledby="completeMethodLabel completeActivityTriggerValue"
+                  onclick="uiMenuToggle('completeActivity')" onkeydown="uiMenuTriggerKeydown(event, 'completeActivity')">
+            <span class="ui-menu-icon" id="completeActivityTriggerIcon" aria-hidden="true"></span>
+            <span class="ui-menu-value" id="completeActivityTriggerValue"></span>
+            <span class="ui-icon ui-icon-down ui-menu-caret" aria-hidden="true"></span>
+          </button>
+          <input type="hidden" id="completeActivityType" value="whatsapp">
+          <div class="ui-menu-list" id="completeActivityMenuList" role="listbox" aria-label="沟通方式" tabindex="-1" hidden
+               onclick="uiMenuListClick(event, 'completeActivity')" onkeydown="uiMenuListKeydown(event, 'completeActivity')"></div>
+        </div>
+        <span>沟通，发生了什么？<span class="required" aria-hidden="true">*</span></span>
       </div>
-      <div class="form-group complete-capture">
-        <div class="form-label-row">
-          <label class="form-label" for="completeResult">这次发生了什么？ <span class="required">*</span></label>
-          <button type="button" class="complete-ai" id="completeAiBtn" onclick="analyzeCommunication('complete')" disabled>AI 帮我整理</button>
-        </div>
-        <textarea class="form-control" id="completeResult" rows="5" oninput="onCompleteResultInput()" onkeydown="onCompleteResultKeydown(event)" placeholder="邮件、WhatsApp 或会议记录"></textarea>
+      <label class="sr-only" for="completeResult">这次发生了什么？（必填）</label>
+      <textarea class="form-control complete-pad" id="completeResult" rows="4" oninput="onCompleteResultInput()" onkeydown="onCompleteResultKeydown(event)" placeholder="可以直接粘贴邮件、WhatsApp 或会议记录"></textarea>
+      <div class="complete-pad-foot">
         <div class="complete-inline-error" id="completeResultError" role="alert" hidden></div>
-        <!-- 沟通方式：紧凑自定义下拉（图标 + 当前方式），值仍写入 completeActivityType -->
-        <div class="complete-method-row">
-          <span class="complete-method-label" id="completeMethodLabel">沟通方式</span>
-          <div class="ui-menu" id="completeActivityMenu">
-            <button type="button" class="ui-menu-trigger" id="completeActivityTrigger"
-                    aria-haspopup="listbox" aria-expanded="false" aria-labelledby="completeMethodLabel completeActivityTriggerValue"
-                    onclick="uiMenuToggle('completeActivity')" onkeydown="uiMenuTriggerKeydown(event, 'completeActivity')">
-              <span class="ui-menu-icon" id="completeActivityTriggerIcon" aria-hidden="true"></span>
-              <span class="ui-menu-value" id="completeActivityTriggerValue"></span>
-              <span class="ui-icon ui-icon-down ui-menu-caret" aria-hidden="true"></span>
-            </button>
-            <input type="hidden" id="completeActivityType" value="whatsapp">
-            <div class="ui-menu-list" id="completeActivityMenuList" role="listbox" aria-label="沟通方式" tabindex="-1" hidden
-                 onclick="uiMenuListClick(event, 'completeActivity')" onkeydown="uiMenuListKeydown(event, 'completeActivity')"></div>
-          </div>
-        </div>
+        <button type="button" class="complete-ai" id="completeAiBtn" onclick="analyzeCommunication('complete')" disabled>AI 帮我整理</button>
       </div>
       <div class="quick-reply-analysis" id="completeAnalysis" hidden></div>
-      <label class="complete-next-toggle"><input type="checkbox" id="completeHasNext" onchange="toggleCompleteNext()"><span><strong>安排下一步</strong></span></label>
-      <div class="form-group complete-next-section" id="completeNextSection" hidden>
-        <label class="form-label" for="completeNextTask">下一步做什么？</label>
-        <input type="text" class="form-control" id="completeNextTask" placeholder="例如：发送再生料方案报价" oninput="updateCompleteSaveLabel()">
-        <label class="form-label complete-task-date-label">任务日期</label>
-        <div class="next-date-choices" id="completeDateChoices">
-          <button type="button" class="date-choice" data-days="7" onclick="setCompleteNextDate(7, this)">7 天</button>
-          <button type="button" class="date-choice active" data-days="15" onclick="setCompleteNextDate(15, this)">15 天</button>
-          <button type="button" class="date-choice" data-days="30" onclick="setCompleteNextDate(30, this)">30 天</button>
-          <button type="button" class="date-choice" id="completeCustomDateBtn" onclick="chooseCompleteCustomDate(this)">选择日期</button>
+
+      <!-- 第二句：接下来。先不安排 / 7 / 15 / 30 天后 / 选日期；勾选框仍是事实来源，但不再露出 -->
+      <div class="complete-next" id="completeNext">
+        <div class="complete-line complete-line-next">接下来</div>
+        <input type="checkbox" class="sr-only" id="completeHasNext" onchange="toggleCompleteNext()" aria-label="安排下一步" tabindex="-1">
+        <div class="next-date-choices complete-seg" id="completeDateChoices" role="group" aria-label="下一步时间">
+          <button type="button" class="complete-seg-none active" id="completeNoNextBtn" onclick="clearCompleteNext()">先不安排</button>
+          <button type="button" class="date-choice" data-days="7" onclick="pickCompleteNext(7, this)">7 天后</button>
+          <button type="button" class="date-choice" data-days="15" onclick="pickCompleteNext(15, this)">15 天后</button>
+          <button type="button" class="date-choice" data-days="30" onclick="pickCompleteNext(30, this)">30 天后</button>
+          <button type="button" class="date-choice" id="completeCustomDateBtn" onclick="pickCompleteCustomDate(this)">选日期</button>
         </div>
-        <input type="date" class="form-control complete-date-input" id="completeNextFollow" onchange="onCompleteNextDateInputChange()">
-        <div class="complete-inline-error" id="completeNextError" role="alert" hidden></div>
+        <div class="complete-next-section" id="completeNextSection" hidden>
+          <div class="complete-when"><span class="complete-when-date tnum" id="completeWhenDate"></span><span class="complete-when-week" id="completeWhenWeek"></span></div>
+          <label class="sr-only" for="completeNextTask">下一步做什么？</label>
+          <input type="text" class="form-control complete-task" id="completeNextTask" placeholder="到时候要做什么？例如：发送再生料方案报价" oninput="updateCompleteSaveLabel()">
+          <input type="date" class="form-control complete-date-input" id="completeNextFollow" aria-label="任务日期" onchange="onCompleteNextDateInputChange()">
+          <p class="complete-tz" id="completeTz" hidden></p>
+          <div class="complete-inline-error" id="completeNextError" role="alert" hidden></div>
+        </div>
       </div>
+
       <details class="complete-more-options">
         <summary><span>补充与周报</span><span class="complete-more-badge" id="completeMoreBadge" hidden>周报</span></summary>
         <div class="form-group"><label class="form-label" for="completeOutcome">补充判断</label><textarea class="form-control" id="completeOutcome" rows="2" placeholder="只有需要与事实分开说明时再填写"></textarea></div>
@@ -940,7 +945,7 @@
     </div>
     <div class="complete-submit-error" id="completeSubmitError" role="alert" hidden></div>
     <div class="modal-footer complete-footer">
-      <span class="complete-kbd-hint" aria-hidden="true">⌘/Ctrl + ↵</span>
+      <span class="complete-kbd-hint" aria-hidden="true">沟通记录可以没有下一步</span>
       <button class="btn cw-act" id="completeCancelBtn" onclick="closeModal('completeModal')">取消</button>
       <button class="btn btn-primary cw-act cw-primary" id="completeSubmitBtn" onclick="submitComplete()">完成跟进</button>
     </div>

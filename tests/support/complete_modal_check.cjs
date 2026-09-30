@@ -146,15 +146,16 @@ function openFilled(overrides) {
     win.onCompleteResultInput();
     assert.equal(button.disabled, false);
   });
-  await check('date choices carry real dates and the custom button has a plain label', () => {
+  await check('date choices are plain words, the chosen real date reads out large, the custom button has a plain label', () => {
     openFilled();
     const seven = doc.querySelector('#completeDateChoices .date-choice[data-days="7"]');
     const fifteen = doc.querySelector('#completeDateChoices .date-choice[data-days="15"]');
     win.setCompleteNextDate(15, fifteen);
-    assert.match(fifteen.textContent, /^15 天 · \d+月\d+日$/);
+    assert.equal(fifteen.textContent, '15 天后');
+    assert.match(doc.getElementById('completeWhenDate').textContent, /^\d+月\d+日$/);
     win.setCompleteNextDate(7, seven);
-    assert.match(seven.textContent, /^7 天 · \d+月\d+日$/);
-    assert.equal(doc.getElementById('completeCustomDateBtn').textContent, '选择日期');
+    assert.equal(seven.textContent, '7 天后');
+    assert.equal(doc.getElementById('completeCustomDateBtn').textContent, '选日期');
   });
   await check('checking 安排下一步 focuses the task input and prefills the AI suggestion', () => {
     openFilled();

@@ -10072,7 +10072,7 @@ function completeRelativeDateLabel(days) {
   var date = new Date();
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() + Number(days || 0));
-  return days + ' 天 · ' + formatChineseDate(localDateString(date));
+  return days + ' 天后';
 }
 
 function setCompleteDateChoiceLabels() {
@@ -10080,7 +10080,7 @@ function setCompleteDateChoiceLabels() {
   document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) {
     var days = choice.getAttribute('data-days');
     if (days) { choice.textContent = completeRelativeDateLabel(days); return; }
-    choice.textContent = (choice.classList.contains('active') && customValue) ? formatChineseDate(customValue) : '选择日期';
+    choice.textContent = (choice.classList.contains('active') && customValue) ? formatChineseDate(customValue) : '选日期';
   });
 }
 
@@ -10111,6 +10111,8 @@ function onCompleteNextDateInputChange() {
     });
   }
   setCompleteDateChoiceLabels();
+  syncCompleteSeg();
+  renderCompleteWhen();
   updateCompleteSaveLabel();
   showCompleteNextError('');
 }
@@ -10200,6 +10202,8 @@ function fillCompleteModal(r) {
   document.getElementById('completeModal').dataset.customerId = r.customer_id || '';
   document.getElementById('completeCustomerName').textContent = r.customer_name || '';
   document.getElementById('completeContent').textContent = r.task_title || r.title || r.content || '';
+  document.getElementById('completeDue').textContent = completeDueText(r.remind_date);
+  _completeTimezone = r.timezone || '';
   uiMenuSetValue('completeActivity', 'whatsapp');
   document.getElementById('completeResult').value = '';
   _communicationAnalyses.complete = null;
@@ -10218,6 +10222,8 @@ function fillCompleteModal(r) {
   document.getElementById('completeNextFollow').min = localDateString(minDate);
   document.getElementById('completeNextFollow').value = '';
   document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) { choice.classList.remove('active'); });
+  syncCompleteSeg();
+  renderCompleteWhen();
   var submit = document.getElementById('completeSubmitBtn');
   if (submit) submit.disabled = false;
   var cancel = document.getElementById('completeCancelBtn');
@@ -10285,8 +10291,75 @@ function toggleCompleteNext() {
     document.getElementById('completeNextFollow').value = '';
     setCompleteDateChoiceLabels();
   }
+  syncCompleteSeg();
+  renderCompleteWhen();
   showCompleteNextError('');
   updateCompleteSaveLabel();
+}
+
+// “接下来”是一行文字选项：先不安排 / 7·15·30 天后 / 选日期。复选框仍是唯一事实来源，这里只驱动它。
+function syncCompleteSeg() {
+  var hasNext = document.getElementById('completeHasNext').checked;
+  var none = document.getElementById('completeNoNextBtn');
+  if (none) none.classList.toggle('active', !hasNext);
+  document.querySelectorAll('#completeDateChoices button').forEach(function(button) {
+    button.setAttribute('aria-pressed', button.classList.contains('active') ? 'true' : 'false');
+  });
+  if (!hasNext) document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) { choice.classList.remove('active'); });
+}
+
+function clearCompleteNext() {
+  var box = document.getElementById('completeHasNext');
+  if (!box.checked) return;
+  box.checked = false;
+  toggleCompleteNext();
+}
+
+function pickCompleteNext(days, button) {
+  var box = document.getElementById('completeHasNext');
+  if (!box.checked) { box.checked = true; toggleCompleteNext(); }
+  setCompleteNextDate(days, button);
+  document.getElementById('completeNextTask').focus();
+}
+
+function pickCompleteCustomDate(button) {
+  var box = document.getElementById('completeHasNext');
+  if (!box.checked) { box.checked = true; toggleCompleteNext(); }
+  chooseCompleteCustomDate(button);
+}
+
+function completeDueText(remindDate) {
+  var due = String(remindDate || '').substring(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) return '';
+  var today = localDateString(new Date());
+  if (due === today) return ' · 今天到期';
+  if (due > today) return ' · ' + formatChineseDate(due) + '到期';
+  var days = Math.round((new Date(today + 'T12:00:00') - new Date(due + 'T12:00:00')) / 86400000);
+  return ' · 原定 ' + formatChineseDate(due) + ' · 逾期 ' + days + ' 天';
+}
+
+// 选定日期的大字读数；客户有推断时区时，只说明“那天对方是不是工作日”，不改任何数据。
+var _completeTimezone = '';
+function renderCompleteWhen() {
+  var value = document.getElementById('completeNextFollow').value;
+  var dateEl = document.getElementById('completeWhenDate');
+  var weekEl = document.getElementById('completeWhenWeek');
+  var tzEl = document.getElementById('completeTz');
+  if (!dateEl || !weekEl || !tzEl) return;
+  tzEl.hidden = true;
+  tzEl.classList.remove('is-warn');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) { dateEl.textContent = '选择日期'; weekEl.textContent = ''; return; }
+  var day = new Date(value + 'T12:00:00');
+  var ahead = Math.round((day - new Date(localDateString(new Date()) + 'T12:00:00')) / 86400000);
+  dateEl.textContent = formatChineseDate(value);
+  weekEl.textContent = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][day.getDay()] + (ahead > 0 ? ' · ' + ahead + ' 天后' : '');
+  if (!_completeTimezone) return;
+  try {
+    var weekend = ['Sat', 'Sun'].indexOf(tideDateParts(_completeTimezone, day.getTime()).wd) >= 0;
+    tzEl.textContent = weekend ? '那天是对方的周末，建议换一天（时区为系统推断）' : '那天是对方的工作日（时区为系统推断）';
+    tzEl.classList.toggle('is-warn', weekend);
+    tzEl.hidden = false;
+  } catch (e) { /* 时区无效：不显示提示 */ }
 }
 
 function setCompleteNextDate(days, button) {
@@ -10298,6 +10371,8 @@ function setCompleteNextDate(days, button) {
     choice.classList.toggle('active', choice === button);
   });
   setCompleteDateChoiceLabels();
+  syncCompleteSeg();
+  renderCompleteWhen();
   updateCompleteSaveLabel();
   showCompleteNextError('');
 }
@@ -11748,7 +11823,9 @@ function focusFirstModalControl(modal) {
     var target = modal.querySelector(preferred);
     if (target && !target.disabled && !target.hidden) { target.focus({ preventScroll: true }); return; }
   }
-  var focusable = modal.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+  // The close × comes first in the DOM but is never where a person starts: prefer the first control, then the × as a last resort.
+  var focusable = modal.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]):not(.modal-close), [tabindex]:not([tabindex="-1"])')
+    || modal.querySelector('.modal-close:not([disabled])');
   if (focusable) focusable.focus({ preventScroll: true });
 }
 

@@ -2449,11 +2449,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 
 /* 完成这次跟进: facts, the next-step switch and its group */
 #trosa .modal .modal-fact { margin-bottom: .95rem; }
-#trosa .modal .complete-next-section {
-  margin-bottom: .6rem;
-  padding: .2rem 0 .2rem 1rem;
-  border-left: 1px solid var(--dl-hair);
-}
 #trosa .modal .report-opt-toggle { display: flex; align-items: flex-start; gap: .6rem; cursor: pointer; }
 #trosa .modal .report-opt-title { color: var(--dl-ink-2); font-size: .8rem; }
 #trosa .modal .report-opt-hint,
@@ -2504,40 +2499,8 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 
 /* ============================================================================
    9. COMPLETE MODAL — 完成这次跟进
-   The modal is a single quiet capture step: one identity line, one text area,
-   one method menu, one optional next step. Everything below is paper and ink.
+   Two sentences: what happened today, and what comes next. Everything below is paper and ink.
    ============================================================================ */
-
-/* --- identity: 客户 · 任务 on a single quiet line --- */
-#trosa .modal .complete-summary {
-  display: flex;
-  align-items: baseline;
-  gap: .55rem;
-  min-width: 0;
-  margin-bottom: 1.15rem;
-  padding-bottom: .85rem;
-  border-bottom: 1px solid var(--dl-hair-2);
-  font-size: .86rem;
-}
-#trosa .modal .complete-summary-customer,
-#trosa .modal .complete-summary #completeCustomerName {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-top: 0;
-  overflow: hidden;
-  color: var(--dl-ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#trosa .modal .complete-summary-sep { flex: 0 0 auto; color: var(--dl-faint); }
-#trosa .modal .complete-summary-task {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--dl-ink-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* --- AI helper: a small hairline button, muted until there is text --- */
 #trosa .modal .complete-ai {
@@ -2567,16 +2530,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   line-height: 1.4;
 }
 #trosa .modal .complete-submit-error { margin: 0; padding: .5rem 1.7rem .1rem; }
-
-/* --- method row: caption + compact menu, sits under the textarea --- */
-#trosa .modal .complete-method-row { display: flex; align-items: center; gap: .7rem; margin-top: .8rem; }
-#trosa .modal .complete-method-label {
-  color: var(--dl-mut);
-  font-size: .6rem;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
 
 /* --- reusable menu (ui-menu): trigger + listbox --- */
 #trosa .ui-menu { position: relative; display: inline-flex; min-width: 0; }
@@ -2685,3 +2638,191 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal.is-submitting .modal-body { pointer-events: none; }
 #trosa .modal.is-submitting .complete-footer .cw-act:not(.cw-primary) { pointer-events: none; }
 
+
+/* ============================================================================
+   10. SHEET SHELL — every small window
+   The pages are rooms (paper, serif identity, hairlines, one ink pill); the
+   dialogs used to be a generic frame from an earlier skin: a tinted header bar,
+   boxed buttons, a footer bar. A dialog is now a sheet of the same paper:
+   no bars, a small eyebrow + a serif title, hairline-only structure, text verbs
+   and one solid pill. The layers below it (style.css, visual-v2/v3) still set
+   the old frame with !important, so this section repeats those properties.
+   ============================================================================ */
+#trosa .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+#trosa .modal-overlay { background: rgba(36, 34, 29, .34) !important; }
+#trosa .modal-overlay .modal {
+  border: 0 !important;
+  border-radius: var(--dl-r-xl) !important;
+  background: var(--dl-paper) !important;
+  box-shadow: 0 1px 2px rgba(36, 34, 29, .06), 0 18px 50px -12px rgba(36, 34, 29, .28) !important;
+}
+#trosa .modal .modal-header {
+  align-items: flex-start;
+  padding: 1.7rem 2.5rem 0 !important;
+  border-bottom: 0 !important;
+  background: none !important;
+}
+#trosa .modal .modal-header h3 {
+  font-family: var(--dl-display) !important;
+  font-size: 1.55rem !important;
+  font-weight: 400 !important;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+}
+#trosa .modal .modal-header .modal-close { flex: 0 0 auto; margin: -.4rem -.7rem 0 0; border-radius: 50% !important; border-color: transparent !important; }
+#trosa .modal .modal-header .modal-close:hover { background: var(--dl-ink-wash) !important; border-color: transparent !important; }
+#trosa .modal .modal-head-copy { min-width: 0; flex: 1 1 auto; }
+#trosa .modal .modal-eyebrow { display: block; margin-bottom: .55rem; color: var(--dl-mut); font-size: var(--dl-fs-micro); letter-spacing: .18em; text-transform: uppercase; }
+#trosa .modal .modal-body { padding: 1.4rem 2.5rem .4rem !important; }
+#trosa .modal .modal-footer {
+  margin: .9rem 2.5rem 0;
+  padding: 1rem 0 1.4rem !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+}
+/* verbs: text, with one solid ink pill */
+#trosa .modal .modal-footer .btn {
+  min-height: 44px;
+  padding: .5rem 1.1rem !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: none !important;
+  color: var(--dl-ink-2) !important;
+  font-size: .9rem !important;
+  font-weight: 400 !important;
+  letter-spacing: .01em;
+}
+#trosa .modal .modal-footer .btn:hover:not(:disabled) { background: var(--dl-ink-wash) !important; color: var(--dl-ink) !important; }
+#trosa .modal .modal-footer .btn.btn-primary,
+#trosa .modal .modal-footer .btn.cw-primary {
+  padding: .5rem 1.3rem !important;
+  background: var(--dl-ink) !important;
+  color: #fffdf7 !important;
+  font-weight: 500 !important;
+}
+#trosa .modal .modal-footer .btn.btn-primary:hover:not(:disabled),
+#trosa .modal .modal-footer .btn.cw-primary:hover:not(:disabled) { background: #3a372f !important; color: #fffdf7 !important; }
+#trosa .modal .modal-footer .btn.btn-danger { color: var(--dl-danger) !important; }
+#trosa .modal .modal-footer .btn:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 560px) {
+  #trosa .modal .modal-header { padding: 1.3rem 1.3rem 0 !important; }
+  #trosa .modal .modal-body { padding: 1.1rem 1.3rem .3rem !important; }
+  #trosa .modal .modal-footer { margin: .7rem 1.3rem 0; padding-bottom: 1.1rem !important; }
+}
+
+/* fields in a sheet focus like the page rooms do: no box, the hairline turns gold */
+#trosa .modal .form-control:focus-visible,
+#trosa .modal .form-group input:focus-visible,
+#trosa .modal .form-group select:focus-visible,
+#trosa .modal .form-group textarea:focus-visible,
+#trosa .modal select.form-control:focus-visible {
+  outline: 0 !important;
+  border-bottom-color: var(--dl-gold-ink) !important;
+  box-shadow: 0 1px 0 0 var(--dl-gold-ink) !important;
+}
+
+/* --- 完成这次跟进: the two sentences --- */
+#trosa .complete-sheet .modal-header h3 { font-size: 2.05rem !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#trosa .complete-sheet .complete-what { margin: .4rem 0 0; color: var(--dl-ink-3); font-size: .88rem; line-height: 1.5; }
+#trosa .complete-sheet .complete-what-task { color: var(--dl-ink-2); }
+#trosa .complete-sheet .modal-body { padding-top: 1.9rem !important; }
+
+#trosa .complete-sheet .complete-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 .4rem;
+  font-family: var(--dl-display);
+  font-size: 1.28rem;
+  line-height: 1.6;
+  color: var(--dl-ink-2);
+}
+#trosa .complete-sheet .complete-line .required { color: var(--dl-danger); margin-left: .15rem; font-size: .8em; }
+/* the method is a word in the sentence, gold-underlined, opening the same menu */
+#trosa .complete-sheet .ui-menu-word { display: inline-flex; }
+#trosa .complete-sheet .ui-menu-word .ui-menu-trigger {
+  min-height: 0;
+  padding: 0 .1em;
+  border: 0;
+  border-bottom: 1px solid var(--dl-gold);
+  border-radius: 0;
+  background: none;
+  color: var(--dl-ink);
+  font-family: var(--dl-display);
+  font-size: 1em;
+  line-height: 1.3;
+}
+#trosa .complete-sheet .ui-menu-word .ui-menu-trigger:hover { background: var(--dl-gold-wash); }
+#trosa .complete-sheet .ui-menu-word .ui-menu-icon { display: none; }
+#trosa .complete-sheet .ui-menu-word .ui-menu-caret { font-size: .6em; }
+#trosa .complete-sheet .ui-menu-word .ui-menu-list { font-family: var(--dl-sans); }
+
+/* the record is ruled paper, not a box */
+#trosa .complete-sheet textarea.complete-pad.form-control {
+  display: block;
+  width: 100%;
+  height: 7.8rem;
+  min-height: 0;
+  margin-top: .5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(1.95rem - 1px), var(--dl-hair-2) calc(1.95rem - 1px), var(--dl-hair-2) 1.95rem);
+  box-shadow: none;
+  color: var(--dl-ink);
+  font-family: var(--dl-sans);
+  font-size: 1rem;
+  line-height: 1.95rem;
+  resize: none;
+}
+#trosa .complete-sheet textarea.complete-pad.form-control::placeholder { color: var(--dl-faint); }
+/* focus on paper: no box, a gold line under the last rule */
+#trosa .complete-sheet textarea.complete-pad.form-control:focus,
+#trosa .complete-sheet textarea.complete-pad.form-control:focus-visible { outline: 0 !important; box-shadow: 0 2px 0 var(--dl-gold-ink) !important; }
+#trosa .complete-sheet .complete-pad-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 34px; margin-top: .3rem; }
+#trosa .complete-sheet .complete-pad-foot .complete-inline-error { margin: 0; }
+#trosa .complete-sheet .complete-ai { margin-left: auto; padding: .2rem .2rem; border: 0; border-radius: 0; color: var(--dl-gold-ink); font-size: .8rem; }
+#trosa .complete-sheet .complete-ai:hover:not(:disabled) { background: none; color: var(--dl-ink); }
+
+/* second sentence: 接下来 + a run of words, one of them underlined in gold */
+#trosa .complete-sheet .complete-next { margin-top: 1.2rem; padding-top: 1.35rem; border-top: 1px solid var(--dl-hair); }
+#trosa .complete-sheet .complete-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 .3rem;
+  margin: .5rem 0 0;
+  border-bottom: 1px solid var(--dl-hair);
+}
+#trosa .complete-sheet .complete-seg button {
+  position: relative;
+  min-height: 40px;
+  padding: .5rem .95rem .55rem 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  color: var(--dl-mut) !important;
+  font-family: var(--dl-sans);
+  font-size: .9rem !important;
+  box-shadow: none !important;
+}
+#trosa .complete-sheet .complete-seg button:hover { color: var(--dl-ink) !important; }
+#trosa .complete-sheet .complete-seg button.active { color: var(--dl-ink) !important; font-weight: 500; }
+#trosa .complete-sheet .complete-seg button.active::after { content: ""; position: absolute; left: 0; right: .95rem; bottom: -1px; height: 2px; background: var(--dl-gold); }
+#trosa .complete-sheet .complete-next-section { margin: 0; padding: 0; border: 0; }
+#trosa .complete-sheet .complete-when { display: flex; align-items: baseline; gap: .7rem; margin-top: 1rem; }
+#trosa .complete-sheet .complete-when-date { font-family: var(--dl-display); font-size: 1.5rem; line-height: 1.2; color: var(--dl-gold-ink); }
+#trosa .complete-sheet .complete-when-week { color: var(--dl-ink-3); font-size: .82rem; }
+#trosa .complete-sheet .complete-task.form-control { margin-top: .6rem; font-size: 1rem; }
+#trosa .complete-sheet .complete-date-input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; opacity: 0; pointer-events: none; }
+#trosa .complete-sheet .complete-tz { margin: .5rem 0 0; color: var(--dl-mut); font-size: .78rem; }
+#trosa .complete-sheet .complete-tz::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .4rem; border-radius: 50%; background: var(--dl-gold); }
+#trosa .complete-sheet .complete-tz.is-warn { color: var(--dl-warn, #8a6a1f); }
+
+/* the optional extras: a quiet line, closed by default */
+#trosa .complete-sheet .complete-more-options { margin-top: 1.1rem; border-top: 0; }
+#trosa .complete-sheet .complete-more-options > summary { display: flex; align-items: center; padding: .4rem 0; color: var(--dl-mut); font-size: .82rem; list-style: none; cursor: pointer; }
+#trosa .complete-sheet .complete-more-options > summary::-webkit-details-marker { display: none; }
+#trosa .complete-sheet .complete-more-options > summary::before { content: "+"; width: 1.1rem; color: var(--dl-gold-ink); }
+#trosa .complete-sheet .complete-more-options[open] > summary::before { content: "–"; }
+#trosa .complete-sheet .complete-more-options > summary:hover { color: var(--dl-ink); }
+#trosa .complete-sheet .complete-submit-error { padding-left: 2.5rem; padding-right: 2.5rem; }
