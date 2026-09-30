@@ -112,6 +112,8 @@ function applyIconButtons(root) {
     if (button.closest && button.closest('.sidebar-tools-menu')) return;
     // The customer workspace names its quiet actions in words (编辑 · 删除).
     if (button.closest && button.closest('.cw-app')) return;
+    // So does the customer ledger: 重新加载 / 清除搜索 stay readable words.
+    if (button.closest && button.closest('.ld-room')) return;
     // A modal footer keeps 取消 / 返回修改 in words; the header ✕ already closes.
     if (button.closest && button.closest('.modal-footer')) return;
     var accessibleLabel = (button.getAttribute('aria-label') || button.getAttribute('title') || '').trim();
@@ -4927,6 +4929,7 @@ function getCustomerSearchQuery() {
 function setCustomerView(view) {
   customerView = view || 'all';
   customerPage = 1;
+  if (LD.ready && isLedgerView(customerView)) ledgerRenderViews();
   document.querySelectorAll('.customer-view-chip').forEach(function(chip) {
     chip.classList.toggle('active', chip.dataset.view === customerView);
   });
@@ -5049,6 +5052,11 @@ function clearCustomerSearch() {
 }
 
 async function loadCustomers(options) {
+  if (isLedgerView(customerView)) {
+    setCustomerMode('ledger');
+    return loadLedger(options);
+  }
+  setCustomerMode('legacy');
   _pageDataLoadedAt = Date.now();
   options = options || {};
   var loadToken = ++_customerLoadToken;
@@ -5101,6 +5109,747 @@ async function loadCustomers(options) {
       setTimeout(function() { updateFilterIndicator(document.querySelector('.customer-view-chips')); }, 60);
     }
   }
+}
+
+// ========== CUSTOMER LEDGER (账页) ==========
+// One long scroll ordered by 最近发生 (design/rooms/customers.md).  Everything
+// here is read-only: GET /api/customers/ledger gives counts, segment subtotals
+// and a light index (id, days, flags) for the ruler; GET
+// /api/customers/ledger/rows returns the fixed-height rows currently in view.
+// The classic list is kept for the manual-order and archived views only.
+var LEDGER_VIEWS = [
+  { id: 'all', label: '全部' }, { id: 'uncontacted', label: '未获回复' }, { id: 'communicated', label: '已有联系' },
+  { id: 'waiting', label: '等待回复' }, { id: 'silent', label: '很久未联系' }, { id: 'no_next', label: '尚无下一步' }
+];
+var LEDGER_FLAG_OVERDUE = 1, LEDGER_FLAG_NO_NEXT = 2, LEDGER_FLAG_WAITING = 4, LEDGER_FLAG_SILENT = 8, LEDGER_FLAG_CONTACT = 16;
+var LEDGER_BLOCK = 50;
+var LEDGER_WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+var LD = {
+  ready: false, state: 'loading', error: null, view: 'all', query: '', token: 0,
+  total: 0, counts: null, segments: [], today: '',
+  order: [], flags: [], days: [], pos: {},
+  items: [], offs: new Float64Array(1), itemOfPos: [], segOfItem: [],
+  rows: {}, blocks: {}, cur: null, nodes: {}, erow: 70, hrow: 76,
+  raf: 0, fetchTimer: 0, lensTimer: 0, lensPos: -1, dragging: false, refreshing: false
+};
+
+function isLedgerView(view) {
+  return LEDGER_VIEWS.some(function(item) { return item.id === view; });
+}
+
+function ledgerEl(id) { return document.getElementById(id); }
+
+function setCustomerMode(mode) {
+  var page = ledgerEl('page-customers');
+  if (page) page.dataset.customerMode = mode;
+  document.documentElement.dataset.customerMode = mode;
+  var shared = ledgerEl('customerSharedTools');
+  var slot = ledgerEl('ledgerToolsSlot');
+  var legacyList = ledgerEl('customerLegacyList');
+  if (!shared || !slot || !legacyList) return;
+  if (mode === 'ledger' && shared.parentNode !== slot) slot.appendChild(shared);
+  else if (mode !== 'ledger' && shared.parentNode !== legacyList.parentNode) legacyList.parentNode.insertBefore(shared, legacyList);
+}
+
+function ledgerInit() {
+  if (LD.ready) return;
+  LD.ready = true;
+  var scroll = ledgerEl('ledgerScroll');
+  var ruler = ledgerEl('ledgerRuler');
+  var room = ledgerEl('ledgerRoom');
+  ['erow', 'hrow'].forEach(function(name) {
+    var probe = document.createElement('div');
+    probe.className = 'ld-probe';
+    probe.dataset.probe = name;
+    probe.style.height = 'var(--ld-' + name + ')';
+    room.appendChild(probe);
+  });
+  scroll.addEventListener('scroll', function() { ledgerSchedulePaint(); }, { passive: true });
+  scroll.addEventListener('keydown', ledgerKeydown);
+  scroll.addEventListener('pointermove', function(event) {
+    if (event.pointerType === 'touch' || event.pointerType === 'pen') return;
+    var node = event.target.closest && event.target.closest('.ld-ent');
+    if (node && Number(node.dataset.id) !== LD.cur) ledgerSetCursor(Number(node.dataset.id), { noReveal: true });
+  });
+  scroll.addEventListener('click', function(event) {
+    var open = event.target.closest('[data-ld-open]');
+    if (open) { ledgerOpen(Number(open.dataset.ldOpen)); return; }
+    var archive = event.target.closest('[data-ld-archive]');
+    if (archive) { ledgerArchive(Number(archive.dataset.ldArchive)); return; }
+    var node = event.target.closest('.ld-ent');
+    if (!node) return;
+    ledgerSetCursor(Number(node.dataset.id), { noReveal: true });
+    scroll.focus({ preventScroll: true });
+  });
+  scroll.addEventListener('dblclick', function(event) {
+    var node = event.target.closest('.ld-ent');
+    if (node) ledgerOpen(Number(node.dataset.id));
+  });
+  ruler.addEventListener('pointerdown', function(event) {
+    LD.dragging = true;
+    try { ruler.setPointerCapture(event.pointerId); } catch (ignore) {}
+    ledgerScrub(event);
+  });
+  ruler.addEventListener('pointermove', ledgerScrub);
+  ruler.addEventListener('pointerleave', function() { if (!LD.dragging) ledgerEl('ledgerLens').classList.remove('is-on'); });
+  var endDrag = function(event) {
+    LD.dragging = false;
+    ledgerEl('ledgerLens').classList.remove('is-on');
+    try { ruler.releasePointerCapture(event.pointerId); } catch (ignore) {}
+  };
+  ruler.addEventListener('pointerup', endDrag);
+  ruler.addEventListener('pointercancel', endDrag);
+  room.addEventListener('click', function(event) {
+    var action = event.target.closest('[data-ld-act]');
+    if (!action) return;
+    var name = action.dataset.ldAct;
+    if (name === 'retry') loadLedger();
+    else if (name === 'retry-rows') { LD.blocks = {}; ledgerNotice(''); ledgerEnsureRows(); }
+    else if (name === 'clear-search') { clearCustomerSearch(); var box = ledgerEl('ledgerSearch'); if (box) box.focus(); }
+    else if (name === 'clear-filters') clearCustomerFilters();
+    else if (name === 'all-view') setCustomerView('all');
+    else if (name === 'add') openAddCustomerModal();
+    else if (name === 'import') openBatchAddModal();
+    else if (name === 'open') ledgerOpen(Number(action.dataset.id));
+    else if (name === 'archive') ledgerArchive(Number(action.dataset.id));
+  });
+  ledgerEl('ledgerViews').addEventListener('click', function(event) {
+    var button = event.target.closest('button[data-view]');
+    if (button) setCustomerView(button.dataset.view);
+  });
+  var input = ledgerEl('ledgerSearch');
+  var timer = 0;
+  input.addEventListener('input', function() {
+    ledgerEl('ledgerSearchBox').classList.toggle('has-text', !!input.value);
+    clearTimeout(timer);
+    timer = setTimeout(function() {
+      var global = ledgerEl('globalPageSearch');
+      if (global) global.value = input.value;
+      customerPage = 1;
+      loadLedger();
+    }, 220);
+  });
+  input.addEventListener('keydown', function(event) {
+    if (event.key === 'ArrowDown' || event.key === 'Enter') {
+      event.preventDefault();
+      scroll.focus({ preventScroll: true });
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      if (input.value) { input.value = ''; input.dispatchEvent(new Event('input')); }
+      else scroll.focus({ preventScroll: true });
+    }
+  });
+  ledgerEl('ledgerSearchClear').addEventListener('click', function() {
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+  });
+  window.addEventListener('resize', function() {
+    if (currentPage !== 'customers' || !isLedgerView(customerView)) return;
+    ledgerFit();
+    ledgerLayout(true);
+  });
+}
+
+function ledgerFit() {
+  var room = ledgerEl('ledgerRoom');
+  if (!room || room.offsetParent === null) return;
+  var bot = ledgerEl('roomBot');
+  var top = room.getBoundingClientRect().top + window.scrollY;
+  var height = Math.floor(window.innerHeight - top - (bot ? bot.offsetHeight : 0) - 12);
+  // Very short windows (200% zoom, landscape phones): keep a usable list and let
+  // the page scroll instead of squeezing the sheet.
+  room.classList.toggle('is-clamped', height < 420);
+  room.style.setProperty('--ld-h', Math.max(420, height) + 'px');
+}
+
+function ledgerMeasure() {
+  var erow = document.querySelector('#ledgerRoom .ld-probe[data-probe="erow"]');
+  var hrow = document.querySelector('#ledgerRoom .ld-probe[data-probe="hrow"]');
+  LD.erow = (erow && erow.offsetHeight) || 70;
+  LD.hrow = (hrow && hrow.offsetHeight) || 76;
+}
+
+function ledgerCriteria() {
+  return !!(getCustomerSearchQuery() || Object.keys(customerFilters || {}).some(function(key) { return customerFilters[key] !== ''; }));
+}
+
+async function loadLedger(options) {
+  options = options || {};
+  ledgerInit();
+  _pageDataLoadedAt = Date.now();
+  var token = ++LD.token;
+  LD.view = customerView;
+  LD.query = getCustomerSearchQuery();
+  var scroll = ledgerEl('ledgerScroll');
+  var input = ledgerEl('ledgerSearch');
+  if (input && document.activeElement !== input && input.value !== LD.query) input.value = LD.query;
+  ledgerEl('ledgerSearchBox').classList.toggle('has-text', !!(input && input.value));
+  renderSavedCustomerViews();
+  ledgerFit();
+  var keep = options.preservePosition && LD.state === 'ok' ? { cur: LD.cur, top: scroll.scrollTop } : null;
+  var hadContent = LD.state === 'ok' && LD.items.length > 0;
+  if (!hadContent) ledgerShowState('loading');
+  else LD.refreshing = true;
+  scroll.setAttribute('aria-busy', 'true');
+  ledgerNotice('');
+  try {
+    var params = new URLSearchParams({ view: customerView });
+    if (LD.query) params.set('search', LD.query);
+    Object.keys(customerFilters || {}).forEach(function(key) { if (customerFilters[key] !== '') params.set(key, customerFilters[key]); });
+    if (new URLSearchParams(window.location.search).get('motion_state') === 'customer_error') throw new Error('QA simulated customer failure');
+    var data = await api('/api/customers/ledger?' + params.toString(), { silentError: true });
+    if (token !== LD.token) return;
+    if (data === null) {
+      var expired = new Error('登录已过期');
+      expired.kind = 'auth';
+      throw expired;
+    }
+    ledgerApply(data, keep);
+  } catch (error) {
+    if (token !== LD.token) return;
+    LD.refreshing = false;
+    if (hadContent) {
+      ledgerNotice('刷新失败，显示的是上一次读取的客户。', true);
+    } else {
+      LD.error = ledgerDescribeError(error);
+      ledgerShowState('error');
+    }
+    scroll.setAttribute('aria-busy', 'false');
+  }
+}
+
+function ledgerDescribeError(error) {
+  var kind = (error && error.kind) || '';
+  var status = Number(error && error.status) || 0;
+  if (kind === 'auth') return { code: '登录 · 登录已过期', title: '需要重新登录', text: '登录后回到客户列表即可，已保存的客户都还在。' };
+  if (kind === 'network' || isApiNetworkError(error)) return { code: '网络 · 无法连接服务', title: '客户列表暂时无法加载', text: '这不是「没有客户」：网络出了问题，已保存的客户都还在。请检查网络后重试。' };
+  if (kind === 'parse') return { code: '解析 · 服务返回的数据不完整', title: '客户列表暂时无法加载', text: '这不是「没有客户」：服务返回的内容无法读取，已保存的客户都还在。' };
+  if (status === 403) return { code: '权限 · HTTP 403', title: '没有权限查看客户列表', text: '当前账号不能读取客户。请联系管理员，或换一个有权限的账号。' };
+  if (status) return { code: '服务 · 服务暂无响应（HTTP ' + status + '）', title: '客户列表暂时无法加载', text: '这不是「没有客户」：服务出了问题，已保存的客户都还在。' };
+  return { code: '错误 · ' + ((error && error.message) || '未知错误'), title: '客户列表暂时无法加载', text: '这不是「没有客户」：读取没有完成，已保存的客户都还在。' };
+}
+
+function ledgerApply(data, keep) {
+  LD.counts = data.counts || null;
+  LD.total = Number(data.total || 0);
+  LD.today = data.today || '';
+  LD.segments = data.segments || [];
+  var index = data.index || [];
+  LD.order = index.map(function(entry) { return entry[0]; });
+  LD.days = index.map(function(entry) { return entry[1]; });
+  LD.flags = index.map(function(entry) { return entry[2]; });
+  LD.pos = {};
+  LD.order.forEach(function(id, position) { LD.pos[id] = position; });
+  LD.rows = {};
+  LD.blocks = {};
+  LD.refreshing = false;
+  ledgerEl('ledgerScroll').setAttribute('aria-busy', 'false');
+  renderCustomerActiveFilters(data.interpreted_filters || []);
+  ledgerRenderViews();
+  var selectedView = LEDGER_VIEWS.filter(function(item) { return item.id === LD.view; })[0];
+  ledgerEl('ledgerLive').textContent = (selectedView ? selectedView.label : '客户') + '，共 ' + LD.total + ' 位客户';
+  if (!LD.total) {
+    LD.cur = null;
+    LD.items = [];
+    var kind = ledgerCriteria() ? 'none' : (LD.view !== 'all' ? 'none-view' : 'empty');
+    ledgerShowState(kind);
+    ledgerLayout(true);
+    return;
+  }
+  ledgerHideState();
+  ledgerBuildItems();
+  var fallback = LD.archiveFallback != null && LD.pos[LD.archiveFallback] != null ? LD.archiveFallback : LD.order[0];
+  LD.cur = keep && keep.cur != null && LD.pos[keep.cur] != null ? keep.cur : (keep ? fallback : LD.order[0]);
+  LD.archiveFallback = null;
+  ledgerLayout(true, keep ? keep.top : 0);
+}
+
+function ledgerBuildItems() {
+  LD.items = [];
+  LD.itemOfPos = [];
+  LD.segOfItem = [];
+  LD.segments.forEach(function(segment, segmentIndex) {
+    LD.items.push({ g: segmentIndex });
+    LD.segOfItem.push(segmentIndex);
+    for (var position = segment.start; position < segment.start + segment.count; position++) {
+      LD.itemOfPos[position] = LD.items.length;
+      LD.items.push({ p: position });
+      LD.segOfItem.push(segmentIndex);
+    }
+  });
+}
+
+function ledgerLayout(reset, top) {
+  ledgerFit();
+  ledgerMeasure();
+  var host = ledgerEl('ledgerHost');
+  var scroll = ledgerEl('ledgerScroll');
+  Object.keys(LD.nodes).forEach(function(key) { LD.nodes[key].remove(); });
+  LD.nodes = {};
+  LD.offs = new Float64Array(LD.items.length + 1);
+  for (var i = 0; i < LD.items.length; i++) LD.offs[i + 1] = LD.offs[i] + (LD.items[i].g != null ? LD.hrow : LD.erow);
+  host.style.height = LD.offs[LD.items.length] + 'px';
+  if (reset) scroll.scrollTop = Math.min(top || 0, Math.max(0, LD.offs[LD.items.length] - scroll.clientHeight));
+  ledgerPaint();
+}
+
+function ledgerFind(px) {
+  var lo = 0, hi = LD.items.length - 1;
+  while (lo < hi) {
+    var mid = (lo + hi + 1) >> 1;
+    if (LD.offs[mid] <= px) lo = mid; else hi = mid - 1;
+  }
+  return Math.max(0, lo);
+}
+
+function ledgerSchedulePaint() {
+  if (LD.raf) return;
+  LD.raf = requestAnimationFrame(function() { LD.raf = 0; ledgerPaint(); });
+}
+
+function ledgerPaint() {
+  var host = ledgerEl('ledgerHost');
+  var scroll = ledgerEl('ledgerScroll');
+  if (!LD.items.length) { drawLedgerRuler(); ledgerRunning(); return; }
+  var over = 420, top = scroll.scrollTop, height = scroll.clientHeight;
+  var first = ledgerFind(Math.max(0, top - over)), last = ledgerFind(top + height + over);
+  Object.keys(LD.nodes).forEach(function(key) {
+    if (Number(key) < first || Number(key) > last) { LD.nodes[key].remove(); delete LD.nodes[key]; }
+  });
+  for (var i = first; i <= last; i++) {
+    if (LD.nodes[i]) continue;
+    var node = ledgerRenderItem(i);
+    node.style.top = LD.offs[i] + 'px';
+    node.style.height = (LD.offs[i + 1] - LD.offs[i]) + 'px';
+    host.appendChild(node);
+    LD.nodes[i] = node;
+  }
+  ledgerSyncActive();
+  ledgerRunning();
+  drawLedgerRuler();
+  clearTimeout(LD.fetchTimer);
+  LD.fetchTimer = setTimeout(ledgerEnsureRows, LD.dragging ? 90 : 20);
+}
+
+function ledgerRelative(days) {
+  if (days === null || days === undefined) return '尚无记录';
+  if (days <= 0) return '今天';
+  if (days === 1) return '昨天';
+  if (days < 14) return days + ' 天前';
+  if (days < 60) return Math.round(days / 7) + ' 周前';
+  if (days < 365) return Math.round(days / 30) + ' 个月前';
+  return Math.floor(days / 365) + ' 年前';
+}
+
+function ledgerDue(row) {
+  if (!row.next_task_date) return { text: '尚无下一步', cls: 'none' };
+  var days = row.next_task_days;
+  var parts = String(row.next_task_date).split('-');
+  var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  var short = (date.getMonth() + 1) + '/' + date.getDate();
+  if (days === null || days === undefined) return { text: short, cls: 'later' };
+  if (days < 0) return { text: '逾期 ' + (-days) + ' 天', cls: 'over' };
+  if (days === 0) return { text: '今天', cls: 'soon' };
+  if (days === 1) return { text: '明天', cls: 'soon' };
+  if (days < 7) return { text: LEDGER_WEEKDAYS[date.getDay()], cls: 'soon' };
+  return { text: short, cls: 'later' };
+}
+
+function ledgerGroupHtml(segment) {
+  var parts = ['<b>' + segment.count + ' 家</b>'];
+  if (segment.overdue) parts.push('<span class="ld-over">逾期 ' + segment.overdue + '</span>');
+  if (segment.waiting) parts.push('等待回复 ' + segment.waiting);
+  if (segment.no_next) parts.push('尚无下一步 ' + segment.no_next);
+  if (segment.silent) parts.push('很久未联系 ' + segment.silent);
+  return '<span class="ld-gl">' + escapeHtml(segment.label) + '</span><span class="ld-gr">' + parts.join(' · ') + '</span>';
+}
+
+function ledgerRowHtml(row) {
+  var due = ledgerDue(row);
+  var query = LD.query;
+  var company = row.company || '未命名公司';
+  var what = row.days === null ? '' : (row.waiting_reply ? '等待回复' : (row.has_contact ? '已有联系' : '未获回复'));
+  var cf = [row.country, row.field].filter(Boolean).join(' · ') || '—';
+  var snippet;
+  if (row.match && query) snippet = '命中 · ' + highlightSearchText(row.match, query);
+  else if (row.activity_snippet || row.activity_kind) snippet = escapeHtml([row.activity_kind, row.activity_snippet].filter(Boolean).join(' · '));
+  else snippet = '尚无沟通记录';
+  var next = row.next_task_date
+    ? '<span class="ld-nx ' + (due.cls === 'over' ? 'is-over' : '') + '"><em>' + escapeHtml(due.text) + '</em> · ' + escapeHtml(row.next_task_title || '已安排') + '</span>'
+    : '<span class="ld-nx is-none">尚无下一步</span>';
+  return '<i class="ld-lit"></i>' +
+    '<div class="ld-l1"><span class="ld-co" title="' + escapeHtml(company) + '">' + highlightSearchText(company, query) + '</span><i class="ld-lead"></i>' +
+    '<span class="ld-wh" title="' + escapeHtml(row.event_date || '尚无沟通记录') + '">' + escapeHtml(ledgerRelative(row.days)) + (what ? '<i>' + what + '</i>' : '') + '</span></div>' +
+    '<div class="ld-l2"><span class="ld-cf">' + highlightSearchText(cf, query) + '</span><span class="ld-sn">' + snippet + '</span>' + next + '</div>' +
+    '<div class="ld-row-acts"><button class="ld-open" type="button" tabindex="-1" data-ld-open="' + row.id + '">打开 <kbd>↵</kbd></button>' +
+    '<button class="ld-quiet" type="button" tabindex="-1" data-ld-archive="' + row.id + '">归档</button></div>';
+}
+
+function ledgerRenderItem(itemIndex) {
+  var item = LD.items[itemIndex];
+  var node = document.createElement('div');
+  if (item.g != null) {
+    node.className = 'ld-grp';
+    node.setAttribute('role', 'presentation');
+    node.innerHTML = ledgerGroupHtml(LD.segments[item.g]);
+    return node;
+  }
+  var id = LD.order[item.p];
+  node.className = 'ld-ent';
+  node.id = 'ld-e-' + id;
+  node.dataset.id = id;
+  node.dataset.pos = item.p;
+  node.setAttribute('role', 'option');
+  node.setAttribute('aria-posinset', String(item.p + 1));
+  node.setAttribute('aria-setsize', String(LD.total));
+  ledgerFillRow(node, id);
+  return node;
+}
+
+function ledgerFillRow(node, id) {
+  var row = LD.rows[id];
+  var current = id === LD.cur;
+  node.classList.toggle('is-cur', current);
+  node.setAttribute('aria-selected', current ? 'true' : 'false');
+  if (!row) {
+    node.classList.add('is-pending');
+    node.setAttribute('aria-label', '正在读取客户');
+    node.innerHTML = '<div class="ld-l1"><span class="ld-sk ld-sk-name"></span><i class="ld-lead"></i><span class="ld-sk ld-sk-when"></span></div><div class="ld-l2"><span class="ld-sk ld-sk-line"></span></div>';
+    return;
+  }
+  node.classList.remove('is-pending');
+  if (row.missing) {
+    node.classList.add('is-missing');
+    node.setAttribute('aria-label', '这位客户已变化，请刷新');
+    node.innerHTML = '<div class="ld-l1"><span class="ld-co">这位客户已变化</span><i class="ld-lead"></i><span class="ld-wh">刷新后可见</span></div>';
+    return;
+  }
+  var due = ledgerDue(row);
+  node.setAttribute('aria-label', [row.company, row.country, ledgerRelative(row.days), due.text].filter(Boolean).join('，'));
+  node.innerHTML = ledgerRowHtml(row);
+}
+
+function ledgerNotice(message, withRetry) {
+  var notice = ledgerEl('ledgerNotice');
+  if (!notice) return;
+  notice.hidden = !message;
+  notice.innerHTML = message ? '<span>' + escapeHtml(message) + '</span><button type="button" class="ld-link" data-ld-act="' + (withRetry === 'rows' ? 'retry-rows' : 'retry') + '">重试</button>' : '';
+}
+
+function ledgerEnsureRows() {
+  if (!LD.items.length) return;
+  var scroll = ledgerEl('ledgerScroll');
+  var top = scroll.scrollTop, height = scroll.clientHeight;
+  var first = ledgerFind(Math.max(0, top - 200)), last = ledgerFind(top + height + 200);
+  var wanted = {};
+  for (var i = first; i <= last; i++) {
+    var item = LD.items[i];
+    if (item && item.p != null) wanted[Math.floor(item.p / LEDGER_BLOCK)] = true;
+  }
+  Object.keys(wanted).forEach(function(block) { ledgerLoadBlock(Number(block)); });
+}
+
+async function ledgerLoadBlock(block) {
+  if (LD.blocks[block]) return;
+  var ids = LD.order.slice(block * LEDGER_BLOCK, (block + 1) * LEDGER_BLOCK);
+  if (!ids.length) return;
+  LD.blocks[block] = 'loading';
+  var token = LD.token;
+  var params = new URLSearchParams({ ids: ids.join(',') });
+  if (LD.query) params.set('search', LD.query);
+  try {
+    var data = await api('/api/customers/ledger/rows?' + params.toString(), { silentError: true });
+    if (token !== LD.token) return;
+    var rows = (data && data.rows) || [];
+    rows.forEach(function(row) { LD.rows[row.id] = row; });
+    ids.forEach(function(id) { if (!LD.rows[id]) LD.rows[id] = { id: id, missing: true }; });
+    LD.blocks[block] = 'done';
+    ledgerRefreshNodes();
+    if (LD.lensPos >= 0) ledgerShowLens(LD.lensPos, null);
+  } catch (error) {
+    if (token !== LD.token) return;
+    LD.blocks[block] = 'failed';
+    ledgerNotice('部分客户没有读取成功。', 'rows');
+  }
+}
+
+function ledgerRefreshNodes() {
+  Object.keys(LD.nodes).forEach(function(key) {
+    var node = LD.nodes[key];
+    if (node.classList.contains('ld-ent') && node.classList.contains('is-pending')) {
+      var id = Number(node.dataset.id);
+      if (LD.rows[id]) ledgerFillRow(node, id);
+    }
+  });
+  ledgerDockUpdate();
+  ledgerSyncActive();
+}
+
+function ledgerSyncActive() {
+  var scroll = ledgerEl('ledgerScroll');
+  var node = LD.cur != null ? ledgerEl('ld-e-' + LD.cur) : null;
+  if (node) scroll.setAttribute('aria-activedescendant', node.id);
+  else scroll.removeAttribute('aria-activedescendant');
+}
+
+function ledgerSetCursor(id, options) {
+  options = options || {};
+  if (id == null || LD.pos[id] == null) return;
+  var previous = LD.cur;
+  LD.cur = id;
+  [previous, id].forEach(function(value) {
+    var node = value != null ? ledgerEl('ld-e-' + value) : null;
+    if (node) {
+      node.classList.toggle('is-cur', value === id);
+      node.setAttribute('aria-selected', value === id ? 'true' : 'false');
+    }
+  });
+  if (!options.noReveal) ledgerReveal(LD.itemOfPos[LD.pos[id]]);
+  ledgerSyncActive();
+  ledgerRunning();
+  drawLedgerRuler();
+  ledgerDockUpdate();
+}
+
+function ledgerReveal(itemIndex) {
+  var scroll = ledgerEl('ledgerScroll');
+  var top = LD.offs[itemIndex], length = LD.offs[itemIndex + 1] - top;
+  var start = scroll.scrollTop, height = scroll.clientHeight, target = start, pad = LD.hrow;
+  if (top - pad < start) target = top - pad;
+  else if (top + length + 8 > start + height) target = top + length + 8 - height;
+  else return;
+  scroll.scrollTo({ top: Math.max(0, target), behavior: shouldAnimateLists() ? 'smooth' : 'auto' });
+}
+
+function ledgerOpen(id) {
+  if (id == null || isNaN(id)) return;
+  openEditModal(id);
+}
+
+// Archiving stays a confirmed, recoverable single action (deleteCustomer); the
+// cursor then lands on the neighbour instead of jumping back to the top.
+async function ledgerArchive(id) {
+  if (id == null || isNaN(id) || LD.pos[id] == null) return;
+  var at = LD.pos[id];
+  LD.archiveFallback = LD.order[at + 1] != null ? LD.order[at + 1] : LD.order[at - 1];
+  // deleteCustomer reloads without awaiting, so the fallback is consumed by the
+  // next ledgerApply (or expires) rather than cleared here.
+  setTimeout(function() { LD.archiveFallback = null; }, 8000);
+  await deleteCustomer(id);
+}
+
+function ledgerKeydown(event) {
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+  if (!LD.items.length) return;
+  var scroll = ledgerEl('ledgerScroll');
+  var perPage = Math.max(4, Math.floor(scroll.clientHeight / LD.erow) - 1);
+  var at = LD.cur != null ? LD.pos[LD.cur] : 0;
+  var to = null;
+  switch (event.key) {
+    case 'ArrowDown': case 'j': to = at + 1; break;
+    case 'ArrowUp': case 'k': to = at - 1; break;
+    case 'PageDown': to = at + perPage; break;
+    case 'PageUp': to = at - perPage; break;
+    case 'Home': to = 0; break;
+    case 'End': to = LD.order.length - 1; break;
+    case 'Enter': ledgerOpen(LD.cur); event.preventDefault(); return;
+    case 'Delete': case 'Backspace': ledgerArchive(LD.cur); event.preventDefault(); return;
+    default:
+      if (/^[1-6]$/.test(event.key)) { setCustomerView(LEDGER_VIEWS[Number(event.key) - 1].id); event.preventDefault(); }
+      return;
+  }
+  event.preventDefault();
+  to = Math.max(0, Math.min(LD.order.length - 1, to));
+  ledgerSetCursor(LD.order[to]);
+}
+
+function ledgerRenderViews() {
+  var nav = ledgerEl('ledgerViews');
+  if (!nav) return;
+  nav.innerHTML = LEDGER_VIEWS.map(function(view, index) {
+    var count = LD.counts && LD.counts[view.id] != null ? LD.counts[view.id] : '–';
+    return '<button type="button" data-view="' + view.id + '" aria-pressed="' + (view.id === customerView ? 'true' : 'false') + '" title="按 ' + (index + 1) + '">' +
+      escapeHtml(view.label) + ' <i>' + count + '</i></button>';
+  }).join('');
+}
+
+function ledgerRunning() {
+  var label = ledgerEl('ledgerRunningLabel');
+  var totals = ledgerEl('ledgerRunningTotals');
+  var position = ledgerEl('ledgerRunningPosition');
+  if (!label) return;
+  if (!LD.items.length) { label.textContent = '—'; totals.textContent = ''; position.textContent = ''; return; }
+  var scroll = ledgerEl('ledgerScroll');
+  var itemIndex = ledgerFind(scroll.scrollTop + 4);
+  var segment = LD.segments[LD.segOfItem[itemIndex]];
+  label.textContent = segment.label;
+  var bits = [segment.count + ' 家'];
+  if (segment.overdue) bits.push('逾期 ' + segment.overdue);
+  if (segment.waiting) bits.push('等待回复 ' + segment.waiting);
+  if (segment.no_next) bits.push('尚无下一步 ' + segment.no_next);
+  totals.innerHTML = bits.map(escapeHtml).join('<br>');
+  var item = LD.items[itemIndex];
+  var at = LD.cur != null ? LD.pos[LD.cur] : (item.p != null ? item.p : segment.start);
+  position.innerHTML = '第 ' + (at + 1) + ' 条 <i>/ ' + LD.total + '</i>';
+}
+
+function ledgerDockUpdate() {
+  var dock = ledgerEl('ledgerDock');
+  if (!dock) return;
+  var row = LD.cur != null ? LD.rows[LD.cur] : null;
+  if (!row || row.missing || LD.state !== 'ok') { dock.innerHTML = ''; return; }
+  var due = ledgerDue(row);
+  dock.innerHTML = '<div class="ld-dock-n"><b>' + escapeHtml(row.company || '未命名公司') + '</b><span>' +
+    escapeHtml([row.country, ledgerRelative(row.days), due.text].filter(Boolean).join(' · ')) + '</span></div>' +
+    '<button class="ld-quiet" type="button" data-ld-act="archive" data-id="' + row.id + '">归档</button>' +
+    '<button class="ld-open ld-open-dock" type="button" data-ld-act="open" data-id="' + row.id + '">打开客户</button>';
+}
+
+// -- ruler: every customer is a tick; drag to scrub the whole ledger -------
+function drawLedgerRuler() {
+  var canvas = ledgerEl('ledgerRulerCanvas');
+  var ruler = ledgerEl('ledgerRuler');
+  if (!canvas || !ruler) return;
+  var rect = ruler.getBoundingClientRect();
+  var ratio = window.devicePixelRatio || 1;
+  var width = Math.max(1, rect.width), height = Math.max(1, rect.height);
+  if (canvas.width !== Math.round(width * ratio) || canvas.height !== Math.round(height * ratio)) {
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+  }
+  var g = canvas.getContext('2d');
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, width, height);
+  var n = LD.order.length;
+  if (!n) return;
+  var style = getComputedStyle(document.documentElement);
+  var color = function(name, fallback) { return (style.getPropertyValue(name) || '').trim() || fallback; };
+  var pad = 14, span = height - pad * 2;
+  var buckets = Math.max(1, Math.min(n, Math.floor(span)));
+  var strongest = new Array(buckets);
+  for (var i = 0; i < n; i++) {
+    var bucket = Math.min(buckets - 1, Math.floor(i / n * buckets));
+    var flags = LD.flags[i];
+    var weight = flags & LEDGER_FLAG_OVERDUE ? 3 : (flags & LEDGER_FLAG_NO_NEXT ? 1 : 2);
+    if (!strongest[bucket] || weight > strongest[bucket]) strongest[bucket] = weight;
+  }
+  var small = width < 40, base = small ? 5 : 10, longest = small ? 12 : 26;
+  for (var b = 0; b < buckets; b++) {
+    var w = strongest[b];
+    if (!w) continue;
+    var y = pad + (b + .5) / buckets * span;
+    g.fillStyle = w === 3 ? color('--dl-danger', '#a4443a') : (w === 2 ? color('--dl-ink-3', '#6f6a5f') : color('--dl-mut', '#8a8478'));
+    var length = w === 3 ? longest : (w === 2 ? base + 4 : base);
+    g.fillRect(width - length - 4, y - .5, length, 1);
+  }
+  g.fillStyle = color('--dl-gold-ink', '#8a6224');
+  LD.segments.forEach(function(segment) { g.fillRect(4, pad + segment.start / n * span, width - 8, 1); });
+  var scroll = ledgerEl('ledgerScroll');
+  var total = Math.max(1, LD.offs[LD.items.length]);
+  var from = scroll.scrollTop / total, to = Math.min(1, (scroll.scrollTop + scroll.clientHeight) / total);
+  g.fillRect(0, pad + from * span, 2, Math.max(4, (to - from) * span));
+  if (LD.cur != null && LD.pos[LD.cur] != null) {
+    g.fillStyle = color('--dl-ink', '#24221d');
+    g.fillRect(width - 6, pad + (LD.pos[LD.cur] + .5) / n * span - 2, 6, 4);
+  }
+}
+
+function ledgerPositionAt(clientY) {
+  var rect = ledgerEl('ledgerRuler').getBoundingClientRect();
+  var fraction = (clientY - rect.top - 14) / Math.max(1, rect.height - 28);
+  return Math.max(0, Math.min(LD.order.length - 1, Math.floor(fraction * LD.order.length)));
+}
+
+function ledgerScrub(event) {
+  if (!LD.order.length) return;
+  var position = ledgerPositionAt(event.clientY);
+  var rect = ledgerEl('ledgerRuler').getBoundingClientRect();
+  LD.lensPos = position;
+  ledgerShowLens(position, event.clientY - rect.top);
+  if (LD.dragging) {
+    var scroll = ledgerEl('ledgerScroll');
+    scroll.scrollTop = Math.max(0, LD.offs[LD.itemOfPos[position]] - scroll.clientHeight / 3);
+    ledgerPaint();
+    ledgerSetCursor(LD.order[position], { noReveal: true });
+  }
+}
+
+function ledgerShowLens(position, offsetY) {
+  var lens = ledgerEl('ledgerLens');
+  var id = LD.order[position];
+  var row = LD.rows[id];
+  if (offsetY !== null && offsetY !== undefined) lens.style.top = offsetY + 'px';
+  if (row && !row.missing) {
+    lens.innerHTML = '<b>' + escapeHtml((row.company || '').length > 46 ? row.company.slice(0, 44) + '…' : row.company) + '</b><i>' +
+      escapeHtml([row.country, ledgerRelative(row.days)].filter(Boolean).join(' · ')) + '</i>';
+  } else {
+    lens.innerHTML = '<i>' + escapeHtml(ledgerRelative(LD.days[position])) + ' · 第 ' + (position + 1) + ' 条</i>';
+    clearTimeout(LD.lensTimer);
+    var block = Math.floor(position / LEDGER_BLOCK);
+    LD.lensTimer = setTimeout(function() { ledgerLoadBlock(block); }, 120);
+  }
+  lens.classList.add('is-on');
+}
+
+// -- states -----------------------------------------------------------------
+function ledgerHideState() {
+  LD.state = 'ok';
+  var state = ledgerEl('ledgerState');
+  state.className = 'ld-state';
+  state.innerHTML = '';
+  state.removeAttribute('data-kind');
+  ledgerEl('page-customers').classList.remove('is-ld-empty');
+  ledgerEl('ledgerHost').hidden = false;
+}
+
+function ledgerShowState(kind) {
+  var state = ledgerEl('ledgerState');
+  var scroll = ledgerEl('ledgerScroll');
+  var query = LD.query;
+  LD.state = kind === 'loading' ? 'loading' : kind;
+  LD.items = [];
+  LD.order = [];
+  LD.flags = [];
+  LD.days = [];
+  LD.pos = {};
+  LD.cur = null;
+  Object.keys(LD.nodes).forEach(function(key) { LD.nodes[key].remove(); });
+  LD.nodes = {};
+  ledgerEl('ledgerHost').hidden = true;
+  ledgerEl('ledgerHost').style.height = '0px';
+  ledgerEl('page-customers').classList.toggle('is-ld-empty', kind === 'empty');
+  state.className = 'ld-state is-on';
+  state.dataset.kind = kind;
+  var html = '';
+  if (kind === 'loading') {
+    var lines = '';
+    for (var i = 0; i < 10; i++) lines += '<i class="ld-sk-row"></i>';
+    html = '<div class="ld-st" role="status"><h3>正在读取客户…</h3><div class="ld-sks">' + lines + '</div></div>';
+  } else if (kind === 'empty') {
+    html = '<div class="ld-st"><p class="ld-micro">尚无客户</p><h3>这里还没有客户</h3><p>添加第一位客户，或导入 Excel 与邮件里的联系人。有了沟通记录，「最近发生」会自动排好。</p>' +
+      '<div class="ld-acts"><button type="button" class="ld-open ld-open-solid" data-ld-act="add">添加客户</button><button type="button" class="ld-ghost" data-ld-act="import">批量添加</button></div></div>';
+  } else if (kind === 'error') {
+    var error = LD.error || ledgerDescribeError(null);
+    html = '<div class="ld-st" role="alert"><p class="ld-code">' + escapeHtml(error.code) + '</p><h3>' + escapeHtml(error.title) + '</h3><p>' + escapeHtml(error.text) + '</p>' +
+      '<div class="ld-acts"><button type="button" class="ld-open ld-open-solid" data-ld-act="retry">重新加载</button></div></div>';
+  } else if (kind === 'none-view') {
+    var view = LEDGER_VIEWS.filter(function(item) { return item.id === LD.view; })[0];
+    html = '<div class="ld-st"><p class="ld-micro">此视图为空</p><h3>「' + escapeHtml(view ? view.label : '') + '」里暂时没有客户</h3><p>视图由实际活动自动计算，无需手动维护。</p>' +
+      '<div class="ld-acts"><button type="button" class="ld-ghost" data-ld-act="all-view">回到全部</button></div></div>';
+  } else {
+    var subject = query ? '没有找到「<em>' + escapeHtml(query) + '</em>」' : '没有客户符合当前筛选';
+    html = '<div class="ld-st" role="status"><p class="ld-micro">没有匹配</p><h3>' + subject + '</h3><p>已搜索公司、联系人、国家、行业、网站、邮箱、沟通与待办。</p>' +
+      '<div class="ld-acts">' + (query ? '<button type="button" class="ld-ghost" data-ld-act="clear-search">清除搜索</button>' : '') +
+      (Object.keys(customerFilters || {}).some(function(key) { return customerFilters[key] !== ''; }) ? '<button type="button" class="ld-ghost" data-ld-act="clear-filters">清空筛选</button>' : '') + '</div></div>';
+  }
+  state.innerHTML = html;
+  scroll.scrollTop = 0;
+  ledgerEl('ledgerDock').innerHTML = '';
+  ledgerFit();
+  ledgerRenderViews();
+  ledgerRunning();
+  drawLedgerRuler();
 }
 
 function renderCustomerPagination(data) {
@@ -7042,7 +7791,7 @@ async function deleteCustomer(id) {
   try {
     await api('/api/customers/' + id, { method: 'DELETE' });
     showToast('客户已归档', 'success');
-    if (currentPage === 'customers') loadCustomers();
+    if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else loadDashboard();
   } catch(e) {}
 }

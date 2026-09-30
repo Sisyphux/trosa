@@ -1310,6 +1310,268 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 }
 
 /* ============================================================================
+   6b. CUSTOMER LEDGER (账页) — design/rooms/customers.md, prototype
+   design/visual-exploration/rooms-v5/customers/03-ledger.html
+   ----------------------------------------------------------------------------
+   One long paper scroll: the left margin is a running head (current segment +
+   subtotal), rows are fixed-height two-liners, the right edge is a ruler that
+   scrubs the whole ledger. Only Daylight tokens; no new material. The classic
+   list survives for the manual-order and archived views (data-customer-mode).
+   ============================================================================ */
+
+#trosa #page-customers[data-customer-mode="ledger"] #customerLegacyBar,
+#trosa #page-customers[data-customer-mode="ledger"] #customerLegacyList { display: none !important; }
+#trosa #page-customers[data-customer-mode="legacy"] #ledgerRoom { display: none !important; }
+
+/* The room owns the viewport height: a compact heading, then the sheet; the
+   window itself never scrolls (the ledger scrolls inside its sheet). */
+html[data-room-page="customers"][data-customer-mode="ledger"] #trosa #roomMain,
+html[data-room-page="customers"][data-customer-mode="ledger"] #trosa #page-customers { min-height: calc(100dvh - 2 * var(--room-bar)) !important; }
+html[data-room-page="customers"][data-customer-mode="ledger"] #trosa #page-customers { padding-top: 8px !important; }
+#trosa #page-customers[data-customer-mode="ledger"] .page-lede,
+#trosa #page-customers[data-customer-mode="ledger"] .page-eyebrow { display: none !important; }
+#trosa #page-customers[data-customer-mode="ledger"] .page-header.page-header { padding-top: clamp(14px, 2.2vh, 24px) !important; padding-bottom: 4px !important; }
+#trosa #page-customers[data-customer-mode="ledger"] .page-body.page-body { padding: 6px 0 0 !important; }
+/* The one solid element is the open action on the lit row (or the empty state's add). */
+#trosa #page-customers[data-customer-mode="ledger"] .command-primary.command-primary {
+  background: transparent !important;
+  color: var(--dl-ink) !important;
+  box-shadow: inset 0 0 0 1px var(--dl-hair-strong) !important;
+}
+#trosa #page-customers[data-customer-mode="ledger"] .command-primary.command-primary:hover { background: var(--dl-paper) !important; }
+#trosa #page-customers.is-ld-empty .command-primary.command-primary { display: none !important; }
+
+#trosa .ld-room {
+  --ld-mw: 236px;
+  --ld-rw: 60px;
+  --ld-erow: 4.7rem;
+  --ld-hrow: 5.1rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--ld-h, 640px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--dl-hair);
+  border-radius: var(--dl-r-lg);
+  background: var(--dl-paper);
+  font-variant-numeric: tabular-nums;
+}
+#trosa .ld-room .ld-sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+#trosa .ld-room .ld-probe { position: absolute; left: 0; top: 0; width: 1px; visibility: hidden; pointer-events: none; }
+/* visual-v4 forces a 1px ring with :not(); the ledger uses the baseline 2px ring, so out-rank it. */
+#trosa .ld-room.ld-room.ld-room :focus-visible { outline: 2px solid var(--dl-focus) !important; outline-offset: 3px !important; border-radius: 4px; }
+#trosa .ld-room.ld-room .ld-scroll:focus-visible { outline: 2px solid var(--dl-focus) !important; outline-offset: -3px !important; border-radius: 6px; }
+
+/* head: search, dynamic views with counts, quiet tools */
+#trosa .ld-head { flex: 0 0 auto; padding: clamp(.7rem, 1.6vh, 1.1rem) 1.6rem 0 clamp(1.2rem, 2vw, 2rem); }
+#trosa .ld-q {
+  display: flex; align-items: center; gap: .6rem; min-width: 0;
+  padding: .3rem 0; border-bottom: 1px solid var(--dl-hair-strong);
+}
+#trosa .ld-q:focus-within { border-bottom-color: var(--dl-focus); box-shadow: 0 1px 0 0 var(--dl-focus); }
+#trosa .ld-room.ld-room .ld-q input.ld-q-input:focus, #trosa .ld-room.ld-room .ld-q input.ld-q-input:focus-visible { outline: 0 !important; box-shadow: none !important; }
+#trosa .ld-q input.ld-q-input::-webkit-search-cancel-button,
+#trosa .ld-q input.ld-q-input::-webkit-search-decoration { display: none !important; -webkit-appearance: none !important; }
+#trosa #page-customers[data-customer-mode="ledger"] .customer-active-filters .customer-search-chip { display: none; }
+#trosa .ld-q input.ld-q-input { -webkit-appearance: none; appearance: none; border-radius: 0 !important; }
+#trosa .ld-q svg { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--dl-ink-3); stroke-width: 1.6; stroke-linecap: round; }
+#trosa .ld-q input.ld-q-input, #trosa .ld-q input {
+  flex: 1; min-width: 0; height: auto; padding: 0; border: 0 !important; outline: 0 !important; box-shadow: none !important;
+  background: none !important; color: var(--dl-ink);
+  font-family: var(--dl-display); font-size: 1.5rem; line-height: 1.3;
+}
+#trosa .ld-q input::placeholder { color: var(--dl-ink-3); opacity: 1; }
+#trosa .ld-q .ld-clear {
+  display: none; padding: .2rem .4rem; border: 0; border-radius: 6px; background: none;
+  color: var(--dl-ink-2); font-size: .78rem; cursor: pointer;
+}
+#trosa .ld-q.has-text .ld-clear { display: inline-block; }
+#trosa .ld-views-row { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem 1.2rem; padding: .55rem 0 .6rem; margin-left: -.6rem; }
+#trosa .ld-views { display: flex; flex-wrap: wrap; gap: .1rem .2rem; align-items: center; }
+#trosa .ld-views button {
+  display: inline-flex; align-items: baseline; gap: .4rem; padding: .28rem .6rem;
+  border: 1px solid transparent; border-radius: 999px; background: none;
+  color: var(--dl-ink-2); font-size: .84rem; cursor: pointer;
+  transition: color var(--dl-dur-fast) var(--dl-ease), background var(--dl-dur-fast) var(--dl-ease);
+}
+#trosa .ld-views button i { font-style: normal; font-size: .72rem; color: var(--dl-ink-2); }
+#trosa .ld-views button:hover { color: var(--dl-ink); background: var(--dl-paper-2); }
+#trosa .ld-views button[aria-pressed="true"] { color: var(--dl-ink); border-color: var(--dl-hair-strong); background: var(--dl-paper); }
+#trosa .ld-views button[aria-pressed="true"] i { color: var(--dl-gold-ink); }
+#trosa .ld-tools { display: flex; flex-wrap: wrap; gap: .1rem; margin-left: auto; }
+#trosa .ld-ghost {
+  display: inline-flex; align-items: center; min-height: 32px; padding: 0 .8rem;
+  border: 1px solid transparent; border-radius: 999px; background: none;
+  color: var(--dl-ink-2); font-size: .8rem; white-space: nowrap; cursor: pointer;
+}
+#trosa .ld-ghost:hover { color: var(--dl-ink); border-color: var(--dl-hair); background: var(--dl-paper); }
+#trosa .ld-tools-slot:empty { display: none; }
+#trosa .ld-tools-slot { flex: 0 0 auto; max-height: 34vh; overflow: auto; padding: 0 1.6rem .4rem clamp(1.2rem, 2vw, 2rem); }
+#trosa .ld-notice {
+  flex: 0 0 auto; display: flex; align-items: center; gap: .8rem; margin: 0 1.6rem .4rem clamp(1.2rem, 2vw, 2rem);
+  padding: .4rem 0 .4rem .9rem; border-left: 3px solid var(--dl-danger);
+  font-size: .82rem; color: var(--dl-ink);
+}
+#trosa .ld-notice[hidden] { display: none; }
+#trosa .ld-link { padding: 0; border: 0; background: none; color: var(--dl-ink); font-size: .82rem; cursor: pointer; text-decoration: underline; text-decoration-color: var(--dl-gold); text-underline-offset: 3px; }
+#trosa .ld-link:hover { color: var(--dl-gold-ink); }
+
+/* body: running head | scroll | ruler */
+#trosa .ld-body {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: var(--ld-mw) minmax(0, 1fr) var(--ld-rw);
+  border-top: 1px solid var(--dl-hair);
+}
+#trosa .ld-margin { position: relative; min-height: 0; padding: 1.4rem 1.4rem 0 clamp(1.2rem, 2vw, 2rem); }
+#trosa .ld-rh { position: sticky; top: 1.4rem; }
+#trosa .ld-rh-p { font-family: var(--dl-display); font-size: clamp(1.9rem, 4.4vh, 2.6rem); line-height: 1; letter-spacing: -.02em; color: var(--dl-ink); }
+#trosa .ld-rh-t { margin-top: .6rem; font-size: .74rem; line-height: 1.6; color: var(--dl-ink-3); }
+#trosa .ld-rh-f { margin-top: 1.6rem; font-family: var(--dl-display); font-size: 1.05rem; color: var(--dl-gold-ink); }
+#trosa .ld-rh-f i { font-style: normal; font-size: .8rem; color: var(--dl-ink-3); }
+#trosa .ld-rh-keys { margin-top: 1.6rem; display: grid; gap: .45rem; font-size: .72rem; color: var(--dl-ink-3); }
+#trosa .ld-rh-keys span { display: flex; gap: .4rem; align-items: center; }
+
+#trosa .ld-scroll { position: relative; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; scrollbar-width: none; }
+#trosa .ld-scroll::-webkit-scrollbar { display: none; }
+#trosa .ld-host { position: relative; width: 100%; }
+#trosa .ld-ent, #trosa .ld-grp { position: absolute; left: 0; right: 0; z-index: 0; }
+#trosa .ld-grp { display: flex; align-items: flex-end; gap: 1rem; padding: 0 calc(1.6rem + 6.6rem) .55rem 0; }
+#trosa .ld-gl { font-size: .68rem; letter-spacing: .18em; text-transform: uppercase; color: var(--dl-gold-ink); white-space: nowrap; }
+#trosa .ld-gr { flex: 1; text-align: right; font-size: .74rem; color: var(--dl-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#trosa .ld-gr b { font-weight: 500; color: var(--dl-ink-2); }
+#trosa .ld-gr .ld-over { color: var(--dl-danger); }
+#trosa .ld-grp::after { content: ""; position: absolute; left: 0; right: 1.6rem; bottom: 0; height: 1px; background: var(--dl-hair-strong); }
+
+#trosa .ld-ent { padding: .55rem calc(1.6rem + 6.6rem) .45rem 0; cursor: pointer; color: var(--dl-ink-2); overflow: hidden; }
+#trosa .ld-l1 { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+#trosa .ld-co {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--dl-display); font-size: 1.2rem; line-height: 1.25; color: var(--dl-ink);
+}
+#trosa .ld-lead { flex: 1 1 1.5rem; min-width: 1.5rem; align-self: flex-end; height: .82em; margin-bottom: .1em; border-bottom: 1px dotted var(--dl-hair-strong); }
+#trosa .ld-wh { flex: none; font-size: .84rem; color: var(--dl-ink); white-space: nowrap; }
+#trosa .ld-wh i { margin-left: .5rem; font-style: normal; font-size: .76rem; color: var(--dl-ink-3); }
+#trosa .ld-l2 { display: grid; grid-template-columns: 190px minmax(0, 1fr) 232px; gap: 0 1.2rem; margin-top: .15rem; font-size: .78rem; line-height: 1.45; }
+#trosa .ld-l2 > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#trosa .ld-sn { color: var(--dl-ink-3); }
+#trosa .ld-nx { text-align: right; }
+#trosa .ld-nx em { font-style: normal; color: var(--dl-ink); }
+#trosa .ld-nx.is-over em { color: var(--dl-danger); }
+#trosa .ld-nx.is-none { font-family: var(--dl-display); font-style: italic; font-size: .9rem; color: var(--dl-ink-3); }
+/* the lit entry: full ink, a wash to the margin edge */
+#trosa .ld-ent .ld-lit { display: none; }
+#trosa .ld-ent.is-cur .ld-lit { display: block; position: absolute; left: -.7rem; right: .6rem; top: 0; bottom: 0; z-index: -1; border-radius: 10px; background: var(--dl-gold-wash); }
+#trosa .ld-ent.is-cur .ld-sn { color: var(--dl-ink-2); }
+#trosa .ld-ent.is-pending { cursor: default; }
+#trosa .ld-sk { display: block; height: 12px; border-radius: 3px; background: var(--dl-hair-2); }
+#trosa .ld-sk-name { flex: 0 1 34%; width: 34%; }
+#trosa .ld-sk-when { flex: none; width: 5rem; height: 9px; }
+#trosa .ld-sk-line { grid-column: 1 / -1; width: 46%; height: 9px; }
+#trosa .ld-ent.is-missing .ld-co, #trosa .ld-ent.is-missing .ld-wh { color: var(--dl-ink-3); }
+#trosa mark.search-hit { background: none; color: inherit; box-shadow: inset 0 -.42em 0 var(--dl-gold-soft); border-radius: 1px; }
+
+/* the only solid element on the page: open the lit entry */
+#trosa .ld-open {
+  display: inline-flex; align-items: center; gap: .55rem; height: 40px; padding: 0 1.15rem;
+  border: 0; border-radius: 999px; background: var(--dl-ink); color: var(--dl-paper);
+  font-size: .84rem; letter-spacing: .02em; white-space: nowrap; cursor: pointer;
+  transition: background var(--dl-dur-fast) var(--dl-ease);
+}
+#trosa .ld-open:hover { background: var(--dl-ink-2); }
+#trosa .ld-room .ld-open:focus-visible { box-shadow: 0 0 0 2px var(--dl-focus-on-ink) inset; }
+#trosa .ld-open kbd { border-color: rgba(255, 253, 247, .38); background: transparent; color: var(--dl-paper); font-size: .72rem; }
+#trosa .ld-ent .ld-row-acts { display: none; position: absolute; right: 1.6rem; top: 50%; z-index: 2; transform: translateY(-50%); flex-direction: column; align-items: flex-end; gap: .1rem; }
+#trosa .ld-ent.is-cur .ld-row-acts { display: flex; }
+#trosa .ld-ent .ld-open { height: 36px; }
+/* quiet text action beside the one solid: archive stays a confirmed, recoverable step */
+#trosa .ld-quiet { padding: .1rem .35rem; border: 0; background: none; color: var(--dl-ink-3); font-size: .74rem; cursor: pointer; }
+#trosa .ld-quiet:hover { color: var(--dl-ink); text-decoration: underline; text-decoration-color: var(--dl-gold); text-underline-offset: 3px; }
+
+/* ruler */
+#trosa .ld-ruler { position: relative; border-left: 1px solid var(--dl-hair-2); cursor: ns-resize; touch-action: none; }
+#trosa .ld-ruler canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#trosa .ld-lens {
+  position: absolute; right: calc(var(--ld-rw) - 8px); z-index: 5; max-width: min(420px, 60vw); padding: .35rem .7rem;
+  transform: translateY(-50%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+  border: 1px solid var(--dl-hair-strong); border-radius: 8px; background: var(--dl-paper); box-shadow: var(--dl-shadow-2);
+  font-size: .78rem; opacity: 0; transition: opacity .12s;
+}
+#trosa .ld-lens.is-on { opacity: 1; }
+#trosa .ld-lens b { margin-right: .5rem; font-family: var(--dl-display); font-size: 1rem; font-weight: 400; }
+#trosa .ld-lens i { font-style: normal; color: var(--dl-ink-3); }
+
+/* states: loading / empty / error / no result, each dressed as ledger paper */
+#trosa .ld-state { display: none; position: absolute; inset: 0; z-index: 3; padding: 1.4rem 1.6rem 0 0; background: var(--dl-paper); overflow: auto; }
+#trosa .ld-state.is-on { display: block; }
+#trosa .ld-st { max-width: 560px; padding-top: .5rem; }
+#trosa .ld-st h3 { margin: .5rem 0 .6rem; font-family: var(--dl-display); font-weight: 400; font-size: clamp(1.7rem, 4vh, 2.4rem); line-height: 1.12; letter-spacing: -.015em; color: var(--dl-ink); }
+#trosa .ld-st p { color: var(--dl-ink-2); font-size: .9rem; line-height: 1.6; }
+#trosa .ld-st p.ld-micro { font-size: .66rem; letter-spacing: .16em; text-transform: uppercase; color: var(--dl-ink-2); }
+#trosa .ld-st p.ld-code { font-size: .78rem; letter-spacing: .04em; color: var(--dl-danger); }
+#trosa .ld-st em { font-style: italic; text-decoration: line-through; text-decoration-color: var(--dl-gold); text-decoration-thickness: 1.5px; }
+#trosa .ld-acts { display: flex; align-items: center; flex-wrap: wrap; gap: .8rem; margin-top: 1.1rem; }
+#trosa .ld-state[data-kind="empty"] { background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--ld-erow) - 1px), var(--dl-hair-2) calc(var(--ld-erow) - 1px), var(--dl-hair-2) var(--ld-erow)); }
+#trosa .ld-state[data-kind="empty"] .ld-st { padding: 1.4rem 1.6rem 1.6rem 0; margin-top: 1.2rem; background: var(--dl-paper); }
+#trosa .ld-state[data-kind="error"] .ld-st { margin-top: 1rem; padding: 1rem 0 1rem 1.4rem; border-left: 3px solid var(--dl-danger); }
+#trosa .ld-state[data-kind="loading"] .ld-st { max-width: none; }
+#trosa .ld-state[data-kind="loading"] h3 { margin: 0 0 1.2rem; font-family: var(--dl-sans); font-size: .9rem; letter-spacing: 0; color: var(--dl-ink-2); }
+#trosa .ld-sks { display: grid; gap: 1.55rem; }
+#trosa .ld-sk-row { display: block; position: relative; height: 14px; border-bottom: 1px dotted var(--dl-hair-strong); animation: ld-shimmer 1.4s ease-in-out infinite; }
+#trosa .ld-sk-row::before { content: ""; position: absolute; left: 0; top: 0; width: 34%; height: 12px; border-radius: 3px; background: var(--dl-hair-2); }
+#trosa .ld-sk-row::after { content: ""; position: absolute; right: 0; top: 2px; width: 9%; height: 9px; border-radius: 3px; background: var(--dl-hair-2); }
+#trosa .ld-sk-row:nth-child(2n) { width: 72%; }
+#trosa .ld-sk-row:nth-child(3n) { width: 50%; }
+@keyframes ld-shimmer { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+html.motion-lite #trosa .ld-sk-row, html.motion-reduced #trosa .ld-sk-row { animation: none; }
+html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  #trosa .ld-sk-row { animation: none; }
+  #trosa .ld-lens, #trosa .ld-open, #trosa .ld-views button { transition: none; }
+}
+
+#trosa .ld-room.is-clamped { margin-bottom: calc(var(--room-bar) + 12px); }
+#trosa .ld-dock { display: none; }
+@media (max-width: 1180px) {
+  #trosa .ld-l2 { grid-template-columns: 150px minmax(0, 1fr) 200px; }
+  #trosa .ld-rh-keys { display: none; }
+}
+@media (max-height: 720px) { #trosa .ld-rh-keys { display: none; } }
+@media (max-width: 900px) {
+  #trosa #page-customers[data-customer-mode="ledger"] .page-header.page-header { flex-direction: row !important; align-items: center !important; gap: 12px !important; padding-bottom: 6px !important; }
+  #trosa #page-customers[data-customer-mode="ledger"] .page-header .command-shelf { margin-left: auto; }
+  #trosa .ld-room { --ld-mw: 0px; --ld-rw: 26px; --ld-erow: 6rem; --ld-hrow: 4rem; border-left: 0; border-right: 0; border-radius: 0; }
+  #trosa .ld-margin { display: none; }
+  #trosa .ld-body { grid-template-columns: minmax(0, 1fr) var(--ld-rw); }
+  #trosa .ld-head { padding: .5rem 0 0 1rem; }
+  #trosa .ld-q { margin-right: 1rem; }
+  #trosa .ld-q input.ld-q-input, #trosa .ld-q input { font-size: 1.15rem; }
+  #trosa .ld-views-row { flex-wrap: nowrap; margin: 0; padding: .4rem 1rem .5rem 0; overflow-x: auto; scrollbar-width: none; }
+  #trosa .ld-views-row::-webkit-scrollbar { display: none; }
+  #trosa .ld-views { flex-wrap: nowrap; white-space: nowrap; }
+  #trosa .ld-tools { display: none; }
+  #trosa .ld-grp { padding: 0 .8rem .5rem 1rem; }
+  #trosa .ld-grp::after { left: 1rem; right: .8rem; }
+  #trosa .ld-ent { padding: .6rem .8rem .5rem 1rem; }
+  #trosa .ld-ent.is-cur .ld-lit { left: .35rem; right: .35rem; }
+  #trosa .ld-co { font-size: 1.1rem; }
+  #trosa .ld-l2 { grid-template-columns: minmax(0, 1fr); gap: 0; margin-top: .1rem; }
+  #trosa .ld-sn { display: none; }
+  #trosa .ld-nx { text-align: left; margin-top: .1rem; }
+  #trosa .ld-ent .ld-row-acts { display: none !important; }
+  #trosa .ld-dock { display: flex; align-items: center; gap: .8rem; padding: .55rem 1rem .7rem; border-top: 1px solid var(--dl-hair-strong); background: var(--dl-paper); }
+  #trosa .ld-dock:empty { display: none; }
+  #trosa .ld-dock-n { flex: 1; min-width: 0; }
+  #trosa .ld-dock-n b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--dl-display); font-weight: 400; font-size: 1.02rem; }
+  #trosa .ld-dock-n span { font-size: .74rem; color: var(--dl-ink-3); }
+  #trosa .ld-dock .ld-open { display: inline-flex; }
+  #trosa .ld-lens { right: calc(var(--ld-rw) - 4px); }
+  #trosa .ld-state { padding-left: 1rem; }
+}
+
+/* ============================================================================
    7. FORMS — quiet daylight fields
    A field is a small caption with one hairline under the value: no box, no
    fill, no inner shadow. The global control boxes (visual-v2 §controls,

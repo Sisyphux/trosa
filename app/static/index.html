@@ -231,7 +231,7 @@
     </div>
 
     <!-- ==================== EXISTING CUSTOMERS ==================== -->
-    <div class="page-section" id="page-customers">
+    <div class="page-section" id="page-customers" data-customer-mode="ledger">
       <div class="page-header customer-page-workbar">
         <div class="page-heading">
           <div class="page-eyebrow">关系索引</div>
@@ -255,6 +255,47 @@
         </div>
       </div>
       <div class="page-body">
+        <!-- Ledger room: one long scroll ordered by 最近发生 (design/rooms/customers.md).
+             The classic list below stays only for the manual-order and archived views. -->
+        <section class="ld-room" id="ledgerRoom" aria-label="客户台账">
+          <div class="ld-head">
+            <label class="ld-q" id="ledgerSearchBox">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+              <span class="ld-sr">搜索客户</span>
+              <input id="ledgerSearch" class="ld-q-input" type="search" autocomplete="off" placeholder="公司、联系人、国家、行业、邮箱…" aria-label="搜索客户">
+              <button class="ld-clear" id="ledgerSearchClear" type="button">清除</button>
+            </label>
+            <div class="ld-views-row">
+              <nav class="ld-views" id="ledgerViews" role="group" aria-label="动态视图"></nav>
+              <div class="ld-tools">
+                <button class="ld-ghost" type="button" onclick="toggleCustomerFilters()">更多筛选</button>
+                <button class="ld-ghost" type="button" onclick="saveCurrentCustomerView()">保存当前视图</button>
+                <button class="ld-ghost" type="button" onclick="setCustomerView('priority')">手动排序</button>
+                <button class="ld-ghost" type="button" onclick="setCustomerView('archived')">已归档</button>
+              </div>
+            </div>
+          </div>
+          <div class="ld-tools-slot" id="ledgerToolsSlot"></div>
+          <div class="ld-notice" id="ledgerNotice" role="alert" hidden></div>
+          <div class="ld-body" id="ledgerBody">
+            <aside class="ld-margin" aria-hidden="true">
+              <div class="ld-rh" id="ledgerRunning">
+                <div class="ld-rh-p" id="ledgerRunningLabel"></div>
+                <div class="ld-rh-t" id="ledgerRunningTotals"></div>
+                <div class="ld-rh-f" id="ledgerRunningPosition"></div>
+                <div class="ld-rh-keys"><span><kbd>↑</kbd><kbd>↓</kbd> 逐条</span><span><kbd>↵</kbd> 打开</span><span><kbd>⌫</kbd> 归档</span><span>拖右侧尺子速览</span></div>
+              </div>
+            </aside>
+            <div class="ld-scroll" id="ledgerScroll" tabindex="0" role="listbox" aria-label="客户台账，按最近发生排列。上下方向键逐条移动，回车打开客户" aria-busy="true">
+              <div class="ld-host" id="ledgerHost"></div>
+              <div class="ld-state" id="ledgerState"></div>
+            </div>
+            <div class="ld-ruler" id="ledgerRuler" aria-hidden="true"><canvas id="ledgerRulerCanvas"></canvas><div class="ld-lens" id="ledgerLens"></div></div>
+          </div>
+          <div class="ld-dock" id="ledgerDock"></div>
+          <div class="ld-sr" id="ledgerLive" role="status" aria-live="polite"></div>
+        </section>
+        <div class="customer-legacy-bar" id="customerLegacyBar">
         <div class="customer-index-bar">
           <div class="customer-view-chips" role="tablist" aria-label="客户视图">
             <button class="customer-view-chip active" data-view="all" onclick="setCustomerView('all')">全部</button>
@@ -271,6 +312,8 @@
             <button class="customer-view-chip ghost save-view" onclick="saveCurrentCustomerView()">保存当前视图</button>
           </div>
         </div>
+        </div>
+        <div class="customer-shared-tools" id="customerSharedTools">
         <div class="customer-advanced-filters" id="customerAdvancedFilters" hidden>
           <div class="advanced-filter-grid">
             <label>国家 / 地区<input type="text" id="filterCountry"></label>
@@ -290,6 +333,8 @@
         </div>
         <div class="customer-active-filters" id="customerActiveFilters"></div>
         <div class="saved-customer-views" id="savedCustomerViews"></div>
+        </div>
+        <div class="customer-legacy-list" id="customerLegacyList">
         <div class="batch-bar" id="customerBatchBar">
           <span class="batch-count" id="customerBatchCount">已选 0 项</span>
           <button class="btn btn-sm" onclick="batchExportEmails()">导出邮箱</button>
@@ -304,6 +349,7 @@
           <div class="customer-card-list" id="customerTableBody"><div class="empty-state"><p>加载中...</p></div></div>
         </div>
         <div class="customer-pagination" id="customerPagination"></div>
+        </div>
       </div>
     </div>
 

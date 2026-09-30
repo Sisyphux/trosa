@@ -3133,5 +3133,80 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(accepted, 1)
 
 
+    def test_customer_ledger_reads_follow_the_list_facts_and_stay_isolated_in_postgres(self):
+        """The read-only ledger index/rows agree with GET /api/customers on real PostgreSQL."""
+        from datetime import timedelta
+
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        today = module._calendar_today()
+
+        def day(offset):
+            return (today - timedelta(days=offset)).isoformat()
+
+        def create(company):
+            response = client.post('/api/customers', json={
+                'name': company + ' Buyer', 'company': company, 'country': 'US', 'field': 'ledger pg',
+            })
+            self.assertEqual(response.status_code, 201, response.get_json())
+            return response.get_json()['id']
+
+        replied = create('Ledger PG Replied Co')
+        waiting = create('Ledger PG Waiting Co')
+        quiet = create('Ledger PG Quiet Co')
+        self.assertEqual(client.post(f'/api/customers/{replied}/follow_history', json={
+            'activity_content': 'Ledger PG inbound reply', 'activity_type': 'customer_reply',
+            'direction': 'inbound', 'follow_date': day(1), 'source': 'postgres-rehearsal-ledger',
+        }).status_code, 200)
+        self.assertEqual(client.post(f'/api/customers/{replied}/tasks', json={
+            'title': 'Ledger PG next step', 'due_date': (today + timedelta(days=3)).isoformat(),
+        }).status_code, 201)
+        self.assertEqual(client.post(f'/api/customers/{waiting}/outreach', json={
+            'subject': 'Ledger PG quotation', 'content': 'Sent', 'sent_date': day(20), 'reply_status': 'pending',
+        }).status_code, 201)
+
+        ledger = client.get('/api/customers/ledger?search=Ledger+PG')
+        self.assertEqual(ledger.status_code, 200, ledger.get_json())
+        payload = ledger.get_json()
+        order = [entry[0] for entry in payload['index']]
+        self.assertEqual(order, [replied, waiting, quiet])
+        self.assertEqual([entry[1] for entry in payload['index']], [1, 20, None])
+        self.assertEqual([(s['key'], s['start'], s['count']) for s in payload['segments']],
+                         [('yesterday', 0, 1), ('month', 1, 1), ('none', 2, 1)])
+        self.assertEqual(payload['counts'], {
+            'all': 3, 'communicated': 1, 'uncontacted': 2, 'waiting': 1, 'silent': payload['counts']['silent'],
+            'no_next': 2,
+        })
+
+        # Same facts as the legacy list under every dynamic view.
+        for view in ('uncontacted', 'communicated', 'waiting', 'silent', 'no_next'):
+            legacy = client.get(f'/api/customers?search=Ledger+PG&view={view}').get_json()
+            via_ledger = client.get(f'/api/customers/ledger?search=Ledger+PG&view={view}').get_json()
+            self.assertEqual({item['id'] for item in legacy['customers']},
+                             {entry[0] for entry in via_ledger['index']}, view)
+            self.assertEqual(via_ledger['total'], payload['counts'][view] if view != 'all' else 3)
+
+        rows = client.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows']
+        self.assertEqual([row['id'] for row in rows], order)
+        self.assertEqual(set(rows[0]), {
+            'id', 'company', 'person', 'country', 'field', 'website', 'event_date', 'days', 'flags',
+            'has_contact', 'waiting_reply', 'activity_kind', 'activity_snippet', 'next_task_title',
+            'next_task_date', 'next_task_days', 'match',
+        })
+        self.assertEqual(rows[0]['next_task_title'], 'Ledger PG next step')
+        self.assertEqual(rows[0]['next_task_days'], 3)
+        self.assertTrue(rows[1]['waiting_reply'])
+
+        # Bounded ids and per-user isolation.
+        self.assertEqual(client.get('/api/customers/ledger/rows?ids=' + ','.join(['1'] * 101)).status_code, 400)
+        other = module.app.test_client()
+        self.assertEqual(other.post('/api/auth/login', json={'user': 'amy'}).status_code, 200)
+        foreign = other.get('/api/customers/ledger?search=Ledger+PG').get_json()
+        self.assertEqual(foreign['index'], [])
+        self.assertEqual(other.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows'], [])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)

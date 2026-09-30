@@ -7702,11 +7702,14 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                             source_filter,
                             last_from, last_to, tag_filter, days_min, days_max,
                             page_value, page, per_page, interpreted_filters,
-                            silent_days, regular_days):
+                            silent_days, regular_days, only_ids=None):
     """Build the Customer list from canonical Customer/Contact/Interaction/Task facts."""
     include_all = include_deleted == 'all'
     archived_only = view == 'archived' or include_deleted == '1'
     source = _active_customers(conn, include_deleted=include_all or archived_only)
+    if only_ids is not None:
+        wanted = {int(item) for item in only_ids}
+        source = [raw for raw in source if int(raw['id']) in wanted]
     customers = []
     for raw in source:
         customer = dict(raw)
@@ -7922,28 +7925,38 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
 @app.route('/api/customers', methods=['GET'])
 @login_required
 def get_customers():
-    search = request.args.get('search', '').strip()
-    business_stage = request.args.get('business_stage', '').strip()
-    level = request.args.get('level', '').strip()
-    sort = request.args.get('sort', 'next_follow_up')
-    order = request.args.get('order', 'asc')
-    include_deleted = request.args.get('deleted', '0').strip()
-    view = request.args.get('view', 'all').strip()
-    country_filter = request.args.get('country', '').strip()
-    business_role = request.args.get('business_role', '').strip()
-    field_filter = request.args.get('field', '').strip()
-    judgment_filter = request.args.get('has_judgment', '').strip()
-    next_state = request.args.get('next_state', '').strip()
-    source_filter = request.args.get('source', '').strip()
-    last_from = request.args.get('last_from', '').strip()[:10]
-    last_to = request.args.get('last_to', '').strip()[:10]
-    tag_filter = request.args.get('tag', '').strip()
+    return jsonify(_customer_list_payload(request.args))
+
+
+def _customer_list_payload(args, only_ids=None):
+    """Build the Customer list response from query-style ``args``.
+
+    ``only_ids`` restricts the candidate set before enrichment, which lets
+    read-only views (the ledger rows) reuse this exact fact projection for a
+    handful of customers without a second definition of the list semantics.
+    """
+    search = args.get('search', '').strip()
+    business_stage = args.get('business_stage', '').strip()
+    level = args.get('level', '').strip()
+    sort = args.get('sort', 'next_follow_up')
+    order = args.get('order', 'asc')
+    include_deleted = args.get('deleted', '0').strip()
+    view = args.get('view', 'all').strip()
+    country_filter = args.get('country', '').strip()
+    business_role = args.get('business_role', '').strip()
+    field_filter = args.get('field', '').strip()
+    judgment_filter = args.get('has_judgment', '').strip()
+    next_state = args.get('next_state', '').strip()
+    source_filter = args.get('source', '').strip()
+    last_from = args.get('last_from', '').strip()[:10]
+    last_to = args.get('last_to', '').strip()[:10]
+    tag_filter = args.get('tag', '').strip()
     try:
-        days_min = max(0, int(request.args.get('days_min', '') or 0))
+        days_min = max(0, int(args.get('days_min', '') or 0))
     except ValueError:
         days_min = 0
     try:
-        days_max = max(0, int(request.args.get('days_max', '') or 0))
+        days_max = max(0, int(args.get('days_max', '') or 0))
     except ValueError:
         days_max = 0
 
@@ -7990,9 +8003,9 @@ def get_customers():
         cleaned_search = cleaned_search[:year_match.start()] + ' ' + cleaned_search[year_match.end():]
         interpreted_filters.append(f'{year}年联系过')
     cleaned_search = re.sub(r'[，,；;]+', ' ', cleaned_search).strip()
-    page_value = request.args.get('page', '').strip()
+    page_value = args.get('page', '').strip()
     try:
-        per_page = min(max(int(request.args.get('per_page', 30) or 30), 5), 100)
+        per_page = min(max(int(args.get('per_page', 30) or 30), 5), 100)
         page = max(int(page_value or 1), 1)
     except ValueError:
         per_page, page = 30, 1
@@ -8018,9 +8031,10 @@ def get_customers():
             days_min=days_min, days_max=days_max, page_value=page_value,
             page=page, per_page=per_page, interpreted_filters=interpreted_filters,
             silent_days=customer_priority_silent_days, regular_days=customer_regular_silent_days,
+            only_ids=only_ids,
         )
         conn.close()
-        return jsonify(payload)
+        return payload
 
     if view == 'archived' or include_deleted == '1':
         query = 'SELECT * FROM customers WHERE is_deleted = 1'
@@ -8085,6 +8099,10 @@ def get_customers():
 
     if view == 'priority':
         query += ' AND COALESCE(is_pinned, 0) = 1'
+    if only_ids is not None:
+        only_ids = [int(item) for item in only_ids]
+        query += ' AND id IN (' + ','.join('?' for _ in only_ids) + ')' if only_ids else ' AND 1=0'
+        params.extend(only_ids)
 
     allowed_sorts = ['name', 'company', 'country', 'level', 'business_stage', 'next_follow_up', 'created_at', 'updated_at', 'last_contact']
     if sort not in allowed_sorts: sort = 'next_follow_up'
@@ -8253,11 +8271,203 @@ def get_customers():
         start = (page - 1) * per_page
         customers = customers[start:start + per_page]
     conn.close()
-    return jsonify({
+    return {
         'customers': customers, 'total': total, 'page': page,
         'per_page': per_page, 'pages': max(1, (total + per_page - 1) // per_page),
         'interpreted_filters': interpreted_filters,
+    }
+
+
+# ---- Customer ledger (read-only) -------------------------------------------
+# The ledger room is one long scroll ordered by "最近发生".  These endpoints
+# only *read* the same relationship facts as ``GET /api/customers``: a light
+# index for the ruler and running head, and the detail rows for the window the
+# user is looking at.  Nothing here writes or adds a second definition of the
+# dynamic views.
+_LEDGER_VIEWS = ('all', 'uncontacted', 'communicated', 'waiting', 'silent', 'no_next')
+_LEDGER_FILTER_ARGS = ('search', 'business_stage', 'level', 'country', 'business_role', 'field',
+                       'has_judgment', 'next_state', 'source', 'last_from', 'last_to', 'tag',
+                       'days_min', 'days_max')
+# (key, label, first day, last day) counted from the latest event; None = open ended.
+_LEDGER_SEGMENTS = (
+    ('today', '今天', 0, 0), ('yesterday', '昨天', 1, 1), ('week', '本周', 2, 7),
+    ('month', '本月', 8, 30), ('quarter', '一至三个月', 31, 90), ('older', '更早', 91, None),
+)
+_LEDGER_NO_EVENT_SEGMENT = ('none', '尚无记录')
+# Bit flags carried by the ruler index: what the tick length expresses.
+LEDGER_FLAG_OVERDUE, LEDGER_FLAG_NO_NEXT, LEDGER_FLAG_WAITING, LEDGER_FLAG_SILENT, LEDGER_FLAG_CONTACT = 1, 2, 4, 8, 16
+_LEDGER_ROWS_MAX = 100
+_LEDGER_ACTIVITY_LABELS = {
+    'whatsapp': 'WhatsApp', 'email': '邮件', 'phone': '电话', 'meeting': '会议', 'quote': '报价',
+    'sample': '寄样', 'follow_up': '跟进', 'customer_reply': '客户回复', 'task_completed': '完成任务',
+}
+
+
+def _ledger_event_date(customer):
+    """Latest real event (communication or outreach) as ``YYYY-MM-DD`` or ''."""
+    dates = [str(customer.get(key) or '')[:10] for key in ('last_contact', 'latest_outreach_date')]
+    dates = [item for item in dates if re.fullmatch(r'\d{4}-\d{2}-\d{2}', item)]
+    return max(dates) if dates else ''
+
+
+def _ledger_segment_for(days):
+    if days is None:
+        return _LEDGER_NO_EVENT_SEGMENT[:2]
+    for key, label, first, last in _LEDGER_SEGMENTS:
+        if days >= first and (last is None or days <= last):
+            return key, label
+    return _LEDGER_SEGMENTS[-1][:2]
+
+
+def _ledger_facts(customer, today):
+    """Small read-only projection of one enriched list row."""
+    event_date = _ledger_event_date(customer)
+    days = None
+    if event_date:
+        try:
+            days = max(0, (today - datetime.strptime(event_date, '%Y-%m-%d').date()).days)
+        except ValueError:
+            days = None
+    next_date = str(customer.get('next_task_date') or '')[:10]
+    silent_threshold = customer.get('silent_threshold')
+    since_contact = customer.get('days_since_contact')
+    silent = since_contact is not None and silent_threshold is not None and since_contact >= silent_threshold
+    flags = 0
+    if next_date and next_date < today.isoformat():
+        flags |= LEDGER_FLAG_OVERDUE
+    if not next_date:
+        flags |= LEDGER_FLAG_NO_NEXT
+    if customer.get('waiting_reply'):
+        flags |= LEDGER_FLAG_WAITING
+    if silent:
+        flags |= LEDGER_FLAG_SILENT
+    if customer.get('has_contact'):
+        flags |= LEDGER_FLAG_CONTACT
+    return {'event_date': event_date, 'days': days, 'flags': flags, 'next_date': next_date}
+
+
+def _ledger_view_matches(view, flags):
+    if view == 'uncontacted':
+        return not flags & LEDGER_FLAG_CONTACT
+    if view == 'communicated':
+        return bool(flags & LEDGER_FLAG_CONTACT)
+    if view == 'waiting':
+        return bool(flags & LEDGER_FLAG_WAITING)
+    if view == 'silent':
+        return bool(flags & LEDGER_FLAG_SILENT)
+    if view == 'no_next':
+        return bool(flags & LEDGER_FLAG_NO_NEXT)
+    return True
+
+
+def _ledger_arguments(source, **overrides):
+    args = {key: str(source.get(key) or '').strip() for key in _LEDGER_FILTER_ARGS if source.get(key)}
+    args.update(overrides)
+    return args
+
+
+@app.route('/api/customers/ledger', methods=['GET'])
+@login_required
+def get_customer_ledger():
+    """Counts, segment subtotals and the ruler index for the customer ledger."""
+    view = (request.args.get('view') or 'all').strip() or 'all'
+    if view not in _LEDGER_VIEWS:
+        return jsonify({'error': '无效的客户视图'}), 400
+    payload = _customer_list_payload(_ledger_arguments(request.args, view='all'))
+    today = _calendar_today()
+    entries = []
+    for customer in payload['customers']:
+        facts = _ledger_facts(customer, today)
+        company = str(customer.get('company') or customer.get('name') or '').casefold()
+        entries.append((facts['days'] is None, facts['days'] or 0, company, int(customer['id']), facts))
+
+    counts = {name: 0 for name in _LEDGER_VIEWS}
+    for entry in entries:
+        for name in _LEDGER_VIEWS:
+            if _ledger_view_matches(name, entry[4]['flags']):
+                counts[name] += 1
+
+    visible = sorted((entry for entry in entries if _ledger_view_matches(view, entry[4]['flags'])),
+                     key=lambda entry: entry[:4])
+    index, segments, current = [], [], None
+    for position, entry in enumerate(visible):
+        facts = entry[4]
+        index.append([entry[3], facts['days'], facts['flags']])
+        key, label = _ledger_segment_for(facts['days'])
+        if current is None or current['key'] != key:
+            current = {'key': key, 'label': label, 'start': position, 'count': 0,
+                       'overdue': 0, 'waiting': 0, 'no_next': 0, 'silent': 0}
+            segments.append(current)
+        current['count'] += 1
+        current['overdue'] += 1 if facts['flags'] & LEDGER_FLAG_OVERDUE else 0
+        current['waiting'] += 1 if facts['flags'] & LEDGER_FLAG_WAITING else 0
+        current['no_next'] += 1 if facts['flags'] & LEDGER_FLAG_NO_NEXT else 0
+        current['silent'] += 1 if facts['flags'] & LEDGER_FLAG_SILENT else 0
+    return jsonify({
+        'view': view, 'today': today.isoformat(), 'total': len(index), 'counts': counts,
+        'segments': segments, 'index': index,
+        'interpreted_filters': payload.get('interpreted_filters', []),
     })
+
+
+def _ledger_snippet(activity):
+    text = re.sub(r'\s+', ' ', str((activity or {}).get('content') or (activity or {}).get('result') or '')).strip()
+    return text[:90] + ('…' if len(text) > 90 else '')
+
+
+def _ledger_activity_kind(activity):
+    if not activity:
+        return ''
+    if activity.get('kind') == 'email':
+        return '开发邮件'
+    return _LEDGER_ACTIVITY_LABELS.get(str(activity.get('activity_type') or ''), '沟通')
+
+
+@app.route('/api/customers/ledger/rows', methods=['GET'])
+@login_required
+def get_customer_ledger_rows():
+    """Whitelisted detail rows for the customers currently in the ledger window."""
+    raw_ids = [item.strip() for item in (request.args.get('ids') or '').split(',') if item.strip()]
+    if not raw_ids or len(raw_ids) > _LEDGER_ROWS_MAX or not all(item.isdigit() for item in raw_ids):
+        return jsonify({'error': f'ids 必须是 1 到 {_LEDGER_ROWS_MAX} 个客户编号'}), 400
+    ids = list(dict.fromkeys(int(item) for item in raw_ids))
+    payload = _customer_list_payload(_ledger_arguments({'search': request.args.get('search')}, view='all'),
+                                     only_ids=ids)
+    today = _calendar_today()
+    by_id = {int(customer['id']): customer for customer in payload['customers']}
+    rows = []
+    for customer_id in ids:
+        customer = by_id.get(customer_id)
+        if not customer:
+            continue
+        facts = _ledger_facts(customer, today)
+        activity = customer.get('latest_activity') or {}
+        context = customer.get('match_context') or {}
+        next_date = facts['next_date']
+        try:
+            next_days = (datetime.strptime(next_date, '%Y-%m-%d').date() - today).days if next_date else None
+        except ValueError:
+            next_days = None
+        rows.append({
+            'id': customer_id,
+            'company': customer.get('company') or customer.get('name') or '',
+            'person': customer.get('name') if customer.get('company') and customer.get('name') != customer.get('company') else '',
+            'country': customer.get('country') or '',
+            'field': customer.get('field') or customer.get('industry') or '',
+            'website': customer.get('website') or '',
+            'event_date': facts['event_date'], 'days': facts['days'], 'flags': facts['flags'],
+            'has_contact': bool(customer.get('has_contact')),
+            'waiting_reply': bool(customer.get('waiting_reply')),
+            'activity_kind': _ledger_activity_kind(activity),
+            'activity_snippet': _ledger_snippet(activity),
+            'next_task_title': str(customer.get('next_task_title') or '')[:120],
+            'next_task_date': next_date, 'next_task_days': next_days,
+            'match': ' · '.join(item for item in (
+                str(context.get('label') or ''),
+                str(context.get('content') or context.get('title') or context.get('contact_name') or '')[:120],
+            ) if item),
+        })
+    return jsonify({'rows': rows, 'today': today.isoformat()})
 
 
 @app.route('/api/customers/<int:customer_id>/priority', methods=['PUT', 'POST'])

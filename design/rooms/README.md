@@ -9,7 +9,7 @@
 目前已有四个房间文档：
 
 - [`today.md`](today.md) —— 今天，来源原型 [`../visual-exploration/rooms-v5/today/03-tide.html`](../visual-exploration/rooms-v5/today/03-tide.html)（2026-09-30 选定）：已选定，尚未实现。
-- [`customers.md`](customers.md) —— 客户列表，来源原型 [`../visual-exploration/rooms-v5/customers/03-ledger.html`](../visual-exploration/rooms-v5/customers/03-ledger.html)（2026-09-30 选定）：已选定，尚未实现。
+- [`customers.md`](customers.md) —— 客户列表，来源原型 [`../visual-exploration/rooms-v5/customers/03-ledger.html`](../visual-exploration/rooms-v5/customers/03-ledger.html)（2026-09-30 选定）：已实现于分支 `agent/room-customers-impl-0930`，未发布。
 - [`customer.md`](customer.md) —— 客户详情，无原型，来源是分支 `agent/ui-daylight-perpage` 的实现（2026-09-30 选定）：已选定，实现在分支、未发布。
 - [`inbox.md`](inbox.md) —— Inbox，来源原型 [`../visual-exploration/rooms-v5/inbox/01-lightbox.html`](../visual-exploration/rooms-v5/inbox/01-lightbox.html)（2026-09-30 选定）：已选定，尚未实现。
 
