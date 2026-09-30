@@ -60,6 +60,6 @@
 - 去 logo 自检：亮面板 + 底片带 + 投影没有通用对应物，不应像通用 SaaS。
 - 真实浏览器矩阵（**均未验证**）：宽屏 1440×900 / 1024×768 / 390×844、iPad 真机触控、iPhone 真机、Safari / Firefox、旧 Win10、键盘全流程、200% 缩放、系统级减少动态、性能模式。
 - 数据状态：19 条信号（含同客户多条、带附件、自动回复、新联系人）、待归属 / 歧义、Sela 两类、空白、加载中、失败、刷新失败、已清空。
-- 焦点环：实现时按 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md) 核对焦点环对比度（原型可能复制了金色 `#bc9052` 约 2.85:1 的问题，要求至少 3:1）。
+- 焦点环：房间内统一 `2px solid var(--dl-focus)`，外移 3px；`--dl-focus` 即 `--dl-gold-ink`，纸面对比度 ≥3:1（`tools/check_daylight_contrast.py` 通过）。亮金 `#bc9052`（2.85:1）只作装饰，不作焦点环。
 - 回归：客户、联系人、沟通记录、Today、Inbox、Search、备份恢复、Sela 幂等同步未受影响。
 - 性能：底片带 `translateX` 与面板柔光（大面积 radial-gradient + blur）需在性能模式关闭柔光后复测低端设备。
