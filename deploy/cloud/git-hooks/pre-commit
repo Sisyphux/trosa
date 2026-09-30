@@ -9,8 +9,29 @@
 # 边界（同机护栏，不是加密边界）：
 #   * dev/review 角色在集成分支（默认 main）上的任何提交都被拒绝，必须改用
 #     create/adopt 在 agent/<id> 隔离区提交；
-#   * release 角色或未设置角色（人工操作）保持原有行为，不受影响。
+#   * release 角色或未设置角色（人工操作）保持原有行为，不受影响；
+#   * agent/<id> 隔离区同一时刻只归一个会话：另一个存活会话持有租约时拒绝提交，
+#     避免两个 Agent 同写一棵树、把对方未提交的改动扫进自己的 commit。
+#     （有会话标识才生效；确需共用可设 TRADE_OS_ALLOW_SHARED_WORKTREE=1。）
 set -euo pipefail
+
+branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf 'detached')"
+case "$branch" in
+  agent/*)
+    if [[ "${TRADE_OS_ALLOW_SHARED_WORKTREE:-}" != 1 ]]; then
+      lease_script="$(git rev-parse --show-toplevel 2>/dev/null)/deploy/cloud/agent-worktree.sh"
+      if [[ -x "$lease_script" ]]; then
+        lease_rc=0
+        "$lease_script" lease check --quiet || lease_rc=$?
+        if [[ "$lease_rc" == 42 ]]; then
+          printf '提交被拒绝：本任务隔离区正被另一个 Agent 会话使用。\n' >&2
+          "$lease_script" guard >&2 || true
+          exit 1
+        fi
+      fi
+    fi
+    ;;
+esac
 
 role="${TRADE_OS_AGENT_ROLE:-release}"
 case "$role" in
@@ -19,7 +40,6 @@ case "$role" in
 esac
 
 target="${TRADE_OS_AUTO_PUBLISH_BRANCH:-main}"
-branch="$(git symbolic-ref --short -q HEAD 2>/dev/null || printf 'detached')"
 [[ "$branch" == "$target" ]] || exit 0
 
 toplevel="$(git rev-parse --show-toplevel 2>/dev/null || printf '?')"

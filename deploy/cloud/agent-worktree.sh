@@ -6,7 +6,8 @@
 # 任务在独立目录、独立分支上工作，并把发布输入收敛为 commit：
 #
 #   deploy/cloud/agent-worktree.sh status               # 判断“我在哪个环境/哪个任务”
-#   deploy/cloud/agent-worktree.sh guard                # 开发任务开始前的入口闸门（dev/review）
+#   deploy/cloud/agent-worktree.sh guard                # 开发任务开始前的入口闸门（dev/review）；同时认领会话租约
+#   deploy/cloud/agent-worktree.sh lease [check|show|release]  # 一个隔离区同一时刻只归一个会话
 #   deploy/cloud/agent-worktree.sh create --task <id>   # 建隔离区 + agent/<id> 分支
 #   deploy/cloud/agent-worktree.sh adopt --task <id>    # 把主工作区在途改动搬进隔离区
 #   deploy/cloud/agent-worktree.sh preflight            # 并发体检：脏主区 / 迁移编号冲突
@@ -27,6 +28,10 @@
 #   目录）会被明确拒绝，要求先 create/adopt；不等到 commit 才报错，避免主工作区
 #   先被写脏。release/人工集成与只读 status 不受影响。
 # - create/adopt 只能在主工作区执行；不能在任务隔离区里再建任务。
+# - 会话租约：一个任务隔离区同一时刻只归一个 Agent 会话（trosa-tasks/<id>.lease，
+#   以 TRADE_OS_AGENT_SESSION / CLAUDE_CODE_SESSION_ID 识别）。第二个会话在同一目录
+#   运行 guard 或 commit 会被拒绝并给出“另开分叉任务”的命令，不会再出现两个会话
+#   同写一棵树、互相 git add 扫走对方未提交改动的情况。
 #
 # 任务边界：
 # - create 会在共享 git 目录写一份任务清单（trosa-tasks/<id>.json：负责人、目标、
@@ -102,7 +107,8 @@ usage() {
   cat <<'EOF'
 Usage:
   agent-worktree.sh status
-  agent-worktree.sh guard
+  agent-worktree.sh guard [--takeover]
+  agent-worktree.sh lease [check|show|release]
   agent-worktree.sh preflight
   agent-worktree.sh start --task <id> [--base <ref>] [--fetch-base]
                           [--owner <name>] [--goal <text>] [--scope <text>]
@@ -133,7 +139,10 @@ status    在任意工作树里运行，报告当前环境、任务归属、未�
 guard     开发任务开始前的入口闸门：dev/review 角色在主工作区（或非 agent/<id>
           目录）会被拒绝，要求先建隔离区；release/人工集成不受影响。只读，不改动
           任何文件。若当前是桌面端会话的 claude/* worktree，会直接提示在该目录运行
-          start 建区（无需手动切到主工作区）。
+          start 建区（无需手动切到主工作区）。在任务隔离区内还会认领会话租约：
+          目录已被另一个存活会话占用时拒绝，并给出另开分叉任务的命令；确认对方
+          已停止才用 --takeover 接管。
+lease     check 认领/刷新本会话租约（被他人占用返回 42）；show 只读查看；release 释放。
 preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。冲突按
           “与本任务相关 / 无关”分级：只有涉及本任务新增迁移或本任务预留号的冲突
           才阻断，其它既有冲突降级为一行提示。
@@ -314,6 +323,122 @@ task_of_branch() {
     agent/*) printf '%s' "${branch#agent/}" ;;
     *) printf '' ;;
   esac
+}
+
+# ---- 会话租约 -------------------------------------------------------------
+# 一个任务隔离区同一时刻只归一个 Agent 会话。多会话共写一棵树时，谁都可能
+# `git add` 到对方未提交的文件，AGENTS.md 又禁止把别人的改动混进自己的 commit，
+# 结果只能停下来问人。租约在“开始工作”(guard) 和“提交”(pre-commit) 两处生效，
+# 让冲突在写文件之前就以明确的分叉命令收场。没有会话标识时不启用（人工操作）。
+LEASE_TTL="${TRADE_OS_LEASE_TTL:-1800}"                 # 无 pid 时的心跳有效期（秒）
+LEASE_MAX_AGE="${TRADE_OS_LEASE_MAX_AGE:-43200}"         # 有 pid 且存活时的上限（秒）
+LEASE_EXIT_HELD=42
+
+agent_session_id() { printf '%s' "${TRADE_OS_AGENT_SESSION:-${CLAUDE_CODE_SESSION_ID:-}}"; }
+task_lease_path() { printf '%s/%s.lease' "$TASK_META_DIR" "$1"; }
+lease_field() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
+
+# 持有者是否仍然活跃：记录了 pid 的以“进程存活且心跳未超上限”为准，
+# 否则以心跳 TTL 为准。已崩溃/已退出的会话不会长期占着目录。
+lease_is_live() {
+  local file=$1 pid ts age
+  pid="$(lease_field "$file" pid)"
+  ts="$(lease_field "$file" ts)"
+  [[ "$ts" =~ ^[0-9]+$ ]] || return 1
+  age=$(( $(date +%s) - ts ))
+  if [[ "$pid" =~ ^[0-9]+$ ]]; then
+    kill -0 "$pid" 2>/dev/null && (( age < LEASE_MAX_AGE ))
+  else
+    (( age < LEASE_TTL ))
+  fi
+}
+
+write_lease() {
+  local file=$1 wt=$2 sid=$3 tmp
+  mkdir -p -- "$TASK_META_DIR"
+  tmp="$file.$$.tmp"
+  {
+    printf 'session=%s\n' "$sid"
+    printf 'pid=%s\n' "${CLAUDE_PID:-${PPID:-}}"
+    printf 'ts=%s\n' "$(date +%s)"
+    printf 'path=%s\n' "$wt"
+    printf 'role=%s\n' "$(trosa_agent_role)"
+  } >"$tmp" && mv -f -- "$tmp" "$file"
+}
+
+# 认领 / 刷新租约。返回 0 表示本会话持有；返回 $LEASE_EXIT_HELD 表示被另一个
+# 存活会话占用（详情写到 stderr，除非 quiet=1）。没有会话标识时直接放行。
+lease_acquire() {
+  local task=$1 wt=$2 takeover=${3:-0} quiet=${4:-0}
+  local sid file lock tries=0 rc=0
+  sid="$(agent_session_id)"
+  [[ -n "$sid" ]] || return 0
+  [[ "${TRADE_OS_ALLOW_SHARED_WORKTREE:-}" == 1 ]] && return 0
+  file="$(task_lease_path "$task")"
+  mkdir -p -- "$TASK_META_DIR"
+  lock="$file.lock"
+  until mkdir -- "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    if (( tries > 50 )); then rmdir -- "$lock" 2>/dev/null || true; tries=0; fi
+    sleep 0.1
+  done
+  lease_acquire_locked "$task" "$wt" "$takeover" "$quiet" "$sid" "$file" || rc=$?
+  rmdir -- "$lock" 2>/dev/null || true
+  return "$rc"
+}
+
+lease_acquire_locked() {
+  local task=$1 wt=$2 takeover=$3 quiet=$4 sid=$5 file=$6
+  local holder held_pid held_age dirty_n
+  if [[ -f "$file" ]] && [[ "$(lease_field "$file" session)" != "$sid" ]] \
+     && lease_is_live "$file" && [[ "$takeover" != 1 ]]; then
+    if [[ "$quiet" != 1 ]]; then
+      holder="$(lease_field "$file" session)"
+      held_pid="$(lease_field "$file" pid)"
+      held_age=$(( ( $(date +%s) - $(lease_field "$file" ts) ) / 60 ))
+      dirty_n="$(git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null | wc -l | tr -d ' ')"
+      {
+        printf '任务隔离区已被另一个 Agent 会话占用：%s\n' "$wt"
+        printf '  占用会话：%s（pid %s，%s 分钟前有过动作，当前有 %s 项未提交改动）\n' \
+          "${holder:0:8}" "${held_pid:-?}" "$held_age" "$dirty_n"
+        printf '  不要在这里继续写：两个会话同写一棵树，git add 会互相扫走未提交的改动。\n'
+        printf '  另开一个分叉任务（基于该任务已提交的 HEAD，不含对方未提交改动）：\n'
+        printf '    cd %s && TRADE_OS_AGENT_ROLE=dev deploy/cloud/agent-worktree.sh create --task %s-b --base agent/%s --owner <name> --goal "..." --scope "..."\n' \
+          "$MAIN_ROOT" "$task" "$task"
+        printf '  若要改的文件正好是对方未提交的文件，等对方先 commit，再 sync 后接着做，不要抢。\n'
+        printf '  只有人工确认对方会话已停止时，才用：deploy/cloud/agent-worktree.sh guard --takeover\n'
+      } >&2
+    fi
+    return "$LEASE_EXIT_HELD"
+  fi
+  write_lease "$file" "$wt" "$sid"
+}
+
+lease_release() {
+  local task=$1 file sid
+  file="$(task_lease_path "$task")"
+  sid="$(agent_session_id)"
+  [[ -f "$file" ]] || { printf '任务 %s 当前没有会话租约。\n' "$task"; return 0; }
+  if [[ -n "$sid" && "$(lease_field "$file" session)" != "$sid" ]] && lease_is_live "$file"; then
+    fail "租约属于另一个存活会话（${sid:0:8} 不是持有者），不能释放；人工确认后用 guard --takeover"
+  fi
+  rm -f -- "$file"
+  printf '任务 %s 的会话租约已释放。\n' "$task"
+}
+
+lease_describe() {
+  local task=$1 file sid holder age state
+  file="$(task_lease_path "$task")"
+  sid="$(agent_session_id)"
+  if [[ ! -f "$file" ]]; then printf '  会话租约：无（下一个 guard/commit 的会话会认领）\n'; return 0; fi
+  holder="$(lease_field "$file" session)"
+  age=$(( ( $(date +%s) - $(lease_field "$file" ts) ) / 60 ))
+  if lease_is_live "$file"; then state='存活'; else state='已过期，可被认领'; fi
+  if [[ -n "$sid" && "$holder" == "$sid" ]]; then
+    printf '  会话租约：本会话持有（%s，%s，%s 分钟前刷新）\n' "${holder:0:8}" "$state" "$age"
+  else
+    printf '  会话租约：会话 %s 持有（%s，%s 分钟前刷新）\n' "${holder:0:8}" "$state" "$age"
+  fi
 }
 
 # 找出所有工作树（主工作区 + 各隔离区） migrations/ 下的迁移文件名。
@@ -1343,6 +1468,7 @@ cmd_status() {
     print_task_meta "$task"
     dirty_count="$(git -C "$top" status --porcelain --untracked-files=all | wc -l | tr -d ' ')"
     printf '  未提交改动：%s 项（只属于本任务，不影响其它任务）\n' "$dirty_count"
+    lease_describe "$task"
   else
     printf '环境：游离工作树（不是主工作区，也不是 agent/* 任务分支）\n'
     printf '  路径：%s\n  分支：%s\n' "$top" "$branch"
@@ -1355,7 +1481,13 @@ cmd_status() {
 # 先 create/adopt。release 角色与未设置角色（人工集成）不受影响，只读的 status
 # 也不受影响。命令本身只读，不修改工作区、不申请编号。
 cmd_guard() {
-  local top branch task role
+  local top branch task role takeover=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --takeover) takeover=1; shift ;;
+      *) fail "guard 未知参数：$1" ;;
+    esac
+  done
   top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
   role="$(trosa_agent_role)"
@@ -1380,16 +1512,48 @@ cmd_guard() {
             ;;
         esac
       fi
+      lease_acquire "$task" "$top" "$takeover" || exit $?
       printf 'guard：可以开始任务\n  角色：%s\n  任务：%s\n  目录：%s\n  分支：%s\n' \
         "$role" "$task" "$top" "$branch"
+      lease_describe "$task"
       if ! hooks_installed; then
         printf '提示：入口隔离 hooks 尚未安装（只读命令不写 hooks）；运行写命令（create/adopt/test/hooks 等）会安装。\n' >&2
       fi
       ;;
     *)
+      if [[ -n "$task" && "$top" != "$MAIN_ROOT" ]]; then
+        lease_acquire "$task" "$top" "$takeover" || exit $?
+      fi
       printf 'guard：可以继续\n  角色：%s（未限制角色，集成/发布场景不受影响）\n  目录：%s\n  分支：%s\n' \
         "$role" "$top" "$branch"
       ;;
+  esac
+}
+
+# lease check 由 pre-commit 调用：认领空闲租约、刷新本会话租约；被另一个存活会话
+# 占用时退出 42（其余失败一律不阻断提交，避免旧版脚本误伤）。
+cmd_lease() {
+  local sub=${1:-show} quiet=0 top branch task
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --quiet) quiet=1; shift ;;
+      *) fail "lease 未知参数：$1" ;;
+    esac
+  done
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$top" ]] || fail '当前目录不在任何 Git 工作树中'
+  branch="$(git -C "$top" symbolic-ref --short -q HEAD || printf 'detached')"
+  task="$(task_of_branch "$branch")"
+  if [[ -z "$task" || "$top" == "$MAIN_ROOT" ]]; then
+    [[ "$quiet" == 1 ]] || printf '当前目录不是 agent/<id> 任务隔离区，没有会话租约。\n'
+    return 0
+  fi
+  case "$sub" in
+    check) lease_acquire "$task" "$top" 0 "$quiet" || exit $? ;;
+    show) lease_describe "$task" ;;
+    release) lease_release "$task" ;;
+    *) fail "lease 未知子命令：$sub（check|show|release）" ;;
   esac
 }
 
@@ -1862,7 +2026,7 @@ cmd_remove() {
   fi
 
   git -C "$MAIN_ROOT" worktree prune
-  rm -f -- "$(task_meta_path "$task")"
+  rm -f -- "$(task_meta_path "$task")" "$(task_lease_path "$task")"
   printf '任务 %s 的隔离区已回收。\n' "$task"
   printf '任务清单/证据备份在：%s（evidence --task %s 仍可读出已回收状态）。\n' \
     "$TASK_REMOVED_DIR" "$task"
@@ -1882,6 +2046,7 @@ esac
 case "$command" in
   status) cmd_status "$@" ;;
   guard) cmd_guard "$@" ;;
+  lease) cmd_lease "$@" ;;
   preflight) cmd_preflight "$@" ;;
   start) cmd_start "$@" ;;
   create) cmd_create "$@" ;;

@@ -32,6 +32,32 @@
 （`status`/`guard`/`preflight`/`list`/`evidence`/`gate`/`flakes`）不写共享 `.git/hooks`，
 因此只读调用没有副作用。
 
+### 一个隔离区同一时刻只归一个会话（会话租约）
+
+两个 Agent 会话共写同一个 `agent/<id>` 隔离区，会在“要改的文件正好是对方未提交的文件”
+时卡死：`git add` 会把对方 stage 的工作扫进自己的 commit（AGENTS.md 禁止），继续写又会
+互相覆盖，最后只能停下来问人。所以租约把它挡在写文件之前：
+
+- `guard` 在任务隔离区里会认领租约（`trosa-tasks/<id>.lease`，按 `TRADE_OS_AGENT_SESSION`
+  或 `CLAUDE_CODE_SESSION_ID` 识别会话）；`pre-commit` 提交时再检查一次，并在空闲时自动认领。
+- 另一个存活会话已持有 → `guard`/`commit` 以退出码 42 拒绝，并直接打印分叉命令。**遇到这个提示不要
+  停下来问人，也不要在原目录继续写**，照做即可：
+
+  ```bash
+  cd ~/Desktop/Trosa
+  TRADE_OS_AGENT_ROLE=dev deploy/cloud/agent-worktree.sh create \
+    --task <id>-b --base agent/<id> --owner <name> --goal "..." --scope "..."
+  ```
+
+  分叉任务基于原任务**已提交**的 HEAD，看不到对方未提交改动；若要改的文件正是对方未提交的文件，
+  等对方 commit 后在分叉任务里 `sync`，不要抢。两个分叉最终各自 `test`/`publish`，冲突走普通 git 合并。
+- 持有者进程已退出或心跳过期（有 pid 时 12 小时、无 pid 时 30 分钟）会自动视为空闲，可直接认领。
+  只有人工确认对方会话确已停止，才用 `guard --takeover` 接管。
+- `lease show` 只读查看，`lease release` 在任务收尾时释放；`remove` 会一并清理。
+- 没有会话标识（人工终端）时租约不启用；确需共用同一目录可设 `TRADE_OS_ALLOW_SHARED_WORKTREE=1`。
+- 每个 Agent 会话应对应**自己的**任务 id：接手别人的任务先看 `status` 里的“会话租约”行，
+  不要因为目录已存在就直接进去写。
+
 ### Agent 权限（`TRADE_OS_AGENT_ROLE`）
 
 | 角色 | 允许 | 不允许 |
