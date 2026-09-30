@@ -72,7 +72,15 @@ await dashboard.waitFor({state: 'visible', timeout: 15000});
 // Customer → real customer workspace.
 await gotoPage('customers');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
-await page.getByRole('button', {name: 'Rehearsal Acrylic Co', exact: true}).click();
+// The customer list is the ledger (design/rooms/customers.md): select the row,
+// then open it with the keyboard path (Enter) the room documents.
+const ledgerRow = () => page.locator('#ledgerScroll .ld-ent').filter({hasText: 'Rehearsal Acrylic Co'}).first();
+const openLedgerRow = async () => {
+  await ledgerRow().waitFor({state: 'visible', timeout: 15000});
+  await ledgerRow().click();
+  await page.keyboard.press('Enter');
+};
+await openLedgerRow();
 let customerModal = page.locator('#customerEditModal.show:visible');
 await customerModal.waitFor({state: 'visible', timeout: 15000});
 await customerModal.getByRole('button', {name: '记录沟通', exact: true}).click();
@@ -97,9 +105,7 @@ await page.locator('#loginOverlay').waitFor({state: 'hidden', timeout: 15000});
 await page.locator('#page-dashboard.active').waitFor({state: 'visible', timeout: 15000});
 await gotoPage('customers');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
-await page.getByRole('button', {name: 'Rehearsal Acrylic Co', exact: true})
-  .waitFor({state: 'visible', timeout: 15000});
-await page.getByRole('button', {name: 'Rehearsal Acrylic Co', exact: true}).click();
+await openLedgerRow();
 customerModal = page.locator('#customerEditModal.show:visible');
 await customerModal.waitFor({state: 'visible', timeout: 15000});
 await customerModal.getByText('Browser acceptance customer reply', {exact: false}).first()
@@ -164,10 +170,10 @@ const previewText = await page.locator('#globalSearchPreview').innerText();
 check(previewText.includes('Browser acceptance'), 'global Search preview has no matching fact');
 await search.press('Enter');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
-const searchMatch = page.locator('#customerTableBody .customer-match-context')
+const searchMatch = page.locator('#ledgerScroll .ld-ent .ld-sn')
   .filter({hasText: 'Browser acceptance customer reply'}).first();
 await searchMatch.waitFor({state: 'visible', timeout: 30000});
-const searchResultText = await page.locator('#customerTableBody').innerText();
+const searchResultText = await page.locator('#ledgerScroll').innerText();
 check(searchResultText.includes('Browser acceptance customer reply'),
   'Search Enter did not show the matching communication');
 
