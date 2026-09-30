@@ -201,8 +201,9 @@ const undo = page.getByRole('button', {name:'撤销', exact:true}).last(); if (!
 await page.waitForFunction(() => document.querySelector('#inboxList')?.textContent?.includes('更正失效邮箱'), null, {timeout:15000});
 if (await inboxCount() !== 7) throw new Error('Inbox count did not restore after Undo: ' + await inboxCount());
 // Drive each upload through the rendered input.  A supported/not_supported
-// conclusion resolves its investigation question server-side, but the analysis
-// stays visible in the still-open rendered card until the next queue reload.
+// conclusion resolves its investigation question server-side, so the open card
+// can be replaced by a queue reload while the analysis is still being asserted
+// (see the state-based wait below).
 const uploads = [
   {file:'supported.csv', filter:'CSV', status:'supported', citation:'CSV', ref:'2'},
   {file:'not_supported.xlsx', filter:'XLSX', status:'not_supported', citation:'Trade rows', ref:'2'},
@@ -211,19 +212,65 @@ const uploads = [
   {file:'broken.pdf', filter:'损坏', status:'analysis_failed'},
 ];
 const observed = [];
+const uploadTimings = [];
+// The server-side analysis is deterministic (measured 0.09-0.36s across 200+
+// rehearsal uploads), but the app re-renders all of #inboxList whenever it
+// reloads its queue: a deferred reload after answering a question, the
+// global-sync debounce, or 返回队列. A reload that lands after this upload
+// resolved its investigation question legitimately drops the open card, and with
+// it the rendered .inbox-upload-status / .inbox-analysis-result. Waiting on those
+// nodes with a fixed timeout is therefore racy: wait on the app's own state, the
+// durable source the render is derived from, and keep asserting the same analysis
+// facts, preferring the rendered node whenever it is still on screen.
+const INBOX_ANALYSIS_TIMEOUT_MS = 15000; // ~40x the measured p99 (0.36s), for CI jitter.
+const readInboxUpload = (questionId) => page.evaluate((qid) => {
+  const state = window.inboxState || {};
+  const analyses = Array.isArray((state.analysisStates || {})[qid]) ? state.analysisStates[qid] : null;
+  const upload = (state.uploadStates || {})[qid] || null;
+  const node = document.querySelector('#inboxList .inbox-analysis-result');
+  const statusEl = document.querySelector('.inbox-upload-status');
+  return {
+    analyses: analyses,
+    upload: upload,
+    rendered: node ? {status: node.getAttribute('data-analysis-status'), text: node.textContent || ''} : null,
+    statusText: statusEl ? (statusEl.textContent || '').trim() : null,
+  };
+}, questionId);
+const citationText = (analyses) => (analyses || []).map((a) => (a.citations || []).map((c) => ((c.source || '') + ' ' + (c.row_or_page == null ? '' : c.row_or_page)).trim()).join(' ')).join(' ');
 for (const spec of uploads) {
   await backToQueue();
   const card = list.locator('.inbox-question-open').filter({hasText: spec.filter}).first();
+  const questionId = String(await card.getAttribute('data-inbox-id') || '');
+  if (!questionId) throw new Error('Inbox upload card has no question id for ' + spec.file + ': ' + (await list.innerText()));
   await card.click();
   const input = page.locator('#inboxList input[type=file]');
   if (!await input.count()) throw new Error('Inbox upload input missing for ' + spec.file + ': ' + (await list.innerText()));
+  const uploadStartedAt = Date.now();
+  const uploadStatusTextBefore = await page.locator('.inbox-upload-status').first().innerText().catch(() => '<absent>');
   await input.setInputFiles(samples + '/' + spec.file);
-  await page.locator('.inbox-upload-status').getByText(/证据已分析|失败/).waitFor({timeout:30000});
-  const result = page.locator('.inbox-analysis-result').first();
-  await result.waitFor({timeout:15000});
-  const status = await result.getAttribute('data-analysis-status');
-  const resultText = await result.innerText();
-  if (status !== spec.status) throw new Error(spec.file + ' expected status ' + spec.status + ' but rendered ' + status + ': ' + resultText);
+  let snapshot = null;
+  while (Date.now() - uploadStartedAt < INBOX_ANALYSIS_TIMEOUT_MS) {
+    snapshot = await readInboxUpload(questionId);
+    if ((snapshot.analyses && snapshot.analyses.length) || (snapshot.upload && snapshot.upload.error)) break;
+    await page.waitForTimeout(100);
+  }
+  const elapsedMs = Date.now() - uploadStartedAt;
+  const analyses = snapshot && snapshot.analyses;
+  const upload = (snapshot && snapshot.upload) || null;
+  const rendered = snapshot && snapshot.rendered;
+  const settled = (analyses && analyses.length) || (upload && upload.error);
+  uploadTimings.push({file: spec.file, statusBefore: uploadStatusTextBefore, elapsedMs: elapsedMs, rendered: !!rendered});
+  if (!settled) {
+    const diagnostic = await readInboxUpload(questionId).catch(() => null);
+    throw new Error(spec.file + ' evidence analysis did not settle within ' + INBOX_ANALYSIS_TIMEOUT_MS + 'ms (elapsed ' + elapsedMs + 'ms; statusBefore=' + JSON.stringify(uploadStatusTextBefore) + '): ' + JSON.stringify(diagnostic));
+  }
+  if (upload && upload.error) throw new Error(spec.file + ' evidence upload failed: ' + (upload.message || ''));
+  if (rendered && snapshot.statusText && !/证据已分析|失败/.test(snapshot.statusText)) {
+    throw new Error(spec.file + ' unexpected upload status text: ' + JSON.stringify(snapshot.statusText));
+  }
+  const status = (rendered && rendered.status) || (analyses && analyses[0] ? analyses[0].status : null);
+  const resultText = rendered ? rendered.text : citationText(analyses);
+  if (status !== spec.status) throw new Error(spec.file + ' expected status ' + spec.status + ' but saw ' + status + ': ' + resultText);
   if (spec.citation && !resultText.includes(spec.citation)) throw new Error(spec.file + ' citation source missing: ' + resultText);
   if (spec.ref && !new RegExp('(^|[^0-9])' + spec.ref + '([^0-9]|$)').test(resultText)) throw new Error(spec.file + ' citation location missing: ' + resultText);
   observed.push({file: spec.file, expected: spec.status, status, resultText});
@@ -291,4 +338,4 @@ while (await list.locator('.inbox-question-open').count()) {
   await page.waitForTimeout(300);
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
-return {cards: 10, draft:true, retry:true, emailCorrection:true, undo:true, automaticResumeQueued:true, unlinkedSelaManual:true, mobileActionClear:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, layouts};
+return {cards: 10, draft:true, retry:true, emailCorrection:true, undo:true, automaticResumeQueued:true, unlinkedSelaManual:true, mobileActionClear:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, uploadTimings, layouts};
