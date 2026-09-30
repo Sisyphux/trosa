@@ -687,7 +687,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .room-note.is-error {
   border-left: 2px solid var(--dl-danger);
   background: var(--dl-danger-soft);
-  color: #7d3229;
+  color: var(--dl-danger-ink);
 }
 
 /* the focal: what the light is holding */
@@ -733,8 +733,8 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   transition: color .3s var(--room-ease), background .3s var(--room-ease), border-color .3s var(--room-ease);
 }
 #trosa .room-act:hover { color: var(--dl-ink); background: rgba(255, 253, 247, .9); border-color: var(--dl-hair); }
-#trosa .room-act.primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
-#trosa .room-act.primary:hover { background: #37342c; color: var(--dl-paper); border-color: transparent; }
+#trosa .room-act.primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: var(--dl-paper); }
+#trosa .room-act.primary:hover { background: var(--dl-ink-hover); color: var(--dl-paper); border-color: transparent; }
 #trosa .room-hint { margin: 1rem 0 0; font-size: .68rem; letter-spacing: .04em; color: var(--dl-mut); }
 #trosa .today-tide .today-room-focus .empty-state { padding: 0 !important; }
 
@@ -868,7 +868,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   background: var(--dl-danger-soft);
   font-size: .74rem;
   line-height: 1.5;
-  color: #7d3229;
+  color: var(--dl-danger-ink);
 }
 #trosa .today-tide .tide-later-error[hidden] { display: none; }
 #trosa .today-tide .tide-later-error button { margin-top: .4rem; }
@@ -1172,8 +1172,8 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   transition: color .3s var(--room-ease), background .3s var(--room-ease), border-color .3s var(--room-ease);
 }
 #trosa #customerEditModal .cw-act:hover { color: var(--dl-ink); background: rgba(255, 253, 247, .9); border-color: var(--dl-hair); }
-#trosa #customerEditModal .cw-act.cw-primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: #f6f2e9; }
-#trosa #customerEditModal .cw-act.cw-primary:hover { background: #37342c; color: #fffdf7; border-color: transparent; }
+#trosa #customerEditModal .cw-act.cw-primary { padding: .56rem 1.2rem; background: var(--dl-ink); color: var(--dl-paper); }
+#trosa #customerEditModal .cw-act.cw-primary:hover { background: var(--dl-ink-hover); color: var(--dl-paper); border-color: transparent; }
 #trosa #customerEditModal .cw-act:disabled { opacity: .55; cursor: default; }
 #trosa #customerEditModal .cw-quick { display: flex; align-items: baseline; gap: .45em; margin-top: .9rem; padding-left: 1.05rem; font-size: .68em; letter-spacing: .04em; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-quick[hidden] { display: none; }
@@ -1197,7 +1197,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .cw-state p:empty { display: none; }
 #trosa #customerEditModal .cw-state .cw-act { margin: 1rem 0 0 -1.05rem; }
 #trosa #customerEditModal.is-error .cw-state strong { color: var(--dl-ink); }
-#trosa #customerEditModal.is-error .cw-state-line span { background: #a0654a; }
+#trosa #customerEditModal.is-error .cw-state-line span { background: var(--dl-danger-line); }
 #trosa #customerEditModal.is-loading .cw-next,
 #trosa #customerEditModal.is-loading .cw-acts,
 #trosa #customerEditModal.is-loading .cw-quick,
@@ -1376,7 +1376,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .cw-level input:focus { outline: none; border-bottom-color: var(--dl-focus); }
 #trosa #customerEditModal .customer-level-quick-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
 #trosa #customerEditModal .customer-level-quick-feedback.is-visible { opacity: 1; }
-#trosa #customerEditModal .customer-level-quick-feedback.is-error { color: #a0654a; }
+#trosa #customerEditModal .customer-level-quick-feedback.is-error { color: var(--dl-danger-ink); }
 #trosa #customerEditModal .cw-tz { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
 #trosa #customerEditModal .cw-tz-select {
   min-height: 0;
@@ -1402,7 +1402,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .cw-tz-reset { font-size: .68em; color: var(--dl-ink-2); border-bottom: 1px solid var(--dl-hair); }
 #trosa #customerEditModal .cw-tz-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
 #trosa #customerEditModal .cw-tz-feedback.is-visible { opacity: 1; }
-#trosa #customerEditModal .cw-tz-feedback.is-error { color: #a0654a; }
+#trosa #customerEditModal .cw-tz-feedback.is-error { color: var(--dl-danger-ink); }
 #trosa #customerEditModal .cw-sub { margin-top: 1.1rem; }
 #trosa #customerEditModal .cw-subk { display: block; margin-bottom: .4rem; font-size: .6em; letter-spacing: .14em; text-transform: uppercase; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-gaps { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .74em; color: var(--dl-ink-2); }
@@ -2294,7 +2294,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal .form-group textarea[aria-invalid="true"],
 #trosa #customerEditModal .form-control.is-invalid,
 #trosa #customerEditModal .form-group input[aria-invalid="true"] {
-  border-bottom-color: #a0654a;
+  border-bottom-color: var(--dl-danger-line);
   color: var(--dl-ink);
 }
 
@@ -2324,11 +2324,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .cw-act.cw-primary {
   padding: .56rem 1.2rem;
   background: var(--dl-ink);
-  color: #f6f2e9;
+  color: var(--dl-paper);
 }
 #trosa .cw-act.cw-primary:hover {
-  background: #37342c;
-  color: #fffdf7;
+  background: var(--dl-ink-hover);
+  color: var(--dl-paper);
 }
 #trosa .cw-act:disabled {
   opacity: .55;
@@ -2487,7 +2487,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 
 /* status lines: a word in the state's colour, never a tinted block */
 #trosa .modal .smart-fill-review.has-error,
-#trosa .modal .smart-preview-status.error { color: #8f4a36; }
+#trosa .modal .smart-preview-status.error { color: var(--dl-danger-ink); }
 #trosa .modal .smart-fill-review.is-ready,
 #trosa .modal .smart-preview-status.success { color: var(--dl-ok); }
 
@@ -2707,11 +2707,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal .modal-footer .btn.cw-primary {
   padding: .5rem 1.3rem !important;
   background: var(--dl-ink) !important;
-  color: #fffdf7 !important;
+  color: var(--dl-paper) !important;
   font-weight: 500 !important;
 }
 #trosa .modal .modal-footer .btn.btn-primary:hover:not(:disabled),
-#trosa .modal .modal-footer .btn.cw-primary:hover:not(:disabled) { background: #3a372f !important; color: #fffdf7 !important; }
+#trosa .modal .modal-footer .btn.cw-primary:hover:not(:disabled) { background: var(--dl-ink-hover) !important; color: var(--dl-paper) !important; }
 /* the pill keeps one width while its verb changes (U-05): a fixed floor, plus a
    wider one for the complete dialog's two-state verb */
 #trosa .modal .modal-footer .btn.btn-primary,
@@ -2836,7 +2836,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .complete-sheet .complete-date-input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; opacity: 0; pointer-events: none; }
 #trosa .complete-sheet .complete-tz { margin: .5rem 0 0; color: var(--dl-mut); font-size: .78rem; }
 #trosa .complete-sheet .complete-tz::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .4rem; border-radius: 50%; background: var(--dl-gold); }
-#trosa .complete-sheet .complete-tz.is-warn { color: var(--dl-warn, #8a6a1f); }
+#trosa .complete-sheet .complete-tz.is-warn { color: var(--dl-warn); }
 
 /* the optional extras: a quiet line, closed by default */
 #trosa .complete-sheet .complete-more-options { margin-top: 1.1rem; border-top: 0; }

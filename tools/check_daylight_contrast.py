@@ -8,8 +8,14 @@ WCAG 对比度并对照阈值：
   ui    ≥ 3.0:1  界面元素、键盘焦点环
   deco  不检查     纯装饰（分隔线、圆点、背景光），只输出数值供参考
 
-另做一次静态扫描（--dl-gold / --dl-faint 不得用作信息文字色，焦点规则不得取 --dl-gold），
-防止以后把亮金或淡灰重新用回承载信息的位置。
+另做静态扫描：
+
+  * visual-v3.css（scan_usage）：--dl-gold / --dl-faint 不得用作信息文字色，
+    焦点规则不得取 --dl-gold。v3 层不再有这些用法。
+  * visual-v5.css（scan_paper_faint）：纸面（弹窗 .modal / 客户工作区
+    #customerEditModal）上的信息文字不得取 --dl-faint——那是「读不到」的淡灰，
+    只能用于禁用态、placeholder、分隔与装饰状态。v5 是后来叠加的覆盖层，
+    大量复用 --dl-gold 作强调色，所以 v5 不做 v3 的 gold 扫描，只盯纸面淡灰。
 
 用法：
   python3 tools/check_daylight_contrast.py            # 输出全表，有失败则退出码 1
@@ -23,7 +29,9 @@ import re
 import sys
 from pathlib import Path
 
-CSS = Path(__file__).resolve().parent.parent / "app" / "static" / "visual-v3.css"
+STATIC = Path(__file__).resolve().parent.parent / "app" / "static"
+CSS = STATIC / "visual-v3.css"
+CSS_V5 = STATIC / "visual-v5.css"
 
 SURFACES = ["dl-paper", "dl-paper-2", "dl-paper-3", "dl-canvas"]
 SOFT_SURFACES = ["dl-gold-soft", "dl-danger-soft", "dl-ok-soft"]
@@ -33,6 +41,7 @@ TEXT_TOKENS = ["dl-ink", "dl-ink-2", "dl-ink-3", "dl-mut", "dl-gold-ink"]
 # 状态文字色（可能落在 paper 或对应 soft 底上）
 STATUS_TEXT = {
     "dl-danger": ["dl-danger-soft"],
+    "dl-danger-ink": ["dl-danger-soft"],
     "dl-ok": ["dl-ok-soft"],
     "dl-info": [],
     "dl-warn": [],
@@ -93,6 +102,12 @@ def ratio(fg, bg) -> float:
 LOGO_ALLOW = (".login-logo",)
 DISABLED_RE = re.compile(r":disabled|\[disabled\]|\.disabled|\[aria-disabled")
 
+# 纸面（弹窗 / 客户工作区）范围内，--dl-faint 不得承载信息
+PAPER_SCOPE_RE = re.compile(r"\.modal\b|#customerEditModal")
+PSEUDO_OR_DECOR_RE = re.compile(r"::placeholder|:empty::before|::selection|::marker")
+DECOR_STATE_RE = re.compile(r"\.is-done")
+FAINT_TEXT_RE = re.compile(r"(?<![\w-])color\s*:\s*var\(--dl-faint\)")
+
 
 def scan_usage(css: str) -> list[str]:
     """静态扫描：亮金/淡灰不得承载信息，焦点规则不得取亮金。"""
@@ -106,6 +121,30 @@ def scan_usage(css: str) -> list[str]:
         is_focus = ":focus" in selector
         if is_focus and re.search(r"(outline|border-color)[^;]*var\(--dl-gold\)", body):
             problems.append(f"焦点样式必须使用 --dl-focus，而不是 --dl-gold：{selector[:90]}")
+    return problems
+
+
+def scan_paper_faint(css: str) -> list[str]:
+    """visual-v5.css 静态扫描：纸面上的信息文字不得取 --dl-faint。
+
+    v5 是叠加在 v3 之上的覆盖层，--dl-gold 在 v5 里是合法的强调色（导航序号、
+    房间日期、客户键等），所以这里只查纸面（弹窗 / 客户工作区）上把 --dl-faint
+    当信息文字用的规则；禁用态、placeholder、装饰（is-done 删除线）豁免。
+    """
+    problems = []
+    css = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+    for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+        selector = " ".join(block.group(1).split())
+        if not PAPER_SCOPE_RE.search(selector):
+            continue
+        if DISABLED_RE.search(selector):
+            continue
+        if PSEUDO_OR_DECOR_RE.search(selector) or DECOR_STATE_RE.search(selector):
+            continue
+        if selector.startswith(LOGO_ALLOW):
+            continue
+        if FAINT_TEXT_RE.search(block.group(2)):
+            problems.append(f"纸面文字不得使用 --dl-faint（读不到）：{selector[:90]}")
     return problems
 
 
@@ -146,6 +185,11 @@ def main() -> int:
         for bg in SURFACES:
             rows.append(("deco", fg, bg, ratio(color(fg), color(bg)), None))
 
+    # 实心墨色动作的 hover 面：纸色文字在其上仍需 ≥4.5:1
+    if "dl-ink-hover" in tokens:
+        rows.append(("text", "dl-paper", "dl-ink-hover",
+                     ratio(color("dl-paper"), color("dl-ink-hover")), TEXT_MIN))
+
     for fg in ["dl-ink-3", "dl-mut"]:
         rows.append(("deco", fg, FLOOR, ratio(color(fg), color(FLOOR)), None))
 
@@ -171,6 +215,12 @@ def main() -> int:
     for v in violations:
         print(f"usage FAIL  {v}")
     failed += len(violations)
+
+    css_v5 = CSS_V5.read_text(encoding="utf-8")
+    paper_violations = scan_paper_faint(css_v5)
+    for v in paper_violations:
+        print(f"usage FAIL  {v}")
+    failed += len(paper_violations)
 
     print(f"\n失败 {failed} 项（阈值：文字 {TEXT_MIN}:1，界面/焦点 {UI_MIN}:1）")
     return 1 if failed else 0
