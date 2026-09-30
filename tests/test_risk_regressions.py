@@ -3559,6 +3559,57 @@ class ModalLabelRegressionTest(unittest.TestCase):
         self.assertEqual(required, accessible, 'every required marker needs a visually hidden 必填')
 
 
+class ModalSolidButtonRegressionTest(unittest.TestCase):
+    """Every small window keeps at most one solid ink pill; other actions stay outlined (U-07)."""
+
+    SOLID = re.compile(r'class="[^"]*\b(?:btn-primary|cw-primary|command-primary)\b')
+
+    @staticmethod
+    def _overlay_blocks(html):
+        blocks = {}
+        for match in re.finditer(r'<div class="modal-overlay[^"]*"([^>]*)>', html):
+            id_match = re.search(r'id="([^"]+)"', match.group(1))
+            if not id_match:
+                continue
+            start = match.start()
+            depth = 0
+            cursor = start
+            while cursor < len(html):
+                nxt = html.find('<div', cursor)
+                close = html.find('</div>', cursor)
+                if nxt == -1:
+                    break
+                if nxt < close:
+                    depth += 1
+                    cursor = nxt + 4
+                else:
+                    depth -= 1
+                    cursor = close + 6
+                    if depth == 0:
+                        break
+            blocks[id_match.group(1)] = html[start:cursor]
+        return blocks
+
+    def test_each_small_modal_has_at_most_one_solid_button(self):
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        blocks = self._overlay_blocks(html)
+        # the customer workspace is a full room, not a small window; it may host
+        # several section-level primaries, so it is out of scope here.
+        self.assertIn('addNewCustomerModal', blocks)
+        for modal_id, block in blocks.items():
+            if modal_id == 'customerEditModal':
+                continue
+            solids = self.SOLID.findall(block)
+            self.assertLessEqual(len(solids), 1, f'{modal_id} shows more than one solid button: {solids}')
+
+    def test_smart_fill_buttons_are_secondary(self):
+        html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
+        for button_id in ('newSmartFillButton', 'existSmartFillButton'):
+            tag = re.search(r'<button[^>]*id="' + button_id + r'"[^>]*>', html).group(0)
+            self.assertNotIn('btn-primary', tag)
+            self.assertNotIn('btn-sm', tag)
+
+
 class TimelineLocalEchoRegressionTest(unittest.TestCase):
     """Customer timeline writes paint locally and use the shared motion states."""
 

@@ -10832,6 +10832,7 @@ async function smartFillCustomer(type) {
   var progressStep = 0;
   var requestToken = ++_smartFillRequestToken;
   var progressMessages = ['正在连接网站…', '正在读取官网正文…', '正在整理可核实的官网事实…'];
+  var idleLabel = (button.textContent || '').trim() || '自动识别';
   button.disabled = true;
   button.textContent = '正在识别…';
   review.hidden = false;
@@ -10861,7 +10862,7 @@ async function smartFillCustomer(type) {
   } finally {
     clearInterval(progressTimer);
     button.disabled = false;
-    button.innerHTML = uiIcon('sparkle') + '自动识别';
+    button.innerHTML = uiIcon('sparkle') + idleLabel;
   }
 }
 

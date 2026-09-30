@@ -995,7 +995,7 @@
       </div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">行业领域</label><input type="text" class="form-control" id="newCustomerField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
       <div class="form-row add-customer-advanced new-customer-advanced"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="newCustomerSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="newCustomerSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div></div>
-      <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button class="btn btn-sm btn-primary" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="text-action add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
+      <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button type="button" class="btn" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="text-action add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加联系人</button></div>
         <div id="newDraftContacts"></div>
@@ -1022,7 +1022,7 @@
       <div class="add-customer-basics">
         <div class="form-group">
           <label class="form-label">客户官网 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
-          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button class="btn btn-sm btn-primary" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>自动识别</button></div>
+          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button type="button" class="btn" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>自动识别</button></div>
         </div>
         <div class="form-group">
           <label class="form-label">公司 / 客户名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
