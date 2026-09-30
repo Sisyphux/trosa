@@ -85,5 +85,18 @@
       "Read(~/.config/trosa/workbench.env)",
       "Read(~/.config/trosa/*.env)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/deploy/cloud/agent-lease-pretool.sh"
+          }
+        ]
+      }
+    ]
   }
 }

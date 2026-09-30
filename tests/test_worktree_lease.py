@@ -111,6 +111,28 @@ class WorktreeLeaseTests(unittest.TestCase):
         self.assertEqual(
             self._run("B", "guard", TRADE_OS_ALLOW_SHARED_WORKTREE="1").returncode, 0)
 
+    def _pretool(self, session, path):
+        import json
+        hook = self.repo / "deploy" / "cloud" / "agent-lease-pretool.sh"
+        return subprocess.run(
+            ["bash", str(hook)], capture_output=True, text=True, env=self._env(session),
+            input=json.dumps({"cwd": str(self.wt), "tool_input": {"file_path": str(path)}}))
+
+    def test_pretool_hook_blocks_writes_from_second_session(self):
+        # Copy of the shipped hook lives in the temp repo via the *.sh glob above.
+        self.assertEqual(self._pretool("A", self.wt / "x.txt").returncode, 0)  # claims
+        blocked = self._pretool("B", self.wt / "x.txt")
+        self.assertEqual(blocked.returncode, 2, blocked.stderr)
+        self.assertIn("create --task t1-b", blocked.stderr)
+        # Outside an agent/<id> worktree the hook never interferes.
+        self.assertEqual(self._pretool("B", self.repo / "README.md").returncode, 0)
+
+    def test_pretool_hook_fails_open_on_bad_input(self):
+        hook = self.repo / "deploy" / "cloud" / "agent-lease-pretool.sh"
+        proc = subprocess.run(["bash", str(hook)], input="not json", capture_output=True,
+                              text=True, env=self._env("B"))
+        self.assertEqual(proc.returncode, 0)
+
     def test_release_and_remove_clear_lease(self):
         self._run("A", "guard")
         lease = self.repo / ".git" / "trosa-tasks" / "t1.lease"

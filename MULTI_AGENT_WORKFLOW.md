@@ -40,6 +40,10 @@
 
 - `guard` 在任务隔离区里会认领租约（`trosa-tasks/<id>.lease`，按 `TRADE_OS_AGENT_SESSION`
   或 `CLAUDE_CODE_SESSION_ID` 识别会话）；`pre-commit` 提交时再检查一次，并在空闲时自动认领。
+- **写文件前也查**：仓库里的 `.claude/settings.json` 给 Edit/Write/NotebookEdit 挂了 PreToolUse 钩子
+  （`deploy/cloud/agent-lease-pretool.sh`）。目标文件在别人占用的隔离区里，写入直接被拒绝（退出码 2，
+  提示回传给模型）；没跑过 `guard` 的会话在第一次写入时也会自动认领。目标不在 `agent/*` 隔离区、
+  输入异常或脚本故障一律放行，护栏自身出问题不会阻断开发。
 - 另一个存活会话已持有 → `guard`/`commit` 以退出码 42 拒绝，并直接打印分叉命令。**遇到这个提示不要
   停下来问人，也不要在原目录继续写**，照做即可：
 
