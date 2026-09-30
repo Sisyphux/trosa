@@ -862,10 +862,10 @@
 
 <!-- Complete Reminder Modal -->
 <div class="modal-overlay" id="completeModal" data-initial-focus="#completeResult">
-  <div class="modal modal-sheet complete-sheet" role="dialog" aria-modal="true" aria-label="完成这次跟进" style="max-width:600px;">
+  <div class="modal modal-sheet complete-sheet" role="dialog" aria-modal="true" aria-labelledby="completeCustomerName completeModalTitle" style="max-width:600px;">
     <div class="modal-header">
       <div class="modal-head-copy">
-        <span class="modal-eyebrow">完成这次跟进</span>
+        <span class="modal-eyebrow" id="completeModalTitle">完成这次跟进</span>
         <h3 id="completeCustomerName"></h3>
         <p class="complete-what" id="completeSummary"><span class="complete-what-task" id="completeContent"></span><span class="complete-what-due" id="completeDue"></span></p>
       </div>
@@ -957,9 +957,9 @@
 
 <!-- Batch Complete Follow-up Modal -->
 <div class="modal-overlay" id="batchCompleteModal">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="batchCompleteModalTitle" style="max-width:520px;">
     <div class="modal-header">
-      <h3>批量完成跟进</h3>
+      <h3 id="batchCompleteModalTitle">批量完成跟进</h3>
       <button class="modal-close" onclick="closeModal('batchCompleteModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -982,9 +982,9 @@
 
 <!-- Add New Customer Modal -->
 <div class="modal-overlay" id="addNewCustomerModal">
-  <div class="modal" style="max-width:560px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addNewCustomerModalTitle" style="max-width:560px;">
     <div class="modal-header">
-      <h3>添加新客户</h3>
+      <h3 id="addNewCustomerModalTitle">添加新客户</h3>
       <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -1013,9 +1013,9 @@
 
 <!-- Add Existing Customer Modal -->
 <div class="modal-overlay" id="addCustomerModal">
-  <div class="modal modal-lg add-customer-modal">
+  <div class="modal modal-lg add-customer-modal" role="dialog" aria-modal="true" aria-labelledby="addCustomerModalTitle">
     <div class="modal-header">
-      <h3>添加客户</h3>
+      <h3 id="addCustomerModalTitle">添加客户</h3>
       <button class="modal-close" onclick="closeModal('addCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -1071,8 +1071,8 @@
 
 <!-- Smart website import preview -->
 <div class="modal-overlay" id="smartFillPreviewModal">
-  <div class="modal" style="max-width:620px;">
-    <div class="modal-header"><div><h3>确认识别结果</h3><p class="modal-subtitle">尚未保存；确认后填入客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="smartFillPreviewModalTitle" style="max-width:620px;">
+    <div class="modal-header"><div><h3 id="smartFillPreviewModalTitle">确认识别结果</h3><p class="modal-subtitle">尚未保存；确认后填入客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body" id="smartFillPreviewContent"></div>
     <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary cw-act cw-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
   </div>
@@ -1080,8 +1080,8 @@
 
 <!-- Unsaved customer form confirmation -->
 <div class="modal-overlay" id="unsavedChangesModal">
-  <div class="modal" style="max-width:440px;">
-    <div class="modal-header"><div><h3>还有未保存的修改</h3><p class="modal-subtitle" id="unsavedChangesSubtitle">你刚才填写的内容还没有保存。</p></div></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="unsavedChangesModalTitle" style="max-width:440px;">
+    <div class="modal-header"><div><h3 id="unsavedChangesModalTitle">还有未保存的修改</h3><p class="modal-subtitle" id="unsavedChangesSubtitle">你刚才填写的内容还没有保存。</p></div></div>
     <div class="modal-body"><p class="unsaved-message">要先保存这些修改，还是放弃后退出？</p></div>
     <div class="modal-footer"><button class="btn cw-act" onclick="continueEditingCustomerForm()">继续编辑</button><button class="btn btn-danger cw-act" onclick="discardCustomerFormChanges()">放弃修改</button><button class="btn btn-primary cw-act cw-primary" id="unsavedSaveButton" onclick="savePendingCustomerForm()">保存并退出</button></div>
   </div>
@@ -1089,9 +1089,9 @@
 
 <!-- Batch Add Modal -->
 <div class="modal-overlay" id="batchAddModal">
-  <div class="modal" style="max-width:600px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="batchAddModalTitle" style="max-width:600px;">
     <div class="modal-header">
-      <h3>批量添加新客户</h3>
+      <h3 id="batchAddModalTitle">批量添加新客户</h3>
       <button class="modal-close" onclick="closeModal('batchAddModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -1106,7 +1106,7 @@
 
 <!-- Next Task Modal -->
 <div class="modal-overlay" id="customerTaskModal">
-  <div class="modal task-action-modal">
+  <div class="modal task-action-modal" role="dialog" aria-modal="true" aria-labelledby="customerTaskModalTitle">
     <div class="modal-header">
       <div>
         <div class="workspace-kicker">下一步</div>
@@ -1139,7 +1139,7 @@
 
 <!-- Inbox Reply Modal -->
 <div class="modal-overlay" id="inboxReplyModal">
-  <div class="modal inbox-reply-modal">
+  <div class="modal inbox-reply-modal" role="dialog" aria-modal="true" aria-labelledby="communicationConfirmTitle">
     <div class="modal-header"><div><div class="workspace-kicker" id="communicationConfirmKicker">沟通确认</div><h3 id="communicationConfirmTitle">记录沟通</h3><p class="modal-subtitle" id="communicationConfirmSubtitle" hidden></p></div><button class="modal-close" onclick="closeModal('inboxReplyModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body">
       <div class="communication-context-summary" id="communicationConfirmContext" hidden><div><span>客户</span><strong id="communicationConfirmContextCustomer">未选择</strong></div><div><span>联系人</span><strong id="communicationConfirmContextContact">未关联</strong></div><div><span>来源</span><strong id="communicationConfirmContextSource">手动记录</strong></div><div><span>日期</span><strong id="communicationConfirmContextDate">未记录</strong></div></div>
@@ -1164,7 +1164,7 @@
 
 <!-- Batch Set Value Modal -->
 <div class="modal-overlay" id="batchSetModal">
-  <div class="modal" style="max-width:400px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="batchSetTitle" style="max-width:400px;">
     <div class="modal-header">
       <h3 id="batchSetTitle">批量更新</h3>
       <button class="modal-close" onclick="closeModal('batchSetModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
@@ -1182,8 +1182,8 @@
 </div>
 
 <!-- Lightweight in-app dialog: replaces browser prompt / confirm surfaces -->
-<div class="modal-overlay" id="appDialogModal" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
-  <div class="modal modal-app-dialog">
+<div class="modal-overlay" id="appDialogModal">
+  <div class="modal modal-app-dialog" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
     <div class="modal-header">
       <div>
         <p class="app-dialog-eyebrow" id="appDialogEyebrow">TRADE OS</p>
@@ -1207,9 +1207,9 @@
 
 <!-- Today Quick Edit Modal -->
 <div class="modal-overlay" id="todayQuickEditModal">
-  <div class="modal" style="max-width:440px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="todayQuickEditModalTitle" style="max-width:440px;">
     <div class="modal-header">
-      <h3>快速编辑选中客户</h3>
+      <h3 id="todayQuickEditModalTitle">快速编辑选中客户</h3>
       <button class="modal-close" onclick="closeModal('todayQuickEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -1242,9 +1242,9 @@
 
 <!-- Follow-up History Edit Modal -->
 <div class="modal-overlay" id="followEditModal">
-  <div class="modal" style="max-width:550px;">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="followEditModalTitle" style="max-width:550px;">
     <div class="modal-header">
-      <h3>编辑跟进记录</h3>
+      <h3 id="followEditModalTitle">编辑跟进记录</h3>
       <button class="modal-close" onclick="closeModal('followEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">

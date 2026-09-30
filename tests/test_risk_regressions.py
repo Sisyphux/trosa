@@ -3501,6 +3501,27 @@ class CompleteModalRegressionTest(unittest.TestCase):
         self.assertIn('complete modal regression: OK', result.stdout)
 
 
+class ModalA11yRegressionTest(unittest.TestCase):
+    """Every dialog declares role/aria-modal, traps Tab, and inerts the page behind."""
+
+    def test_modal_a11y_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'modal_a11y_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('modal a11y regression: OK', result.stdout)
+
+
 class TimelineLocalEchoRegressionTest(unittest.TestCase):
     """Customer timeline writes paint locally and use the shared motion states."""
 

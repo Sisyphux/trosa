@@ -11195,17 +11195,23 @@ function refreshCalendarFeed() {
   });
 }
 
+var _ephemeralModalSeq = 0;
+
 function showCustomModal(title, bodyHtml) {
   var overlay = document.createElement('div');
   overlay.className = 'modal-overlay show ephemeral-modal';
-  overlay.innerHTML = '<div class="modal" style="max-width:560px;">' +
-    '<div class="modal-header"><h3>' + title + '</h3><button class="modal-close" aria-label="关闭" onclick="closeEphemeralModal(this.closest(\'.modal-overlay\'))">' + uiIcon('close') + '</button></div>' +
+  var titleId = 'ephemeralModalTitle' + (++_ephemeralModalSeq);
+  overlay.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="' + titleId + '" style="max-width:560px;">' +
+    '<div class="modal-header"><h3 id="' + titleId + '">' + title + '</h3><button class="modal-close" aria-label="关闭" onclick="closeEphemeralModal(this.closest(\'.modal-overlay\'))">' + uiIcon('close') + '</button></div>' +
     '<div class="modal-body">' + bodyHtml + '</div>' +
     '<div class="modal-footer"><button class="btn" onclick="closeEphemeralModal(this.closest(\'.modal-overlay\'))">关闭</button></div>' +
     '</div>';
   overlay.addEventListener('click', function(e) { if (e.target === this) closeEphemeralModal(this); });
+  var active = document.activeElement;
+  overlay._returnFocus = (active && active !== document.body && !overlay.contains(active)) ? active : null;
   document.body.appendChild(overlay);
   syncModalBodyLock();
+  requestAnimationFrame(function() { focusFirstModalControl(overlay); });
 }
 
 // ========== FOLLOW-UP HISTORY ==========
@@ -11845,7 +11851,62 @@ function modalNeedsUnsavedGuard(id) {
   var modal = document.getElementById(id);
   return !!modal && _unguardedModals.indexOf(id) < 0 && !!modal.querySelector('input:not([type="hidden"]), select, textarea');
 }
-function syncModalBodyLock() { document.body.style.overflow = document.querySelector('.modal-overlay.show') ? 'hidden' : ''; }
+// The topmost open overlay is the only interactive surface. `openModal` keeps
+// overlays in DOM order, so the last `.show` overlay is the one on top (nested
+// dialogs, e.g. the unsaved-changes prompt, sit after the composer they protect).
+function modalTopOverlay() {
+  var open = Array.prototype.slice.call(document.querySelectorAll('.modal-overlay.show'));
+  return open[open.length - 1] || null;
+}
+
+// Every body child except the top overlay becomes inert: the page behind a
+// dialog must not take clicks or focus, and a lower dialog in a nested stack is
+// inert too. We remember exactly which elements we set so closing restores the
+// stack without clobbering inert that another owner (the room index) applied.
+var _modalInerted = [];
+var _modalInertSkipTags = { SCRIPT: 1, STYLE: 1, LINK: 1, TEMPLATE: 1, META: 1, NOSCRIPT: 1 };
+function syncModalInert() {
+  _modalInerted.forEach(function(el) { el.removeAttribute('inert'); });
+  _modalInerted = [];
+  var top = modalTopOverlay();
+  if (!top) return;
+  Array.prototype.forEach.call(document.body.children, function(child) {
+    if (child === top) return;
+    if (_modalInertSkipTags[child.tagName]) return;
+    child.setAttribute('inert', '');
+    _modalInerted.push(child);
+  });
+}
+
+function syncModalBodyLock() {
+  document.body.style.overflow = document.querySelector('.modal-overlay.show') ? 'hidden' : '';
+  syncModalInert();
+}
+
+// A control is reachable by Tab only when it is visible enough to focus. The
+// attribute checks work in jsdom (used by the regression harness); the browser
+// additionally skips `display:none` subtrees on its own.
+function modalControlVisible(el) {
+  var node = el;
+  while (node && node.nodeType === 1) {
+    if (node.hidden) return false;
+    if (node.hasAttribute('inert')) return false;
+    if (node.getAttribute && node.getAttribute('aria-hidden') === 'true') return false;
+    if (node.style && node.style.display === 'none') return false;
+    node = node.parentElement;
+  }
+  return true;
+}
+
+function modalFocusableElements(container) {
+  if (!container) return [];
+  var selector = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+  return Array.prototype.filter.call(container.querySelectorAll(selector), function(el) {
+    var tabindex = el.getAttribute('tabindex');
+    if (tabindex !== null && Number(tabindex) < 0) return false;
+    return modalControlVisible(el);
+  });
+}
 
 function focusFirstModalControl(modal) {
   if (!modal || !modal.classList.contains('show')) return;
@@ -12037,17 +12098,19 @@ function closeModal(id, force) {
 
 function closeEphemeralModal(element) {
   if (!element || !element.isConnected) return;
+  var returnFocus = element._returnFocus;
   element.classList.remove('show');
-  if (_motionReduced) {
-    element.remove();
+  syncModalBodyLock();
+  var finishClose = function() {
+    if (element.isConnected) element.remove();
     syncModalBodyLock();
-    return;
-  }
+    if (!document.querySelector('.modal-overlay.show') && returnFocus && returnFocus.isConnected && !returnFocus.disabled) {
+      returnFocus.focus({ preventScroll: true });
+    }
+  };
+  if (_motionReduced) { finishClose(); return; }
   element.classList.add('is-closing');
-  setTimeout(function() {
-    element.remove();
-    syncModalBodyLock();
-  }, 170);
+  setTimeout(finishClose, 170);
 }
 
 function continueEditingCustomerForm() {
@@ -12092,6 +12155,28 @@ document.addEventListener('keydown', function(e) {
     if (top.id === 'unsavedChangesModal') continueEditingCustomerForm();
     else if (top.classList.contains('ephemeral-modal')) closeEphemeralModal(top);
     else closeModal(top.id);
+  }
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Tab') return;
+  // Keep keyboard focus inside the topmost dialog: tabbing past the last
+  // control wraps to the first, Shift+Tab from the first wraps to the last.
+  // Without this the browser hands focus to the (now inert) page behind.
+  var top = modalTopOverlay();
+  if (!top) return;
+  var focusables = modalFocusableElements(top);
+  if (!focusables.length) { e.preventDefault(); return; }
+  var first = focusables[0];
+  var last = focusables[focusables.length - 1];
+  var active = document.activeElement;
+  if (e.shiftKey) {
+    if (active === first || !top.contains(active)) {
+      e.preventDefault();
+      last.focus({ preventScroll: true });
+    }
+  } else if (active === last || !top.contains(active)) {
+    e.preventDefault();
+    first.focus({ preventScroll: true });
   }
 });
 window.addEventListener('beforeunload', function(e) {
