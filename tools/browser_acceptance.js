@@ -152,6 +152,51 @@ const todayText = await page.locator('#page-dashboard').innerText();
 check(todayText.includes('Browser acceptance: send sample quotation'),
   'dated next step is missing from Today');
 
+// The 完成这次跟进 modal (#completeModal) must open ready to type from a real
+// entry and record the follow-up through its keyboard path. Today's dated action
+// is a real reminder, so it is also reachable from the full calendar — the other
+// caller of the same dialog. The old dialog called loadDashboard()/loadCalendar()
+// and repainted the whole page; this path proves the inline save instead.
+await page.locator('#page-dashboard [data-module="calendar_sync"]').first().click();
+await page.locator('#page-calendar.active').waitFor({state: 'visible', timeout: 15000});
+const calendarToday = page.locator('#calendarGrid .calendar-day.today').first();
+await calendarToday.waitFor({state: 'visible', timeout: 15000});
+await calendarToday.click();
+const calendarRow = page.locator('#calendarDetail .reminder-item')
+  .filter({hasText: 'Browser acceptance: send sample quotation'}).first();
+await calendarRow.waitFor({state: 'visible', timeout: 15000});
+await calendarRow.getByRole('button', {name: '记录跟进'}).click();
+const completeModal = page.locator('#completeModal.show:visible');
+await completeModal.waitFor({state: 'visible', timeout: 15000});
+const completeFocusId = await page.evaluate(
+  () => (document.activeElement && document.activeElement.id) || ''
+);
+check(completeFocusId === 'completeResult',
+  'the complete modal did not put the caret in the capture textarea');
+
+await completeModal.locator('#completeResult').fill('Browser acceptance complete follow-up');
+// 沟通方式 now lives below the textarea as a compact custom menu; ArrowDown opens
+// it and Enter selects the next channel (WhatsApp → email).
+await completeModal.locator('#completeActivityTrigger').click();
+await page.keyboard.press('ArrowDown');
+await page.keyboard.press('Enter');
+const completeChannel = await page.evaluate(
+  () => document.getElementById('completeActivityType').value
+);
+check(completeChannel === 'email',
+  'the complete modal channel menu did not switch with the keyboard');
+
+await completeModal.locator('#completeResult').click();
+await page.keyboard.press('Control+Enter');
+await completeModal.waitFor({state: 'hidden', timeout: 30000});
+const completeToast = page.locator('#toastContainer .toast').first();
+await completeToast.waitFor({state: 'visible', timeout: 15000});
+check((await completeToast.innerText()).includes('已记录'),
+  'completing the follow-up did not confirm inline with 已记录');
+const calendarAfter = await page.locator('#calendarDetail').innerText();
+check(!calendarAfter.includes('Browser acceptance: send sample quotation'),
+  'the completed follow-up stayed in the calendar after an inline save');
+
 // Inbox must remain a real rendered workspace with pending judgement items.
 await gotoPage('inbox');
 await page.locator('#page-inbox.active').waitFor({state: 'visible', timeout: 15000});

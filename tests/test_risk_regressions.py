@@ -3480,6 +3480,27 @@ class ModalExitRegressionTest(unittest.TestCase):
         self.assertIn('modal exit regression: OK', result.stdout)
 
 
+class CompleteModalRegressionTest(unittest.TestCase):
+    """The 完成这次跟进 modal keeps its new handfeel: ready-to-type, inline errors, local echo."""
+
+    def test_complete_modal_flow_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'complete_modal_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('complete modal regression: OK', result.stdout)
+
+
 class TimelineLocalEchoRegressionTest(unittest.TestCase):
     """Customer timeline writes paint locally and use the shared motion states."""
 

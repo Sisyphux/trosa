@@ -69,6 +69,201 @@ function uiIcon(name) {
   return '<span class="ui-icon ui-icon-' + name + '" aria-hidden="true"></span>';
 }
 
+// ---- reusable compact menu: a trigger button + a listbox -------------------
+// A small, daylight-quiet select replacement for places where a native <select>
+// reads as a form artifact. The chosen value is mirrored into a hidden input so
+// existing read/write logic keeps working unchanged.
+//
+// HTML contract:
+//   <div class="ui-menu" id="<ID>Menu">
+//     <button type="button" class="ui-menu-trigger" id="<ID>Trigger" aria-haspopup="listbox"
+//             aria-expanded="false" onclick="uiMenuToggle('<ID>')"
+//             onkeydown="uiMenuTriggerKeydown(event, '<ID>')">
+//       <span class="ui-menu-icon" id="<ID>TriggerIcon" aria-hidden="true"></span>
+//       <span class="ui-menu-value" id="<ID>TriggerValue"></span>
+//       <span class="ui-icon ui-icon-down ui-menu-caret" aria-hidden="true"></span>
+//     </button>
+//     <input type="hidden" id="<ID>" value="...">
+//     <div class="ui-menu-list" id="<ID>MenuList" role="listbox" tabindex="-1" hidden
+//          onclick="uiMenuListClick(event, '<ID>')"
+//          onkeydown="uiMenuListKeydown(event, '<ID>')"></div>
+//   </div>
+// Register once with uiMenuRegister(id, [{value,label,icon?}]); the first option
+// is the fallback when the hidden input is empty.
+var _uiMenuRegistry = {};
+var _uiMenuDocBound = false;
+
+function uiMenuRegister(id, options, inputId) {
+  _uiMenuRegistry[id] = { id: id, inputId: inputId || id, options: options || [], activeIndex: -1 };
+  if (!_uiMenuDocBound) {
+    _uiMenuDocBound = true;
+    document.addEventListener('click', function(e) {
+      Object.keys(_uiMenuRegistry).forEach(function(key) {
+        var root = document.getElementById(key + 'Menu');
+        if (root && e.target && root.contains(e.target)) return;
+        if (uiMenuIsOpen(key)) uiMenuClose(key, false);
+      });
+    });
+  }
+  uiMenuSync(id);
+}
+
+function uiMenuEls(id) {
+  var inputId = (_uiMenuRegistry[id] || {}).inputId || id;
+  return {
+    root: document.getElementById(id + 'Menu'),
+    trigger: document.getElementById(id + 'Trigger'),
+    icon: document.getElementById(id + 'TriggerIcon'),
+    value: document.getElementById(id + 'TriggerValue'),
+    input: document.getElementById(inputId),
+    list: document.getElementById(id + 'MenuList')
+  };
+}
+
+function uiMenuOptions(id) { return (_uiMenuRegistry[id] || {}).options || []; }
+
+function uiMenuFindOption(id, value) {
+  var options = uiMenuOptions(id);
+  for (var i = 0; i < options.length; i++) { if (options[i].value === value) return options[i]; }
+  return null;
+}
+
+function uiMenuSync(id) {
+  if (!_uiMenuRegistry[id]) return;
+  var els = uiMenuEls(id);
+  if (!els.trigger) return;
+  var current = uiMenuFindOption(id, els.input ? els.input.value : '') || uiMenuOptions(id)[0];
+  if (current && els.input && els.input.value !== current.value) els.input.value = current.value;
+  if (els.value) els.value.textContent = current ? current.label : '';
+  if (els.icon) els.icon.innerHTML = current && current.icon ? uiIcon(current.icon) : '';
+  uiMenuRenderList(id);
+}
+
+function uiMenuRenderList(id) {
+  var els = uiMenuEls(id);
+  if (!els.list) return;
+  var current = els.input ? els.input.value : '';
+  els.list.innerHTML = uiMenuOptions(id).map(function(option) {
+    var selected = option.value === current;
+    return '<div class="ui-menu-item' + (selected ? ' is-selected' : '') + '" role="option" tabindex="-1" data-value="' + escapeHtml(option.value) + '" aria-selected="' + (selected ? 'true' : 'false') + '">' +
+      '<span class="ui-menu-item-icon">' + (option.icon ? uiIcon(option.icon) : '') + '</span>' +
+      '<span class="ui-menu-item-label">' + escapeHtml(option.label) + '</span>' +
+      '<span class="ui-icon ui-icon-check ui-menu-item-check" aria-hidden="true"></span>' +
+      '</div>';
+  }).join('');
+}
+
+function uiMenuIsOpen(id) {
+  var els = uiMenuEls(id);
+  return !!(els.list && !els.list.hidden);
+}
+
+function uiMenuOpen(id) {
+  var els = uiMenuEls(id);
+  if (!els.list || !els.trigger) return;
+  Object.keys(_uiMenuRegistry).forEach(function(key) { if (key !== id && uiMenuIsOpen(key)) uiMenuClose(key, false); });
+  els.list.hidden = false;
+  if (els.root) els.root.classList.add('is-open');
+  els.trigger.setAttribute('aria-expanded', 'true');
+  var current = els.input ? els.input.value : '';
+  var options = uiMenuOptions(id);
+  var index = 0;
+  for (var i = 0; i < options.length; i++) { if (options[i].value === current) index = i; }
+  uiMenuHighlight(id, index, true);
+}
+
+function uiMenuClose(id, refocus) {
+  var els = uiMenuEls(id);
+  if (els.list) {
+    els.list.hidden = true;
+    els.list.querySelectorAll('.ui-menu-item.is-active').forEach(function(el) { el.classList.remove('is-active'); });
+  }
+  if (els.root) els.root.classList.remove('is-open');
+  if (els.trigger) {
+    els.trigger.setAttribute('aria-expanded', 'false');
+    if (refocus) els.trigger.focus();
+  }
+  if (_uiMenuRegistry[id]) _uiMenuRegistry[id].activeIndex = -1;
+}
+
+function uiMenuHighlight(id, index, focus) {
+  var els = uiMenuEls(id);
+  if (!els.list) return;
+  var items = els.list.querySelectorAll('.ui-menu-item');
+  if (!items.length) return;
+  if (index < 0) index = items.length - 1;
+  if (index >= items.length) index = 0;
+  if (_uiMenuRegistry[id]) _uiMenuRegistry[id].activeIndex = index;
+  items.forEach(function(item, i) { item.classList.toggle('is-active', i === index); });
+  var active = items[index];
+  if (active && focus !== false && active.focus) active.focus();
+  if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+}
+
+function uiMenuSetValue(id, value) {
+  var els = uiMenuEls(id);
+  if (els.input) els.input.value = value;
+  uiMenuSync(id);
+}
+
+function uiMenuChoose(id, value) {
+  var option = uiMenuFindOption(id, value);
+  if (!option) return;
+  var els = uiMenuEls(id);
+  if (els.input) {
+    els.input.value = option.value;
+    els.input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  uiMenuSync(id);
+  uiMenuClose(id, true);
+}
+
+function uiMenuToggle(id) {
+  if (uiMenuIsOpen(id)) uiMenuClose(id, true); else uiMenuOpen(id);
+}
+
+function uiMenuTriggerKeydown(event, id) {
+  var key = event.key;
+  if (uiMenuIsOpen(id)) {
+    if (key === 'Escape') { event.stopPropagation(); event.preventDefault(); uiMenuClose(id, true); return; }
+    if (key === 'Tab') { uiMenuClose(id, false); return; }
+  }
+  if (key !== 'ArrowDown' && key !== 'ArrowUp' && key !== 'Enter' && key !== ' ') return;
+  event.preventDefault();
+  uiMenuOpen(id);
+  var els = uiMenuEls(id);
+  var options = uiMenuOptions(id);
+  var current = els.input ? els.input.value : '';
+  var index = 0;
+  for (var i = 0; i < options.length; i++) { if (options[i].value === current) index = i; }
+  if (key === 'ArrowUp') index = index <= 0 ? options.length - 1 : index - 1;
+  uiMenuHighlight(id, index, true);
+}
+
+function uiMenuListKeydown(event, id) {
+  var key = event.key;
+  if (key === 'Escape') { event.stopPropagation(); event.preventDefault(); uiMenuClose(id, true); return; }
+  if (key === 'Tab') { uiMenuClose(id, false); return; }
+  var data = _uiMenuRegistry[id] || {};
+  if (key === 'ArrowDown') { event.preventDefault(); uiMenuHighlight(id, (data.activeIndex || 0) + 1, true); return; }
+  if (key === 'ArrowUp') { event.preventDefault(); uiMenuHighlight(id, (data.activeIndex || 0) - 1, true); return; }
+  if (key === 'Home') { event.preventDefault(); uiMenuHighlight(id, 0, true); return; }
+  if (key === 'End') { event.preventDefault(); uiMenuHighlight(id, uiMenuOptions(id).length - 1, true); return; }
+  if (key === 'Enter' || key === ' ') {
+    event.preventDefault();
+    var els = uiMenuEls(id);
+    var items = els.list ? els.list.querySelectorAll('.ui-menu-item') : [];
+    var active = items[data.activeIndex || 0];
+    if (active) uiMenuChoose(id, active.getAttribute('data-value'));
+  }
+}
+
+function uiMenuListClick(event, id) {
+  var item = event.target && event.target.closest ? event.target.closest('.ui-menu-item') : null;
+  if (!item || !event.currentTarget.contains(item)) return;
+  uiMenuChoose(id, item.getAttribute('data-value'));
+}
+
 function applyHoverLabels(root) {
   var scope = root && root.querySelectorAll ? root : document;
   var selector = 'button[aria-label], a[aria-label], [role="button"][aria-label], [role="menuitem"][aria-label], input[aria-label]';
@@ -3290,6 +3485,15 @@ function updateAutoDirectionPreview(context) {
   var direction = override === 'auto' ? resolvedCommunicationDirection(context) : override;
   var hint = document.getElementById(context === 'complete' ? 'completeDirectionHint' : 'historyDirectionHint');
   if (!hint) return;
+  if (context === 'complete') {
+    // 完成跟进弹窗里方向只在 AI 给出结果后才需要说明，结果之前保持安静。
+    var row = document.getElementById('completeDirectionRow');
+    var known = direction !== 'unknown';
+    hint.textContent = known ? (override === 'auto' ? '系统识别：' : '手动指定：') + communicationDirectionLabel(direction) : '';
+    hint.hidden = !known;
+    if (row) row.hidden = !known;
+    return;
+  }
   hint.textContent = direction === 'unknown'
     ? '系统将在 AI 整理时结合发言人和客户信息判断'
     : (override === 'auto' ? '系统识别：' : '手动指定：') + communicationDirectionLabel(direction);
@@ -3306,7 +3510,8 @@ async function analyzeCommunication(context) {
   var direction = selectedCommunicationDirection(context);
   if (!content) { showToast('请先粘贴或输入沟通内容', 'warning'); if (contentEl) contentEl.focus(); return; }
   if (!panel) return;
-  if (button) { button.disabled = true; button.textContent = 'AI 正在整理…'; button.setAttribute('aria-busy', 'true'); }
+  if (button) { button.disabled = true; button.textContent = isComplete ? '整理中…' : 'AI 正在整理…'; button.setAttribute('aria-busy', 'true'); }
+  if (isComplete) _completeAnalyzeBusy = true;
   panel.hidden = false;
   panel.innerHTML = '<div class="quick-analysis-loading">AI 正在后台整理沟通内容，你可以继续填写其他内容…</div>';
   // 整理结果写到共享槽位并渲染进当前表单，必须在响应回来时确认还是同一个
@@ -3332,11 +3537,18 @@ async function analyzeCommunication(context) {
       '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>' +
       (facts.length ? '<div class="quick-analysis-facts">' + facts.map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('') + '</div>' : '') +
       '<div class="quick-analysis-actions"><button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'summary\')">采用摘要</button>' +
-      (analysis.suggested_next_action ? '<button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'next\')">采用下一步建议</button>' : '') + '</div>';
+      (analysis.suggested_next_action ? '<button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'next\')">采用下一步建议</button>' : '') + '</div>' +
+      (isComplete ? completeDirectionRowHtml() : '');
+    if (isComplete) updateAutoDirectionPreview(context);
   } catch (e) {
     panel.innerHTML = '<div class="quick-analysis-error">AI 暂时无法整理，原文已保留，可以继续手动保存。</div>';
   } finally {
-    if (button) { button.disabled = false; button.textContent = 'AI 帮我整理'; button.removeAttribute('aria-busy'); }
+    if (isComplete) {
+      _completeAnalyzeBusy = false;
+      syncCompleteAiButton();
+    } else if (button) {
+      button.disabled = false; button.textContent = 'AI 帮我整理'; button.removeAttribute('aria-busy');
+    }
   }
 }
 
@@ -4929,7 +5141,7 @@ async function submitTodayWideNote(reminderId, button) {
   }
 }
 
-function renderTodaySchedule(reminders) {
+function renderTodaySchedule(reminders, preferDate) {
   todayScheduleData = {};
   calendarData = {};
   (reminders || []).forEach(function(r) {
@@ -4957,7 +5169,7 @@ function renderTodaySchedule(reminders) {
       (tasks.length ? '<span class="schedule-count">' + tasks.length + ' 项</span>' : '<span class="schedule-empty">—</span>') + '</button>';
   }
   grid.innerHTML = html;
-  var initialDate = firstTaskDate || localDateString(new Date(Date.now() + 86400000));
+  var initialDate = preferDate || firstTaskDate || localDateString(new Date(Date.now() + 86400000));
   showTodayScheduleDetail(initialDate);
 }
 
@@ -9797,6 +10009,171 @@ async function deleteOutreach(outreachId) {
 
 
 // ========== COMPLETE REMINDER ==========
+// ---- 完成跟进弹窗：沟通方式菜单、内联校验、局部刷新 -------------------------
+// 沟通方式仍写回 #completeActivityType（现在是隐藏字段），值语义与旧 <select> 完全一致。
+var _COMPLETE_ACTIVITY_OPTIONS = [
+  { value: 'whatsapp', label: 'WhatsApp', icon: 'message' },
+  { value: 'email', label: '邮件', icon: 'mail' },
+  { value: 'phone', label: '电话' },
+  { value: 'meeting', label: '会议', icon: 'users' },
+  { value: 'quote', label: '报价' },
+  { value: 'sample', label: '寄样' },
+  { value: 'follow_up', label: '其他跟进' }
+];
+uiMenuRegister('completeActivity', _COMPLETE_ACTIVITY_OPTIONS, 'completeActivityType');
+
+var _completeAnalyzeBusy = false;
+var _completeSubmitting = false;
+var _calendarDetailDate = '';
+
+function completeDirectionRowHtml() {
+  return '<div class="complete-direction-row" id="completeDirectionRow" hidden>' +
+    '<span id="completeDirectionHint"></span>' +
+    '<details><summary>识别有误？</summary><select class="form-control" id="completeDirectionOverride" onchange="updateAutoDirectionPreview(\'complete\')">' +
+    '<option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option>' +
+    '</select></details></div>';
+}
+
+function syncCompleteAiButton() {
+  var button = document.getElementById('completeAiBtn');
+  if (!button) return;
+  var textarea = document.getElementById('completeResult');
+  var busy = _completeAnalyzeBusy || _completeSubmitting;
+  button.disabled = busy || !(textarea && textarea.value.trim());
+  button.textContent = busy ? '整理中…' : 'AI 帮我整理';
+  if (busy) button.setAttribute('aria-busy', 'true'); else button.removeAttribute('aria-busy');
+}
+
+function showCompleteResultError(message) {
+  var el = document.getElementById('completeResultError');
+  if (!el) return;
+  el.textContent = message || '';
+  el.hidden = !message;
+}
+function showCompleteNextError(message) {
+  var el = document.getElementById('completeNextError');
+  if (!el) return;
+  el.textContent = message || '';
+  el.hidden = !message;
+}
+function showCompleteSubmitError(message) {
+  var el = document.getElementById('completeSubmitError');
+  if (!el) return;
+  el.textContent = message || '';
+  el.hidden = !message;
+}
+function clearCompleteErrors() {
+  showCompleteResultError('');
+  showCompleteNextError('');
+  showCompleteSubmitError('');
+}
+
+function completeRelativeDateLabel(days) {
+  var date = new Date();
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + Number(days || 0));
+  return days + ' 天 · ' + formatChineseDate(localDateString(date));
+}
+
+function setCompleteDateChoiceLabels() {
+  var customValue = document.getElementById('completeNextFollow').value;
+  document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) {
+    var days = choice.getAttribute('data-days');
+    if (days) { choice.textContent = completeRelativeDateLabel(days); return; }
+    choice.textContent = (choice.classList.contains('active') && customValue) ? formatChineseDate(customValue) : '选择日期';
+  });
+}
+
+function selectedTodayScheduleDate() {
+  var day = document.querySelector('.today-schedule-day.selected');
+  return day ? day.dataset.scheduleDate : '';
+}
+
+function onCompleteResultInput() {
+  showCompleteResultError('');
+  updateAutoDirectionPreview('complete');
+  syncCompleteAiButton();
+}
+
+function onCompleteResultKeydown(event) {
+  if ((event.metaKey || event.ctrlKey) && (event.key === 'Enter' || event.key === 'Return')) {
+    event.preventDefault();
+    submitComplete();
+  }
+}
+
+function onCompleteNextDateInputChange() {
+  var input = document.getElementById('completeNextFollow');
+  var custom = document.getElementById('completeCustomDateBtn');
+  if (input.value && custom) {
+    document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) {
+      choice.classList.toggle('active', choice === custom);
+    });
+  }
+  setCompleteDateChoiceLabels();
+  updateCompleteSaveLabel();
+  showCompleteNextError('');
+}
+
+function onCompleteReportedChange() {
+  var checked = document.getElementById('completeIsReported').checked;
+  var section = document.getElementById('reportCatSection');
+  if (section) section.style.display = checked ? 'block' : 'none';
+  var badge = document.getElementById('completeMoreBadge');
+  if (badge) badge.hidden = !checked;
+}
+
+function setCompleteSubmitting(on) {
+  var modal = document.querySelector('#completeModal .modal');
+  if (modal) modal.classList.toggle('is-submitting', !!on);
+  var submit = document.getElementById('completeSubmitBtn');
+  if (submit) {
+    submit.disabled = !!on;
+    if (on) { submit.textContent = '保存中…'; submit.setAttribute('aria-busy', 'true'); }
+    else { submit.removeAttribute('aria-busy'); }
+  }
+  var cancel = document.getElementById('completeCancelBtn');
+  if (cancel) cancel.disabled = !!on;
+  var trigger = document.getElementById('completeActivityTrigger');
+  if (trigger) trigger.disabled = !!on;
+  if (on) uiMenuClose('completeActivity', false);
+  syncCompleteAiButton();
+  if (!on) updateCompleteSaveLabel();
+}
+
+// 保存成功后只动这一行和它去处的局部数据，避免整页重新拉取。
+function refreshSourceListsAfterComplete(reminderId, nextEntry) {
+  var rid = Number(reminderId);
+  var keep = function(r) { return Number(r.id) !== rid; };
+  if (Array.isArray(dashboardReminders)) dashboardReminders = dashboardReminders.filter(keep);
+  if (Array.isArray(_tideActiveReminders)) _tideActiveReminders = _tideActiveReminders.filter(keep);
+  if (Array.isArray(_tideUpcomingCache)) _tideUpcomingCache = _tideUpcomingCache.filter(keep);
+  if (todayScheduleData) Object.keys(todayScheduleData).forEach(function(k) { todayScheduleData[k] = (todayScheduleData[k] || []).filter(keep); });
+  if (calendarData) Object.keys(calendarData).forEach(function(k) { calendarData[k] = (calendarData[k] || []).filter(keep); });
+  if (nextEntry && nextEntry.remind_date) {
+    if (!Array.isArray(_tideUpcomingCache)) _tideUpcomingCache = [];
+    _tideUpcomingCache.push(nextEntry);
+    _tideUpcomingCache.sort(function(a, b) { return String(a.remind_date || '').localeCompare(String(b.remind_date || '')); });
+    var day = String(nextEntry.remind_date).substring(0, 10);
+    if (!calendarData) calendarData = {};
+    if (!calendarData[day]) calendarData[day] = [];
+    calendarData[day].push(nextEntry);
+  }
+  if (currentPage === 'dashboard') {
+    var keepDate = selectedTodayScheduleDate();
+    renderTodayTasks(_tideActiveReminders || []);
+    if (document.getElementById('todayScheduleGrid')) {
+      renderTodaySchedule((dashboardReminders || []).concat(_tideUpcomingCache || []), keepDate);
+    }
+  } else if (currentPage === 'calendar') {
+    var detailDate = _calendarDetailDate || '';
+    if (document.getElementById('calendarGrid')) {
+      renderCalendar();
+      if (detailDate) showCalendarDetail(detailDate);
+    }
+  }
+}
+
 // 连续打开两次“记录跟进”时（比如快速点两条今日待办），先打开的那次读取返回
 // 较慢会重新 fillCompleteModal，把用户已经在第二次弹窗里输入的内容整个清掉。
 // fillToken 保证只有最后一次 openCompleteModal 的响应才能填充表单。
@@ -9823,11 +10200,12 @@ function fillCompleteModal(r) {
   document.getElementById('completeModal').dataset.customerId = r.customer_id || '';
   document.getElementById('completeCustomerName').textContent = r.customer_name || '';
   document.getElementById('completeContent').textContent = r.task_title || r.title || r.content || '';
-  document.getElementById('completeActivityType').value = 'whatsapp';
+  uiMenuSetValue('completeActivity', 'whatsapp');
   document.getElementById('completeResult').value = '';
-  document.getElementById('completeDirectionOverride').value = 'auto';
   _communicationAnalyses.complete = null;
-  updateAutoDirectionPreview('complete');
+  _completeAnalyzeBusy = false;
+  _completeSubmitting = false;
+  clearCompleteErrors();
   var analysisPanel = document.getElementById('completeAnalysis');
   if (analysisPanel) { analysisPanel.hidden = true; analysisPanel.innerHTML = ''; }
   document.getElementById('completeOutcome').value = '';
@@ -9840,9 +10218,17 @@ function fillCompleteModal(r) {
   document.getElementById('completeNextFollow').min = localDateString(minDate);
   document.getElementById('completeNextFollow').value = '';
   document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) { choice.classList.remove('active'); });
+  var submit = document.getElementById('completeSubmitBtn');
+  if (submit) submit.disabled = false;
+  var cancel = document.getElementById('completeCancelBtn');
+  if (cancel) cancel.disabled = false;
+  var modalCard = document.querySelector('#completeModal .modal');
+  if (modalCard) modalCard.classList.remove('is-submitting');
   document.getElementById('completeIsReported').checked = false;
   var moreOptions = document.querySelector('#completeModal .complete-more-options');
   if (moreOptions) moreOptions.open = false;
+  var badge = document.getElementById('completeMoreBadge');
+  if (badge) badge.hidden = true;
   document.getElementById('reportCatSection').style.display = 'none';
   document.querySelectorAll('#reportCatPills .cat-pill').forEach(function(p,i){
     p.style.background = i===0 ? 'var(--brand-500)' : '';
@@ -9850,6 +10236,8 @@ function fillCompleteModal(r) {
     p.style.border = i===0 ? 'none' : '1px solid var(--border-200)';
     p.classList.toggle('active', i===0);
   });
+  setCompleteDateChoiceLabels();
+  syncCompleteAiButton();
   updateCompleteSaveLabel();
   openModal('completeModal');
   markModalClean('completeModal');
@@ -9882,15 +10270,22 @@ function parseOutreachPaste() {
 function toggleCompleteNext() {
   var enabled = document.getElementById('completeHasNext').checked;
   document.getElementById('completeNextSection').hidden = !enabled;
-  if (enabled && !document.getElementById('completeNextFollow').value) {
-    var defaultChoices = document.querySelectorAll('#completeDateChoices .date-choice');
-    if (defaultChoices.length >= 2) setCompleteNextDate(15, defaultChoices[1]);
-    document.getElementById('completeNextTask').focus();
-  }
-  if (!enabled) {
+  if (enabled) {
+    if (!document.getElementById('completeNextFollow').value) {
+      var defaultChoices = document.querySelectorAll('#completeDateChoices .date-choice');
+      if (defaultChoices.length >= 2) setCompleteNextDate(15, defaultChoices[1]);
+    }
+    var taskInput = document.getElementById('completeNextTask');
+    var analysis = _communicationAnalyses.complete || {};
+    if (!taskInput.value && analysis.suggested_next_action) taskInput.value = analysis.suggested_next_action;
+    setCompleteDateChoiceLabels();
+    taskInput.focus();
+  } else {
     document.getElementById('completeNextTask').value = '';
     document.getElementById('completeNextFollow').value = '';
+    setCompleteDateChoiceLabels();
   }
+  showCompleteNextError('');
   updateCompleteSaveLabel();
 }
 
@@ -9902,7 +10297,9 @@ function setCompleteNextDate(days, button) {
   document.querySelectorAll('#completeDateChoices .date-choice').forEach(function(choice) {
     choice.classList.toggle('active', choice === button);
   });
+  setCompleteDateChoiceLabels();
   updateCompleteSaveLabel();
+  showCompleteNextError('');
 }
 
 function chooseCompleteCustomDate(button) {
@@ -9916,23 +10313,21 @@ function chooseCompleteCustomDate(button) {
   } else {
     input.click();
   }
+  setCompleteDateChoiceLabels();
 }
 
 function updateCompleteSaveLabel() {
+  var button = document.getElementById('completeSubmitBtn');
+  if (!button) return;
+  if (_completeSubmitting) return; // 保存中由 setCompleteSubmitting 接管文案
   var date = document.getElementById('completeNextFollow').value;
   var task = document.getElementById('completeNextTask').value.trim();
-  var button = document.getElementById('completeSubmitBtn');
   var hasNext = document.getElementById('completeHasNext').checked;
-  if (button) button.textContent = hasNext && task && date ? '完成并安排到 ' + formatChineseDate(date) : '完成任务';
+  button.textContent = hasNext && task && date ? '完成并安排下一步 · ' + formatChineseDate(date) : '完成跟进';
 }
 
-// 周报复选框切换分类面板
+// 周报分类面板：勾选“同步到周报”时展开，并在折叠标题旁亮出小标记。
 document.addEventListener('DOMContentLoaded', function(){
-  var cb = document.getElementById('completeIsReported');
-  if(cb) cb.addEventListener('change', function(){
-    document.getElementById('reportCatSection').style.display = this.checked ? 'block' : 'none';
-  });
-  // 分类标签点击
   var pills = document.getElementById('reportCatPills');
   if(pills){
     pills.addEventListener('click', function(e){
@@ -9951,6 +10346,7 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 async function submitComplete() {
+  if (_completeSubmitting) return;
   if (!beginWrite('complete')) return;
   try {
     await runSubmitComplete();
@@ -9966,8 +10362,19 @@ async function runSubmitComplete() {
   var hasNext = document.getElementById('completeHasNext').checked;
   var nextTask = hasNext ? document.getElementById('completeNextTask').value.trim() : '';
   var nextDate = hasNext ? document.getElementById('completeNextFollow').value.trim() : '';
-  if (!content) { showToast('请简单记录这次发生了什么', 'warning'); document.getElementById('completeResult').focus(); return; }
-  if (hasNext && (!nextTask || !nextDate)) { showToast('请填写下一步动作和日期', 'warning'); return; }
+  clearCompleteErrors();
+  if (!content) {
+    showCompleteResultError('请写下这次发生了什么');
+    var textarea = document.getElementById('completeResult');
+    if (textarea) textarea.focus();
+    return;
+  }
+  if (hasNext && (!nextTask || !nextDate)) {
+    showCompleteNextError('请填写下一步动作和日期');
+    var taskInput = document.getElementById('completeNextTask');
+    if (taskInput && !nextTask) taskInput.focus();
+    return;
+  }
   var data = {
     activity_type: document.getElementById('completeActivityType').value,
     direction: direction,
@@ -9977,13 +10384,34 @@ async function runSubmitComplete() {
     next_follow_up: nextTask ? nextDate : '',
     is_reported: document.getElementById('completeIsReported').checked ? 1 : 0
   };
+  _completeSubmitting = true;
+  setCompleteSubmitting(true);
   try {
-    var saved = await api('/api/reminders/' + id, { method: 'PUT', body: JSON.stringify(data) });
-    showToast(nextTask ? '记录已保存，下一步已安排' : (attentionStateMessage(saved.attention) || '记录已保存，当前任务已完成'), 'success');
+    var saved = await api('/api/reminders/' + id, { method: 'PUT', body: JSON.stringify(data), silentError: true });
+    if (!saved) {
+      showCompleteSubmitError('没有保存成功，请检查登录状态后重试');
+      return;
+    }
+    var nextEntry = null;
+    if (saved.task_id && nextTask && nextDate) {
+      nextEntry = {
+        id: saved.task_id,
+        customer_id: document.getElementById('completeModal').dataset.customerId || '',
+        customer_name: document.getElementById('completeCustomerName').textContent || '',
+        task_title: nextTask,
+        content: nextTask,
+        remind_date: nextDate
+      };
+    }
     closeModal('completeModal', true);
-    if (currentPage === 'dashboard') loadDashboard();
-    else if (currentPage === 'calendar') loadCalendar();
-  } catch(e) {}
+    try { refreshSourceListsAfterComplete(id, nextEntry); } catch (e) {}
+    showToast('已记录' + (nextTask && nextDate ? ' · 下一步 ' + formatChineseDate(nextDate) : ''), 'success');
+  } catch (e) {
+    showCompleteSubmitError((e && e.message) ? ('保存失败：' + e.message) : '保存失败，请稍后重试');
+  } finally {
+    _completeSubmitting = false;
+    setCompleteSubmitting(false);
+  }
 }
 
 // ========== ADD CUSTOMER MODALS ==========
@@ -10540,6 +10968,7 @@ function renderCalendar() {
 }
 
 function showCalendarDetail(dateStr) {
+  _calendarDetailDate = dateStr;
   var tasks = calendarData[dateStr] || [];
   var el = document.getElementById('calendarDetail');
   if (tasks.length === 0) {
@@ -11314,6 +11743,11 @@ function syncModalBodyLock() { document.body.style.overflow = document.querySele
 
 function focusFirstModalControl(modal) {
   if (!modal || !modal.classList.contains('show')) return;
+  var preferred = modal.getAttribute('data-initial-focus');
+  if (preferred) {
+    var target = modal.querySelector(preferred);
+    if (target && !target.disabled && !target.hidden) { target.focus({ preventScroll: true }); return; }
+  }
   var focusable = modal.querySelector('input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])');
   if (focusable) focusable.focus({ preventScroll: true });
 }
@@ -11444,7 +11878,7 @@ function closeModal(id, force) {
     });
     return false;
   }
-  if (!force && !customerLoading && modalNeedsUnsavedGuard(id) && customerModalIsDirty(id)) {
+  if (!force && !customerLoading && modalNeedsUnsavedGuard(id) && customerModalIsDirty(id) && !(id === 'completeModal' && _completeSubmitting)) {
     _pendingCustomerModalClose = id;
     var subtitle = document.getElementById('unsavedChangesSubtitle');
     var title = document.querySelector('#' + id + ' .modal-header h3, #' + id + ' .cw-ident h1');
