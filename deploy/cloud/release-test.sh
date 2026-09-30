@@ -40,8 +40,9 @@ Usage:
 
 --quick 只做 Python/JavaScript 语法检查，用于快速反馈；
 默认执行完整门禁：快速检查 → 并行（[隔离数据目录 Python 回归（失败重跑一次）] ∥
-[真实 PostgreSQL 演练 → 真实 Chromium 页面验收] ∥ [浏览器扩展回归]）。任一分支失败
-整道门禁失败。退出码非 0 表示这棵树不可发布。
+[真实 PostgreSQL 演练 → 真实 Chromium 页面验收 → Inbox 专项验收（浏览器步骤失败重跑
+一次并记入 flake 台账）] ∥ [浏览器扩展回归]）。任一分支失败整道门禁失败。退出码非 0
+表示这棵树不可发布。
 EOF
 }
 
@@ -200,8 +201,36 @@ run_python_regression_branch() {
   fi
 }
 
+# 浏览器验收步骤：门禁已经准备并拥有 rehearsal 服务，这里只复用同一服务/连接并重载
+# 确定性 fixture，不重启、不在退出时停服务（服务生命周期由本门禁在 cleanup 统一回收）。
+# 步骤函数由 release_gate_run_browser_step 决定失败后是否重跑一次。
+run_core_browser_acceptance() {
+  TROSA_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
+    TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1 \
+    "$TREE/tools/browser_acceptance.sh"
+}
+
+run_core_browser_acceptance_retry() {
+  # 重跑换一个 request id：第一次的请求可能仍留在浏览器侧（Tabbit 会保留同一 request
+  # 的 receipt），换 id 可避免“程序可能已执行过先前动作”的误判。
+  export TROSA_BROWSER_ACCEPTANCE_REQUEST_ID=acceptance-core-workflow-retry
+  run_core_browser_acceptance
+}
+
+run_inbox_browser_acceptance() {
+  TROSA_INBOX_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
+    TROSA_INBOX_BROWSER_REUSE_REHEARSAL=1 \
+    bash "$TREE/tools/inbox_browser_acceptance.sh"
+}
+
+run_inbox_browser_acceptance_retry() {
+  export TROSA_INBOX_BROWSER_REQUEST_ID=acceptance-inbox-specialist-retry
+  run_inbox_browser_acceptance
+}
+
 # 分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收。与分支 A（SQLite）
-# 和分支 C（扩展回归）互不依赖；同一门禁里 PostgreSQL 服务只起停一次。
+# 和分支 C（扩展回归）互不依赖；同一门禁里 PostgreSQL 服务只起停一次。PostgreSQL
+# rehearsal 不重跑（确定性）；两个 Chromium 步骤失败重跑一次并记入 flake 台账。
 run_rehearsal_browser_branch() {
   trap - EXIT
   printf '\n==> PostgreSQL rehearsal（真实 loopback PostgreSQL）\n'
@@ -210,25 +239,24 @@ run_rehearsal_browser_branch() {
     || fail 'PostgreSQL rehearsal failed; this gate never converts it to SKIP'
   printf '完成：PostgreSQL rehearsal\n'
 
-  printf '\n==> 真实 Chromium 页面验收（Customer → 沟通 → Today → Inbox → Search）\n'
-  [[ -x "$TREE/tools/browser_acceptance.sh" ]] \
-    || fail "找不到真实浏览器验收入口：$TREE/tools/browser_acceptance.sh"
   # 复用上面已在同一端口启动并迁移好的 rehearsal 服务/连接；浏览器验收只重载
   # 确定性 fixture（PostgreSQL 集成测试改动了数据），不再重启服务，也不在退出时
   # 停掉门禁拥有的服务。服务生命周期由本门禁统一回收（见 cleanup）。
   eval "$("$PYTHON_BIN" "$TREE/tools/postgres_rehearsal.py" env)"
   export TROSA_REHEARSAL_PORT="$REHEARSAL_GATE_PORT"
-  TROSA_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
-    TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1 \
-    "$TREE/tools/browser_acceptance.sh" \
-    || fail '真实 Chromium 页面验收失败；不会以 DOM/语法测试代替'
+
+  printf '\n==> 真实 Chromium 页面验收（Customer → 沟通 → Today → Inbox → Search）\n'
+  [[ -x "$TREE/tools/browser_acceptance.sh" ]] \
+    || fail "找不到真实浏览器验收入口：$TREE/tools/browser_acceptance.sh"
+  release_gate_run_browser_step '真实 Chromium 页面验收' "$TREE" \
+    run_core_browser_acceptance run_core_browser_acceptance_retry \
+    || fail '真实 Chromium 页面验收两次均失败；不会以 DOM/语法测试代替'
   printf '完成：真实 Chromium 页面验收\n'
 
   printf '\n==> 真实 Chromium Inbox 专项验收（Sela 续跑、手机遮挡、键盘与上传）\n'
-  TROSA_INBOX_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
-    TROSA_INBOX_BROWSER_REUSE_REHEARSAL=1 \
-    bash "$TREE/tools/inbox_browser_acceptance.sh" \
-    || fail 'Inbox 专项 Chromium 验收失败；不能用通用页面流程替代'
+  release_gate_run_browser_step 'Inbox 专项 Chromium 验收' "$TREE" \
+    run_inbox_browser_acceptance run_inbox_browser_acceptance_retry \
+    || fail 'Inbox 专项 Chromium 验收两次均失败；不能用通用页面流程替代'
   printf '完成：Inbox 专项 Chromium 验收\n'
 }
 

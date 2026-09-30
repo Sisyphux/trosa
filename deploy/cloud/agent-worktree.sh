@@ -112,6 +112,7 @@ Usage:
   agent-worktree.sh list
   agent-worktree.sh test --task <id> [--quick]
   agent-worktree.sh evidence --task <id>
+  agent-worktree.sh flakes [--limit <n>]
   agent-worktree.sh gate --task <id>
   agent-worktree.sh reconcile --task <id>
   agent-worktree.sh hooks
@@ -135,6 +136,8 @@ adopt     把主工作区的在途改动（默认全部；可用 --path 限定�
 test      委托 release-test.sh，与发布候选使用同一份门禁；完整门禁要求任务已同步
           到最新 <main>，否则只对旧基线成立。
 evidence  查看任务清单状态与最近一次完成证据。
+flakes    汇总浏览器验收的 flake 台账（只读）：按步骤 + 结果计数并列出最近事件。
+          台账由门禁在 Chromium 步骤失败重跑时写入；它只记录瞬时失败，不改变判定。
 gate      只读检查任务是否 ready（门禁证据对应当前 HEAD 且已包含最新 main）；
           publish 内部使用同一判定。
 reconcile 把本任务新增且与最新 main/其它任务冲突的迁移改名到下一个空号并提交。
@@ -779,6 +782,32 @@ cmd_evidence() {
   fi
 }
 
+# 汇总浏览器验收的 flake 台账（只读）。台账由 release-test.sh 在浏览器步骤失败重跑
+# 时写入；这里只做聚合展示，不改变任何门禁结论。
+cmd_flakes() {
+  local limit=20
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --limit) [[ $# -ge 2 ]] || fail '--limit 需要一个数字'; limit=$2; shift 2 ;;
+      *) fail "flakes 未知参数：$1" ;;
+    esac
+  done
+  local ledger
+  ledger="$(release_gate_flake_ledger_path "$MAIN_ROOT")" || fail '无法定位 flake 台账'
+  printf 'flake 台账：%s\n' "$ledger"
+  if [[ ! -s "$ledger" ]]; then
+    printf '尚无 flake 事件。\n'
+    return 0
+  fi
+  printf '\n按「步骤 + 结果」汇总（retrying 为未决的第一次失败，ok/failed 为终态）：\n'
+  awk -F'\t' '{ c[$2" | "$5]++ } END { for (k in c) printf "%6d  %s\n", c[k], k }' "$ledger" \
+    | LC_ALL=C sort -k2
+  printf '\n最近 %s 条事件（时间 / 步骤 / 首次退出码 / 结果）：\n' "$limit"
+  tail -n "$limit" "$ledger" | awk -F'\t' '{ printf "%s  %s  exit=%s  %s\n", $1, $2, $4, $5 }'
+  printf '\n提示：这是浏览器验收的瞬时失败记录，不等于代码缺陷。若某步骤反复出现，\n'
+  printf '应作为真实缺陷排查，而不是依赖重跑。\n'
+}
+
 cmd_gate() {
   local task=""
   while [[ $# -gt 0 ]]; do
@@ -1191,6 +1220,7 @@ case "$command" in
   list) cmd_list "$@" ;;
   test) cmd_test "$@" ;;
   evidence) cmd_evidence "$@" ;;
+  flakes) cmd_flakes "$@" ;;
   gate) cmd_gate "$@" ;;
   reconcile) cmd_reconcile "$@" ;;
   hooks) cmd_hooks "$@" ;;

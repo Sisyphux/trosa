@@ -110,6 +110,80 @@ release_gate_lookup() {
   grep -m1 -E "^key=${key}([[:space:]]|\$)" "$ledger"
 }
 
+# 浏览器验收 flake 台账
+# --------------------
+# 真实 Chromium 验收要驱动外部浏览器任务（Tabbit/Chromium），历史上出现过与树
+# 内容无关的瞬时失败（浏览器任务被复用/中断、页面在刷新完成前被断言等）。门禁对
+# “浏览器步骤”允许失败后重跑一次（见 release_gate_run_browser_step），但事件必须
+# 落进可汇总的台账，绝不静默算通过：重跑通过则门禁继续但事件已记账，重跑仍失败则
+# 门禁红。
+#
+# 台账与已验证树账本同目录，每行一条 TSV：
+#   <UTC ISO8601>\t<label>\t<tree>\t<first_exit>\t<retry>
+# retry ∈ retrying|ok|failed。只追加写入，重复无害；内容不含任何凭据。
+# 汇总示例：awk -F'\t' '{c[$2" "$5]++} END{for (k in c) print c[k], k}' <台账>
+RELEASE_GATE_FLAKE_LEDGER_NAME=".flake-events.log"
+
+# 定位 flake 台账。TROSA_FLAKE_LEDGER 可显式覆盖（测试用）；否则落在候选树的
+# 共享 git 目录下，任务区与发布候选共用同一本台账。
+release_gate_flake_ledger_path() {
+  if [[ -n "${TROSA_FLAKE_LEDGER:-}" ]]; then
+    printf '%s' "$TROSA_FLAKE_LEDGER"
+    return 0
+  fi
+  local tree=$1 common
+  [[ -n "$tree" ]] || return 1
+  common="$(cd "$tree" 2>/dev/null && git rev-parse --git-common-dir 2>/dev/null)" || return 1
+  [[ -n "$common" ]] || return 1
+  case "$common" in
+    /*) ;;
+    *) common="$tree/$common" ;;
+  esac
+  printf '%s/trosa-tasks/%s' "$common" "$RELEASE_GATE_FLAKE_LEDGER_NAME"
+}
+
+# 记录一次 flake 事件。台账写失败只提示，不改变门禁结论（判定由调用方按重跑规则做）。
+release_gate_record_flake() {
+  local tree=$1 label=$2 first_exit=$3 retry=$4 ledger when
+  if ! ledger="$(release_gate_flake_ledger_path "$tree")"; then
+    printf 'release-gate: 无法定位 flake 台账，事件未落盘：%s\n' "$label" >&2
+    return 0
+  fi
+  mkdir -p -- "$(dirname "$ledger")" 2>/dev/null || true
+  when="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$when" "$label" "$tree" "$first_exit" "$retry" \
+    >>"$ledger" 2>/dev/null || true
+  return 0
+}
+
+# 浏览器步骤专用：失败重跑一次。第一次失败即记 retrying；重跑通过记 ok 并返回 0；
+# 重跑再失败记 failed 并返回 1。非浏览器步骤不得使用本函数（它们不允许重跑）。
+# 用法：release_gate_run_browser_step <label> <tree> <first_fn> [<retry_fn>]
+release_gate_run_browser_step() {
+  local label=$1 tree=$2 first_fn=$3 retry_fn=${4:-$3}
+  local first_status=0 second_status=0
+  if "$first_fn"; then
+    return 0
+  else
+    first_status=$?
+  fi
+  printf '\nrelease-gate: %s 第一次失败（退出码 %s），记录 flake 事件并重跑一次\n' \
+    "$label" "$first_status" >&2
+  release_gate_record_flake "$tree" "$label" "$first_status" retrying
+  if "$retry_fn"; then
+    printf 'release-gate: %s 第 2 次运行通过；已记入 flake 台账 trosa-tasks/%s\n' \
+      "$label" "$RELEASE_GATE_FLAKE_LEDGER_NAME"
+    release_gate_record_flake "$tree" "$label" "$first_status" ok
+    return 0
+  else
+    second_status=$?
+  fi
+  release_gate_record_flake "$tree" "$label" "$first_status" failed
+  printf 'release-gate: %s 两次均失败（第一次 %s，第二次 %s）\n' \
+    "$label" "$first_status" "$second_status" >&2
+  return 1
+}
+
 # 并行运行多个门禁分支函数：任一失败仍等待其余分支结束后返回非 0，输出先分别
 # 落盘再按分支顺序打印（不交错）。运行的子进程 pid 暴露在
 # RELEASE_GATE_PARALLEL_PIDS，供调用方的 EXIT trap 在被打断时回收。

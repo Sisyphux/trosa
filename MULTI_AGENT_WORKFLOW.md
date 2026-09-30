@@ -33,7 +33,7 @@
 | 角色 | 允许 | 不允许 |
 |---|---|---|
 | 开发 Agent `dev` | create/adopt/test/sync/remove、改本任务代码、commit | publish、读发布配置、改主工作区 |
-| 审查 Agent `review` | `status` / `preflight` / `test`、查看 `evidence` | 改代码、publish |
+| 审查 Agent `review` | `status` / `preflight` / `test`、查看 `evidence` / `flakes` | 改代码、publish |
 | 发布 Agent `release` | 主工作区集成、`publish`、真实验收 | 在主工作区写业务代码 |
 
 - 开发/审查会话开始前设置 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；未设置时默认按 `release` 处理，以保持人工操作不变。
@@ -94,7 +94,7 @@ deploy/cloud/agent-worktree.sh test --task <id>    # 与发布候选同一份门
   立即失效；`test` 只有在 HEAD 已包含最新 `origin/main` 时才通过。反过来先 test
   再 sync 会让证据过期，必须重新 test。
 - 测试失败或任务暂停只影响本隔离区，其它任务与主工作区不受影响。
-- **完成证据**：`test` 与 `publish` 会把 tree commit、门禁结果和发布 release 写入共享文件 `trosa-tasks/<id>.verify.log`，并更新任务清单状态；用 `evidence --task <id>` 查看。
+- **完成证据**：`test` 与 `publish` 会把 tree commit、门禁结果和发布 release 写入共享文件 `trosa-tasks/<id>.verify.log`，并更新任务清单状态；用 `evidence --task <id>` 查看。Chromium 验收的瞬时失败会记入 `trosa-tasks/.flake-events.log`，用 `flakes [--limit <n>]` 汇总。
 - **完成定义**：`status=landed`（已发布且健康）才算任务完成；绿色门禁只代表“开发完成”，不能用“已修复”描述尚未发布的改动。`gate --task <id>` 可随时只读检查任务是否 ready（证据对应当前 HEAD 且已包含最新 main）。
 - 回收：`remove --task <id>`（默认保留分支；确认丢弃加 `--force`）。
 
@@ -149,8 +149,14 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 - 快速检查（Python/JS 语法、`tools/check_migrations.py` 迁移完整性）先跑，失败即停。
 - 之后三条互不依赖的分支并行，输出各自落盘后按分支顺序打印，不交错：
   - 分支 A：隔离 SQLite 的 Python 回归（失败重跑一次，两次都失败才红）；
-  - 分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收；
+  - 分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收 → Inbox 专项验收；
   - 分支 C：浏览器扩展回归（`browser-extension` 的 `npm test`）。
+- 只有 Chromium 步骤允许失败重跑一次（`release_gate_run_browser_step`），且事件必须
+  落进共享 flake 台账 `trosa-tasks/.flake-events.log`（每行 `<时间>\t<步骤>\t<树>\t
+  <首次退出码>\t<结果>`，结果 ∈ `retrying|ok|failed`）：重跑通过门禁继续但事件已记账，
+  重跑仍失败整道门禁红——绝不用重跑把失败静默算通过。PostgreSQL rehearsal 与 Python
+  回归不适用该机制（前者确定性、后者本就重跑一次）。用 `agent-worktree.sh flakes`
+  汇总台账；同一步骤反复出现时按真实缺陷排查，不要依赖重跑。
 - 任一支失败都让整道门禁失败：运行器会等待其余分支结束再返回非 0，`trap` 统一回收
   临时数据目录、日志目录与 PostgreSQL rehearsal 服务，不留后台进程。
 - PostgreSQL rehearsal 在一条门禁里只起停一次：`release-test.sh` 选定唯一端口并

@@ -22,6 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ENV = ROOT / "deploy" / "cloud" / "release-env.sh"
 
 
+GATE_LIB = ROOT / "deploy" / "cloud" / "lib-release-gate.sh"
+AGENT_WORKTREE = ROOT / "deploy" / "cloud" / "agent-worktree.sh"
+RELEASE_TEST = ROOT / "deploy" / "cloud" / "release-test.sh"
+CORE_ACCEPTANCE_JS = ROOT / "tools" / "browser_acceptance.js"
+
+
 def run_bash(snippet: str, **env) -> subprocess.CompletedProcess:
     base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
     base.update(env)
@@ -171,6 +177,107 @@ class TaskEvidenceContractTests(unittest.TestCase):
         for name in ("trosa-release", "release-commit.sh"):
             text = (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8")
             self.assertIn("trosa_require_release_role", text, name)
+
+
+class BrowserFlakeGateTests(unittest.TestCase):
+    """浏览器验收的瞬时失败只重跑一次，且必须落进可汇总的 flake 台账。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ledger = Path(self.tmp.name) / "flake.log"
+
+    def retry(self, first_rc: int, retry_rc: int = 0, with_retry: bool = True):
+        body = "first() { return %d; }\n" % first_rc
+        if with_retry:
+            body += "retry() { return %d; }\n" % retry_rc
+        retry_fn = "retry" if with_retry else "first"
+        snippet = (
+            f'source "{GATE_LIB}"\n'
+            f'export TROSA_FLAKE_LEDGER="{self.ledger}"\n'
+            + body
+            + "if release_gate_run_browser_step 'synthetic 步骤' "
+            f'"{ROOT}" first {retry_fn}; then echo RESULT=0; else echo RESULT=$?; fi\n'
+        )
+        proc = run_bash(snippet)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc, proc.stdout.strip().splitlines()[-1]
+
+    def ledger_rows(self):
+        if not self.ledger.exists():
+            return []
+        text = self.ledger.read_text(encoding="utf-8")
+        return [line.split("\t") for line in text.splitlines() if line]
+
+    def test_success_first_try_records_nothing(self):
+        _, result = self.retry(0)
+        self.assertEqual(result, "RESULT=0")
+        self.assertEqual(self.ledger_rows(), [])
+
+    def test_retry_succeeds_records_flake_but_passes(self):
+        proc, result = self.retry(1, 0)
+        self.assertEqual(result, "RESULT=0")
+        rows = self.ledger_rows()
+        self.assertEqual([row[4] for row in rows], ["retrying", "ok"])
+        self.assertEqual(rows[0][1], "synthetic 步骤")
+        self.assertEqual(rows[0][3], "1")
+        self.assertIn("flake", proc.stderr)
+
+    def test_both_attempts_fail_fails_the_gate(self):
+        _, result = self.retry(1, 1)
+        self.assertEqual(result, "RESULT=1")
+        self.assertEqual(
+            [row[4] for row in self.ledger_rows()], ["retrying", "failed"]
+        )
+
+    def test_retry_defaults_to_the_same_step(self):
+        _, result = self.retry(1, 1, with_retry=False)
+        self.assertEqual(result, "RESULT=1")
+        self.assertEqual(
+            [row[4] for row in self.ledger_rows()], ["retrying", "failed"]
+        )
+
+    def test_ledger_path_defaults_below_shared_git_dir(self):
+        proc = run_bash(
+            f'source "{GATE_LIB}"\nrelease_gate_flake_ledger_path "{ROOT}"'
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(
+            proc.stdout.strip().endswith("/trosa-tasks/.flake-events.log"),
+            proc.stdout,
+        )
+
+    def test_flakes_command_aggregates_ledger(self):
+        self.ledger.write_text(
+            "2026-09-30T00:00:00Z\tstep-a\t/tree\t1\tok\n"
+            "2026-09-30T00:01:00Z\tstep-a\t/tree\t1\tfailed\n"
+            "2026-09-30T00:02:00Z\tstep-a\t/tree\t1\tok\n",
+            encoding="utf-8",
+        )
+        proc = run_bash(
+            f'TROSA_FLAKE_LEDGER="{self.ledger}" bash "{AGENT_WORKTREE}" flakes'
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(proc.stdout, r"2\s+step-a \| ok")
+        self.assertRegex(proc.stdout, r"1\s+step-a \| failed")
+
+    def test_gate_wires_retry_for_browser_steps_only(self):
+        text = RELEASE_TEST.read_text(encoding="utf-8")
+        self.assertEqual(text.count("release_gate_run_browser_step '"), 2)
+        self.assertIn("release_gate_run_browser_step '真实 Chromium 页面验收'", text)
+        self.assertIn("release_gate_run_browser_step 'Inbox 专项 Chromium 验收'", text)
+        # PostgreSQL rehearsal 是确定性的，绝不能被重跑包裹。
+        self.assertIn('postgres_rehearsal.py" test', text)
+        self.assertNotIn("run_browser_step 'PostgreSQL", text)
+
+    def test_core_acceptance_polls_focus_and_waits_for_search_hit(self):
+        js = CORE_ACCEPTANCE_JS.read_text(encoding="utf-8")
+        # 弹窗焦点由 requestAnimationFrame 调度，断言必须轮询而不是瞬时采样。
+        self.assertIn("waitForFunction", js)
+        self.assertNotIn("completeFocusId", js)
+        # 搜索断言必须等到「命中」高亮的刷新快照，而不是某一条更早的具体沟通正文。
+        self.assertIn(".filter({hasText: '命中'})", js)
+        self.assertNotIn("hasText: 'Browser acceptance customer reply'", js)
 
 
 if __name__ == "__main__":
