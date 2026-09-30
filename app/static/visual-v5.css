@@ -1310,6 +1310,288 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 }
 
 /* ============================================================================
+   INBOX — 灯箱 (lightbox)
+   ----------------------------------------------------------------------------
+   The room is a photographer's lightbox: one signal is enlarged onto a bright
+   panel (source original left, AI suggestion + handling right), the rest wait as
+   negatives on a film strip below with the current one lit and centred, and the
+   two most recently handled drop into a tray at the bottom-right.
+
+   Only presentation changes here. The strip reuses the existing queue rows, the
+   panel reuses the existing question card, and the keys drive the existing
+   handler paths. The only solid element on the page is the current primary
+   action, so the page-header 记录回复 button is demoted to an outline.
+   ============================================================================ */
+
+/* ---- one lit panel -------------------------------------------------------- */
+#trosa .inbox-lightbox.inbox-lightbox {
+  position: relative;
+  padding: clamp(1.1rem, 2.4vw, 1.7rem);
+  border: 1px solid var(--dl-hair);
+  border-radius: var(--dl-r-lg);
+  background: var(--dl-paper);
+}
+#trosa .inbox-lightbox.is-open.inbox-lightbox.is-open::before {
+  content: "";
+  position: absolute;
+  inset: -14% -5% -8%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(58% 72% at 46% 0%, rgba(188, 144, 82, .18), rgba(188, 144, 82, 0) 72%);
+  filter: blur(16px);
+}
+#trosa .inbox-lightbox.is-open.inbox-lightbox.is-open > * { position: relative; z-index: 1; }
+html.performance-priority #trosa .inbox-lightbox.is-open.inbox-lightbox.is-open::before { filter: none !important; opacity: .55; }
+
+/* two columns: source original | AI suggestion + handling */
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active.inbox-question-active {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  align-items: start;
+  align-content: start !important;
+}
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-queue.inbox-question-queue,
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-evidence.inbox-question-evidence,
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-decision.inbox-question-decision {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-queue.inbox-question-queue { grid-column: 1; grid-row: 1; }
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-evidence.inbox-question-evidence {
+  grid-column: 1; grid-row: 2;
+  margin-top: 18px !important; padding-top: 16px !important;
+  border-top: 1px solid var(--dl-hair-2) !important;
+}
+#trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-decision.inbox-question-decision {
+  grid-column: 2; grid-row: 1 / span 2;
+  padding-left: clamp(1rem, 2.2vw, 1.8rem) !important;
+  border-left: 1px solid var(--dl-hair) !important;
+}
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue h3 {
+  margin: 8px 0 6px;
+  font-family: var(--dl-display);
+  font-size: var(--dl-fs-title);
+  font-weight: 400;
+  line-height: 1.25;
+  color: var(--dl-ink);
+}
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue .inbox-question-subject {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 4px 0 8px;
+}
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue .inbox-question-subject span { color: var(--dl-mut); font-size: var(--dl-fs-caption); }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue .inbox-question-subject strong { font-family: var(--dl-display); font-weight: 400; font-size: var(--dl-fs-h3); color: var(--dl-ink); }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue .inbox-question-subject small { color: var(--dl-mut); font-size: var(--dl-fs-caption); }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-queue p { color: var(--dl-ink-2); font-size: var(--dl-fs-body-s); line-height: 1.65; }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-decision h4,
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-evidence h4 { color: var(--dl-mut); font-size: var(--dl-fs-caption); letter-spacing: .12em; text-transform: uppercase; font-weight: 600; margin: 0 0 10px; }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-evidence ol { margin: 0; padding: 0; list-style: none; }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-evidence li + li { margin-top: 12px; }
+#trosa .inbox-lightbox.inbox-lightbox .inbox-question-decision .inbox-question-decision { border: 0 !important; }
+#trosa .inbox-question-decision.is-flashed { animation: inbox-ai-flash .7s ease; }
+@keyframes inbox-ai-flash { 0% { background: var(--dl-gold-wash, rgba(188, 144, 82, .09)); } 100% { background: transparent; } }
+
+/* ---- AI labelling --------------------------------------------------------- */
+#trosa .ai-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 7px;
+  border: 1px solid var(--dl-gold); border-radius: var(--dl-r-pill, 999px);
+  color: var(--dl-gold-ink); font-size: var(--dl-fs-micro);
+  letter-spacing: .12em; text-transform: uppercase;
+}
+#trosa .inbox-evidence-proposal span { color: var(--dl-gold-ink); }
+#trosa .inbox-ai-suggestion {
+  margin: 12px 0 0; padding: 10px 12px;
+  border: 1px solid var(--dl-gold-soft); border-radius: var(--dl-r-sm);
+  background: var(--dl-gold-wash, rgba(188, 144, 82, .07));
+  color: var(--dl-ink-2); font-size: var(--dl-fs-body-s); line-height: 1.6;
+}
+#trosa .inbox-effects { color: var(--dl-ink-2); font-size: var(--dl-fs-body-s); line-height: 1.6; }
+#trosa .inbox-effects b { color: var(--dl-ink-3); font-weight: 600; }
+
+/* promise highlighting: the words to watch are lit, everything else stays plain */
+#trosa mark.inbox-promise { background: transparent; color: inherit; box-shadow: inset 0 -.42em 0 var(--dl-gold-soft); }
+#trosa .inbox-promises-off mark.inbox-promise { box-shadow: none; }
+
+/* ---- the cast from panel down to the strip -------------------------------- */
+#trosa .inbox-cone.inbox-cone {
+  position: relative; width: 74%; height: 44px; margin: 0 auto;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(36, 34, 29, .10), rgba(36, 34, 29, 0));
+  clip-path: polygon(0 0, 100% 0, 93% 100%, 7% 100%);
+}
+#trosa .inbox-cone.inbox-cone::after {
+  content: ""; position: absolute; left: 50%; bottom: 0;
+  width: 26px; height: 2px; margin-left: -13px; background: var(--dl-gold);
+}
+
+/* ---- film strip of past signals ------------------------------------------- */
+#trosa .inbox-strip.inbox-strip {
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 18px 0 !important;
+  border-top: 1px solid var(--dl-hair-2);
+  border-bottom: 1px solid var(--dl-hair-2);
+}
+#trosa .inbox-track.inbox-track {
+  display: flex !important;
+  gap: 12px !important;
+  align-items: flex-end;
+  transition: transform var(--dl-dur-slow, .55s) var(--dl-ease, ease);
+  will-change: transform;
+}
+#trosa .inbox-track.inbox-track .inbox-question-row.inbox-question-row {
+  position: relative;
+  flex: 0 0 176px !important;
+  width: 176px !important;
+  border: 1px solid var(--dl-hair) !important;
+  border-bottom: 1px solid var(--dl-hair) !important;
+  border-radius: var(--dl-r-sm) !important;
+  background: var(--dl-paper-3) !important;
+  opacity: .8;
+  transition: transform var(--dl-dur, .28s) var(--dl-ease, ease), opacity var(--dl-dur, .28s), box-shadow var(--dl-dur, .28s), background var(--dl-dur, .28s);
+}
+#trosa .inbox-track.inbox-track .inbox-question-row:hover.inbox-question-row { opacity: 1; background: var(--dl-paper-2) !important; }
+#trosa .inbox-track.inbox-track .inbox-question-row.is-current.inbox-question-row.is-current {
+  opacity: 1;
+  background: var(--dl-paper) !important;
+  border-color: var(--dl-hair-strong) !important;
+  transform: translateY(-4px);
+  box-shadow: var(--dl-shadow-2, 0 10px 24px rgba(36, 34, 29, .12));
+}
+#trosa .inbox-track.inbox-track .inbox-question-row.is-current.inbox-question-row.is-current::before {
+  content: ""; position: absolute; left: 14px; right: 14px; top: -1px; height: 2px; background: var(--dl-gold);
+}
+#trosa .inbox-track.inbox-track .inbox-question-open.inbox-question-open {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  width: 100% !important;
+  padding: 12px 12px 14px !important;
+  border: 0 !important;
+  background: transparent !important;
+  text-align: left !important;
+}
+#trosa .inbox-track.inbox-track .inbox-question-open strong {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-family: var(--dl-display) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+  line-height: 1.3 !important;
+  color: var(--dl-ink) !important;
+}
+#trosa .inbox-track.inbox-track .inbox-question-subjectline { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dl-mut) !important; font-size: 11.5px !important; }
+#trosa .inbox-track.inbox-track .inbox-question-side.inbox-question-side { flex-direction: row !important; align-items: center !important; gap: 8px !important; }
+#trosa .inbox-track.inbox-track .inbox-question-side time { font-size: 11px !important; }
+#trosa .inbox-track.inbox-track .inbox-question-evidence.inbox-question-evidence { font-size: 11px !important; }
+#trosa .inbox-track.inbox-track .inbox-question-go.inbox-question-go { display: none !important; }
+
+/* ---- foot hints + tray ---------------------------------------------------- */
+/* 收片盒渲染在 #inboxList 之外（#inboxLower），与队列同一列对齐：宽屏时让出左侧
+   筛选栏的宽度（218px 栏 + 32px 间距），窄屏时铺满。 */
+#trosa .inbox-lower.inbox-lower {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 330px) !important;
+  gap: 18px 24px !important;
+  align-items: start !important;
+  margin-top: 18px !important;
+  margin-left: 250px !important;
+}
+#trosa .inbox-foot.inbox-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; color: var(--dl-mut); font-size: var(--dl-fs-caption); }
+#trosa .inbox-foot kbd {
+  display: inline-block; min-width: 18px; padding: 1px 6px; margin-right: 2px;
+  border: 1px solid var(--dl-hair); border-radius: var(--dl-r-xs, 6px);
+  background: var(--dl-paper-2); color: var(--dl-ink-2);
+  font-family: var(--dl-sans); font-size: 11px; text-align: center;
+}
+#trosa .inbox-tray.inbox-tray { padding: 12px 14px; border: 1px solid var(--dl-hair); border-radius: var(--dl-r-md); background: var(--dl-paper-2); }
+#trosa .inbox-tray-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+#trosa .inbox-tray-head strong { font-family: var(--dl-display); font-weight: 400; font-size: var(--dl-fs-h4); color: var(--dl-ink); }
+#trosa .inbox-tray-head span { color: var(--dl-mut); font-size: var(--dl-fs-micro); letter-spacing: .14em; text-transform: uppercase; }
+#trosa .inbox-tray ul { margin: 8px 0 0; padding: 0; list-style: none; }
+#trosa .inbox-tray-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--dl-hair-2); }
+#trosa .inbox-tray-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#trosa .inbox-tray-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dl-ink); font-size: var(--dl-fs-body-s); }
+#trosa .inbox-tray-copy span, #trosa .inbox-tray-note, #trosa .inbox-tray-empty { color: var(--dl-mut); font-size: var(--dl-fs-caption); }
+#trosa .inbox-tray-empty { margin: 8px 0 0; }
+
+/* idle invitation */
+#trosa .inbox-lightbox-idle.inbox-lightbox-idle { padding: clamp(2rem, 6vw, 3.2rem) 1.5rem; text-align: center; }
+#trosa .inbox-lightbox-idle .inbox-eyebrow { color: var(--dl-gold-ink); font-size: var(--dl-fs-micro); letter-spacing: .18em; text-transform: uppercase; }
+#trosa .inbox-lightbox-idle h3 { margin: 8px 0 8px; font-family: var(--dl-display); font-weight: 400; font-size: var(--dl-fs-title); color: var(--dl-ink); }
+#trosa .inbox-lightbox-idle p { max-width: 30em; margin: 0 auto; color: var(--dl-mut); font-size: var(--dl-fs-body-s); line-height: 1.6; }
+#trosa .inbox-lightbox-idle kbd {
+  display: inline-block; padding: 0 5px; border: 1px solid var(--dl-hair); border-radius: var(--dl-r-xs, 6px);
+  background: var(--dl-paper-2); color: var(--dl-ink-2); font-family: var(--dl-sans); font-size: var(--dl-fs-caption);
+}
+
+/* ---- single solid element: demote the header's 记录回复 -------------------- */
+#trosa #page-inbox .inbox-command-shelf .command-primary.command-primary {
+  background: transparent !important;
+  color: var(--dl-ink) !important;
+  border: 1px solid var(--dl-hair-strong) !important;
+  box-shadow: none !important;
+}
+#trosa #page-inbox .inbox-command-shelf .command-primary.command-primary:hover { background: var(--dl-paper-2) !important; }
+
+/* ---- refresh failure banner / loading skeleton ---------------------------- */
+#trosa .inbox-load-banner.inbox-load-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 16px; padding: 10px 14px;
+  border-left: 2px solid var(--dl-danger);
+  background: var(--dl-danger-soft, rgba(164, 68, 58, .08));
+  color: var(--dl-ink-2); font-size: var(--dl-fs-body-s);
+}
+#trosa .inbox-skeleton { padding: 18px 0; }
+#trosa .inbox-skeleton-label { margin: 0 0 10px; color: var(--dl-mut); font-size: var(--dl-fs-body-s); }
+#trosa .inbox-skeleton-line {
+  display: block; height: 14px; margin: 10px 0; border-radius: var(--dl-r-xs, 6px);
+  background: linear-gradient(90deg, var(--dl-paper-3), var(--dl-paper-2), var(--dl-paper-3));
+  background-size: 200% 100%;
+  animation: inbox-skeleton 1.4s linear infinite;
+}
+#trosa .inbox-skeleton-line:nth-child(3) { width: 82%; }
+#trosa .inbox-skeleton-line:nth-child(4) { width: 64%; }
+@keyframes inbox-skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ---- narrow: one column, AI + actions first, strip last -------------------- */
+@media (max-width: 1024px) {
+  #trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active.inbox-question-active {
+    display: flex !important; flex-direction: column !important;
+  }
+  #trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-decision.inbox-question-decision {
+    order: 1; padding-left: 0 !important; padding-bottom: 18px !important;
+    border-left: 0 !important; border-bottom: 1px solid var(--dl-hair) !important;
+  }
+  #trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-queue.inbox-question-queue { order: 2; padding-top: 18px !important; }
+  #trosa .inbox-lightbox.inbox-lightbox > .inbox-question-active > .inbox-question-evidence.inbox-question-evidence { order: 3; }
+  #trosa .inbox-cone.inbox-cone { display: none !important; }
+  #trosa .inbox-lower.inbox-lower { grid-template-columns: minmax(0, 1fr) !important; margin-left: 0 !important; }
+}
+@media (max-width: 760px) {
+  #trosa .inbox-lightbox.is-open.inbox-lightbox.is-open::before { display: none; }
+  #trosa .inbox-strip.inbox-strip { padding: 14px 0 !important; }
+  #trosa .inbox-track.inbox-track .inbox-question-row.inbox-question-row { flex: 0 0 150px !important; width: 150px !important; }
+  #trosa .inbox-foot.inbox-foot { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #trosa .inbox-track.inbox-track,
+  #trosa .inbox-track.inbox-track .inbox-question-row.inbox-question-row { transition: none !important; }
+  #trosa .inbox-skeleton-line { animation: none !important; }
+  #trosa .inbox-question-decision.is-flashed { animation: none !important; }
+}
+html.performance-priority #trosa .inbox-track.inbox-track,
+html.performance-priority #trosa .inbox-track.inbox-track .inbox-question-row.inbox-question-row { transition: none !important; }
+html.performance-priority #trosa .inbox-skeleton-line { animation: none !important; }
+
+/* ============================================================================
    6b. CUSTOMER LEDGER (账页) — design/rooms/customers.md, prototype
    design/visual-exploration/rooms-v5/customers/03-ledger.html
    ----------------------------------------------------------------------------
@@ -1933,3 +2215,4 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .ical-subscription-label { color: var(--dl-mut); font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
 #trosa .ical-url-input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--dl-hair); border-radius: 4px; background: none; color: var(--dl-mut); font-family: monospace; font-size: .78rem; }
 #trosa .ical-sync-status { flex-basis: 100%; color: var(--dl-mut); font-size: .76rem; }
+
