@@ -1117,6 +1117,32 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
 #trosa #customerEditModal .customer-level-quick-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
 #trosa #customerEditModal .customer-level-quick-feedback.is-visible { opacity: 1; }
 #trosa #customerEditModal .customer-level-quick-feedback.is-error { color: #a0654a; }
+#trosa #customerEditModal .cw-tz { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .4rem; }
+#trosa #customerEditModal .cw-tz-select {
+  min-height: 0;
+  padding: .05rem .1rem;
+  border: 0;
+  border-bottom: 1px dashed var(--dl-hair);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  max-width: 15rem;
+}
+#trosa #customerEditModal .cw-tz-select:focus-visible { outline: 1px solid var(--dl-focus); outline-offset: 2px; border-bottom-color: var(--dl-focus); }
+#trosa #customerEditModal .cw-tz-badge {
+  font-size: .6em;
+  letter-spacing: .08em;
+  padding: .05rem .3rem;
+  border: 1px solid var(--dl-hair);
+  border-radius: 999px;
+  color: var(--dl-ink-2);
+}
+#trosa #customerEditModal .cw-tz-badge.is-manual { color: var(--dl-ink); border-color: var(--dl-ink-2); }
+#trosa #customerEditModal .cw-tz-reset { font-size: .68em; color: var(--dl-ink-2); border-bottom: 1px solid var(--dl-hair); }
+#trosa #customerEditModal .cw-tz-feedback { font-size: .7em; color: var(--dl-mut); opacity: 0; transition: opacity .3s var(--room-ease); }
+#trosa #customerEditModal .cw-tz-feedback.is-visible { opacity: 1; }
+#trosa #customerEditModal .cw-tz-feedback.is-error { color: #a0654a; }
 #trosa #customerEditModal .cw-sub { margin-top: 1.1rem; }
 #trosa #customerEditModal .cw-subk { display: block; margin-bottom: .4rem; font-size: .6em; letter-spacing: .14em; text-transform: uppercase; color: var(--dl-mut); }
 #trosa #customerEditModal .cw-gaps { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .74em; color: var(--dl-ink-2); }

@@ -77,6 +77,12 @@ from gmail_sync import (
 import inbox_questions as _inbox_questions
 from inbox_attachment_analysis import analyze_import_file as _analyze_inbox_import_file
 from inbox_reconcile import reconcile_current_user as _reconcile_inbox_current_user
+from customer_timezone import (
+    TIMEZONE_SOURCE_INFERRED as _TIMEZONE_SOURCE_INFERRED,
+    TIMEZONE_SOURCE_MANUAL as _TIMEZONE_SOURCE_MANUAL,
+    infer_timezone as _infer_customer_timezone,
+    normalize_timezone as _normalize_customer_timezone,
+)
 from trosa_domain import (
     active_customers as _active_customers,
     customer_contacts as _customer_contacts,
@@ -1854,6 +1860,34 @@ _COUNTRY_MAP = {
 def normalize_country(name):
     if not name: return ''
     return _COUNTRY_MAP.get(name.strip().lower(), name.strip())
+
+
+def _resolve_customer_timezone(data, existing):
+    """Decide the customer timezone and its source for a customer write.
+
+    - An explicitly supplied timezone must be a legal IANA name (400 otherwise).
+    - An explicit empty timezone drops the manual override and re-infers.
+    - When the country changes and the current value was inferred, the timezone
+      is re-inferred from the new country.
+    - A manual timezone is never replaced by inference.
+    """
+    existing = existing or {}
+    data = data if isinstance(data, dict) else {}
+    current = str(existing.get('timezone') or '').strip()
+    current_source = str(existing.get('timezone_source') or '').strip()
+    country = normalize_country(data.get('country', existing.get('country', '')))
+    if 'timezone' in data:
+        candidate = str(data.get('timezone') or '').strip()
+        if candidate:
+            if not _normalize_customer_timezone(candidate):
+                raise CrmWriteError('时区必须是合法的 IANA 时区名称', 400)
+            return candidate, _TIMEZONE_SOURCE_MANUAL
+        inferred = _infer_customer_timezone(country)
+        return inferred, (_TIMEZONE_SOURCE_INFERRED if inferred else '')
+    if current_source == _TIMEZONE_SOURCE_MANUAL:
+        return current, current_source
+    inferred = _infer_customer_timezone(country)
+    return inferred, (_TIMEZONE_SOURCE_INFERRED if inferred else '')
 
 
 def normalize_website(value):
@@ -8453,6 +8487,8 @@ def get_customer_ledger_rows():
             'company': customer.get('company') or customer.get('name') or '',
             'person': customer.get('name') if customer.get('company') and customer.get('name') != customer.get('company') else '',
             'country': customer.get('country') or '',
+            'timezone': customer.get('timezone') or '',
+            'timezone_source': customer.get('timezone_source') or '',
             'field': customer.get('field') or customer.get('industry') or '',
             'website': customer.get('website') or '',
             'event_date': facts['event_date'], 'days': facts['days'], 'flags': facts['flags'],
@@ -8621,7 +8657,7 @@ def get_customer_summary(customer_id):
         return jsonify(customer)
     row = conn.execute('''SELECT id, name, company, country, website, field, industry, business_stage, business_role, level,
                                  tags, profile, notes, last_contact, next_follow_up, customer_judgment,
-                                 import_source, source, source_detail,
+                                 import_source, source, source_detail, timezone, timezone_source,
                                  created_at, updated_at
                           FROM customers
                           WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
@@ -9767,6 +9803,7 @@ def create_customer():
     if not customer_name and not company_name:
         return jsonify({'error': '请至少填写客户名称或公司名称'}), 400
     country = normalize_country(data.get('country', ''))
+    customer_timezone = _infer_customer_timezone(country)
     customer_level = _normalize_customer_level(data.get('level', 'C'))
     business_stage = str(data.get('business_stage') or '').strip()
     business_role = str(data.get('business_role', data.get('type', '')) or '').strip()
@@ -9851,19 +9888,21 @@ def create_customer():
         'annual_revenue': data.get('annual_revenue', ''), 'tags': data.get('tags', ''),
         'import_source': 'manual', 'source': customer_source,
         'source_detail': customer_source_detail,
+        'timezone': customer_timezone,
+        'timezone_source': _TIMEZONE_SOURCE_INFERRED if customer_timezone else '',
     }
     if postgres_mode():
         customer_id = _create_customer_record(conn, values=creation_values)
     else:
         c.execute('''
-            INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, source, source_detail, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, source, source_detail, timezone, timezone_source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (data.get('name', ''), data.get('company', ''), country, customer_level,
               '', business_role, business_stage, creation_values['customer_judgment'],
               creation_values['website'], data.get('profile', ''), data.get('field', ''), data.get('notes', ''),
               data.get('system_notes', ''), last_contact, next_follow_up, data.get('industry', ''),
               data.get('company_size', ''), data.get('annual_revenue', ''), data.get('tags', ''), 'manual',
-              customer_source, customer_source_detail, now, now))
+              customer_source, customer_source_detail, creation_values['timezone'], creation_values['timezone_source'], now, now))
         customer_id = c.lastrowid
     for index, contact in enumerate(contacts):
         if not any((contact.get(key) or '').strip() for key in ('name', 'email', 'phone', 'whatsapp', 'linkedin')):
@@ -9951,6 +9990,11 @@ def update_customer(customer_id):
         except CrmWriteError as error:
             conn.close()
             return jsonify({'error': error.message}), error.status
+        try:
+            customer_timezone, customer_timezone_source = _resolve_customer_timezone(data, existing)
+        except CrmWriteError as error:
+            conn.close()
+            return jsonify({'error': error.message}), error.status
         business_stage = data.get('business_stage', existing.get('business_stage', ''))
         if business_stage not in ('', '成交', '流失'):
             conn.close()
@@ -9979,6 +10023,8 @@ def update_customer(customer_id):
             'annual_revenue': data.get('annual_revenue', existing.get('annual_revenue', '')),
             'tags': data.get('tags', existing.get('tags', '')),
             'import_source': existing.get('import_source', ''),
+            'timezone': customer_timezone,
+            'timezone_source': customer_timezone_source,
         }
         if source_update:
             updated_values['source'] = customer_source
@@ -9994,12 +10040,13 @@ def update_customer(customer_id):
         else:
             c.execute('''
                 UPDATE customers SET name=?, company=?, country=?, level=?, type=?, business_role=?, business_stage=?, customer_judgment=?, website=?, profile=?, field=?, notes=?, system_notes=?,
-                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, source=?, source_detail=?, updated_at=? WHERE id=?
+                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, source=?, source_detail=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?
             ''', (updated_values['name'], updated_values['company'], updated_values['country'], customer_level,
                   existing.get('type', ''), business_role, business_stage, customer_judgment, updated_values['website'],
                   updated_values['profile'], updated_values['field'], updated_values['notes'], updated_values['system_notes'],
                   last_contact, new_next_follow, is_manual_date, updated_values['industry'], updated_values['company_size'],
-                  updated_values['annual_revenue'], updated_values['tags'], customer_source, customer_source_detail, now, customer_id))
+                  updated_values['annual_revenue'], updated_values['tags'], customer_source, customer_source_detail,
+                  customer_timezone, customer_timezone_source, now, customer_id))
         new_date = new_next_follow if 'next_follow_up' in data else ''
         if new_date and new_date != old_date:
             _complete_open_follow_up_tasks(conn, customer_ids=[customer_id], completed_at=now)
@@ -15595,14 +15642,20 @@ def update_customer_profile(customer_id, data, before_commit=None):
         values.update(supplied)
         values['country'] = normalize_country(values.get('country', ''))
         values['website'] = normalize_website(values.get('website', ''))
+        # Keep the inferred timezone in step with an Agent-side country edit; a
+        # manual override is never replaced.
+        if str(values.get('timezone_source') or '') != _TIMEZONE_SOURCE_MANUAL:
+            inferred_timezone = _infer_customer_timezone(values['country'])
+            values['timezone'] = inferred_timezone
+            values['timezone_source'] = _TIMEZONE_SOURCE_INFERRED if inferred_timezone else ''
         now = _calendar_now_text()
         if postgres_mode():
             _update_customer_record(conn, customer_id=customer_id, values=values)
         else:
-            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, profile=?, notes=?, tags=?, updated_at=? WHERE id=?''',
+            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, profile=?, notes=?, tags=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?''',
                       (values.get('name', ''), values.get('company', ''), values.get('country', ''), values.get('website', ''),
                        values.get('field', ''), values.get('industry', ''), values.get('profile', ''), values.get('notes', ''),
-                       values.get('tags', ''), now, customer_id))
+                       values.get('tags', ''), values.get('timezone', ''), values.get('timezone_source', ''), now, customer_id))
         after = _snapshot_entity(conn, 'customers', customer_id)
         undo_token = _create_undo_action(conn, 'UPDATE_CUSTOMER_PROFILE', 'customer', customer_id,
                                          [_undo_entity('customers', customer_id, before, after)], '撤销 Agent 修改客户资料')
@@ -17871,12 +17924,13 @@ def recover_excel_activities(paths=None):
                         country = normalize_country(_excel_text(row[country_col]) if 0 <= country_col < len(row) else '')
                         website = _excel_text(row[website_col]) if 0 <= website_col < len(row) else ''
                         profile = _excel_text(row[profile_col]) if 0 <= profile_col < len(row) else ''
+                        timezone = _infer_customer_timezone(country)
                         c.execute('''INSERT INTO customers
                                      (name, company, country, level, type, business_role, website, profile, field, notes,
-                                      import_source, source, source_detail, created_at, updated_at)
-                                     VALUES (?, ?, ?, 'C', '', '', ?, ?, '', '', 'excel', ?, '', ?, ?)''',
+                                      import_source, source, source_detail, timezone, timezone_source, created_at, updated_at)
+                                     VALUES (?, ?, ?, 'C', '', '', ?, ?, '', '', 'excel', ?, '', ?, ?, ?, ?)''',
                                   (customer_name[:200], customer_name[:200], country, website, profile,
-                                   'Excel / 历史导入', now, now))
+                                   'Excel / 历史导入', timezone, _TIMEZONE_SOURCE_INFERRED if timezone else '', now, now))
                         customer_id = c.lastrowid
                         customer_lookup[customer_key] = customer_id
                         created_customers += 1
@@ -18094,18 +18148,20 @@ def sync_from_excel(excel_path=None):
         field = str(row[col_field]).strip() if col_field >= 0 and col_field < len(row) and row[col_field] else ''
         notes = str(row[col_notes]).strip() if col_notes >= 0 and col_notes < len(row) and row[col_notes] else ''
         profile = str(row[col_profile]).strip() if col_profile >= 0 and col_profile < len(row) and row[col_profile] else ''
+        timezone = _infer_customer_timezone(country)
         # 检查是否已存在（按名称匹配）
-        c.execute('SELECT id FROM customers WHERE name = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (name,))
+        c.execute('SELECT id, timezone, timezone_source FROM customers WHERE name = ? AND (is_deleted = 0 OR is_deleted IS NULL)', (name,))
         existing = c.fetchone()
         if existing:
-            c.execute('UPDATE customers SET company=?, country=?, level=?, type=?, business_role=?, website=?, field=?, business_stage=?, notes=?, profile=?, updated_at=? WHERE id=?',
-                      (company, country, level, cust_type, cust_type, website, field, business_stage, notes, profile, now, existing['id']))
+            tz, tz_source = _resolve_customer_timezone({'country': country}, dict(existing))
+            c.execute('UPDATE customers SET company=?, country=?, level=?, type=?, business_role=?, website=?, field=?, business_stage=?, notes=?, profile=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?',
+                      (company, country, level, cust_type, cust_type, website, field, business_stage, notes, profile, tz, tz_source, now, existing['id']))
             cust_id = existing['id']
             updated_count += 1
         else:
-            c.execute('''INSERT INTO customers (name, company, country, level, type, business_role, website, profile, field, business_stage, notes, import_source, source, source_detail, created_at, updated_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)''',
-                      (name, company, country, level, cust_type, cust_type, website, profile, field, business_stage, notes, 'excel', 'Excel / 历史导入', now, now))
+            c.execute('''INSERT INTO customers (name, company, country, level, type, business_role, website, profile, field, business_stage, notes, import_source, source, source_detail, timezone, timezone_source, created_at, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)''',
+                      (name, company, country, level, cust_type, cust_type, website, profile, field, business_stage, notes, 'excel', 'Excel / 历史导入', timezone, _TIMEZONE_SOURCE_INFERRED if timezone else '', now, now))
             cust_id = c.lastrowid
             new_count += 1
 

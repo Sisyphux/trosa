@@ -150,6 +150,50 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             "orphan_contact_legacy_refs": 0,
         })
 
+    def test_customer_timezone_inference_manual_and_reinference_in_postgres(self):
+        """Timezone round-trips through the real PostgreSQL compat surface."""
+        from trosa_domain import customer_record
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        created = client.post('/api/customers', json={
+            'name': 'Timezone Acceptance Customer',
+            'company': 'Timezone Acceptance Co',
+            'country': 'US',
+            'level': 'C',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+
+        detail = client.get(f'/api/customers/{customer_id}')
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        self.assertEqual(detail.get_json()['timezone'], 'America/New_York')
+        self.assertEqual(detail.get_json()['timezone_source'], 'inferred')
+
+        # A manual override is never replaced by country inference.
+        manual = client.put(f'/api/customers/{customer_id}', json={'timezone': 'Europe/London'})
+        self.assertEqual(manual.status_code, 200, manual.get_json())
+        country_change = client.put(f'/api/customers/{customer_id}', json={'country': '德国'})
+        self.assertEqual(country_change.status_code, 200, country_change.get_json())
+        after = client.get(f'/api/customers/{customer_id}').get_json()
+        self.assertEqual(after['timezone'], 'Europe/London')
+        self.assertEqual(after['timezone_source'], 'manual')
+
+        # An explicit empty value drops the manual override and re-infers.
+        reset = client.put(f'/api/customers/{customer_id}', json={'timezone': ''})
+        self.assertEqual(reset.status_code, 200, reset.get_json())
+        self.assertEqual(client.get(f'/api/customers/{customer_id}').get_json()['timezone'], 'Europe/Berlin')
+
+        # An illegal IANA name is rejected without changing the stored value.
+        bad = client.put(f'/api/customers/{customer_id}', json={'timezone': 'Mars/Phobos'})
+        self.assertEqual(bad.status_code, 400, bad.get_json())
+
+        record = customer_record(self.connection, customer_id)
+        self.assertEqual(record['timezone'], 'Europe/Berlin')
+        self.assertEqual(record['timezone_source'], 'inferred')
+
     def test_canonical_customer_contact_interaction_task_inbox_and_state(self):
         import trosa_domain
         from tools.postgres_rehearsal import FIXTURE_KEY, load_fixture
@@ -3191,7 +3235,8 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         rows = client.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows']
         self.assertEqual([row['id'] for row in rows], order)
         self.assertEqual(set(rows[0]), {
-            'id', 'company', 'person', 'country', 'field', 'website', 'event_date', 'days', 'flags',
+            'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'website',
+            'event_date', 'days', 'flags',
             'has_contact', 'waiting_reply', 'activity_kind', 'activity_snippet', 'next_task_title',
             'next_task_date', 'next_task_days', 'match',
         })

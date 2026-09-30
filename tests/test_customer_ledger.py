@@ -21,7 +21,8 @@ sys.path.insert(0, str(ROOT))
 import db
 
 ROW_KEYS = {
-    'id', 'company', 'person', 'country', 'field', 'website', 'event_date', 'days', 'flags',
+    'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'website',
+    'event_date', 'days', 'flags',
     'has_contact', 'waiting_reply', 'activity_kind', 'activity_snippet', 'next_task_title',
     'next_task_date', 'next_task_days', 'match',
 }

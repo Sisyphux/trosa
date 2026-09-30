@@ -286,6 +286,11 @@ def init_postgres_store():
                     # migration failed and PostgreSQL marked the transaction
                     # as aborted.
                     conn.rollback()
+            # Infer a default timezone once for accounts that predate the
+            # column. Unrecognisable countries stay empty; per-user manual
+            # values live in legacy_payload and are never touched here.
+            _backfill_customer_timezones_postgres(cursor)
+
             org_id = _postgres_org_id()
             cursor.execute(
                 '''INSERT INTO identity.organizations (id, name)
@@ -1138,6 +1143,8 @@ USER_TABLE_SQL = [
         external_id TEXT DEFAULT '',
         source TEXT DEFAULT '',
         source_detail TEXT DEFAULT '',
+        timezone TEXT DEFAULT '',
+        timezone_source TEXT DEFAULT '',
         attention_state TEXT DEFAULT '',
         attention_reason TEXT DEFAULT '',
         attention_updated_at TEXT DEFAULT '',
@@ -1668,6 +1675,8 @@ USER_MIGRATIONS = {
         'external_id': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
         'source_detail': "TEXT DEFAULT ''",
+        'timezone': "TEXT DEFAULT ''",
+        'timezone_source': "TEXT DEFAULT ''",
         'attention_state': "TEXT DEFAULT ''",
         'attention_reason': "TEXT DEFAULT ''",
         'attention_updated_at': "TEXT DEFAULT ''",
@@ -1936,6 +1945,63 @@ def _migrate_customer_level_constraint(cursor):
         cursor.execute('PRAGMA foreign_keys=' + ('1' if foreign_keys_enabled else '0'))
 
 
+def _backfill_customer_timezones_sqlite(cursor):
+    """Infer a default timezone once for existing SQLite customers.
+
+    Only rows with an empty timezone are touched, and an unrecognisable country
+    stays empty: nothing is guessed. A manual timezone is never overwritten.
+    """
+    from customer_timezone import TIMEZONE_SOURCE_INFERRED, infer_timezone
+
+    rows = cursor.execute(
+        "SELECT id, country FROM customers "
+        "WHERE COALESCE(trim(timezone), '') = '' "
+        "AND COALESCE(timezone_source, '') <> 'manual'"
+    ).fetchall()
+    updates = []
+    for row in rows:
+        inferred = infer_timezone(row[1])
+        if inferred:
+            updates.append((inferred, TIMEZONE_SOURCE_INFERRED, row[0]))
+    if updates:
+        cursor.executemany(
+            "UPDATE customers SET timezone=?, timezone_source=? WHERE id=?",
+            updates,
+        )
+    return len(updates)
+
+
+def _backfill_customer_timezones_postgres(cursor):
+    """Infer a default timezone once for existing PostgreSQL accounts.
+
+    The canonical default lives on ``trosa.customer_details`` and is derived
+    from the company country code. Only empty rows are touched, and an
+    unrecognisable country stays empty. Per-user manual values live in
+    ``account_legacy_refs.legacy_payload`` and are never touched here.
+    """
+    from customer_timezone import TIMEZONE_SOURCE_INFERRED, infer_timezone
+
+    cursor.execute('''
+        SELECT d.account_id, c.country_code
+          FROM trosa.customer_details d
+          JOIN trosa.accounts a ON a.id = d.account_id
+          JOIN core.companies c ON c.id = a.company_id
+         WHERE COALESCE(trim(d.timezone), '') = ''
+           AND COALESCE(d.timezone_source, '') <> 'manual'
+    ''')
+    updates = []
+    for account_id, country_code in cursor.fetchall():
+        inferred = infer_timezone(country_code)
+        if inferred:
+            updates.append((inferred, TIMEZONE_SOURCE_INFERRED, account_id))
+    if updates:
+        cursor.executemany(
+            "UPDATE trosa.customer_details SET timezone=%s, timezone_source=%s WHERE account_id=%s",
+            updates,
+        )
+    return len(updates)
+
+
 def init_user_tables(user):
     """初始化/迁移单个用户的数据库"""
     if postgres_mode():
@@ -1984,6 +2050,10 @@ def init_user_tables(user):
                      WHERE COALESCE(customer_judgment, '')=''
                        AND attention_state='custom'
                        AND trim(COALESCE(attention_reason, ''))<>''""")
+
+        # Infer a default timezone once for legacy customers that predate the
+        # column. Unrecognisable countries stay empty; a manual value is kept.
+        _backfill_customer_timezones_sqlite(c)
 
         merged_contacts = _merge_duplicate_contact_emails(c)
         if merged_contacts:
