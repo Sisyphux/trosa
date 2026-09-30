@@ -27,7 +27,7 @@ avoid-gradient-dashboard-overload.png
 | `01-layout-and-density/` | 信息层级、网格、留白、列表密度 | 页面结构与排版 |
 | `02-navigation-and-workflows/` | 导航、搜索、工作流、空状态 | 页面之间的路径与操作入口 |
 | `03-components-and-interactions/` | 按钮、表单、弹窗、反馈与微交互 | 组件样式和状态 |
-| `04-typography-colour-material/` | 字体、颜色、纸张/玻璃材质、图标 | 视觉令牌与表面语言 |
+| `04-typography-colour-material/` | 字体、颜色、纸张与墨色、图标 | 视觉令牌与表面语言 |
 | `05-mobile-and-responsive/` | 窄屏布局、触控和断点处理 | 响应式验收 |
 | `06-anti-patterns/` | 希望避免的视觉模式 | 设计审查时的反例清单 |
 | `_archive/` | 已失效、已替代或不再适用的素材 | 保留历史，不参与默认参考 |

@@ -6,8 +6,8 @@
 >
 > 产品标准仍以 `PRODUCT_DESIGN_STANDARD.md` 为准；本文件负责把其中“安静、可信、清楚、有秩序”的要求转成可执行的视觉与交互规则。
 
-当前对应视觉样板：`design/today-visual-prototype.html`  
-当前对应静态预览：`design/today-visual-preview-v2.png`
+当前对应视觉样板：`design/archive/prototypes-warm-editorial/today-visual-prototype.html`  
+当前对应静态预览：`design/archive/prototypes-warm-editorial/today-visual-preview-v2.png`
 
 ### 文档约束等级
 

@@ -49,7 +49,7 @@ v2 的四张被否掉了：01 的地平线想法成立但没被用起来，04 �
 ```bash
 cd <repo>
 python3 -m http.server 8799 --bind 127.0.0.1
-# 打开 http://127.0.0.1:8799/design/visual-exploration/workspace-v3/index.html
+# 打开 http://127.0.0.1:8799/design/archive/explorations/workspace-v3/index.html
 ```
 
 `index.html` 是四宫格对比页：可切 Desktop 1440×900 / iPad 1024×768 / iPhone 390×844，

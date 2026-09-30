@@ -84,7 +84,7 @@ let dev={w:1440,h:900};
    expose a direct link + the real file path so nothing depends on the sandbox. */
 const ABSOLUTE_OK=/^(https?|file):$/.test(location.protocol);
 const HERE=location.href.replace(/[^/]*$/,'');
-const FILE_DIR='design/visual-exploration/workspace-v1/';
+const FILE_DIR='design/archive/explorations/workspace-v1/';
 function url(file){ return ABSOLUTE_OK ? new URL(file,location.href).href : file; }
 
 function build(){

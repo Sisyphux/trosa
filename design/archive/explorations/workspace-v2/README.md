@@ -57,7 +57,7 @@
 ```bash
 cd <repo>
 python3 -m http.server 8799 --bind 127.0.0.1
-# 打开 http://127.0.0.1:8799/design/visual-exploration/workspace-v2/index.html
+# 打开 http://127.0.0.1:8799/design/archive/explorations/workspace-v2/index.html
 ```
 
 `index.html` 是四宫格对照页：可切换 Desktop 1440×900 / iPad 1024×768 / iPhone 390×844 预览，也可「打开四个标签页」「重播全部转场」。

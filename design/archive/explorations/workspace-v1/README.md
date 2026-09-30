@@ -42,7 +42,7 @@ Colonnade 只是登录页当前最好的方案，不是 Trosa 的设计模板。
 
 ```bash
 python3 -m http.server 8799
-# 然后访问 http://127.0.0.1:8799/design/visual-exploration/workspace-v1/index.html
+# 然后访问 http://127.0.0.1:8799/design/archive/explorations/workspace-v1/index.html
 ```
 
 键盘：`1–5` 切换分区，`Esc` 重播转场/返回。
