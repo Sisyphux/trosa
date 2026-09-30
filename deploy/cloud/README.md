@@ -297,17 +297,24 @@ done
 ```bash
 deploy/cloud/agent-worktree.sh status                 # 判断当前环境 / 任务归属
 deploy/cloud/agent-worktree.sh preflight              # 体检：主区脏文件、迁移编号冲突
+deploy/cloud/agent-worktree.sh start --task <id> \
+  --owner <name> --goal "..." --scope "..."           # 合并 guard+status+preflight+create
 deploy/cloud/agent-worktree.sh create --task <id> \
-  --owner <name> --goal "..." --scope "..."           # 建隔离区，预留下一个迁移编号
+  --owner <name> --goal "..." --scope "..."           # 只建隔离区（默认不预留迁移号）
 deploy/cloud/agent-worktree.sh adopt --task <id>      # 把主区在途改动整体搬进隔离区
+deploy/cloud/agent-worktree.sh reserve-migration \
+  --task <id>                                         # 懒预留迁移号（真要写迁移时才用）
 deploy/cloud/agent-worktree.sh test --task <id>       # 隔离数据目录跑完整回归（含扩展测试）
+deploy/cloud/agent-worktree.sh ship --task <id>       # 交付：同步 + 快速门禁 + 登记发布队列
 deploy/cloud/agent-worktree.sh sync --task <id>       # 变基到最新 main
 deploy/cloud/agent-worktree.sh publish --task <id>    # 发布任务分支的已提交成果
 deploy/cloud/agent-worktree.sh remove --task <id>     # 回收（默认保留分支）
 ```
 
 任务清单（负责人 / 目标 / 修改范围 / 预留迁移编号）存放在共享 git 目录
-`trosa-tasks/<id>.json`，不进入版本库。发布要求任务 worktree 完全干净
+`trosa-tasks/<id>.json`，不进入版本库。`ship` 只做开发方该做的事（同步、快速门禁、
+登记到 `trosa-tasks/.ship-queue` 并把状态置为 `shipped`），不自己发布；完整门禁由
+发布侧重跑。发布要求任务 worktree 完全干净
 （包含没有未跟踪文件）；随后在基于 `origin/main` 的临时 release worktree 中
 cherry-pick 任务 commit，跑同一份 `release-test.sh`，冲突则停止且不修改调用者
 工作区。主 worktree 可以继续有其他 Agent 的在途改动。完整说明见

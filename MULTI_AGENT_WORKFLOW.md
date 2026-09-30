@@ -42,8 +42,21 @@
 
 ## 2. 开新任务（每个 Agent 会话开始时）
 
+推荐用一个命令走完“闸门 + 环境 + 体检 + 建区”：
+
 ```bash
 cd ~/Desktop/Trosa
+deploy/cloud/agent-worktree.sh start --task <id> \
+  --owner <负责人/Agent 名> \
+  --goal "一句话目标" \
+  --scope "预期修改的文件/模块"
+```
+
+`start` 要求主工作区干净；有在途改动时会拒绝并提示改用 `adopt`（它专门搬运在途
+改动并保留 stash 备份），避免把来源不明的改动留在主工作区。需要分步执行时，下面
+四个命令仍然可用（`start` 就是它们的组合）：
+
+```bash
 deploy/cloud/agent-worktree.sh guard         # 任务开始闸门：dev/review 在主工作区会被拒绝
 deploy/cloud/agent-worktree.sh status        # 先确认自己在哪个环境（同时刷新入口护栏）
 deploy/cloud/agent-worktree.sh preflight     # 体检：主区是否干净、迁移编号是否冲突
@@ -55,8 +68,8 @@ deploy/cloud/agent-worktree.sh create --task <id> \
 
 开发/审查会话在动任何文件之前先运行 `guard`：它会告诉你“现在能否开始任务”。
 若输出“可以开始任务”，说明你已经在自己的 `agent/<id>` 隔离区；若被拒绝，按提示
-先在主工作区 `create`/`adopt`。`release` 角色或未设置角色（人工集成）运行 `guard`
-始终放行。进入隔离区后再确认身份：
+先在主工作区 `start`/`create`/`adopt`。`release` 角色或未设置角色（人工集成）运行
+`guard` 始终放行。进入隔离区后再确认身份：
 
 ```bash
 cd ../trosa-worktrees/<id>
@@ -65,6 +78,11 @@ deploy/cloud/agent-worktree.sh status   # 确认“任务=<id>”再动手
 
 任务清单保存在共享 git 目录 `trosa-tasks/<id>.json`（负责人 / 目标 / 修改范围 / 预留迁移号），
 它不进入版本库、不参与发布，因此不会污染 `git status`。
+
+迁移编号是**懒预留**的：`start`/`create` 默认不取号，只有确实要新增 `migrations/`
+文件时才运行 `deploy/cloud/agent-worktree.sh reserve-migration --task <id>`（幂等，
+已预留则原样返回），避免无数据库改动的任务消耗单调计数器。需要建区即取号可给
+`create` 加 `--reserve-migration`。
 
 ## 3. 主工作区出现无法归属的在途改动时
 
@@ -85,9 +103,16 @@ deploy/cloud/agent-worktree.sh adopt --task <id> --owner <name> \
 # 在隔离区里
 git add <只加本任务的文件>
 git commit -m "[<id>] 说明这次完成了什么"
+deploy/cloud/agent-worktree.sh ship --task <id>    # 交付：同步 + 快速门禁 + 登记发布队列
 deploy/cloud/agent-worktree.sh sync --task <id>    # 消解迁移编号碰撞 + 变基到最新 origin/main
 deploy/cloud/agent-worktree.sh test --task <id>    # 与发布候选同一份门禁，并记录证据
 ```
+
+- **交付用 `ship`**：它把 `sync`（含迁移编号消解）→ 快速门禁（`release-test.sh
+  --quick`）→ 登记到仓库外发布队列（`trosa-tasks/.ship-queue`，任务状态置为
+  `shipped`）串成一个动作，然后立即返回。开发方**不等待**完整门禁，也不自己发布；
+  发布方会在自己一侧重跑完整门禁再落地（开发方写下的 `verify.log` 不是判定依据）。
+  需要提前看完整门禁结果时仍可单独 `test --task <id>`。
 
 - commit message 以 `[<id>]` 开头，来源一眼可辨；一次 commit 只承载一个任务的改动。
 - **先同步、后门禁**：`sync` 会在变基前自动消解迁移编号碰撞，变基后旧的门禁证据
@@ -208,11 +233,13 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
 
 - **唯一事实源是 `migrations/` 目录**：运行时（`db.py`）与演练工具
   （`tools/unified_postgres_migration.py`）都按文件名排序自动发现，没有第二份清单。
-- 新迁移编号在 `create` / `adopt` 时统一预留（跨主工作区与所有隔离区取下一个空号），
-  写入任务清单的 `reserved_migration`。分配是并发安全的：`agent-worktree.sh` 与
-  `tools/reconcile_migrations.py` 共用同一个共享预留锁（`trosa-tasks/.reserve.lock`），
-  并在锁内写一份持久计数 `trosa-tasks/.migration-counter`；编号单调递增、从不回收，
-  因此两个并发任务（无论是 `create` 还是同时 `reconcile`）不会拿到同一个号，也不
+- 新迁移编号是**懒预留**：`start`/`create` 默认不取号，真要写迁移时用
+  `reserve-migration --task <id>`（幂等），`adopt` 因搬运的在途改动可能已含迁移而
+  仍会取号。取到的号写入任务清单的 `reserved_migration`。分配是并发安全的：
+  `agent-worktree.sh` 与 `tools/reconcile_migrations.py` 共用同一个共享预留锁
+  （`trosa-tasks/.reserve.lock`），并在锁内写一份持久计数
+  `trosa-tasks/.migration-counter`；编号单调递增、从不回收，
+  因此两个并发任务（无论是预留还是同时 `reconcile`）不会拿到同一个号，也不
   再只依赖“扫描当前哪个号为空”。
 - 每棵树、每次发布前由 `tools/check_migrations.py`（已接入 `release-test.sh` 快速门禁）
   校验：文件名合法、编号唯一。编号空档只作为警告（并行任务可能先发布较大编号，

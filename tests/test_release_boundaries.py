@@ -352,5 +352,77 @@ class BrowserFlakeGateTests(unittest.TestCase):
         self.assertIn("已是 landed；本次只追加证据，不改写已发布的验证结论", text)
 
 
+class EntryConvergenceTests(unittest.TestCase):
+    """开发方入口收敛：start / ship / 懒预留迁移号，且不得越权发布。"""
+
+    def _script_text(self) -> str:
+        return AGENT_WORKTREE.read_text(encoding="utf-8")
+
+    def _function_body(self, name: str) -> str:
+        text = self._script_text()
+        start = text.index(f"{name}() {{")
+        end = text.index("\n}\n", start)
+        return text[start:end]
+
+    def test_usage_and_dispatch_expose_new_entrypoints(self):
+        text = self._script_text()
+        self.assertIn("agent-worktree.sh start --task", text)
+        self.assertIn("agent-worktree.sh ship --task", text)
+        self.assertIn("agent-worktree.sh reserve-migration --task", text)
+        self.assertIn("start) cmd_start ", text)
+        self.assertIn("ship) cmd_ship ", text)
+        self.assertIn("reserve-migration) cmd_reserve_migration ", text)
+
+    def test_start_wires_guard_status_preflight_and_create(self):
+        body = self._function_body("cmd_start")
+        # start 合并了环境判定、并发体检与建区三步，并要求主工作区干净。
+        self.assertIn("require_main_workspace", body)
+        self.assertIn("trosa_agent_role", body)
+        self.assertIn("cmd_preflight", body)
+        self.assertIn("cmd_create", body)
+        # 有在途改动时拒绝并指向 adopt，而不是把脏改动留在主工作区。
+        self.assertIn("status --porcelain --untracked-files=all", body)
+        self.assertIn("adopt --task", body)
+        self.assertIn("fail", body)
+
+    def test_create_no_longer_reserves_migration_by_default(self):
+        body = self._function_body("cmd_create")
+        self.assertIn("reserve=0", body)
+        # 兼容旧参数：仍是合法输入，且提供 opt-in。
+        self.assertIn("--no-reserve-migration) reserve=0", body)
+        self.assertIn("--reserve-migration) reserve=1", body)
+        self.assertNotIn("reserve=1\n  while", body)
+
+    def test_reserve_migration_is_lazy_and_idempotent(self):
+        body = self._function_body("cmd_reserve_migration")
+        # 只有真正要写迁移时才取号，且已有编号时不重复占用。
+        self.assertIn("isdigit()", body)
+        self.assertIn("begin_migration_lock", body)
+        self.assertIn("next_migration_number", body)
+        self.assertIn("merge_task_meta", body)
+        # 幂等分支必须早于取号返回。
+        self.assertIn("已预留迁移编号", body)
+
+    def test_ship_composes_sync_quick_gate_and_queue_without_publishing(self):
+        body = self._function_body("cmd_ship")
+        self.assertIn("cmd_sync", body)
+        self.assertIn("cmd_test", body)
+        self.assertIn("--quick", body)
+        self.assertIn("status=shipped", body)
+        self.assertIn(".ship-queue", body)
+        self.assertIn("shipped_commit", body)
+        # 开发方能力边界：ship 绝不能自己发布或推送。
+        for forbidden in ("cmd_publish", "auto-publish.sh", "release-commit.sh", "git push"):
+            self.assertNotIn(forbidden, body, forbidden)
+
+    def test_ship_queue_fields_are_tsv_and_ship_status_has_verdict(self):
+        text = self._script_text()
+        # 队列行：时间 任务 分支 commit（制表符分隔）。
+        self.assertIn("'%s\\t%s\\t%s\\t%s\\n'", text)
+        # 任务清单要能读出“已交付”判定。
+        self.assertIn('elif status == "shipped":', text)
+        self.assertIn("shipped_commit", text)
+
+
 if __name__ == "__main__":
     unittest.main()

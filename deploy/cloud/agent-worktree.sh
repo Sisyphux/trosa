@@ -104,13 +104,17 @@ Usage:
   agent-worktree.sh status
   agent-worktree.sh guard
   agent-worktree.sh preflight
+  agent-worktree.sh start --task <id> [--base <ref>] [--fetch-base]
+                          [--owner <name>] [--goal <text>] [--scope <text>]
   agent-worktree.sh create --task <id> [--base <ref>] [--fetch-base]
                            [--owner <name>] [--goal <text>] [--scope <text>]
-                           [--no-reserve-migration]
+                           [--reserve-migration]
   agent-worktree.sh adopt --task <id> [--path <repo-relative> ...]
                           [--owner <name>] [--goal <text>] [--scope <text>]
+  agent-worktree.sh reserve-migration --task <id>
   agent-worktree.sh list
   agent-worktree.sh test --task <id> [--quick]
+  agent-worktree.sh ship --task <id> [--offline]
   agent-worktree.sh evidence --task <id>
   agent-worktree.sh flakes [--limit <n>]
   agent-worktree.sh gate --task <id>
@@ -129,12 +133,21 @@ guard     开发任务开始前的入口闸门：dev/review 角色在主工作�
           目录）会被拒绝，要求先 create/adopt 进入隔离区；release/人工集成不受
           影响。只读，不改动任何文件。
 preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。
-create    建隔离区，写任务清单并预留下一个迁移编号；只能在主工作区执行。
+start     开发方入口（推荐）：合并 guard + status + preflight + create。要求主工作区
+          干净，否则请先用 adopt 把在途改动搬进隔离区；通过后等同于 create。
+create    建隔离区，写任务清单；只能在主工作区执行。迁移编号改为懒预留：默认不取号，
+          真正要写迁移时用 reserve-migration；需要建区即取号可加 --reserve-migration。
 adopt     把主工作区的在途改动（默认全部；可用 --path 限定）整体搬进新任务区，
           原始改动会保留为 stash 备份，主工作区恢复干净。路径按主工作区根解析；
           只能在主工作区执行。
+reserve-migration
+          为本任务懒预留一个迁移编号（幂等：已预留则原样返回）。只有真要新增
+          migrations/ 文件时才调用，避免无数据库改动的任务消耗编号。
 test      委托 release-test.sh，与发布候选使用同一份门禁；完整门禁要求任务已同步
           到最新 <main>，否则只对旧基线成立。
+ship      开发方交付入口：sync 到最新 <main> → 快速门禁 → 把分支与 commit 登记到
+          仓库外发布队列（status=shipped），然后立即返回。开发方不等待完整门禁；
+          发布方会自己重跑完整门禁。要看完整门禁结果仍可单独 test --task <id>。
 evidence  查看任务清单状态与最近一次完成证据。
 flakes    汇总浏览器验收的 flake 台账（只读）：按步骤 + 结果计数并列出最近事件。
           台账由门禁在 Chromium 步骤失败重跑时写入；它只记录瞬时失败，不改变判定。
@@ -337,7 +350,8 @@ doc = {
     ).astimezone().isoformat(timespec="seconds"),
 }
 for key in ("landed_commit", "landed_release", "landed_at",
-            "verify_result", "verified_commit", "verified_at"):
+            "verify_result", "verified_commit", "verified_at",
+            "shipped_commit", "shipped_at"):
     if preserved.get(key):
         doc[key] = preserved[key]
 with open(path, "w", encoding="utf-8") as handle:
@@ -371,6 +385,8 @@ for key, label in (
     ("synced_at", "最近同步"),
     ("verified_commit", "验证 commit"),
     ("verify_result", "最近门禁"),
+    ("shipped_commit", "交付 commit"),
+    ("shipped_at", "交付时间"),
     ("landed_commit", "落地 commit"),
     ("landed_release", "发布 release"),
     ("evidence", "证据文件"),
@@ -395,6 +411,8 @@ if status == "landed":
     print(f"  完成判定：已发布（release={doc.get('landed_release') or '未知'}）")
 elif status == "abandoned":
     print("  完成判定：已废弃")
+elif status == "shipped":
+    print("  完成判定：已交付到发布队列（等发布方重跑完整门禁后落地）")
 elif doc.get("verify_result") == "ok" and head and verified != head:
     print("  完成判定：门禁证据已过期（对应当前 HEAD 之外的 commit），必须重新验证")
 elif doc.get("verify_result") == "ok":
@@ -605,8 +623,91 @@ register_verified_tree() {
     "$tree" "${b:0:9}"
 }
 
+# 开发方入口（推荐）：合并 guard + status + preflight + create。要求主工作区干净：
+# 在途改动属于新任务时请用 adopt（它专门搬运在途改动并留 stash 备份），不要把
+# 脏改动留在主工作区里 create。create 之前的硬性校验仍由 create 自己执行。
+cmd_start() {
+  local task="" arg idx=0
+  local -a pass=("$@")
+  while [[ $idx -lt ${#pass[@]} ]]; do
+    arg="${pass[$idx]}"
+    case "$arg" in
+      --task) [[ $((idx+1)) -lt ${#pass[@]} ]] || fail '--task 需要一个 id'
+              task="${pass[$((idx+1))]}"; idx=$((idx+2)); continue ;;
+      *) idx=$((idx+1)) ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'start 需要 --task <id>'
+  validate_task_id "$task"
+  require_main_workspace
+  local role
+  role="$(trosa_agent_role)"
+  printf '角色：%s\n环境：主工作区（%s）\n' "$role" "$MAIN_ROOT"
+  local dirty
+  dirty="$(git -C "$MAIN_ROOT" status --porcelain --untracked-files=all)"
+  if [[ -n "$dirty" ]]; then
+    printf '主工作区有未提交改动：\n' >&2
+    git -C "$MAIN_ROOT" status --short >&2
+    fail "主工作区不干净，不能用 start 建新任务；若这些改动属于任务 $task，请改用 adopt --task $task（会把改动搬进隔离区并保留 stash 备份）"
+  fi
+  printf '主工作区干净。\n'
+  # 并发体检：只提示，不阻断。已知的其它任务迁移号冲突等不应挡住建区，
+  # create 之前的硬性检查仍由 create 执行。
+  local pf=0
+  cmd_preflight || pf=$?
+  if [[ "$pf" != 0 ]]; then
+    printf '提醒：并发体检有未通过项（见上）。若与本任务无关可继续。\n' >&2
+  fi
+  cmd_create ${pass[@]+"${pass[@]}"}
+}
+
+# 懒预留迁移号：只有真要新增 migrations/ 文件时才取号，避免无数据库改动的任务
+# 消耗单调计数器。幂等：已预留则原样返回，不重复占用编号。
+cmd_reserve_migration() {
+  local task=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
+      *) fail "reserve-migration 未知参数：$1" ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'reserve-migration 需要 --task <id>'
+  validate_task_id "$task"
+  local meta
+  meta="$(task_meta_path "$task")"
+  [[ -r "$meta" ]] || fail "任务 $task 尚无任务清单（先 start/create/adopt 建区）"
+  local existing
+  existing="$(python3 - "$meta" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        doc = json.load(handle)
+except (OSError, ValueError):
+    doc = {}
+value = str(doc.get("reserved_migration") or "")
+print(value if value.isdigit() else "")
+PY
+)"
+  if [[ -n "$existing" ]]; then
+    printf '任务 %s 已预留迁移编号：%s\n' "$task" "$existing"
+    return 0
+  fi
+  local reserved
+  begin_migration_lock
+  reserved="$(next_migration_number)"
+  merge_task_meta "$task" "reserved_migration=$reserved"
+  release_migration_lock
+  printf '任务 %s 预留迁移编号：%s\n' "$task" "$reserved"
+  printf '建议文件名：migrations/%s_<说明>.sql\n' "$reserved"
+}
+
 cmd_create() {
-  local task="" base="$TARGET_BRANCH" fetch_base=0 owner="" goal="" scope="" reserve=1
+  # 迁移编号改为懒预留：默认不取号，避免无数据库改动的任务消耗单调计数器；
+  # 真要写迁移时用 reserve-migration，或建区即取号加 --reserve-migration。
+  # --no-reserve-migration 保留为兼容参数（与默认行为一致）。
+  local task="" base="$TARGET_BRANCH" fetch_base=0 owner="" goal="" scope="" reserve=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
@@ -615,6 +716,7 @@ cmd_create() {
       --owner) [[ $# -ge 2 ]] || fail '--owner 需要一个值'; owner=$2; shift 2 ;;
       --goal) [[ $# -ge 2 ]] || fail '--goal 需要文字'; goal=$2; shift 2 ;;
       --scope) [[ $# -ge 2 ]] || fail '--scope 需要文字'; scope=$2; shift 2 ;;
+      --reserve-migration) reserve=1; shift ;;
       --no-reserve-migration) reserve=0; shift ;;
       *) fail "create 未知参数：$1" ;;
     esac
@@ -666,9 +768,11 @@ cmd_create() {
   printf '\n任务隔离区已就绪：\n  目录：%s\n  分支：%s（基线 %s）\n' "$wt" "$(branch_of "$task")" "$base"
   print_task_meta "$task"
   if [[ -n "$reserved" ]]; then
-    printf '  下一个迁移编号：%s（无数据库改动时忽略）\n' "$reserved"
+    printf '  预留迁移编号：%s（无数据库改动时忽略）\n' "$reserved"
+  else
+    printf '  迁移编号：未预留（要写 migrations/ 时运行 reserve-migration --task %s）\n' "$task"
   fi
-  printf '下一步：在该目录改代码、commit 到本任务分支；验证用 test，发布用 publish。\n'
+  printf '下一步：在该目录改代码、commit 到本任务分支；交付用 ship，看完整门禁用 test。\n'
   printf '开始前可在隔离区内运行 status，确认这里就是你的任务。\n'
 }
 
@@ -796,6 +900,42 @@ cmd_test() {
       "reusable_tree=0"
     fail "任务 $task 门禁未通过，不可发布（证据：$log，退出码 $status）"
   fi
+}
+
+# 开发方交付入口：sync 到最新 <main> → 快速门禁 → 把分支与 commit 登记到仓库外
+# 发布队列（status=shipped），然后立即返回。开发方不等待完整门禁；发布方会自己
+# 重跑一遍完整门禁（开发方的 verify.log 不作为判定依据）。要看完整门禁结果仍可
+# 单独 test --task <id>。故意不在此处 git push：发布形态（队列/远端）由发布侧定，
+# 开发会话不应做对外可见操作。
+cmd_ship() {
+  local task="" offline=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
+      --offline) offline=1; shift ;;
+      *) fail "ship 未知参数：$1" ;;
+    esac
+  done
+  [[ -n "$task" ]] || fail 'ship 需要 --task <id>'
+  validate_task_id "$task"
+  local wt
+  wt="$(find_task_path "$task")"
+  [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
+  local -a sync_args=(--task "$task")
+  if [[ "$offline" == 1 ]]; then sync_args+=(--offline); fi
+  cmd_sync ${sync_args[@]+"${sync_args[@]}"}
+  cmd_test --task "$task" --quick
+  local head iso queue
+  head="$(git -C "$wt" rev-parse HEAD)"
+  iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  merge_task_meta "$task" "status=shipped" "shipped_commit=$head" "shipped_at=$iso"
+  mkdir -p -- "$TASK_META_DIR"
+  queue="$TASK_META_DIR/.ship-queue"
+  printf '%s\t%s\t%s\t%s\n' "$iso" "$task" "$(branch_of "$task")" "$head" >> "$queue"
+  printf '\n任务 %s 已交付到发布队列。\n  分支：%s\n  交付 commit：%s\n  队列：%s\n' \
+    "$task" "$(branch_of "$task")" "${head:0:9}" "$queue"
+  printf '发布方会自己重跑完整门禁后发布；开发方无需在此等待。\n'
+  printf '要看完整门禁结果：test --task %s（不带 --quick）。\n' "$task"
 }
 
 cmd_evidence() {
@@ -1252,10 +1392,13 @@ case "$command" in
   status) cmd_status "$@" ;;
   guard) cmd_guard "$@" ;;
   preflight) cmd_preflight "$@" ;;
+  start) cmd_start "$@" ;;
   create) cmd_create "$@" ;;
   adopt) cmd_adopt "$@" ;;
+  reserve-migration) cmd_reserve_migration "$@" ;;
   list) cmd_list "$@" ;;
   test) cmd_test "$@" ;;
+  ship) cmd_ship "$@" ;;
   evidence) cmd_evidence "$@" ;;
   flakes) cmd_flakes "$@" ;;
   gate) cmd_gate "$@" ;;
