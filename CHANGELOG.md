@@ -1,3 +1,13 @@
+## 2026-09-30 — 浏览器验收改为锁定的无头 Chromium：唯一运行标记、按故障类型重跑、证据按 commit 追加
+
+- 现象：真实 Chromium 验收由桌面浏览器任务驱动，多次在「main + 一个 docs 文件」上出现与改动无关的间歇性失败（同一页面等待超时、弹窗光标未落位两种错误），而失败到底该重跑还是该查缺陷没有区分；证据文件每跑一次就被整文件覆盖，发布后重跑会改写已发布的验证结论。
+- 变更（终态：自己起无头浏览器）：浏览器验收改为每次运行自己启动一个由 `browser-extension/package-lock.json` 锁定的 Playwright 无头 Chromium（`tools/run_browser_acceptance.cjs` 驱动 `tools/browser_acceptance.js` / `tools/inbox_browser_acceptance.js`），不再共用开发机上的桌面浏览器；缺 Playwright 一律硬失败，不标记为 SKIP。
+- 变更（唯一运行标记与状态等待断言）：每次运行生成唯一 `RUN_ID`，并把它写进本次创建的沟通记录、待办与完成内容；搜索断言改为等待状态，并要求**恰好命中一条**带本次标记的结果（`searchHitCount === 1`）；焦点仍用 `page.waitForFunction` 轮询。失败时打印页面状态（URL/标题/焦点元素/可见弹窗/轻提示/控制台错误/失败请求），并把截图与状态 JSON 落到共享 `trosa-tasks/browser-artifacts/`。
+- 变更（按故障类型重跑）：驱动按故障类型返回退出码——基础设施故障 `21`、断言/产品失败 `20`。门禁**只对基础设施故障重跑一次并记入 flake 台账 `trosa-tasks/.flake-events.log`，断言失败绝不重跑**，避免把真实缺陷洗成绿；每次验收只在约 12–20 秒的浏览器阶段持一把复用 `lib-release-lock.sh` 的机器级锁，同机并发门禁串行通过。
+- 变更（证据不可改写）：`trosa-tasks/<id>.verify.log` 改为按 commit 追加（每次运行追加一段 `# --- run … result=ok|failed ---`），不再整文件覆盖；任务已 `landed` 后重跑门禁只追加证据、不改写已发布的验证结论。
+- 未改动：门禁仍是唯一实现 `deploy/cloud/release-test.sh`（任务区/发布候选共用）；发布仍只接受 commit/branch、不读工作区脏改动；production 基线门、切换前备份、ECS 深度健康检查、发布串行锁、`--force-with-lease`、迁移前向单调与 applied ledger 全部不变；未配置 AI/网络时核心功能不受影响。
+- 验证：`bash -n`、AsyncFunction 语法编译、`py_compile` 通过；`tests.test_release_boundaries`、`tests.test_release_commit_entrypoint` 共 36 项通过（新增故障分级、断言失败不重跑、追加证据、锁与唯一标记、无 SKIP 路径的断言）；完整门禁（隔离 SQLite Python 回归 ∥ 真实 PostgreSQL rehearsal + 无头 Chromium 核心验收与 Inbox 专项验收 ∥ 浏览器扩展回归）通过。
+
 ## 2026-09-30 — 全部小窗口统一到页面同一套设计语言
 
 独立 UI 评审（`design/reviews/ui-review-0930/REPORT.md`）在共用弹窗层发现一批系统性缺陷。本任务按报告顺序逐条修复，让全部小窗口与房间页面说同一套语言；每条修复都在本分支重新验证过（评审对象是 main，未含 8bb4553）。

@@ -188,6 +188,16 @@ checkout 落后（例如历史 worktree 里残留旧脚本）或脚本被改动�
   分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收；分支 C：浏览器扩展回归。
   输出按分支分组打印，任一支失败都让整道门禁失败；`trap` 统一回收临时资源与
   rehearsal 服务。
+- 浏览器验收用 `browser-extension/package-lock.json` 锁定的 Playwright 无头
+  Chromium（`tools/run_browser_acceptance.cjs` 驱动 `tools/browser_acceptance.js` /
+  `tools/inbox_browser_acceptance.js`），每次运行自己启动一个无头浏览器，不依赖
+  开发机上的桌面浏览器；缺 Playwright 一律硬失败，绝不标记为 SKIP。每次运行生成
+  唯一 `RUN_ID`（写进验收记录的唯一标记），并只在浏览器阶段持一把机器级锁
+  （`deploy/cloud/lib-release-lock.sh`，共享 git 目录），同机并发门禁串行通过。
+  驱动按故障类型返回退出码：`21` 基础设施故障、`20` 断言/产品失败。`release-test.sh`
+  **只对基础设施故障重跑一次并记入 flake 台账（`trosa-tasks/.flake-events.log`），
+  断言失败绝不重跑**，避免把真实缺陷洗成绿；失败时打印页面状态并把截图/状态 JSON
+  落到 `trosa-tasks/browser-artifacts/`。
 - 一条门禁只起停一次 PostgreSQL rehearsal：`release-test.sh` 选定唯一端口并拥有
   服务生命周期，`tools/browser_acceptance.sh` 被门禁调用时以
   `TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1` 复用同一服务/连接，只重载确定性
@@ -198,6 +208,9 @@ checkout 落后（例如历史 worktree 里残留旧脚本）或脚本被改动�
 完整的记录），并记录 `verified_tree = HEAD^{tree}`。身份由四项锚定：候选树 tree
 hash、门禁实现哈希（运行门禁那份 `deploy/cloud/` + 候选树 `tools/`）、外部输入哈希
 （`migrations/` 目录 + 门禁固定测试环境）、基线（`origin/main` sha）。
+证据文件 `trosa-tasks/<id>.verify.log` 按 commit **追加**（每次运行追加一段
+`# --- run … result=ok|failed ---`），不再整文件覆盖：任务已 `landed` 后重跑门禁只
+追加证据、不改写已发布的验证结论。
 
 `release-commit.sh` cherry-pick 后计算候选身份：命中且四项一致时跳过全量门禁，但仍做
 快速语法/迁移完整性检查，并打印 `gate reused for tree=<hash>`；未命中走原全量门禁。

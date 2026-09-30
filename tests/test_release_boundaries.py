@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -26,6 +27,7 @@ GATE_LIB = ROOT / "deploy" / "cloud" / "lib-release-gate.sh"
 AGENT_WORKTREE = ROOT / "deploy" / "cloud" / "agent-worktree.sh"
 RELEASE_TEST = ROOT / "deploy" / "cloud" / "release-test.sh"
 CORE_ACCEPTANCE_JS = ROOT / "tools" / "browser_acceptance.js"
+BROWSER_DRIVER = ROOT / "tools" / "run_browser_acceptance.cjs"
 
 
 def run_bash(snippet: str, **env) -> subprocess.CompletedProcess:
@@ -215,27 +217,50 @@ class BrowserFlakeGateTests(unittest.TestCase):
         self.assertEqual(self.ledger_rows(), [])
 
     def test_retry_succeeds_records_flake_but_passes(self):
-        proc, result = self.retry(1, 0)
+        proc, result = self.retry(21, 0)
         self.assertEqual(result, "RESULT=0")
         rows = self.ledger_rows()
         self.assertEqual([row[4] for row in rows], ["retrying", "ok"])
         self.assertEqual(rows[0][1], "synthetic 步骤")
-        self.assertEqual(rows[0][3], "1")
+        self.assertEqual(rows[0][3], "21")
         self.assertIn("flake", proc.stderr)
 
     def test_both_attempts_fail_fails_the_gate(self):
-        _, result = self.retry(1, 1)
+        _, result = self.retry(21, 21)
         self.assertEqual(result, "RESULT=1")
         self.assertEqual(
             [row[4] for row in self.ledger_rows()], ["retrying", "failed"]
         )
 
     def test_retry_defaults_to_the_same_step(self):
-        _, result = self.retry(1, 1, with_retry=False)
+        _, result = self.retry(21, 21, with_retry=False)
         self.assertEqual(result, "RESULT=1")
         self.assertEqual(
             [row[4] for row in self.ledger_rows()], ["retrying", "failed"]
         )
+
+    def test_assertion_failure_is_not_retried(self):
+        # 断言失败（退出码 20）绝不重跑：既不写 flake，也绝不调用重跑函数，
+        # 否则真实缺陷会被重跑洗成绿。用哨兵文件证明重跑函数从未被调用。
+        sentinel = Path(self.tmp.name) / "retried"
+        snippet = (
+            f'source "{GATE_LIB}"\n'
+            f'export TROSA_FLAKE_LEDGER="{self.ledger}"\n'
+            "first() { return 20; }\n"
+            f'retry() {{ touch "{sentinel}"; return 0; }}\n'
+            "if release_gate_run_browser_step 'synthetic 步骤' "
+            f'"{ROOT}" first retry; then echo RESULT=0; else echo RESULT=$?; fi\n'
+        )
+        proc = run_bash(snippet)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip().splitlines()[-1], "RESULT=1")
+        self.assertEqual(self.ledger_rows(), [])
+        self.assertFalse(sentinel.exists(), "断言失败不得重跑")
+
+    def test_infra_exit_code_is_configurable_and_wired(self):
+        text = GATE_LIB.read_text(encoding="utf-8")
+        self.assertIn("RELEASE_GATE_BROWSER_INFRA_EXIT", text)
+        self.assertIn("RELEASE_GATE_BROWSER_INFRA_EXIT:-21", text)
 
     def test_ledger_path_defaults_below_shared_git_dir(self):
         proc = run_bash(
@@ -278,6 +303,53 @@ class BrowserFlakeGateTests(unittest.TestCase):
         # 搜索断言必须等到「命中」高亮的刷新快照，而不是某一条更早的具体沟通正文。
         self.assertIn(".filter({hasText: '命中'})", js)
         self.assertNotIn("hasText: 'Browser acceptance customer reply'", js)
+        # 每条记录带本次运行唯一标记，搜索断言据此要求“恰好命中一条”。
+        self.assertIn("TROSA_BROWSER_ACCEPTANCE_RUN_TAG", js)
+        self.assertIn("searchHitCount === 1", js)
+
+    def test_browser_driver_classifies_infra_vs_assertion(self):
+        self.assertTrue(BROWSER_DRIVER.is_file())
+        if shutil.which("node") is None:
+            self.skipTest("node 不可用")
+        cases = (
+            ("net::ERR_CONNECTION_REFUSED", None, "infra"),
+            ("Timeout 15000ms exceeded", None, "assertion"),
+            ("anything at all", "assertion", "assertion"),
+        )
+        for message, override, expected in cases:
+            script = (
+                "const m=require(process.argv[1]);"
+                "const e=Object.assign(new Error(process.argv[2]),"
+                "process.argv[3]?{acceptanceClass:process.argv[3]}:{});"
+                "console.log(m.classify(e));"
+            )
+            proc = subprocess.run(
+                ["node", "-e", script, str(BROWSER_DRIVER), message, override or ""],
+                capture_output=True, text=True, timeout=30, cwd=str(ROOT),
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout.strip(), expected, message)
+
+    def test_browser_launchers_use_locked_headless_chromium(self):
+        for name in ("browser_acceptance.sh", "inbox_browser_acceptance.sh"):
+            text = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            self.assertNotIn("tabbit", text.lower(), name)
+            self.assertIn("run_browser_acceptance.cjs", text, name)
+            self.assertIn("lib-release-lock.sh", text, name)
+            self.assertIn("trosa_lock_acquire", text, name)
+            # 每次运行生成唯一 RUN_ID；缺失浏览器依赖是基础设施硬失败，不是 SKIP。
+            self.assertIn("RUN_ID", text, name)
+            self.assertIn("不会把浏览器验收标记为 SKIP", text, name)
+
+    def test_evidence_is_append_only_and_landed_is_immutable(self):
+        text = AGENT_WORKTREE.read_text(encoding="utf-8")
+        # 证据只追加：允许 >>"$log"，绝不允许单 > 覆盖同一证据文件。
+        self.assertIn('>>"$log"', text)
+        self.assertNotRegex(text, r'(?<!>)>"\$log"')
+        self.assertIn("# --- run", text)
+        # 已 landed 的任务重跑只能追加证据，不得改写已发布的验证结论。
+        self.assertIn("task_status", text)
+        self.assertIn("已是 landed；本次只追加证据，不改写已发布的验证结论", text)
 
 
 if __name__ == "__main__":

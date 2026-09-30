@@ -1,4 +1,4 @@
-"""Deterministic Inbox-only fixture for the Tabbit acceptance script.
+"""Deterministic Inbox-only fixture for the browser acceptance script.
 
 It runs only with ``CRM_ENV=rehearsal`` and uses the normal canonical domain
 writer; no HTTP test endpoint or production behaviour is introduced.

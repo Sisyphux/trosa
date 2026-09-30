@@ -112,17 +112,22 @@ release_gate_lookup() {
 
 # 浏览器验收 flake 台账
 # --------------------
-# 真实 Chromium 验收要驱动外部浏览器任务（Tabbit/Chromium），历史上出现过与树
-# 内容无关的瞬时失败（浏览器任务被复用/中断、页面在刷新完成前被断言等）。门禁对
-# “浏览器步骤”允许失败后重跑一次（见 release_gate_run_browser_step），但事件必须
-# 落进可汇总的台账，绝不静默算通过：重跑通过则门禁继续但事件已记账，重跑仍失败则
-# 门禁红。
+# 真实 Chromium 验收会启动浏览器/服务/loopback 端口，历史上出现过与树内容无关的
+# 瞬时失败（服务未就绪、连接被重置、浏览器连接断开等）。门禁只对**基础设施故障**
+# （浏览器步骤退出码 21）允许失败后重跑一次（见 release_gate_run_browser_step）；
+# **断言失败（退出码 20，或任何其它非 21 退出码）绝不重跑**，避免把真实缺陷洗成绿。
+# 每次重跑都必须记进可汇总的台账，绝不静默算通过：重跑通过则门禁继续但事件已记账，
+# 重跑仍失败则门禁红。
 #
 # 台账与已验证树账本同目录，每行一条 TSV：
 #   <UTC ISO8601>\t<label>\t<tree>\t<first_exit>\t<retry>
 # retry ∈ retrying|ok|failed。只追加写入，重复无害；内容不含任何凭据。
 # 汇总示例：awk -F'\t' '{c[$2" "$5]++} END{for (k in c) print c[k], k}' <台账>
 RELEASE_GATE_FLAKE_LEDGER_NAME=".flake-events.log"
+
+# 浏览器验收步骤约定：基础设施故障退出码 21（允许重跑一次），断言/产品失败退出码
+# 20（绝不重跑）。驱动 tools/run_browser_acceptance.cjs 负责按故障类型返回该码。
+RELEASE_GATE_BROWSER_INFRA_EXIT="${RELEASE_GATE_BROWSER_INFRA_EXIT:-21}"
 
 # 定位 flake 台账。TROSA_FLAKE_LEDGER 可显式覆盖（测试用）；否则落在候选树的
 # 共享 git 目录下，任务区与发布候选共用同一本台账。
@@ -156,8 +161,10 @@ release_gate_record_flake() {
   return 0
 }
 
-# 浏览器步骤专用：失败重跑一次。第一次失败即记 retrying；重跑通过记 ok 并返回 0；
-# 重跑再失败记 failed 并返回 1。非浏览器步骤不得使用本函数（它们不允许重跑）。
+# 浏览器步骤专用：只有基础设施故障（退出码 21）才重跑一次；断言/产品失败
+# （退出码 20 或任何其它非 21 码）绝不重跑，避免把真实缺陷洗成绿。第一次失败
+# 即记 retrying；重跑通过记 ok 并返回 0；重跑再失败记 failed 并返回 1。
+# 非浏览器步骤不得使用本函数（它们不允许重跑）。
 # 用法：release_gate_run_browser_step <label> <tree> <first_fn> [<retry_fn>]
 release_gate_run_browser_step() {
   local label=$1 tree=$2 first_fn=$3 retry_fn=${4:-$3}
@@ -167,7 +174,12 @@ release_gate_run_browser_step() {
   else
     first_status=$?
   fi
-  printf '\nrelease-gate: %s 第一次失败（退出码 %s），记录 flake 事件并重跑一次\n' \
+  if [[ "$first_status" != "$RELEASE_GATE_BROWSER_INFRA_EXIT" ]]; then
+    printf '\nrelease-gate: %s 失败（退出码 %s，断言/产品缺陷）；按规则不重跑\n' \
+      "$label" "$first_status" >&2
+    return 1
+  fi
+  printf '\nrelease-gate: %s 基础设施故障（退出码 %s），记录 flake 事件并重跑一次\n' \
     "$label" "$first_status" >&2
   release_gate_record_flake "$tree" "$label" "$first_status" retrying
   if "$retry_fn"; then

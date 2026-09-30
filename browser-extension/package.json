@@ -5,6 +5,7 @@
     "test": "node tests/runtime.test.cjs && node tests/assignment-flow.test.cjs && node tests/smoke.test.js && node tests/empty-read-retry.test.cjs"
   },
   "devDependencies": {
-    "jsdom": "27.4.0"
+    "jsdom": "27.4.0",
+    "playwright": "1.63.0"
   }
 }

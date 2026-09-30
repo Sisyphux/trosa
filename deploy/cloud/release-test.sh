@@ -40,9 +40,9 @@ Usage:
 
 --quick 只做 Python/JavaScript 语法检查，用于快速反馈；
 默认执行完整门禁：快速检查 → 并行（[隔离数据目录 Python 回归（失败重跑一次）] ∥
-[真实 PostgreSQL 演练 → 真实 Chromium 页面验收 → Inbox 专项验收（浏览器步骤失败重跑
-一次并记入 flake 台账）] ∥ [浏览器扩展回归]）。任一分支失败整道门禁失败。退出码非 0
-表示这棵树不可发布。
+[真实 PostgreSQL 演练 → 真实 Chromium 页面验收 → Inbox 专项验收（浏览器步骤仅对基础
+设施故障重跑一次并记入 flake 台账；断言失败绝不重跑）] ∥ [浏览器扩展回归]）。任一
+分支失败整道门禁失败。退出码非 0 表示这棵树不可发布。
 EOF
 }
 
@@ -203,7 +203,8 @@ run_python_regression_branch() {
 
 # 浏览器验收步骤：门禁已经准备并拥有 rehearsal 服务，这里只复用同一服务/连接并重载
 # 确定性 fixture，不重启、不在退出时停服务（服务生命周期由本门禁在 cleanup 统一回收）。
-# 步骤函数由 release_gate_run_browser_step 决定失败后是否重跑一次。
+# 步骤函数由 release_gate_run_browser_step 决定失败后是否重跑一次；它只看退出码：
+# 21（基础设施故障）重跑一次并记 flake，20（断言/产品失败）与其它码绝不重跑。
 run_core_browser_acceptance() {
   TROSA_BROWSER_REHEARSAL_PORT="$REHEARSAL_GATE_PORT" \
     TROSA_BROWSER_ACCEPTANCE_REUSE_REHEARSAL=1 \
@@ -211,9 +212,8 @@ run_core_browser_acceptance() {
 }
 
 run_core_browser_acceptance_retry() {
-  # 重跑换一个 request id：第一次的请求可能仍留在浏览器侧（Tabbit 会保留同一 request
-  # 的 receipt），换 id 可避免“程序可能已执行过先前动作”的误判。
-  export TROSA_BROWSER_ACCEPTANCE_REQUEST_ID=acceptance-core-workflow-retry
+  # 每次调用都会生成新的 RUN_ID/RUN_TAG（启动器负责），所以重跑天然使用新的运行
+  # 标识与验收记录标记，不会复用第一次可能残留的浏览器状态。
   run_core_browser_acceptance
 }
 
@@ -224,13 +224,14 @@ run_inbox_browser_acceptance() {
 }
 
 run_inbox_browser_acceptance_retry() {
-  export TROSA_INBOX_BROWSER_REQUEST_ID=acceptance-inbox-specialist-retry
+  # 同上：RUN_ID 在启动器内每次重新生成，重跑不复用第一次的标识。
   run_inbox_browser_acceptance
 }
 
 # 分支 B：真实 PostgreSQL rehearsal → 真实 Chromium 页面验收。与分支 A（SQLite）
 # 和分支 C（扩展回归）互不依赖；同一门禁里 PostgreSQL 服务只起停一次。PostgreSQL
-# rehearsal 不重跑（确定性）；两个 Chromium 步骤失败重跑一次并记入 flake 台账。
+# rehearsal 不重跑（确定性）；两个 Chromium 步骤只对基础设施故障（退出码 21）重跑
+# 一次并记入 flake 台账，断言失败（退出码 20）绝不重跑。
 run_rehearsal_browser_branch() {
   trap - EXIT
   printf '\n==> PostgreSQL rehearsal（真实 loopback PostgreSQL）\n'

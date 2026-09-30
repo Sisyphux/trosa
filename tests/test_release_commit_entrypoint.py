@@ -66,10 +66,12 @@ class CommitReleaseEntrypointTests(unittest.TestCase):
 
     def test_real_browser_acceptance_has_no_skip_path(self):
         script = read("tools/browser_acceptance.sh")
-        for token in ("tabbit-cli", "不会把浏览器验收标记为 SKIP",
-                      "tools/postgres_rehearsal.py", "serve_rehearsal.py",
-                      "nodejs"):
+        for token in ("run_browser_acceptance.cjs", "lib-release-lock.sh",
+                      "不会把浏览器验收标记为 SKIP",
+                      "tools/postgres_rehearsal.py", "serve_rehearsal.py"):
             self.assertIn(token, script)
+        # 已不再依赖开发者桌面上的 Tabbit/共享浏览器任务。
+        self.assertNotIn("tabbit", script.lower())
         program = read("tools/browser_acceptance.js")
         for token in ("#loginOverlay", "#inboxReplyContent",
                       "#customerTaskDate", "page-dashboard",

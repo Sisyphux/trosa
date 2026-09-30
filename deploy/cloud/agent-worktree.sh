@@ -196,11 +196,30 @@ PY
 # 也不更新完成判定；否则一次语法检查会让任务看起来“已通过门禁”。
 task_quick_log_path() { printf '%s/%s.quick.log' "$TASK_META_DIR" "$1"; }
 
-# 运行一次命令，把完整输出写入指定证据文件，并在开头附上可核验的元数据。
+# 读取任务清单里的 status 字段；清单缺失或没有 status 时输出空。
+task_status() {
+  local meta
+  meta="$(task_meta_path "$1")"
+  [[ -r "$meta" ]] || return 0
+  python3 - "$meta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+print(doc.get("status", ""))
+PY
+}
+
+# 运行一次命令，把完整输出**追加**到指定证据文件，并在每次运行前附上可核验的元数据段。
 # 返回被运行命令的退出码，调用方据此判定完成与否。
+#
+# 证据只追加、从不截断：一旦某次运行的 result: ok 已被记录（尤其任务已 landed），
+# 之后任何重跑都只能新增一段，无法改写它——发布后重跑不会把已发布的验证结论洗掉。
+# 文件头（task/branch）只在文件不存在时写入一次。
 run_with_evidence() {
   local log=$1 task=$2 kind=$3 head=$4; shift 4
-  local tmp status
+  local tmp status at result
   mkdir -p -- "$TASK_META_DIR"
   tmp="$(mktemp "${TMPDIR:-/tmp}/trosa-evidence.XXXXXX")"
   set +e
@@ -208,17 +227,23 @@ run_with_evidence() {
   status=$?
   set -e
   cat "$tmp"
+  at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  result=ok
+  [[ "$status" == 0 ]] || result=failed
+  if [[ ! -f "$log" ]]; then
+    {
+      printf '# trosa task evidence\n'
+      printf '# task: %s\n' "$task"
+      printf '# branch: %s\n' "$(branch_of "$task")"
+    } >>"$log"
+  fi
   {
-    printf '# trosa task evidence\n'
+    printf '\n# --- run %s kind=%s commit=%s result=%s ---\n' "$at" "$kind" "$head" "$result"
     printf '# task: %s\n' "$task"
-    printf '# branch: %s\n' "$(branch_of "$task")"
-    printf '# commit: %s\n' "$head"
-    printf '# kind: %s\n' "$kind"
-    if [[ "$status" == 0 ]]; then printf '# result: ok\n'; else printf '# result: failed\n'; fi
-    printf '# at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '# at: %s\n' "$at"
     printf '# command: %s\n' "$*"
     cat "$tmp"
-  } >"$log"
+  } >>"$log"
   rm -f -- "$tmp"
   return "$status"
 }
@@ -738,21 +763,33 @@ cmd_test() {
     log="$(task_evidence_path "$task")"; kind="test"
   fi
   iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # 已 landed 的任务：本次运行只追加证据，绝不改写已发布的验证结论/状态。
+  local landed=0
+  if [[ "$(task_status "$task")" == landed ]]; then
+    landed=1
+  fi
   if run_with_evidence "$log" "$task" "$kind" "$head" bash "$gate" ${args[@]+"${args[@]}"}; then
     if [[ "$quick" == 1 ]]; then
       printf '任务 %s 快速门禁通过（仅语法检查，不作为完成证据）。\n' "$task"
       printf '完整门禁：test --task %s（不带 --quick）。快速日志：%s\n' "$task" "$log"
     else
-      merge_task_meta "$task" \
-        "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
-      register_verified_tree "$task" "$wt" "$gate_tree"
-      printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+      if [[ "$landed" == 1 ]]; then
+        printf '任务 %s 已是 landed；本次只追加证据，不改写已发布的验证结论。\n' "$task"
+      else
+        merge_task_meta "$task" \
+          "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+        register_verified_tree "$task" "$wt" "$gate_tree"
+        printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+      fi
       printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
     fi
   else
     local status=$?
     if [[ "$quick" == 1 ]]; then
       fail "任务 $task 快速门禁失败（仅语法，未改动完成判定）：$log"
+    fi
+    if [[ "$landed" == 1 ]]; then
+      fail "任务 $task 已是 landed 但本次重跑门禁未通过；证据已追加，不改写已发布结论（证据：$log，退出码 $status）"
     fi
     merge_task_meta "$task" \
       "verify_result=failed" "verified_commit=$head" "verified_at=$iso" "evidence=$log" \

@@ -1,7 +1,8 @@
-// Executed only by Tabbit against the local rehearsal service.  Uploads go
-// through the visible input and ordinary HTTP endpoints, never an analyzer.
-// The launcher replaces these literals before handing this program to the
-// browser-owned runtime (which intentionally does not inherit shell env).
+// Executed by tools/run_browser_acceptance.cjs inside a locked headless
+// Playwright Chromium against the local rehearsal service.  Uploads go through
+// the visible input and ordinary HTTP endpoints, never an analyzer.  The driver
+// replaces these literals before running the program, so the fixture values stay
+// out of the committed source.
 const origin = '__TROSA_INBOX_BROWSER_URL__';
 const samples = '__TROSA_INBOX_BROWSER_SAMPLES__';
 const fixtureContactId = '__TROSA_INBOX_BROWSER_CONTACT_ID__';
