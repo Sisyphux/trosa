@@ -179,8 +179,44 @@ function openFilled(overrides) {
     assert.match(doc.getElementById('completeSubmitBtn').textContent, /^完成并安排下一步 · \d+月\d+日$/);
   });
 
-  console.log('scenario: 提交校验与反馈');
-  await check('empty submit shows an inline error, focuses the textarea and sends nothing', () => {
+  await check('an AI-suggested next step keeps an AI 建议 marker until the user edits it', () => {
+    openFilled();
+    const tag = doc.getElementById('completeNextTaskAi');
+    assert.equal(tag.hidden, true);
+    win._communicationAnalyses.complete = { suggested_next_action: '发送再生料报价' };
+    doc.getElementById('completeHasNext').checked = true;
+    win.toggleCompleteNext();
+    assert.equal(doc.getElementById('completeNextTask').value, '发送再生料报价');
+    assert.equal(tag.hidden, false);
+    assert.match(tag.textContent, /AI 建议/);
+    // Editing clears the marker: the words are the user's own now.
+    win.onCompleteNextTaskInput();
+    assert.equal(tag.hidden, true);
+    assert.equal(doc.getElementById('completeNextTask').dataset.aiSource, undefined);
+  });
+  await check('applying the suggestion marks the field; a fresh open clears it', () => {
+    openFilled();
+    win._communicationAnalyses.complete = { suggested_next_action: '电话确认数量' };
+    win.applyCommunicationAnalysis('complete', 'next');
+    const tag = doc.getElementById('completeNextTaskAi');
+    assert.equal(tag.hidden, false);
+    assert.equal(doc.getElementById('completeNextTask').dataset.aiSource, '1');
+    openFilled();
+    assert.equal(tag.hidden, true);
+    assert.equal(doc.getElementById('completeNextTask').dataset.aiSource, undefined);
+  });
+  await check('the customer-workspace next step carries the same AI marker wiring', () => {
+    const tag = doc.getElementById('followHistoryNextTaskAi');
+    assert.ok(tag, 'missing AI tag markup for the workspace composer');
+    win._communicationAnalyses.history = { suggested_next_action: '发报价' };
+    win.applyCommunicationAnalysis('history', 'next');
+    assert.equal(tag.hidden, false);
+    assert.equal(doc.getElementById('followHistoryNextTask').value, '发报价');
+    win.onFollowHistoryNextTaskInput();
+    assert.equal(tag.hidden, true);
+  });
+
+  console.log('scenario: 提交校验与反馈');  await check('empty submit shows an inline error, focuses the textarea and sends nothing', () => {
     openFilled();
     putCalls = [];
     doc.getElementById('completeResult').value = '';

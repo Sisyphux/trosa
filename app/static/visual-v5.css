@@ -1691,6 +1691,8 @@ html.performance-priority #trosa .inbox-lightbox.is-open.inbox-lightbox.is-open:
   color: var(--dl-gold-ink); font-size: var(--dl-fs-micro);
   letter-spacing: .12em; text-transform: uppercase;
 }
+/* 无论放在哪里，带有 hidden 的 AI 标记都必须真的消失（display 会盖过 UA 的 [hidden]） */
+#trosa .ai-tag[hidden] { display: none; }
 #trosa .inbox-evidence-proposal span { color: var(--dl-gold-ink); }
 #trosa .inbox-ai-suggestion {
   margin: 12px 0 0; padding: 10px 12px;
@@ -2813,6 +2815,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .complete-sheet .complete-when-date { font-family: var(--dl-display); font-size: 1.5rem; line-height: 1.2; color: var(--dl-gold-ink); }
 #trosa .complete-sheet .complete-when-week { color: var(--dl-ink-3); font-size: .82rem; }
 #trosa .complete-sheet .complete-task.form-control { margin-top: .6rem; font-size: 1rem; }
+/* AI 预填的下一步动作就地带着来源标记，用户改写后消失 */
+#trosa .complete-sheet .complete-task-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .6rem; margin-top: .6rem; }
+#trosa .complete-sheet .complete-task-row .complete-task.form-control { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+#trosa .complete-sheet .complete-ai-tag { flex: 0 0 auto; margin: 0; }
+#trosa .complete-sheet .ai-field-tag { margin: 0; }
 #trosa .complete-sheet .complete-date-input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; opacity: 0; pointer-events: none; }
 #trosa .complete-sheet .complete-tz { margin: .5rem 0 0; color: var(--dl-mut); font-size: .78rem; }
 #trosa .complete-sheet .complete-tz::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .4rem; border-radius: 50%; background: var(--dl-gold); }

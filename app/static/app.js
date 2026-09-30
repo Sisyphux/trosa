@@ -3572,12 +3572,37 @@ function applyCommunicationAnalysis(context, field) {
     document.getElementById('completeHasNext').checked = true;
     toggleCompleteNext();
     document.getElementById('completeNextTask').value = suggestion;
+    setAiFieldTag('completeNextTask', 'completeNextTaskAi', true);
     updateCompleteSaveLabel();
   } else {
     document.getElementById('followHistoryNextTask').value = suggestion;
+    setAiFieldTag('followHistoryNextTask', 'followHistoryNextTaskAi', true);
     updateFollowHistorySaveLabel();
   }
   showToast('下一步建议已填入，请确认动作和日期', 'success');
+}
+
+// AI 预填的字段必须一直带着来源标记，直到用户改写它为止；不能把 AI 建议
+// 无标注地当成用户自己写的事实（DESIGN_WORLD 1.7 / 1.8，UI_QUALITY_BASELINE §6）。
+function setAiFieldTag(inputId, tagId, isAi) {
+  var input = document.getElementById(inputId);
+  var tag = document.getElementById(tagId);
+  if (input) {
+    if (isAi) input.dataset.aiSource = '1';
+    else delete input.dataset.aiSource;
+  }
+  if (tag) tag.hidden = !isAi;
+}
+
+// 用户一旦改写预填内容，来源标记立刻消失：现在写的是他自己确认过的事实。
+function onCompleteNextTaskInput() {
+  setAiFieldTag('completeNextTask', 'completeNextTaskAi', false);
+  updateCompleteSaveLabel();
+}
+
+function onFollowHistoryNextTaskInput() {
+  setAiFieldTag('followHistoryNextTask', 'followHistoryNextTaskAi', false);
+  updateFollowHistorySaveLabel();
 }
 
 function chooseInboxReplyCandidate(customerId) {
@@ -9885,6 +9910,7 @@ async function addFollowHistory() {
       document.getElementById('followHistoryContent').innerHTML = '';
       document.getElementById('followHistoryResult').innerHTML = '';
       document.getElementById('followHistoryNextTask').value = '';
+      setAiFieldTag('followHistoryNextTask', 'followHistoryNextTaskAi', false);
       document.getElementById('followHistoryNext').value = '';
       document.getElementById('followHistoryReport').checked = false;
       document.getElementById('followHistoryDirectionOverride').value = 'auto';
@@ -10214,6 +10240,7 @@ function fillCompleteModal(r) {
   if (analysisPanel) { analysisPanel.hidden = true; analysisPanel.innerHTML = ''; }
   document.getElementById('completeOutcome').value = '';
   document.getElementById('completeNextTask').value = '';
+  setAiFieldTag('completeNextTask', 'completeNextTaskAi', false);
   document.getElementById('completeHasNext').checked = false;
   document.getElementById('completeNextSection').hidden = true;
   var minDate = new Date();
@@ -10283,11 +10310,15 @@ function toggleCompleteNext() {
     }
     var taskInput = document.getElementById('completeNextTask');
     var analysis = _communicationAnalyses.complete || {};
-    if (!taskInput.value && analysis.suggested_next_action) taskInput.value = analysis.suggested_next_action;
+    if (!taskInput.value && analysis.suggested_next_action) {
+      taskInput.value = analysis.suggested_next_action;
+      setAiFieldTag('completeNextTask', 'completeNextTaskAi', true);
+    }
     setCompleteDateChoiceLabels();
     taskInput.focus();
   } else {
     document.getElementById('completeNextTask').value = '';
+    setAiFieldTag('completeNextTask', 'completeNextTaskAi', false);
     document.getElementById('completeNextFollow').value = '';
     setCompleteDateChoiceLabels();
   }

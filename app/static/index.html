@@ -756,7 +756,7 @@
                 <div class="form-group"><div class="form-label-row"><label class="form-label">这次发生了什么？ <span class="required">*</span></label><button type="button" class="text-action" onclick="analyzeCommunication('history')">AI 帮我整理</button></div><div class="rich-text-area" id="followHistoryContent" contenteditable="true" data-placeholder="可直接粘贴完整邮件、WhatsApp 对话或会议内容" role="textbox" aria-multiline="true" oninput="updateAutoDirectionPreview('history')"></div><div class="auto-direction-row"><span id="historyDirectionHint">系统会根据发言人自动区分双方</span><details><summary>识别有误？</summary><select class="form-control" id="followHistoryDirectionOverride" onchange="updateAutoDirectionPreview('history')"><option value="auto">自动识别</option><option value="outbound">我发给客户</option><option value="inbound">客户发给我</option><option value="two_way">双方沟通</option></select></details></div></div>
                 <div class="quick-reply-analysis" id="followHistoryAnalysis" hidden></div>
                 <div class="form-group"><label class="form-label">结果或判断</label><div class="rich-text-area rich-text-area-compact" id="followHistoryResult" contenteditable="true" data-placeholder="例如：客户接受交期，准备内部确认数量" role="textbox" aria-multiline="true"></div></div>
-                <div class="form-group"><label class="form-label">下一步做什么？</label><input type="text" class="form-control" id="followHistoryNextTask" placeholder="可留空，例如：发送再生料方案报价" oninput="updateFollowHistorySaveLabel()"></div>
+                <div class="form-group"><div class="form-label-row"><label class="form-label" for="followHistoryNextTask">下一步做什么？</label><span class="ai-tag ai-field-tag" id="followHistoryNextTaskAi" hidden>AI 建议</span></div><input type="text" class="form-control" id="followHistoryNextTask" placeholder="可留空，例如：发送再生料方案报价" oninput="onFollowHistoryNextTaskInput()"></div>
                 <div class="form-row">
                   <div class="form-group"><label class="form-label">任务日期</label><input type="date" class="form-control" id="followHistoryNext" onchange="updateFollowHistorySaveLabel()"></div>
                   <div class="form-group cw-check"><label><input type="checkbox" id="followHistoryReport"> 加入本周工作</label></div>
@@ -912,7 +912,10 @@
         <div class="complete-next-section" id="completeNextSection" hidden>
           <div class="complete-when"><span class="complete-when-date tnum" id="completeWhenDate"></span><span class="complete-when-week" id="completeWhenWeek"></span></div>
           <label class="sr-only" for="completeNextTask">下一步做什么？</label>
-          <input type="text" class="form-control complete-task" id="completeNextTask" placeholder="到时候要做什么？例如：发送再生料方案报价" oninput="updateCompleteSaveLabel()">
+          <div class="complete-task-row">
+            <input type="text" class="form-control complete-task" id="completeNextTask" placeholder="到时候要做什么？例如：发送再生料方案报价" oninput="onCompleteNextTaskInput()">
+            <span class="ai-tag complete-ai-tag" id="completeNextTaskAi" hidden>AI 建议</span>
+          </div>
           <input type="date" class="form-control complete-date-input" id="completeNextFollow" aria-label="任务日期" onchange="onCompleteNextDateInputChange()">
           <p class="complete-tz" id="completeTz" hidden></p>
           <div class="complete-inline-error" id="completeNextError" role="alert" hidden></div>
