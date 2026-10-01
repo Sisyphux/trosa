@@ -4058,8 +4058,13 @@ function tideBandHtml(r, t) {
     var width = ((w.end - w.start) / 1440) * 100;
     var cls = 'tide-win';
     if (t >= w.end) cls += ' is-gone';
-    else if (t >= w.start) cls += ' is-open';
-    html += '<span class="' + cls + '" style="left:' + left.toFixed(3) + '%;width:' + width.toFixed(3) + '%"></span>';
+    var style = 'left:' + left.toFixed(3) + '%;width:' + width.toFixed(3) + '%';
+    if (t >= w.end) { /* closed */ }
+    else if (t >= w.start) {
+      cls += ' is-open';
+      style += ';--done:' + (((t - w.start) / (w.end - w.start)) * 100).toFixed(2) + '%';
+    }
+    html += '<span class="' + cls + '" style="' + style + '"></span>';
   }
   return html;
 }
@@ -4456,6 +4461,7 @@ function renderTodayTasks(reminders) {
 
   var selectedRow = remEl.querySelector('.today-task-row.selected');
   var selectedId = selectedRow ? Number(selectedRow.dataset.reminderId) : Number(reminders[0].id);
+  var hadSelection = !!selectedRow && reminders.some(function(item) { return Number(item.id) === selectedId; });
   if (!reminders.some(function(item) { return Number(item.id) === selectedId; })) selectedId = Number(reminders[0].id);
   reconcileKeyedElements(remEl, reminders, {
     selector: '.today-task-row',
@@ -4463,6 +4469,15 @@ function renderTodayTasks(reminders) {
     render: function(item, index) { return buildTodayTaskRow(item, index, Number(item.id) === selectedId); }
   });
   applyTodayGroups();
+  if (!hadSelection) {
+    // Rows are regrouped by who is reachable now, so the default pick is the first row on screen,
+    // not the first item the API returned; otherwise the side card describes a row nobody can see.
+    var firstRow = remEl.querySelector('.today-task-row');
+    if (firstRow) selectedId = Number(firstRow.dataset.reminderId);
+    remEl.querySelectorAll('.today-task-row').forEach(function(row) {
+      row.classList.toggle('selected', Number(row.dataset.reminderId) === selectedId);
+    });
+  }
   renderTideChart();
   updateTideCaption();
   renderTodayFocus(reminders.filter(function(item) { return Number(item.id) === selectedId; })[0] || reminders[0]);
@@ -4915,16 +4930,12 @@ function renderTodayFocus(r) {
   if (website && !/^https?:\/\//i.test(website)) website = 'https://' + website;
   // The room holds one sentence and one solid button: what happens next, and the
   // way to record that it happened. Everything else is a quiet secondary action.
-  el.innerHTML = '<span class="room-k micro">下一步</span>' +
-    '<h2 class="room-next">' + escapeHtml(r.task_title || r.title || r.content || '联系客户') + '</h2>' +
-    '<p class="room-when tnum">' + escapeHtml(todayWhenText(r.remind_date)) + '</p>' +
-    '<div class="room-acts">' +
+  el.innerHTML = '<div class="room-acts">' +
       '<button type="button" class="room-act primary" onclick="openTodayCommunicationConfirm()">记录沟通</button>' +
       '<button type="button" class="room-act" onclick="openEditModal(' + Number(r.customer_id) + ')">查看客户</button>' +
       (website ? '<a class="room-act" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') +
     '</div>' +
-    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>' +
-    '<div class="tide-dock-clock" id="todayDockClock"></div>';
+    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
   renderTodayWideDetail(r, name, meta, website);
   updateTodayFocusClock(r);
   updateTodayRoomStatus();
@@ -5067,7 +5078,8 @@ function renderTodayWideDetail(r, name, meta, website) {
   el.dataset.customerName = name;
   el.innerHTML =
     '<div class="room-ident"><h3 class="room-company">' + escapeHtml(name) + '</h3>' +
-      (meta ? '<p class="room-lines">' + escapeHtml(meta) + '</p>' : '') + '</div>' +
+      (meta ? '<p class="room-lines">' + escapeHtml(meta) + '</p>' : '') +
+      '<div class="tide-dock-clock" id="todayDockClock"></div></div>' +
     '<section class="room-panel" aria-label="最近沟通">' +
       '<div class="room-panel-head"><span class="micro">最近沟通</span><span class="micro tnum" id="todayFactsMeta"></span></div>' +
       '<div class="room-panel-body lit-group" id="todayFacts" aria-live="polite"></div>' +

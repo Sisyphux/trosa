@@ -176,7 +176,9 @@
             </div>
             <div class="tide-grid-head" aria-hidden="true">
               <span>客户与下一步</span>
-              <span>对方的工作窗口 · 我们的一天</span>
+              <span class="tide-head-win">对方上班时段 · 我们的一天
+                <span class="tide-legend"><i class="lg lg-open"></i>正在上班<i class="lg lg-later"></i>稍后上班<i class="lg lg-gone"></i>已下班</span>
+              </span>
               <span>状态</span>
             </div>
             <div class="tide-grid" id="todayTideGrid">
@@ -201,17 +203,21 @@
             </div>
           </div>
 
+          <div class="tide-side">
+          <div class="tide-dock" id="todayDock">
+            <div class="tide-dock-row">
+              <section class="today-wide-detail" id="todayWideDetail" aria-label="选中客户的上下文"></section>
+              <aside class="today-room-focus lit-anchor" id="todayFocus"><div class="empty-state"><p>今天没有到期的下一步</p></div></aside>
+            </div>
+          </div>
           <aside class="tide-later">
             <div class="tide-later-head">
               <h3>接下来 14 天</h3>
-              <div class="section-caption">未来 14 天</div>
+              <button class="text-action" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历">完整日历</button>
             </div>
             <div class="today-schedule-grid" id="todayScheduleGrid"></div>
             <div class="today-schedule-detail" id="todayScheduleDetail">点击日期查看安排</div>
             <div class="tide-later-error" id="todayUpcomingError" hidden role="alert"></div>
-            <div class="tide-later-actions">
-              <button class="text-action" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
-            </div>
             <details class="today-more">
               <summary>本周记录与工作概览</summary>
               <div class="today-more-grid">
@@ -220,12 +226,6 @@
               </div>
             </details>
           </aside>
-        </div>
-
-        <div class="tide-dock" id="todayDock">
-          <div class="tide-dock-row">
-            <aside class="today-room-focus lit-anchor" id="todayFocus"><div class="empty-state"><p>今天没有到期的下一步</p></div></aside>
-            <section class="today-wide-detail" id="todayWideDetail" aria-label="客户档案工作区"></section>
           </div>
         </div>
       </div>

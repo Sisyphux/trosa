@@ -427,8 +427,8 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
    ============================================================================ */
 
 #trosa .today-tide {
-  --c1: clamp(190px, 21vw, 300px);
-  --c3: clamp(150px, 15vw, 210px);
+  --c1: clamp(170px, 17vw, 260px);
+  --c3: clamp(130px, 11vw, 170px);
   position: relative;
   min-height: calc(100dvh - 2 * var(--room-bar));
   padding: clamp(1.2rem, 3.4vh, 2.4rem) var(--room-gut) clamp(1.4rem, 4vh, 3rem);
@@ -482,12 +482,25 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 /* two macro columns: the table, and the quiet rail */
 #trosa .today-tide .tide-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(210px, 19vw, 270px);
-  column-gap: clamp(1.6rem, 4vw, 4rem);
+  grid-template-columns: minmax(0, 1fr) clamp(190px, 16vw, 240px);
+  column-gap: clamp(1.2rem, 3vw, 3rem);
   align-items: start;
 }
 #trosa .today-tide .tide-main { grid-column: 1; min-width: 0; }
-#trosa .today-tide .tide-later { grid-column: 2; min-width: 0; }
+#trosa .today-tide .tide-later { min-width: 0; }
+/* right column: the selected customer's card, then the next 14 days. It follows the
+   scroll so the card stays beside the row you picked, however long the list is. */
+#trosa .today-tide .tide-side {
+  grid-column: 2;
+  min-width: 0;
+  position: sticky;
+  top: calc(var(--room-bar) + 1rem);
+  align-self: start;
+  max-height: calc(100dvh - var(--room-bar) - 2rem);
+  overflow-y: auto;
+  padding: 3px;
+  margin: -3px;
+}
 
 /* the chart head */
 #trosa .today-tide .tide-chart-head {
@@ -537,7 +550,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .today-tide .tide-chart-cell { grid-column: 2; grid-row: 1; min-width: 0; }
 #trosa .today-tide .tide-chart {
   position: relative;
-  height: 118px;
+  height: clamp(150px, 21vh, 210px);
   cursor: crosshair;
   touch-action: none;
   outline: none;
@@ -556,7 +569,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .today-tide .tide-hrs span {
   position: absolute;
   transform: translateX(-50%);
-  font-size: .58rem;
+  font-size: .64rem;
   letter-spacing: .04em;
   color: var(--dl-mut);
   font-variant-numeric: tabular-nums;
@@ -751,6 +764,11 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   cursor: pointer;
   transition: background .3s var(--room-ease), box-shadow .3s var(--room-ease);
 }
+/* visual-v4 pins every .today-task-row to `38px 1fr auto` with !important;
+   on wide screens the tide row must keep the chart's three columns instead. */
+@media (min-width: 821px) {
+  #trosa .today-tide .tide-row.tide-row { grid-template-columns: var(--c1) minmax(0, 1fr) var(--c3) !important; }
+}
 #trosa .today-tide .tide-row:hover { background: rgba(255, 253, 247, .68); }
 #trosa .today-tide .tide-row.selected { background: var(--dl-gold-soft); box-shadow: inset 0 0 0 1px rgba(188, 144, 82, .28); }
 #trosa .today-tide .tide-row:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--dl-focus); }
@@ -805,8 +823,21 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   border: 1px solid var(--dl-gold);
   background: var(--dl-gold-soft);
 }
-#trosa .today-tide .tide-win.is-open { background: var(--dl-gold); }
-#trosa .today-tide .tide-win.is-gone { border-style: dashed; border-color: var(--dl-hair-strong); background: none; }
+/* open: the part already worked is pale, the part still reachable is solid */
+#trosa .today-tide .tide-win.is-open {
+  background: linear-gradient(to right, var(--dl-gold-soft) 0 var(--done, 0%), var(--dl-gold) var(--done, 0%) 100%);
+}
+#trosa .today-tide .tide-win.is-gone { border-color: transparent; background: var(--dl-hair-strong); opacity: .55; }
+#trosa .today-tide .tide-head-win { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+#trosa .today-tide .tide-legend { display: inline-flex; align-items: center; gap: .35rem; text-transform: none; letter-spacing: .04em; }
+#trosa .today-tide .tide-legend .lg {
+  display: inline-block; width: 1.3rem; height: .45rem; margin-left: .55rem;
+  border-radius: 999px; border: 1px solid var(--dl-gold);
+}
+#trosa .today-tide .tide-legend .lg:first-child { margin-left: 0; }
+#trosa .today-tide .tide-legend .lg-open { background: var(--dl-gold); }
+#trosa .today-tide .tide-legend .lg-later { background: var(--dl-gold-soft); }
+#trosa .today-tide .tide-legend .lg-gone { border-color: transparent; background: var(--dl-hair-strong); opacity: .55; }
 #trosa .today-tide .tide-nowtick { display: none; }
 #trosa .today-tide .tide-c3 { min-width: 0; padding-left: .6rem; text-align: right; }
 #trosa .today-tide .tide-status { display: block; font-size: .8rem; color: var(--dl-ink-2); }
@@ -838,15 +869,33 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .today-tide .today-batch-bar { grid-column: 1 / -1; }
 
 /* the dock: the one place with a solid button */
-#trosa .today-tide .tide-dock { margin-top: clamp(1.4rem, 4vh, 2.6rem); }
-#trosa .today-tide .tide-dock-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: clamp(1.4rem, 4vw, 3.6rem);
-  padding-top: clamp(1rem, 3vh, 1.6rem);
-  border-top: 1px solid var(--dl-hair);
+#trosa .today-tide .tide-dock { margin: 0 0 1.5rem; padding-bottom: 1.3rem; border-bottom: 1px solid var(--dl-hair); }
+#trosa .today-tide .tide-dock-row { display: flex; flex-direction: column; gap: 1rem; }
+/* the legacy dashboard card (fixed height, thick border, glass) does not belong here */
+#trosa .today-tide #todayWideDetail.today-wide-detail {
+  display: block;
+  position: static;
+  grid-column: auto;
+  min-height: 0 !important;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
-#trosa .today-tide .tide-dock-clock { margin-top: 1.1rem; }
+#trosa .today-tide #todayWideDetail:empty { display: none; }
+#trosa .today-tide .tide-dock .room-acts { margin-top: 0; gap: .4rem; }
+#trosa .today-tide .tide-dock .room-act { padding: .5rem .9rem; }
+#trosa .today-tide .tide-dock .room-hint { margin-top: .7rem; }
+#trosa .today-tide .tide-dock .room-panel-head { padding-bottom: .4rem; }
+#trosa .today-tide .tide-dock .room-row { grid-template-columns: 3rem minmax(0, 1fr); gap: .6rem; padding: .55rem 0; }
+#trosa .today-tide .tide-dock .room-tx { font-size: .78rem; -webkit-line-clamp: 2; }
+#trosa .today-tide .tide-dock .room-panel { margin-top: 1rem; }
+#trosa .today-tide .tide-dock-clock { margin-top: .7rem; }
 #trosa .today-tide .tide-dock-clock .micro { display: block; color: var(--dl-mut); }
 #trosa .today-tide .tide-clock { display: block; margin-top: .15rem; font-family: var(--room-serif); font-size: 1.1rem; color: var(--dl-ink); font-variant-numeric: tabular-nums; }
 #trosa .today-tide .tide-clock-note { display: block; margin-top: .1rem; font-size: .68rem; color: var(--dl-mut); }
@@ -854,7 +903,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 /* the rail: the next 14 days, then this week's record folded away */
 #trosa .today-tide .tide-later-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: .6rem;
   padding-bottom: .5rem;
@@ -872,7 +921,12 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 }
 #trosa .today-tide .tide-later-error[hidden] { display: none; }
 #trosa .today-tide .tide-later-error button { margin-top: .4rem; }
-#trosa .today-tide .tide-later-actions { display: flex; gap: .9rem; margin-top: .7rem; }
+/* the rail head carries the one quiet way into the full calendar, so the rail
+   no longer grows a separate action row under the compact month */
+#trosa .today-tide .tide-later-head .icon-action-button {
+  width: 30px; min-width: 30px; height: 30px; min-height: 30px; border-radius: 9px;
+}
+#trosa .today-tide .tide-later-head .icon-action-button .ui-icon { width: 16px; height: 16px; }
 #trosa .today-tide .today-more { margin-top: 1.2rem; }
 /* the rail is narrow: a compact calendar, not the full-width one */
 #trosa .today-tide .today-schedule-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: .8rem; }
@@ -886,7 +940,10 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 @media (max-width: 820px) {
   #trosa .today-tide { --c1: auto; --c3: auto; }
   #trosa .today-tide .tide-body { grid-template-columns: minmax(0, 1fr); }
-  #trosa .today-tide .tide-later { grid-column: 1; margin-top: 2rem; }
+  /* narrow: the side column dissolves; the 14 days come first, the customer card docks to the bottom */
+  #trosa .today-tide .tide-side { display: contents; }
+  #trosa .today-tide .tide-later { grid-column: 1; margin-top: 2rem; order: 1; }
+  #trosa .today-tide .tide-dock { order: 2; grid-column: 1; }
   #trosa .today-tide .tide-grid-head { display: none; }
   #trosa .today-tide .tide-chart-cell { grid-column: 1; grid-row: 1; opacity: .55; }
   #trosa .today-tide .tide-chart { height: 60px; cursor: default; pointer-events: none; }
@@ -922,8 +979,20 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
     padding: .7rem var(--room-gut) .8rem;
     background: var(--dl-hi);
     border-top: 1px solid var(--dl-hair);
+    border-bottom: 0;
+    bottom: var(--room-bar);
+    max-height: none;
+    overflow: visible;
   }
-  #trosa .today-tide .tide-dock-row { grid-template-columns: minmax(0, 1fr); gap: .9rem; padding-top: 0; border-top: 0; }
+  #trosa .today-tide .tide-dock-row { gap: .6rem; }
+  /* the docked bar keeps only: who, their local time, and the one action */
+  #trosa .today-tide .tide-dock .room-panel,
+  #trosa .today-tide .tide-dock .room-lines,
+  #trosa .today-tide .tide-dock .room-hint { display: none; }
+  #trosa .today-tide .tide-dock .tide-dock-clock { display: flex; align-items: baseline; gap: .7rem; margin-top: .3rem; flex-wrap: wrap; }
+  #trosa .today-tide .tide-dock .tide-dock-clock .micro { display: inline; }
+  #trosa .today-tide .tide-dock .tide-clock,
+  #trosa .today-tide .tide-dock .tide-clock-note { display: inline; margin-top: 0; }
 }
 
 /* ============================================================================
