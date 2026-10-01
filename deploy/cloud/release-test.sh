@@ -15,8 +15,10 @@
 #   deploy/cloud/auto-publish.sh     遗留文件清单入口
 #
 # 用法：
-#   release-test.sh [--quick] [--dir DIR]
+#   release-test.sh [--quick | --fast] [--dir DIR]
 #     --quick  只做语法检查（不跑 Python 回归与扩展测试）
+#     --fast   开发期快档：语法检查 + 单元测试子集（由 agent-worktree.sh test 使用；
+#              发布前门禁从不使用它，publish/流水线永远跑完整档）
 #     --dir    指定要验证的代码树（默认：本脚本所在的树）
 set -euo pipefail
 export LC_ALL=C
@@ -29,6 +31,7 @@ source "$SCRIPT_DIR/lib-release-gate.sh"
 # 并行分支进程：库运行器运行期间填充，trap 据此回收。
 RELEASE_GATE_PARALLEL_PIDS=()
 QUICK=0
+FAST=0
 TEST_DATA_DIR=""
 TEST_ENV_FILE=""
 LOG_DIR=""
@@ -36,9 +39,11 @@ LOG_DIR=""
 usage() {
   cat <<'EOF'
 Usage:
-  release-test.sh [--quick] [--dir DIR]
+  release-test.sh [--quick | --fast] [--dir DIR]
 
 --quick 只做 Python/JavaScript 语法检查，用于快速反馈；
+--fast  开发期快档：快速检查 + 单元测试子集（跳过 PostgreSQL/Chromium/扩展），
+       只由 agent-worktree.sh test 在改动范围安全时使用；发布前门禁不读此档；
 默认执行完整门禁：快速检查 → 并行（[隔离数据目录 Python 回归（失败重跑一次）] ∥
 [真实 PostgreSQL 演练 → 真实 Chromium 页面验收 → Inbox 专项验收（浏览器步骤仅对基础
 设施故障重跑一次并记入 flake 台账；断言失败绝不重跑）] ∥ [浏览器扩展回归]）。任一
@@ -54,6 +59,7 @@ fail() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --quick) QUICK=1; shift ;;
+    --fast) FAST=1; shift ;;
     --dir)
       [[ $# -ge 2 ]] || fail '--dir 需要一个路径'
       [[ -d "$2" ]] || fail "--dir 不是目录：$2"
@@ -125,9 +131,11 @@ if [[ "$QUICK" == 1 ]]; then
   exit 0
 fi
 
-command -v npm >/dev/null 2>&1 || fail '找不到 npm，无法执行浏览器扩展回归'
-[[ -d "$TREE/browser-extension/node_modules" ]] \
-  || fail "找不到 $TREE/browser-extension/node_modules（先在 browser-extension 执行 npm install；隔离区可用 symlink 复用主仓）"
+if [[ "$FAST" != 1 ]]; then
+  command -v npm >/dev/null 2>&1 || fail '找不到 npm，无法执行浏览器扩展回归'
+  [[ -d "$TREE/browser-extension/node_modules" ]] \
+    || fail "找不到 $TREE/browser-extension/node_modules（先在 browser-extension 执行 npm install；隔离区可用 symlink 复用主仓）"
+fi
 
 # Some source-level release tests invoke trosa-release for argument/routing
 # checks. They must not depend on a developer's real workbench.env (which is
@@ -179,6 +187,55 @@ run_python_regression() {
     CRM_DB_PATH="$TEST_DATA_DIR" \
     "$PYTHON_BIN" -m unittest discover -s tests -p 'test_*.py' -v
 }
+
+# 开发期快档的单元测试子集：每个文件都已确认在数秒内完成、且不依赖 PostgreSQL/
+# Chromium/扩展。它只给 agent-worktree.sh test 的文档/CLI/测试改动用；发布前完整
+# 门禁（release-commit.sh / 流水线）从不传 --fast，因此发布判定完全不变。
+FAST_TEST_FILES=(
+  test_release_pipeline.py
+  test_release_boundaries.py
+  test_release_commit_entrypoint.py
+  test_migration_integrity.py
+  test_runtime_contract.py
+)
+
+run_fast_python_regression() {
+  rm -rf -- "$TEST_DATA_DIR"
+  mkdir -p -- "$TEST_DATA_DIR"
+  local pattern
+  for pattern in "${FAST_TEST_FILES[@]}"; do
+    printf '\n  -- %s\n' "$pattern"
+    env \
+      -u TRADE_OS_AGENT_ROLE \
+      -u TRADE_OS_DATABASE_URL \
+      -u PGPASSFILE \
+      -u TROSA_REHEARSAL \
+      -u TROSA_REHEARSAL_DATABASE_URL \
+      CRM_ENV=development \
+      TRADE_OS_DEV_SQLITE=1 \
+      TRADE_OS_DATA_BACKEND=sqlite \
+      TRADE_OS_WORKBENCH_ENV="$TEST_ENV_FILE" \
+      CRM_DB_PATH="$TEST_DATA_DIR" \
+      "$PYTHON_BIN" -m unittest discover -s tests -p "$pattern" -v || return 1
+  done
+  return 0
+}
+
+# 开发期快档在快速语法/迁移检查之后执行：只跑上面的秒级子集，跳过 PostgreSQL、
+# Chromium 与浏览器扩展。它不写完整证据，也不登记可复用验收树。
+if [[ "$FAST" == 1 ]]; then
+  printf '\n==> 开发快档：单元测试子集（隔离数据目录；跳过 PostgreSQL/Chromium/扩展）\n'
+  if run_fast_python_regression; then
+    :
+  else
+    first_status=$?
+    printf '失败：开发快档单元测试（退出码 %s），重跑一次以排除瞬时竞态\n' "$first_status" >&2
+    sleep 1
+    run_fast_python_regression || fail "开发快档单元测试两次均失败"
+  fi
+  printf '\nrelease-test: OK tree=%s fast=1\n' "$TREE"
+  exit 0
+fi
 
 # 分支 A：隔离 SQLite 的 Python 回归（失败重跑一次，两次都失败才红）。
 run_python_regression_branch() {

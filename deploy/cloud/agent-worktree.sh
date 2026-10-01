@@ -113,7 +113,7 @@ Usage:
                           [--owner <name>] [--goal <text>] [--scope <text>]
   agent-worktree.sh reserve-migration --task <id>
   agent-worktree.sh list
-  agent-worktree.sh test --task <id> [--quick]
+  agent-worktree.sh test --task <id> [--quick | --full]
   agent-worktree.sh ship --task <id> [--offline]
   agent-worktree.sh evidence --task <id>
   agent-worktree.sh flakes [--limit <n>]
@@ -130,21 +130,32 @@ TRADE_OS_WORKTREE_ROOT 覆盖）。
 
 status    在任意工作树里运行，报告当前环境、任务归属、未提交改动与预留迁移号。
 guard     开发任务开始前的入口闸门：dev/review 角色在主工作区（或非 agent/<id>
-          目录）会被拒绝，要求先 create/adopt 进入隔离区；release/人工集成不受
-          影响。只读，不改动任何文件。
-preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。
-start     开发方入口（推荐）：合并 guard + status + preflight + create。要求主工作区
-          干净，否则请先用 adopt 把在途改动搬进隔离区；通过后等同于 create。
-create    建隔离区，写任务清单；只能在主工作区执行。迁移编号改为懒预留：默认不取号，
-          真正要写迁移时用 reserve-migration；需要建区即取号可加 --reserve-migration。
+          目录）会被拒绝，要求先建隔离区；release/人工集成不受影响。只读，不改动
+          任何文件。若当前是桌面端会话的 claude/* worktree，会直接提示在该目录运行
+          start 建区（无需手动切到主工作区）。
+preflight 并发体检：主工作区是否干净、各任务是否脏、迁移编号是否冲突。冲突按
+          “与本任务相关 / 无关”分级：只有涉及本任务新增迁移或本任务预留号的冲突
+          才阻断，其它既有冲突降级为一行提示。
+start     开发方入口（推荐）：合并 guard + status + preflight + create，可在任意
+          worktree（含 claude/*）里调用——先用共享 git 目录定位主工作区再建区，
+          create/adopt 的“只在主工作区”约束不变。要求主工作区干净，否则请先用
+          adopt 把在途改动搬进隔离区；通过后等同于 create。
+create    建隔离区，写任务清单；只能在主工作区执行（start 会先切到主工作区）。
+          迁移编号改为懒预留：默认不取号，真正要写迁移时用 reserve-migration；
+          需要建区即取号可加 --reserve-migration。
 adopt     把主工作区的在途改动（默认全部；可用 --path 限定）整体搬进新任务区，
           原始改动会保留为 stash 备份，主工作区恢复干净。路径按主工作区根解析；
           只能在主工作区执行。
 reserve-migration
           为本任务懒预留一个迁移编号（幂等：已预留则原样返回）。只有真要新增
           migrations/ 文件时才调用，避免无数据库改动的任务消耗编号。
-test      委托 release-test.sh，与发布候选使用同一份门禁；完整门禁要求任务已同步
-          到最新 <main>，否则只对旧基线成立。
+test      委托 release-test.sh，与发布候选使用同一份门禁。默认按改动范围分档：
+          只改文档/CLI/测试（docs/、design/、tests/、tools/、*.md）跑 fast 档
+          （语法检查 + 单元测试子集，写入独立 fast 日志，不写完整证据、不登记
+          可复用验收树）；触及 app.py、app/static、migrations 等运行时代码跑
+          full 档并记录完整证据。--full 强制完整档，--quick 仅语法检查（ship 用）。
+          发布前门禁（publish/流水线）永远跑完整档，不受此分档影响。
+          full 档要求任务已同步到最新 <main>，否则只对旧基线成立。
 ship      开发方交付入口：sync 到最新 <main> → 快速门禁 → 把分支与 commit 登记到
           仓库外发布队列（status=shipped），然后立即返回。开发方不等待完整门禁；
           发布方会自己重跑完整门禁。要看完整门禁结果仍可单独 test --task <id>。
@@ -208,6 +219,10 @@ PY
 # 快速门禁（--quick）只做语法检查，写入独立的 quick 日志，绝不覆盖完整证据、
 # 也不更新完成判定；否则一次语法检查会让任务看起来“已通过门禁”。
 task_quick_log_path() { printf '%s/%s.quick.log' "$TASK_META_DIR" "$1"; }
+
+# 开发期快档（test 的默认分档之一）只跑语法 + 单元测试子集，写入独立的 fast 日志。
+# 它同样**不**写 verify_result、不登记可复用验收树，因此发布前完整门禁照跑。
+task_fast_log_path() { printf '%s/%s.fast.log' "$TASK_META_DIR" "$1"; }
 
 # 读取任务清单里的 status 字段；清单缺失或没有 status 时输出空。
 task_status() {
@@ -498,6 +513,73 @@ task_base_ref() {
 
 head_contains() { git -C "$1" merge-base --is-ancestor "$2" HEAD; }
 
+# 当前目录所在的任务 id（仅在 agent/<id> 隔离区里非空；主工作区与其它 worktree 为空）。
+current_task_id() {
+  local top branch
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$top" && "$top" != "$MAIN_ROOT" ]] || return 0
+  branch="$(git -C "$top" symbolic-ref --short -q HEAD || printf 'detached')"
+  task_of_branch "$branch"
+}
+
+# 本任务相对基线新增的迁移文件名（basename，含未跟踪文件）。体检用它把编号冲突
+# 分成“与本任务相关 / 无关”：无关的既有冲突只提示、不阻断，避免每次开工都被
+# 别人的 0041 撞号刷屏。
+task_new_migration_basenames() {
+  local wt=$1 base_ref mb
+  base_ref="$(task_base_ref)"
+  git -C "$wt" rev-parse --verify --quiet "$base_ref" >/dev/null 2>&1 || return 0
+  mb="$(git -C "$wt" merge-base HEAD "$base_ref" 2>/dev/null || true)"
+  [[ -n "$mb" ]] || mb="$base_ref"
+  {
+    git -C "$wt" diff --name-only --diff-filter=A "$mb" HEAD -- migrations/ 2>/dev/null
+    git -C "$wt" ls-files --others --exclude-standard -- migrations/ 2>/dev/null
+  } | sed '/^$/d' | sed 's#.*/##' | sort -u
+}
+
+# 读取任务清单里预留的迁移编号；未预留输出空。
+task_reserved_number() {
+  local meta
+  meta="$(task_meta_path "$1")"
+  [[ -r "$meta" ]] || return 0
+  python3 - "$meta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+value = str(doc.get("reserved_migration") or "")
+print(value if value.isdigit() else "")
+PY
+}
+
+# 本任务相对基线（含工作区未提交改动）的改动路径。分档只据此判断范围。
+task_changed_paths() {
+  local wt=$1 base_ref mb
+  base_ref="$(task_base_ref)"
+  mb="$(git -C "$wt" merge-base HEAD "$base_ref" 2>/dev/null || true)"
+  [[ -n "$mb" ]] || mb="$base_ref"
+  {
+    git -C "$wt" diff --name-only "$mb" HEAD -- 2>/dev/null
+    git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null \
+      | sed -e 's/^...//' -e 's/.* -> //'
+  } | sed '/^$/d' | sort -u
+}
+
+# 开发期门禁分档（只影响开发方 test，不改变发布前完整门禁）：
+#   fast  改动全部落在 docs/、design/、tests/、tools/ 或以 .md 结尾
+#   full  其余情况（app.py、app/static、migrations 等运行时代码，空改动，T2 路径）
+# 规则由 tools/release_tier.py 的 --dev-gate 给出（复用发布分级，但更保守、fail
+# closed）；发布前的 release-commit.sh / 流水线从不读这个档位，始终完整档。
+dev_gate_tier() {
+  local wt=$1 tier_tool changed
+  changed="$(task_changed_paths "$wt")"
+  [[ -n "$changed" ]] || { printf 'full'; return 0; }
+  tier_tool="$wt/tools/release_tier.py"
+  [[ -r "$tier_tool" ]] || tier_tool="$MAIN_ROOT/tools/release_tier.py"
+  printf '%s\n' "$changed" | python3 "$tier_tool" --dev-gate 2>/dev/null || printf 'full'
+}
+
 # 迁移编号校正：把本任务新增且与最新 main / 其它 worktree / 他人预留冲突的迁移
 # 自动改名到下一个空号，并提交改名。无冲突时不做任何改动。
 # 编号分配由 reconcile_migrations.py 在共享预留锁内从持久计数器取号，两个并发
@@ -623,9 +705,11 @@ register_verified_tree() {
     "$tree" "${b:0:9}"
 }
 
-# 开发方入口（推荐）：合并 guard + status + preflight + create。要求主工作区干净：
-# 在途改动属于新任务时请用 adopt（它专门搬运在途改动并留 stash 备份），不要把
-# 脏改动留在主工作区里 create。create 之前的硬性校验仍由 create 自己执行。
+# 开发方入口（推荐）：合并 guard + status + preflight + create。可在任意 worktree
+# 里调用（含桌面端会话建的 claude/* worktree）：先用共享 git 目录定位主工作区，再
+# 切到主工作区建区，因此 create/adopt 的“只在主工作区”约束保持不变，Agent 也不
+# 需要手动离开自己的目录。要求主工作区干净：在途改动属于新任务时请用 adopt（它
+# 专门搬运在途改动并留 stash 备份），不要把脏改动留在主工作区里 create。
 cmd_start() {
   local task="" arg idx=0
   local -a pass=("$@")
@@ -639,9 +723,18 @@ cmd_start() {
   done
   [[ -n "$task" ]] || fail 'start 需要 --task <id>'
   validate_task_id "$task"
+  # 入口兼容任意 worktree：用共享 git 目录定位主工作区并切过去，之后仍走原有的
+  # “只在主工作区建区”约束（require_main_workspace）。create/adopt 的对外约束不变。
+  local origin_top
+  origin_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$origin_top" ]] || fail '当前目录不在任何 Git 工作树中'
+  cd "$MAIN_ROOT"
   require_main_workspace
   local role
   role="$(trosa_agent_role)"
+  if [[ "$origin_top" != "$MAIN_ROOT" ]]; then
+    printf '（从 worktree %s 调用；已在主工作区 %s 建区）\n' "$origin_top" "$MAIN_ROOT"
+  fi
   printf '角色：%s\n环境：主工作区（%s）\n' "$role" "$MAIN_ROOT"
   local dirty
   dirty="$(git -C "$MAIN_ROOT" status --porcelain --untracked-files=all)"
@@ -824,28 +917,37 @@ PY
 }
 
 cmd_test() {
-  local task="" quick=0
+  local task="" quick=0 force_full=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
       --quick) quick=1; shift ;;
+      --full) force_full=1; shift ;;
       *) fail "test 未知参数：$1" ;;
     esac
   done
   [[ -n "$task" ]] || fail 'test 需要 --task <id>'
   validate_task_id "$task"
-  local wt args=() gate gate_tree
+  local wt args=() gate gate_tree tier=full
   wt="$(find_task_path "$task")"
   [[ -d "$wt" ]] || fail "隔离区目录缺失：$wt"
-  # 完整门禁必须基于最新 main：否则“绿”只对旧基线成立。快速语法检查不受限。
+  # 开发期分档：只改文档/CLI/测试走快档（语法 + 单元测试子集），触及 app.py、
+  # app/static、migrations 等运行时代码走完整档；--full 可强制完整档。这只是
+  # 本地反馈的快慢，发布前门禁（publish/流水线）永远跑完整档，绝不因此放宽。
+  if [[ "$quick" != 1 && "$force_full" != 1 ]]; then
+    tier="$(dev_gate_tier "$wt")"
+  fi
+  # 完整门禁必须基于最新 main：否则“绿”只对旧基线成立。快速与快档不受限。
   if [[ "$quick" != 1 ]]; then
-    local base_ref
-    base_ref="$(task_base_ref)"
-    if git -C "$wt" rev-parse --verify --quiet "$base_ref" >/dev/null 2>&1; then
-      head_contains "$wt" "$base_ref" \
-        || fail "任务 $task 尚未同步到最新 ${TARGET_BRANCH}（HEAD 不包含 ${base_ref}）；先 sync --task $task 再 test"
-    else
-      printf '警告：找不到基线 %s，跳过基线包含检查（先 fetch origin/%s）。\n' "$base_ref" "$TARGET_BRANCH" >&2
+    if [[ "$tier" == full ]]; then
+      local base_ref
+      base_ref="$(task_base_ref)"
+      if git -C "$wt" rev-parse --verify --quiet "$base_ref" >/dev/null 2>&1; then
+        head_contains "$wt" "$base_ref" \
+          || fail "任务 $task 尚未同步到最新 ${TARGET_BRANCH}（HEAD 不包含 ${base_ref}）；先 sync --task $task 再 test"
+      else
+        printf '警告：找不到基线 %s，跳过基线包含检查（先 fetch origin/%s）。\n' "$base_ref" "$TARGET_BRANCH" >&2
+      fi
     fi
   fi
   # If the task branch already contains the gate, test that exact version;
@@ -858,13 +960,19 @@ cmd_test() {
   gate_tree="$(git -C "$(dirname "$gate")" rev-parse --show-toplevel 2>/dev/null || true)"
   [[ -n "$gate_tree" ]] || gate_tree="$MAIN_ROOT"
   args=(--dir "$wt")
-  if [[ "$quick" == 1 ]]; then args+=(--quick); fi
+  if [[ "$quick" == 1 ]]; then
+    args+=(--quick)
+  elif [[ "$tier" == fast ]]; then
+    args+=(--fast)
+  fi
   local head iso log kind
   head="$(git -C "$wt" rev-parse HEAD)"
   if [[ "$quick" == 1 ]]; then
     log="$(task_quick_log_path "$task")"; kind="test-quick"
+  elif [[ "$tier" == fast ]]; then
+    log="$(task_fast_log_path "$task")"; kind="test-fast"
   else
-    log="$(task_evidence_path "$task")"; kind="test"
+    log="$(task_evidence_path "$task")"; kind="test-full"
   fi
   iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   # 已 landed 的任务：本次运行只追加证据，绝不改写已发布的验证结论/状态。
@@ -876,14 +984,22 @@ cmd_test() {
     if [[ "$quick" == 1 ]]; then
       printf '任务 %s 快速门禁通过（仅语法检查，不作为完成证据）。\n' "$task"
       printf '完整门禁：test --task %s（不带 --quick）。快速日志：%s\n' "$task" "$log"
+    elif [[ "$tier" == fast ]]; then
+      merge_task_meta "$task" \
+        "fast_result=ok" "fast_commit=$head" "fast_at=$iso" \
+        "fast_evidence=$log" "fast_tier=fast" "reusable_tree=0"
+      printf '任务 %s 开发快档通过（分档：fast；语法检查 + 单元测试子集，跳过 PostgreSQL/Chromium/扩展）。\n' "$task"
+      printf '快档不写完整门禁证据、不登记可复用验收树；发布前仍会跑完整档，因此没有放宽任何门禁。\n'
+      printf '完整档：test --task %s --full。快档日志：%s（commit %s）\n' "$task" "$log" "${head:0:9}"
     else
       if [[ "$landed" == 1 ]]; then
         printf '任务 %s 已是 landed；本次只追加证据，不改写已发布的验证结论。\n' "$task"
       else
         merge_task_meta "$task" \
-          "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log"
+          "verify_result=ok" "verified_commit=$head" "verified_at=$iso" "evidence=$log" \
+          "gate_tier=full"
         register_verified_tree "$task" "$wt" "$gate_tree"
-        printf '任务 %s 验证完成（门禁实现：release-test.sh）。\n' "$task"
+        printf '任务 %s 验证完成（分档：full；门禁实现：release-test.sh）。\n' "$task"
       fi
       printf '证据：%s（commit %s）\n' "$log" "${head:0:9}"
     fi
@@ -891,6 +1007,12 @@ cmd_test() {
     local status=$?
     if [[ "$quick" == 1 ]]; then
       fail "任务 $task 快速门禁失败（仅语法，未改动完成判定）：$log"
+    fi
+    if [[ "$tier" == fast ]]; then
+      merge_task_meta "$task" \
+        "fast_result=failed" "fast_commit=$head" "fast_at=$iso" \
+        "fast_evidence=$log" "fast_tier=fast" "reusable_tree=0"
+      fail "任务 $task 开发快档失败（证据：${log}，退出码 ${status}）；可用 --full 跑完整档定位"
     fi
     if [[ "$landed" == 1 ]]; then
       fail "任务 $task 已是 landed 但本次重跑门禁未通过；证据已追加，不改写已发布结论（证据：$log，退出码 $status）"
@@ -1189,7 +1311,18 @@ cmd_guard() {
         fail "开发/审查角色（${role}）不得在主工作区开始任务：主工作区只做集成/验收/发布。请在 $MAIN_ROOT 运行 create（已有在途改动则用 adopt）进入 agent/<id> 隔离区后再改代码，避免先把主工作区写脏。"
       fi
       if [[ -z "$task" ]]; then
-        fail "开发/审查角色（${role}）当前不在 agent/<id> 任务隔离区（目录 ${top}，分支 ${branch}）。请回到主工作区 $MAIN_ROOT 用 create/adopt 建立任务。"
+        case "$branch" in
+          claude/*)
+            # 桌面端会话为每个会话建一个 claude/* worktree。它不是一个任务隔离区，
+            # 但也不必离开：在当前目录直接 start 就会在主工作区建好 agent/<id> 区。
+            fail "检测到桌面端会话 worktree（分支 ${branch}）。无需切到主工作区：直接在当前目录运行
+  deploy/cloud/agent-worktree.sh start --task <id> --owner <name> --goal \"...\" --scope \"...\"
+即可建好 agent/<id> 任务隔离区，再进入该目录工作。"
+            ;;
+          *)
+            fail "开发/审查角色（${role}）当前不在 agent/<id> 任务隔离区（目录 ${top}，分支 ${branch}）。请回到主工作区 $MAIN_ROOT 用 create/adopt 建立任务，或在当前 worktree 直接 start --task <id>。"
+            ;;
+        esac
       fi
       printf 'guard：可以开始任务\n  角色：%s\n  任务：%s\n  目录：%s\n  分支：%s\n' \
         "$role" "$task" "$top" "$branch"
@@ -1238,9 +1371,19 @@ cmd_preflight() {
   done < <(git -C "$MAIN_ROOT" worktree list --porcelain; printf '\n')
 
   printf '\n[迁移编号]\n'
-  local conflicts
+  # 体检分“与本任务相关 / 无关”：只有本任务新增迁移撞号、或本任务预留号与别人
+  # 重复时才阻断；别人的既有冲突降级为一行提示，不阻断、不每次刷屏。
+  local cur_task new_migrations conflicts related="" unrelated="" num names nm is_related
+  cur_task="$(current_task_id)"
+  new_migrations=""
+  if [[ -n "$cur_task" ]]; then
+    local cur_wt
+    cur_wt="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    new_migrations="$(task_new_migration_basenames "$cur_wt")"
+  fi
   conflicts="$(all_migration_basenames | python3 -c '
 import collections, sys
+
 by_number = collections.defaultdict(set)
 for name in sys.stdin:
     name = name.strip()
@@ -1248,21 +1391,58 @@ for name in sys.stdin:
         by_number[name[:4]].add(name)
 for number in sorted(by_number):
     if len(by_number[number]) > 1:
-        print(f"  {number}: " + ", ".join(sorted(by_number[number])))
+        print(number + "\t" + ",".join(sorted(by_number[number])))
 ')"
   if [[ -n "$conflicts" ]]; then
-    printf '  发现编号冲突（两个任务抢同一个迁移号，合并前必须改名）：\n%s\n' "$conflicts"
+    while IFS=$'\t' read -r num names; do
+      [[ -n "$num" ]] || continue
+      is_related=0
+      if [[ -n "$new_migrations" ]]; then
+        while IFS= read -r nm; do
+          [[ -n "$nm" ]] || continue
+          case ",$names," in *",$nm,"*) is_related=1 ;; esac
+        done <<<"$new_migrations"
+      fi
+      if [[ "$is_related" == 1 ]]; then
+        related+="  ${num}: ${names//,/, }"$'\n'
+      else
+        unrelated+="  ${num}: ${names//,/, }"$'\n'
+      fi
+    done <<<"$conflicts"
+  fi
+  if [[ -n "$related" ]]; then
+    printf '  与本任务相关的编号冲突（本任务新增迁移与其它树撞号，合并前必须改名）：\n%s' "$related"
     problems=$((problems + 1))
-  else
+  fi
+  if [[ -n "$unrelated" ]]; then
+    local flat
+    flat="$(printf '%s' "$unrelated" | tr '\n' ';' | sed 's/  */ /g; s/^ //; s/;[[:space:]]*$//; s/; */；/g')"
+    printf '  提示：与本任务无关的既有迁移编号冲突（不阻断本任务，建议单列任务处理）：%s\n' "$flat"
+  fi
+  if [[ -z "$related" && -z "$unrelated" ]]; then
     printf '  未发现跨任务编号冲突（每棵树内仍需通过 check_migrations.py）。\n'
   fi
 
-  local dup_reserved
+  local dup_reserved cur_reserved rel_dup="" unrel_dup="" dup
   dup_reserved="$(reserved_migration_numbers | sort | uniq -d)"
   if [[ -n "$dup_reserved" ]]; then
-    printf '  多个活跃任务预留了同一编号（合并前必须错开）：\n'
-    printf '%s\n' "$dup_reserved" | sed 's/^/    /'
-    problems=$((problems + 1))
+    cur_reserved=""
+    [[ -n "$cur_task" ]] && cur_reserved="$(task_reserved_number "$cur_task")"
+    while IFS= read -r dup; do
+      [[ -n "$dup" ]] || continue
+      if [[ -n "$cur_reserved" && "$dup" == "$cur_reserved" ]]; then
+        rel_dup+=" $dup"
+      else
+        unrel_dup+=" $dup"
+      fi
+    done <<<"$dup_reserved"
+    if [[ -n "${rel_dup// }" ]]; then
+      printf '  多个活跃任务预留了与本任务相同的编号（合并前必须错开）：%s\n' "$rel_dup"
+      problems=$((problems + 1))
+    fi
+    if [[ -n "${unrel_dup// }" ]]; then
+      printf '  提示：与本任务无关的预留编号重复（不阻断本任务）：%s\n' "$unrel_dup"
+    fi
   fi
 
   printf '\n'
