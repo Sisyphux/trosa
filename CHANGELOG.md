@@ -1,4 +1,14 @@
-## 2026-09-30 — 浏览器验收改为锁定的无头 Chromium：唯一运行标记、按故障类型重跑、证据按 commit 追加
+## 2026-10-01 — Agent 数据访问改为「可逆即自由」：动作策略表 + 增删改查放开 + CLI 直写
+
+- 产品原则变更：无人值守的后台自动化（Sela、AI 预填、定时任务）仍不得自动创建客户、联系人、待办或商业承诺；但在成员本人指令下，持有 `crm:write` 令牌的 Agent 可以直接**新增、修改、调整日程、归档 / 恢复**，每一步都保留来源、审计与撤销。永久删除、对外发送消息、报价、价格与交期承诺仍由人完成。
+- 单一动作策略表：`app.py` 用一张 `_GATEWAY_ACTION_POLICY`（`action → {handler, reversible, scope}`）登记全部网关写动作，网关只按表分发。表里没有的动作一律 409；`reversible=False` 的动作任何 scope 都不放行；删除 / 批量改 / 恢复数据库 / 管理令牌等并入同一张表并标为不可逆。新增动作若忘记登记处理器或撤销路径，测试会直接失败，让「默认安全」成为结构性保证而不是靠记忆。
+- 补齐写动作（全部复用现有共享写函数，带幂等键、审计、单条撤销）：`create_customer`（去重只按规范化后的唯一精确邮箱 / 手机号，命中返回 `duplicate_candidate` 含已有客户 id，不自动合并、不重复创建；撤销 = 归档新建客户）、`archive_customer` / `restore_customer`（互为撤销，不暴露 `/permanent`）、`batch`（一次最多 50 个可逆子动作；任一子动作失败按相反顺序撤销已应用项，整体不落地；成功后一个 `action_id` 整体撤销）。
+- 读取放开：`/api/agent/*` 的今日简报、客户工作区、完整时间线、跨客户消息搜索接受 `crm:read` 令牌（新增 `login_or_gateway_read`，令牌只在 GET 且持有 `crm:read` 时通过）；令牌不能进入任何 `/api/agent/*` 非 GET 路由或其它登录接口；跨成员读取仍是白名单字段，令牌不能指定 `user_id`。附件只开放元数据列表，不开放内容下载。
+- CLI 与令牌：`tools/trosa_cli.py` 增加 `create-customer`、`update-customer`、`create-contact`、`update-contact`、`record-communication`、`create-task`、`update-task`、`complete-task`、`reschedule`、`archive-customer`、`restore-customer`、`batch`、`undo` 与只读 `brief` / `workspace` / `timeline` / `search`；每个写命令输出 `action_id` 与 `undo_hint`（`undo <action_id>`），没有删除命令。`issue-token` 默认 scope 改为 `crm:read,crm:write`，令牌默认 90 天有效，`whoami` 在剩余不足 7 天时提示重领；`revoke-token` 不变。
+- 文档：`docs/AGENT_ACCESS.md` 按「可逆即自由」重写权限表、明确永不可做的动作与「出错了怎么 undo」。
+- 验证：`tests/test_agent_data_freedom.py`（策略表「未登记即拒绝 / 不可逆永不放行」、`create_customer` 去重与撤销、归档 / 恢复往返、`batch` 成功 / 中途失败回滚 / 整体撤销、令牌读 GET 成功而写方法与其它登录接口仍 403 / 401、跨成员隔离、分页 offset、CLI 端到端生命周期）与更新后的 `tests/test_agent_cli.py` 通过；完整门禁见任务证据。
+
+
 
 - 现象：真实 Chromium 验收由桌面浏览器任务驱动，多次在「main + 一个 docs 文件」上出现与改动无关的间歇性失败（同一页面等待超时、弹窗光标未落位两种错误），而失败到底该重跑还是该查缺陷没有区分；证据文件每跑一次就被整文件覆盖，发布后重跑会改写已发布的验证结论。
 - 变更（终态：自己起无头浏览器）：浏览器验收改为每次运行自己启动一个由 `browser-extension/package-lock.json` 锁定的 Playwright 无头 Chromium（`tools/run_browser_acceptance.cjs` 驱动 `tools/browser_acceptance.js` / `tools/inbox_browser_acceptance.js`），不再共用开发机上的桌面浏览器；缺 Playwright 一律硬失败，不标记为 SKIP。

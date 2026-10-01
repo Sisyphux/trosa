@@ -21,6 +21,10 @@ class FakeGateway:
 
     def __init__(self, customers=0, tasks=()):
         self.customers, self.tasks, self.calls, self.proposals = customers, list(tasks), [], []
+        self.actions, self.batches, self.undos = [], [], []
+        self.whoami_payload = {'success': True, 'data': {
+            'user': 'hamid', 'scopes': ['crm:read', 'crm:write'], 'expires_at': '',
+            'days_remaining': None, 'renew_hint': ''}}
 
     def get(self, path, **params):
         self.calls.append((path, params))
@@ -37,9 +41,30 @@ class FakeGateway:
     def page_all(self, path, key, max_items=5000, **params):
         return trosa_cli.Gateway.page_all(self, path, key, max_items, **params)
 
+    def agent_get(self, path, **params):
+        self.calls.append((path, params))
+        return {'success': True, 'data': {'path': path, 'params': params}}
+
     def propose(self, action, customer_id, payload, key=None):
         self.proposals.append((action, customer_id, payload))
         return {'success': True}
+
+    def act(self, action, customer_id, payload, key=None):
+        self.actions.append((action, customer_id, payload, key))
+        return {'success': True, 'data': {'action': {'id': 'agact_' + 'a' * 20, 'type': action,
+                                                     'undo_token': 'undo-token'}}}
+
+    def batch(self, actions, key=None):
+        self.batches.append((actions, key))
+        return {'success': True, 'data': {'action': {'id': 'agact_' + 'b' * 20, 'type': 'batch',
+                                                     'undo_token': ''}}}
+
+    def undo(self, action_id):
+        self.undos.append(action_id)
+        return {'success': True, 'data': {'action': {'id': action_id, 'status': 'undone'}}}
+
+    def whoami(self):
+        return self.whoami_payload
 
 
 class LoadTokenTest(unittest.TestCase):
@@ -106,9 +131,13 @@ class PagingTest(unittest.TestCase):
         trosa_cli.run(self.parse('propose-communication', '7', '--content', '客户回复', '--direction', 'inbound'), gateway)
         self.assertEqual(gateway.proposals[1][2]['direction'], 'inbound')
 
-    def test_cli_exposes_no_direct_write_command(self):
-        names = trosa_cli.build_parser()._subparsers._group_actions[0].choices
-        self.assertFalse([n for n in names if n.startswith(('write', 'delete', 'update', 'undo'))])
+    def test_cli_exposes_reversible_writes_and_no_delete_command(self):
+        names = set(trosa_cli.build_parser()._subparsers._group_actions[0].choices)
+        self.assertFalse([n for n in names if 'delete' in n or n == 'permanent'])
+        for expected in ('create-customer', 'update-customer', 'create-contact', 'update-contact',
+                         'record-communication', 'create-task', 'update-task', 'complete-task',
+                         'reschedule', 'archive-customer', 'restore-customer', 'batch', 'undo'):
+            self.assertIn(expected, names)
 
     def test_proposal_idempotency_key_is_deterministic(self):
         sent = []
@@ -125,6 +154,77 @@ class PagingTest(unittest.TestCase):
         self.assertNotEqual(sent[0], sent[2])
 
 
+class DirectWriteCliTest(unittest.TestCase):
+    def parse(self, *argv):
+        return trosa_cli.build_parser().parse_args(argv)
+
+    def test_create_customer_sends_payload_and_prints_undo(self):
+        gateway = FakeGateway()
+        result = trosa_cli.run(self.parse(
+            'create-customer', '--name', 'Acme', '--company', 'Acme Co', '--email', 'a@acme.test'), gateway)
+        action, customer_id, payload = gateway.actions[0][:3]
+        self.assertEqual(action, 'create_customer')
+        self.assertIsNone(customer_id)
+        self.assertEqual(payload['contacts'][0]['email'], 'a@acme.test')
+        self.assertIn('undo', result['undo_hint'])
+
+    def test_reschedule_is_update_task_on_the_same_date(self):
+        gateway = FakeGateway()
+        trosa_cli.run(self.parse('update-task', '5', '--due', '2026-10-09'), gateway)
+        trosa_cli.run(self.parse('reschedule', '5', '--date', '2026-10-09'), gateway)
+        self.assertEqual([call[0] for call in gateway.actions], ['update_task', 'update_task'])
+        self.assertEqual(gateway.actions[0][2]['remind_date'], '2026-10-09')
+        self.assertEqual(gateway.actions[1][2]['remind_date'], '2026-10-09')
+
+    def test_write_idempotency_key_is_deterministic(self):
+        sent = []
+        original = trosa_cli.request_json
+        trosa_cli.request_json = lambda *a, **k: sent.append(k['headers']['Idempotency-Key']) or {}
+        try:
+            gateway = trosa_cli.Gateway(TOKEN, 'https://example.test')
+            gateway.act('create_task', 1, {'title': 'a', 'due_date': '2026-10-01'})
+            gateway.act('create_task', 1, {'due_date': '2026-10-01', 'title': 'a'})
+            gateway.act('create_task', 1, {'title': 'b', 'due_date': '2026-10-01'})
+        finally:
+            trosa_cli.request_json = original
+        self.assertEqual(sent[0], sent[1])
+        self.assertNotEqual(sent[0], sent[2])
+
+    def test_batch_reads_actions_from_a_json_file(self):
+        gateway = FakeGateway()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'batch.json')
+            Path(path).write_text(json.dumps({'actions': [
+                {'action': 'create_task', 'customer_id': 1, 'payload': {'title': 't', 'due_date': '2026-10-09'}},
+                {'action': 'archive_customer', 'customer_id': 2, 'payload': {}},
+            ]}))
+            result = trosa_cli.run(self.parse('batch', path), gateway)
+        self.assertEqual(len(gateway.batches[0][0]), 2)
+        self.assertIn('undo', result['undo_hint'])
+
+    def test_undo_posts_the_action_id(self):
+        gateway = FakeGateway()
+        trosa_cli.run(self.parse('undo', 'agact_abcdabcdabcdabcd'), gateway)
+        self.assertEqual(gateway.undos, ['agact_abcdabcdabcdabcd'])
+
+    def test_agent_read_commands_use_the_agent_surface(self):
+        gateway = FakeGateway()
+        trosa_cli.run(self.parse('workspace', '7'), gateway)
+        trosa_cli.run(self.parse('search', '--query', '报价'), gateway)
+        self.assertEqual(gateway.calls[0][0], '/customers/7/workspace')
+        self.assertEqual(gateway.calls[1][0], '/messages/search')
+        self.assertEqual(gateway.calls[1][1]['query'], '报价')
+
+    def test_whoami_surfaces_renew_hint(self):
+        gateway = FakeGateway()
+        gateway.whoami_payload = {'success': True, 'data': {
+            'user': 'hamid', 'scopes': ['crm:read'], 'expires_at': '2026-10-02 00:00:00',
+            'days_remaining': 0, 'renew_hint': '令牌将在 7 天内过期'}}
+        result = trosa_cli.run(self.parse('whoami'), gateway)
+        self.assertTrue(result['data']['authenticated'])
+        self.assertIn('7 天内过期', result['renew_hint'])
+
+
 class HumanOnlyTest(unittest.TestCase):
     def test_issue_token_refuses_without_interactive_terminal(self):
         args = trosa_cli.build_parser().parse_args(['issue-token', '--user', 'hamid'])
@@ -132,6 +232,11 @@ class HumanOnlyTest(unittest.TestCase):
             trosa_cli.run(args, root='https://example.test')
         self.assertEqual(ctx.exception.code, 2)
         self.assertIn('交互式终端', str(ctx.exception))
+
+    def test_issue_token_defaults_to_read_write_and_90_days(self):
+        args = trosa_cli.build_parser().parse_args(['issue-token', '--user', 'hamid'])
+        self.assertEqual(args.scopes, 'crm:read,crm:write')
+        self.assertEqual(args.expires_days, 90)
 
     def test_issue_token_rejects_unknown_scope(self):
         args = trosa_cli.build_parser().parse_args(['issue-token', '--user', 'hamid', '--scopes', 'crm:read,admin'])

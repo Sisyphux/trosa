@@ -441,9 +441,33 @@ def _sela_service_integration_user():
     return 'hamid'
 
 
+def _agent_gateway_token_expiry(days):
+    """Return the absolute local expiry text for an optional token lifetime."""
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 90
+    days = max(1, min(days, 3650))
+    return (datetime.now(_CALENDAR_TZ) + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _agent_gateway_token_expired(record, now_text=None):
+    """Only an explicit, elapsed ``expires_at`` invalidates a token."""
+    expires_at = str((record or {}).get('expires_at') or '').strip()
+    if not expires_at:
+        return False
+    return expires_at <= str(now_text or _calendar_now_text())
+
+
 def _agent_gateway_principal():
-    """Authenticate a personal Agent Gateway token for Gateway routes only."""
-    if not request.path.startswith('/api/gateway/'):
+    """Authenticate a personal Agent token for Gateway and read-only Agent routes.
+
+    The credential is recognised only on ``/api/gateway/*`` and ``/api/agent/*``.
+    A non-GET ``/api/agent/*`` request is still rejected by ``login_required``,
+    so a token can never reach the proposal write paths or any other
+    ``login_required`` surface.
+    """
+    if not (request.path.startswith('/api/gateway/') or request.path.startswith('/api/agent/')):
         return None
     header = str(request.headers.get('Authorization') or '')
     if not header.startswith('Bearer '):
@@ -466,11 +490,15 @@ def _agent_gateway_principal():
     digest = hashlib.sha256(token.encode('utf-8')).hexdigest()
     user = str(record.get('user') or '')
     scopes = frozenset(record.get('scopes') or [])
-    if (not record or record.get('revoked_at') or user not in USERS
+    if (not record or record.get('revoked_at') or _agent_gateway_token_expired(record)
+            or user not in USERS
             or not scopes.issubset(_AGENT_GATEWAY_SCOPES)
             or not secrets.compare_digest(digest, str(record.get('token_sha256') or ''))):
         return None
-    return {'id': token_id, 'user': user, 'scopes': scopes}
+    return {'id': token_id, 'user': user, 'scopes': scopes,
+            'expires_at': str(record.get('expires_at') or ''),
+            'created_at': str(record.get('created_at') or ''),
+            'label': str(record.get('label') or '')}
 
 
 def _ensure_pin_store():
@@ -829,6 +857,28 @@ def login_required(f):
         ):
             return jsonify({'error': '未登录', 'login_required': True}), 401
         return f(*args, **kwargs)
+    return decorated
+
+
+def login_or_gateway_read(f):
+    """Allow a ``crm:read`` Agent token to read an Agent endpoint.
+
+    A token is accepted only for ``GET`` and only when it carries ``crm:read``.
+    Any other method still falls through to ``login_required``, whose explicit
+    rejection of ``g.gateway_principal`` keeps tokens out of every write route.
+    A normal browser session keeps its existing behaviour.
+    """
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        principal = getattr(g, 'gateway_principal', None)
+        if principal:
+            if request.method != 'GET':
+                return jsonify({'error': 'Agent token 只能读取，不能写入此接口', 'gateway_read_only': True}), 403
+            if 'crm:read' not in principal['scopes']:
+                return jsonify({'error': '当前 token 没有 crm:read 权限'}), 403
+            return f(*args, **kwargs)
+        return login_required(f)(*args, **kwargs)
     return decorated
 
 
@@ -1340,6 +1390,10 @@ def _agent_action_write(conn, principal, action, result, payload, customer_id):
         'update_contact': ('contact', result.get('id')),
         'resolve_inbox': ('inbox_item', result.get('id')),
         'assign_inbox_customer': ('inbox_item', result.get('id')),
+        'create_customer': ('customer', result.get('id')),
+        'archive_customer': ('customer', result.get('id')),
+        'restore_customer': ('customer', result.get('id')),
+        'batch': ('batch', result.get('id')),
     }[action]
     resolved_customer = result.get('customer_id') or customer_id
     response_data = {'action': {'id': action_id, 'type': action, 'status': 'completed',
@@ -1348,6 +1402,10 @@ def _agent_action_write(conn, principal, action, result, payload, customer_id):
                                 'undo_token': result['undo_token'],
                                 'undo_description': result.get('undo_description', '')}}
     request_payload = {'action': action, 'customer_id': customer_id, 'payload': payload}
+    if action == 'batch':
+        # The composite action's rollback recipe lives with its own audit row;
+        # the undo endpoint replays these child snapshots in reverse order.
+        request_payload['children'] = result.get('children') or []
     now = _calendar_now_text()
     user = str(principal.get('user') or _db_scope_user())
     if not postgres_mode():
@@ -2899,6 +2957,7 @@ def agent_gateway_tokens():
             if record.get('user') == g.current_user:
                 tokens.append({'id': row['key'][len(_AGENT_GATEWAY_TOKEN_PREFIX):], 'label': record.get('label', ''),
                                'scopes': record.get('scopes', []), 'created_at': record.get('created_at', ''),
+                               'expires_at': record.get('expires_at', ''),
                                'revoked_at': record.get('revoked_at', '')})
         return jsonify({'success': True, 'data': {'tokens': tokens}})
 
@@ -2907,10 +2966,12 @@ def agent_gateway_tokens():
     if not isinstance(scopes, list) or not scopes or not set(scopes).issubset(_AGENT_GATEWAY_SCOPES):
         return jsonify({'error': 'scope 无效'}), 400
     label = str(data.get('label') or '').strip()[:80]
+    expires_at = _agent_gateway_token_expiry(data.get('expires_in_days', 90))
     token_id = secrets.token_urlsafe(12).replace('-', 'a').replace('_', 'b')[:16]
     token = f'trosa_pat_{token_id}_{secrets.token_urlsafe(48)}'
     record = {'token_sha256': hashlib.sha256(token.encode('utf-8')).hexdigest(), 'user': g.current_user,
-              'scopes': sorted(set(scopes)), 'label': label, 'created_at': _calendar_now_text(), 'revoked_at': ''}
+              'scopes': sorted(set(scopes)), 'label': label, 'created_at': _calendar_now_text(),
+              'expires_at': expires_at, 'revoked_at': ''}
     conn = get_system_db()
     try:
         conn.execute('INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, ?)',
@@ -2920,7 +2981,7 @@ def agent_gateway_tokens():
         conn.close()
     log_operation('CREATE_AGENT_GATEWAY_TOKEN', 'agent_gateway_token', None, f'{label or token_id}: {", ".join(record["scopes"])}')
     return jsonify({'success': True, 'data': {'id': token_id, 'token': token, 'scopes': record['scopes'],
-                                               'created_at': record['created_at']}}), 201
+                                               'created_at': record['created_at'], 'expires_at': record['expires_at']}}), 201
 
 
 @app.route('/api/agent-gateway/tokens/<token_id>', methods=['DELETE'])
@@ -9846,128 +9907,16 @@ def create_customer():
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         data = {}
-    customer_name = str(data.get('name') or '').strip()
-    company_name = str(data.get('company') or '').strip()
-    if not customer_name and not company_name:
-        return jsonify({'error': '请至少填写客户名称或公司名称'}), 400
-    country = normalize_country(data.get('country', ''))
-    customer_timezone = _infer_customer_timezone(country)
-    customer_level = _normalize_customer_level(data.get('level', 'C'))
-    business_stage = str(data.get('business_stage') or '').strip()
-    business_role = str(data.get('business_role', data.get('type', '')) or '').strip()
-    if business_stage not in ('', '成交', '流失'):
-        return jsonify({'error': '业务阶段只能是成交、流失或留空'}), 400
-    if business_role not in ('', '中间商', '终端'):
-        return jsonify({'error': '客户角色只能是中间商、终端或留空'}), 400
-    contacts = _merge_contact_candidates(data.get('contacts') or [])
     try:
-        last_contact = _normalize_optional_date(data.get('last_contact'), '上次联系日期')
-        next_follow_up = _normalize_optional_date(data.get('next_follow_up'), '下次跟进日期')
-        customer_source = _normalize_customer_source(data.get('source'))
-        customer_source_detail = _normalize_customer_source_detail(data.get('source_detail'))
+        result = create_customer_profile(data)
+    except _DuplicateCustomerError as duplicate:
+        return jsonify({'error': duplicate.message, 'duplicate_customer_id': duplicate.customer_id}), 409
     except CrmWriteError as error:
         return jsonify({'error': error.message}), error.status
-    conn = get_db()
-    c = conn.cursor()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # Prevent the most expensive duplicate mistakes before writing anything.
-    website = normalize_website(data.get('website'))
-    data['website'] = website
-    website_domain = _canonical_website_domain(website)
-    if website_domain:
-        if postgres_mode():
-            existing_websites = [row for row in _active_customers(conn)
-                                 if str(row.get('website') or '').strip()]
-        else:
-            existing_websites = c.execute(
-                "SELECT id, company, name, website FROM customers "
-                "WHERE (is_deleted=0 OR is_deleted IS NULL) AND trim(COALESCE(website, '')) <> ''"
-            ).fetchall()
-        duplicate = next(
-            (row for row in existing_websites if _canonical_website_domain(row['website']) == website_domain),
-            None,
-        )
-        if duplicate:
-            conn.close()
-            return jsonify({'error': f'网站域名已属于客户：{duplicate["company"] or duplicate["name"]}', 'duplicate_customer_id': duplicate['id']}), 409
-    for contact in contacts:
-        email = (contact.get('email') or '').strip().lower()
-        phone_values = [(contact.get('phone') or '').strip(), (contact.get('whatsapp') or '').strip()]
-        if email:
-            if postgres_mode():
-                duplicate = next((
-                    {'id': customer.get('id'), 'company': customer.get('company'), 'name': customer.get('name')}
-                    for customer in _active_customers(conn)
-                    for existing_contact in _customer_contacts(conn, int(customer['id']))
-                    if _canonical_email(existing_contact.get('email')) == email
-                ), None)
-            else:
-                c.execute('''SELECT c.id, c.company, c.name FROM contacts ct JOIN customers c ON c.id=ct.customer_id
-                             WHERE lower(ct.email)=? AND (c.is_deleted=0 OR c.is_deleted IS NULL) LIMIT 1''', (email,))
-                duplicate = c.fetchone()
-            if duplicate:
-                conn.close()
-                return jsonify({'error': f'邮箱已属于客户：{duplicate["company"] or duplicate["name"]}', 'duplicate_customer_id': duplicate['id']}), 409
-        for phone in filter(None, phone_values):
-            if postgres_mode():
-                duplicate = next((
-                    {'id': customer.get('id'), 'company': customer.get('company'), 'name': customer.get('name')}
-                    for customer in _active_customers(conn)
-                    for existing_contact in _customer_contacts(conn, int(customer['id']))
-                    if phone in {str(existing_contact.get('phone') or '').strip(), str(existing_contact.get('whatsapp') or '').strip()}
-                ), None)
-            else:
-                c.execute('''SELECT c.id, c.company, c.name FROM contacts ct JOIN customers c ON c.id=ct.customer_id
-                             WHERE ct.phone=? OR ct.whatsapp=? LIMIT 1''', (phone, phone))
-                duplicate = c.fetchone()
-            if duplicate:
-                conn.close()
-                return jsonify({'error': f'电话或 WhatsApp 已属于客户：{duplicate["company"] or duplicate["name"]}', 'duplicate_customer_id': duplicate['id']}), 409
-    creation_values = {
-        'name': data.get('name', ''), 'company': data.get('company', ''), 'country': country,
-        'level': customer_level, 'business_role': business_role, 'business_stage': business_stage,
-        'customer_judgment': str(data.get('customer_judgment') or '').strip()[:1000],
-        'website': normalize_website(data.get('website')), 'profile': data.get('profile', ''),
-        'field': data.get('field', ''), 'notes': data.get('notes', ''),
-        'system_notes': data.get('system_notes', ''), 'last_contact': last_contact,
-        'next_follow_up': next_follow_up, 'manual_next_follow': bool(next_follow_up),
-        'industry': data.get('industry', ''), 'company_size': data.get('company_size', ''),
-        'annual_revenue': data.get('annual_revenue', ''), 'tags': data.get('tags', ''),
-        'import_source': 'manual', 'source': customer_source,
-        'source_detail': customer_source_detail,
-        'timezone': customer_timezone,
-        'timezone_source': _TIMEZONE_SOURCE_INFERRED if customer_timezone else '',
-    }
-    if postgres_mode():
-        customer_id = _create_customer_record(conn, values=creation_values)
-    else:
-        c.execute('''
-            INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, source, source_detail, timezone, timezone_source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (data.get('name', ''), data.get('company', ''), country, customer_level,
-              '', business_role, business_stage, creation_values['customer_judgment'],
-              creation_values['website'], data.get('profile', ''), data.get('field', ''), data.get('notes', ''),
-              data.get('system_notes', ''), last_contact, next_follow_up, data.get('industry', ''),
-              data.get('company_size', ''), data.get('annual_revenue', ''), data.get('tags', ''), 'manual',
-              customer_source, customer_source_detail, creation_values['timezone'], creation_values['timezone_source'], now, now))
-        customer_id = c.lastrowid
-    for index, contact in enumerate(contacts):
-        if not any((contact.get(key) or '').strip() for key in ('name', 'email', 'phone', 'whatsapp', 'linkedin')):
-            continue
-        _create_contact(conn, customer_id=customer_id, values={
-            **contact, 'is_primary': 1 if index == 0 else 0,
-            'email': (contact.get('email') or '').strip().lower(),
-        }, created_at=now)
-    manual_next_follow = next_follow_up
-    if manual_next_follow:
-        task_title = (data.get('task_title') or f'联系 {data.get("name", "客户")}').strip()
-        _merge_or_create_reminder(c, customer_id, task_title, task_title,
-                                  data.get('notes', ''), manual_next_follow, now=now)
-    conn.commit()
-    conn.close()
-    log_operation('CREATE', 'customer', customer_id, f'创建客户: {data.get("name", "")}')
-    return jsonify({'id': customer_id, 'message': '客户创建成功'}), 201
+    except Exception as error:
+        logger.error('create_customer error: %s', error, exc_info=True)
+        return jsonify({'error': '客户创建失败，未保存任何更改'}), 500
+    return jsonify({'id': result['id'], 'message': '客户创建成功'}), 201
 
 
 @app.route('/api/customers/<int:customer_id>', methods=['PUT'])
@@ -13528,7 +13477,7 @@ def _agent_json_or_markdown(payload, markdown):
 
 
 @app.route('/api/agent/brief/today', methods=['GET'])
-@login_required
+@login_or_gateway_read
 def get_agent_today_brief():
     """A small, ordered work queue for an agent starting the day."""
     today = _calendar_today().isoformat()
@@ -13622,7 +13571,7 @@ def get_agent_today_brief():
 
 
 @app.route('/api/agent/customers/<int:customer_id>/workspace', methods=['GET'])
-@login_required
+@login_or_gateway_read
 def get_agent_customer_workspace(customer_id):
     """Return facts, existing commitments and gaps in one bounded customer workspace."""
     conn = get_db()
@@ -13665,7 +13614,7 @@ def get_agent_customer_workspace(customer_id):
 
 
 @app.route('/api/agent/customers/<int:customer_id>/timeline', methods=['GET'])
-@login_required
+@login_or_gateway_read
 def get_agent_customer_timeline(customer_id):
     """Return a bounded, factual communication timeline for an Agent to compose from."""
     try:
@@ -13709,7 +13658,7 @@ def get_agent_customer_timeline(customer_id):
 
 
 @app.route('/api/agent/messages/search', methods=['GET'])
-@login_required
+@login_or_gateway_read
 def search_agent_messages():
     """Search recorded communications and outreach emails without fixed workflows."""
     query = str(request.args.get('query') or request.args.get('q') or '').strip()
@@ -13951,6 +13900,29 @@ def _gateway_reject_user_override(data):
     if not isinstance(data, dict):
         return False
     return any(key in data for key in ('user_id', 'owner_id', 'user')) or _gateway_reject_user_override(data.get('payload'))
+
+
+@app.route('/api/gateway/whoami', methods=['GET'])
+@gateway_scope_required('crm:read')
+def gateway_whoami():
+    """Report the calling token's identity so a CLI can warn before expiry."""
+    principal = g.gateway_principal
+    expires_at = str(principal.get('expires_at') or '')
+    days_remaining = None
+    if expires_at:
+        try:
+            delta = (datetime.strptime(expires_at, '%Y-%m-%d %H:%M:%S')
+                     - datetime.now(_CALENDAR_TZ).replace(tzinfo=None))
+            days_remaining = int(delta.total_seconds() // 86400)
+        except ValueError:
+            days_remaining = None
+    renew_hint = ''
+    if days_remaining is not None and days_remaining < 7:
+        renew_hint = '令牌将在 7 天内过期，请成员本人重新领取（issue-token）。'
+    return _gateway_response({'user': principal['user'], 'scopes': sorted(principal['scopes']),
+                              'label': principal.get('label') or '',
+                              'expires_at': expires_at, 'days_remaining': days_remaining,
+                              'renew_hint': renew_hint})
 
 
 def _gateway_customer_payload(row):
@@ -14311,8 +14283,209 @@ class _GatewayIdempotentReplay(Exception):
         self.response_data = response_data
 
 
+def _gateway_handle_record_communication(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('记录沟通需要 customer_id')
+    return record_customer_communication(ctx['customer_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_create_contact(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('新增联系人需要 customer_id')
+    return create_customer_contact(ctx['customer_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_create_task(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('创建待办需要 customer_id')
+    return create_customer_follow_up_task(ctx['customer_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_complete_task(ctx):
+    if not isinstance(ctx['payload'].get('task_id'), int):
+        raise CrmWriteError('完成待办需要 task_id')
+    return complete_customer_task(ctx['payload']['task_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_update_task(ctx):
+    if not isinstance(ctx['payload'].get('task_id'), int):
+        raise CrmWriteError('修改待办需要 task_id')
+    return update_customer_follow_up_task(ctx['payload']['task_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_update_customer(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('修改客户资料需要 customer_id')
+    return update_customer_profile(ctx['customer_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_update_contact(ctx):
+    if not isinstance(ctx['payload'].get('contact_id'), int):
+        raise CrmWriteError('修改联系人资料需要 contact_id')
+    return update_customer_contact(ctx['payload']['contact_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_resolve_inbox(ctx):
+    if not isinstance(ctx['payload'].get('inbox_item_id'), int):
+        raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
+    return resolve_customer_inbox_item(ctx['payload']['inbox_item_id'], ctx['payload'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_assign_inbox_customer(ctx):
+    if not isinstance(ctx['customer_id'], int) or not isinstance(ctx['payload'].get('inbox_item_id'), int):
+        raise CrmWriteError('确认 Inbox 归属需要 customer_id 和 inbox_item_id')
+    return assign_customer_inbox_item(ctx['payload']['inbox_item_id'], ctx['customer_id'], ctx['payload'],
+                                      before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_create_customer(ctx):
+    # ``source`` on a Customer is a business fact (展会 / Google / ...), not the
+    # transport source; drop the injected transport default when the caller did
+    # not choose a real customer source.
+    payload = dict(ctx['payload'])
+    if payload.get('source') == 'agent_gateway':
+        payload.pop('source', None)
+    return create_customer_profile(payload, before_commit=ctx['before_commit'],
+                                   duplicate_check='candidate', with_undo=True)
+
+
+def _gateway_handle_archive_customer(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('归档客户需要 customer_id')
+    return archive_customer_profile(ctx['customer_id'], before_commit=ctx['before_commit'])
+
+
+def _gateway_handle_restore_customer(ctx):
+    if not isinstance(ctx['customer_id'], int):
+        raise CrmWriteError('恢复客户需要 customer_id')
+    return restore_customer_profile(ctx['customer_id'], before_commit=ctx['before_commit'])
+
+
+def _rollback_gateway_actions(applied_actions):
+    """Best-effort reverse-order rollback of committed batch children."""
+    for entry in reversed(applied_actions or []):
+        undo_token = str((entry or {}).get('undo_token') or '')
+        if not undo_token:
+            continue
+        conn = get_db()
+        try:
+            conn.execute('BEGIN')
+            _, error = _undo_action_for_user(conn, undo_token)
+            if error:
+                conn.rollback()
+                logger.error('batch rollback blocked: %s', error)
+                continue
+            if entry.get('id'):
+                _agent_action_mark_undone(conn, entry['id'], _calendar_now_text())
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            logger.error('batch rollback error: %s', exc, exc_info=True)
+        finally:
+            conn.close()
+
+
+def _gateway_handle_batch(ctx):
+    """Apply up to 50 reversible actions; on failure leave nothing behind."""
+    payload = ctx['payload']
+    actions = payload.get('actions') if isinstance(payload, dict) else None
+    if not isinstance(actions, list) or not actions:
+        raise CrmWriteError('batch 需要非空 actions 列表')
+    if len(actions) > _GATEWAY_BATCH_LIMIT:
+        raise CrmWriteError(f'batch 一次最多 {_GATEWAY_BATCH_LIMIT} 个子动作', 409)
+    for item in actions:
+        if not isinstance(item, dict):
+            raise CrmWriteError('batch 子动作格式无效')
+        child_action = str(item.get('action') or '')
+        if child_action == 'batch':
+            raise CrmWriteError('batch 不能嵌套 batch', 409)
+        child_policy = _GATEWAY_ACTION_POLICY.get(child_action)
+        if not child_policy or not child_policy.get('reversible') or not callable(child_policy.get('handler')):
+            raise CrmWriteError(f'batch 不允许动作：{child_action or "未命名"}', 409)
+        if _gateway_reject_user_override(item):
+            raise CrmWriteError('Agent 不可指定 user_id 或切换用户', 400)
+    applied_actions = []
+    children = []
+    try:
+        for item in actions:
+            # Child keys are per-attempt on purpose: a failed batch must be
+            # replayable from scratch, while the outer receipt still makes the
+            # whole request idempotent.
+            child_key = 'batch-' + secrets.token_urlsafe(24)
+            child_response, _replayed, _status = _gateway_direct_write(
+                str(item.get('action') or ''), item, child_key,
+            )
+            child_action = child_response.get('action')
+            if child_action:
+                applied_actions.append(child_action)
+                children.append({'action_id': child_action.get('id', ''),
+                                 'undo_token': child_action.get('undo_token', '')})
+            else:
+                children.append({'action_id': '', 'undo_token': ''})
+    except Exception:
+        _rollback_gateway_actions(applied_actions)
+        raise
+    result = {'id': None, 'customer_id': None, 'children': children,
+              'undo_token': '', 'undo_description': f'撤销批次操作（{len(applied_actions)} 项）'}
+    # Record the composite action and its idempotency receipt atomically.  The
+    # children already committed individually, so a failure here is treated as a
+    # failed request and the children are rolled back by the caller's handler.
+    conn = get_db()
+    try:
+        conn.execute('BEGIN')
+        ctx['before_commit'](conn, conn.cursor(), result)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        _rollback_gateway_actions(applied_actions)
+        raise
+    finally:
+        conn.close()
+    return result
+
+
+_GATEWAY_BATCH_LIMIT = 50
+_GATEWAY_FORBIDDEN_MESSAGE = '高风险操作不允许 crm:write 直接执行；请使用 proposal 或人工流程'
+_GATEWAY_FORBIDDEN_ACTIONS = (
+    'delete_customer', 'delete_contact', 'delete_task', 'delete_timeline',
+    'delete_inbox', 'delete_attachment', 'bulk_update', 'restore_database',
+    'manage_tokens',
+)
+# The single source of truth for what a crm:write token may do.  Dispatch is
+# table-driven: an action that is not registered here is refused (409), and a
+# registered ``reversible=False`` action is refused for every scope.  A new
+# action therefore defaults to "not allowed" until someone deliberately
+# registers a handler and its undo path.
+_GATEWAY_ACTION_POLICY = {
+    'record_communication': {'handler': _gateway_handle_record_communication, 'reversible': True, 'scope': 'crm:write'},
+    'create_contact': {'handler': _gateway_handle_create_contact, 'reversible': True, 'scope': 'crm:write'},
+    'create_task': {'handler': _gateway_handle_create_task, 'reversible': True, 'scope': 'crm:write'},
+    'complete_task': {'handler': _gateway_handle_complete_task, 'reversible': True, 'scope': 'crm:write'},
+    'update_task': {'handler': _gateway_handle_update_task, 'reversible': True, 'scope': 'crm:write'},
+    'update_customer': {'handler': _gateway_handle_update_customer, 'reversible': True, 'scope': 'crm:write'},
+    'update_contact': {'handler': _gateway_handle_update_contact, 'reversible': True, 'scope': 'crm:write'},
+    'resolve_inbox': {'handler': _gateway_handle_resolve_inbox, 'reversible': True, 'scope': 'crm:write'},
+    'assign_inbox_customer': {'handler': _gateway_handle_assign_inbox_customer, 'reversible': True, 'scope': 'crm:write'},
+    'create_customer': {'handler': _gateway_handle_create_customer, 'reversible': True, 'scope': 'crm:write'},
+    'archive_customer': {'handler': _gateway_handle_archive_customer, 'reversible': True, 'scope': 'crm:write'},
+    'restore_customer': {'handler': _gateway_handle_restore_customer, 'reversible': True, 'scope': 'crm:write'},
+    'batch': {'handler': _gateway_handle_batch, 'reversible': True, 'scope': 'crm:write'},
+    **{name: {'handler': None, 'reversible': False, 'scope': 'forbidden'}
+       for name in _GATEWAY_FORBIDDEN_ACTIONS},
+}
+
+
 def _gateway_direct_write(action, data, idempotency_key):
-    """Execute one approved low-risk CRM operation through a shared write function."""
+    """Dispatch one registered, reversible action through its shared handler."""
+    policy = _GATEWAY_ACTION_POLICY.get(action)
+    if policy is None:
+        raise CrmWriteError('该动作未登记，不允许通过令牌执行', 409)
+    if not policy['reversible']:
+        raise CrmWriteError(_GATEWAY_FORBIDDEN_MESSAGE, 409)
+    handler = policy.get('handler')
+    if not callable(handler):
+        raise CrmWriteError('该动作没有可执行处理器', 409)
+
     payload = data.get('payload') if isinstance(data.get('payload'), dict) else {}
     customer_id = data.get('customer_id')
     request_hash = hashlib.sha256(json.dumps({'action': action, 'customer_id': customer_id, 'payload': payload},
@@ -14326,7 +14499,10 @@ def _gateway_direct_write(action, data, idempotency_key):
     if existing:
         if not secrets.compare_digest(existing['request_sha256'], request_hash):
             raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
-        return json.loads(existing['response_json']), True
+        return json.loads(existing['response_json']), True, 200
+
+    source = str(payload.get('source') or 'agent_gateway').strip()[:100]
+    effective_payload = dict(payload) if action == 'create_customer' else {**payload, 'source': source}
 
     def receipt_hook(conn, cursor, result):
         existing = _agent_gateway_receipt_read(conn, 'write:' + action, idempotency_key)
@@ -14334,56 +14510,26 @@ def _gateway_direct_write(action, data, idempotency_key):
             if secrets.compare_digest(existing['request_sha256'], request_hash):
                 raise _GatewayIdempotentReplay(json.loads(existing['response_json']))
             raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
-        action_id, response_data = _agent_action_write(
-            conn, principal, action, result, payload, customer_id,
-        )
+        if result.get('_gateway_skip_action'):
+            # A duplicate candidate is a validated no-op: record the receipt so
+            # a retry replays it, but do not fake a completed write action.
+            response_data = result['_gateway_response']
+        else:
+            _action_id, response_data = _agent_action_write(
+                conn, principal, action, result, effective_payload, customer_id,
+            )
+            result['_gateway_response'] = response_data
         _agent_gateway_receipt_write(
             conn, 'write:' + action, idempotency_key, request_hash,
             response_data, created_at=_calendar_now_text(),
         )
-        result['_gateway_response'] = response_data
 
-    source = str(payload.get('source') or 'agent_gateway').strip()[:100]
-    payload = {**payload, 'source': source}
-    if action == 'record_communication':
-        if not isinstance(customer_id, int):
-            raise CrmWriteError('记录沟通需要 customer_id')
-        result = record_customer_communication(customer_id, payload, before_commit=receipt_hook)
-    elif action == 'create_contact':
-        if not isinstance(customer_id, int):
-            raise CrmWriteError('新增联系人需要 customer_id')
-        result = create_customer_contact(customer_id, payload, before_commit=receipt_hook)
-    elif action == 'create_task':
-        if not isinstance(customer_id, int):
-            raise CrmWriteError('创建待办需要 customer_id')
-        result = create_customer_follow_up_task(customer_id, payload, before_commit=receipt_hook)
-    elif action == 'complete_task':
-        if not isinstance(payload.get('task_id'), int):
-            raise CrmWriteError('完成待办需要 task_id')
-        result = complete_customer_task(payload['task_id'], payload, before_commit=receipt_hook)
-    elif action == 'update_task':
-        if not isinstance(payload.get('task_id'), int):
-            raise CrmWriteError('修改待办需要 task_id')
-        result = update_customer_follow_up_task(payload['task_id'], payload, before_commit=receipt_hook)
-    elif action == 'update_customer':
-        if not isinstance(customer_id, int):
-            raise CrmWriteError('修改客户资料需要 customer_id')
-        result = update_customer_profile(customer_id, payload, before_commit=receipt_hook)
-    elif action == 'update_contact':
-        if not isinstance(payload.get('contact_id'), int):
-            raise CrmWriteError('修改联系人资料需要 contact_id')
-        result = update_customer_contact(payload['contact_id'], payload, before_commit=receipt_hook)
-    elif action == 'resolve_inbox':
-        if not isinstance(payload.get('inbox_item_id'), int):
-            raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
-        result = resolve_customer_inbox_item(payload['inbox_item_id'], payload, before_commit=receipt_hook)
-    elif action == 'assign_inbox_customer':
-        if not isinstance(customer_id, int) or not isinstance(payload.get('inbox_item_id'), int):
-            raise CrmWriteError('确认 Inbox 归属需要 customer_id 和 inbox_item_id')
-        result = assign_customer_inbox_item(payload['inbox_item_id'], customer_id, payload, before_commit=receipt_hook)
-    else:
-        raise CrmWriteError('此操作需要 proposal 或不允许直接执行', 409)
-    return result['_gateway_response'], False
+    ctx = {'action': action, 'data': data, 'customer_id': customer_id,
+           'payload': effective_payload, 'idempotency_key': idempotency_key,
+           'before_commit': receipt_hook}
+    result = handler(ctx)
+    status = int(result.get('_gateway_http_status') or 201)
+    return result['_gateway_response'], False, status
 
 
 @app.route('/api/gateway/actions', methods=['POST'])
@@ -14393,14 +14539,16 @@ def gateway_execute_action():
     if _gateway_reject_user_override(data):
         return _gateway_response(error=('validation', 'Agent 不可指定 user_id 或切换用户'), status=400)
     action = str(data.get('action') or '').strip()
-    if action in {'delete_customer', 'delete_contact', 'delete_task', 'delete_timeline', 'delete_inbox', 'delete_attachment',
-                  'bulk_update', 'restore_database', 'manage_tokens'}:
-        return _gateway_response(error=('conflict', '高风险操作不允许 crm:write 直接执行；请使用 proposal 或人工流程'), status=409)
+    policy = _GATEWAY_ACTION_POLICY.get(action)
+    if policy is None:
+        return _gateway_response(error=('conflict', '该动作未登记，不允许通过令牌执行'), status=409)
+    if not policy['reversible']:
+        return _gateway_response(error=('conflict', _GATEWAY_FORBIDDEN_MESSAGE), status=409)
     key = str(request.headers.get('Idempotency-Key') or '').strip()
     if not key or len(key) > 200:
         return _gateway_response(error=('validation', '需要 1-200 字符的 Idempotency-Key'), status=400)
     try:
-        response_data, replayed = _gateway_direct_write(action, data, key)
+        response_data, replayed, status = _gateway_direct_write(action, data, key)
     except _GatewayIdempotentReplay as replay:
         return _gateway_response(replay.response_data)
     except CrmWriteError as error:
@@ -14410,7 +14558,33 @@ def gateway_execute_action():
         logger.error('gateway_execute_action error: %s', error, exc_info=True)
         return _gateway_response(error=('internal_error', 'Agent 操作未保存'), status=500)
     log_operation('AGENT_GATEWAY_WRITE', 'agent_action', None, action)
-    return _gateway_response(response_data, status=200 if replayed else 201)
+    return _gateway_response(response_data, status=status)
+
+
+def _undo_batch_action(conn, action):
+    """Roll back a composite batch by replaying its child snapshots in reverse."""
+    try:
+        request_payload = json.loads(action.get('request_json') or '{}')
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None, '批次记录损坏，无法安全恢复'
+    children = request_payload.get('children') if isinstance(request_payload, dict) else None
+    if not isinstance(children, list) or not children:
+        return None, '批次没有可撤销的子动作'
+    now = _calendar_now_text()
+    for child in reversed(children):
+        if not isinstance(child, dict):
+            continue
+        token = str(child.get('undo_token') or '')
+        if not token:
+            # A duplicate candidate created nothing; there is nothing to undo.
+            continue
+        _, error = _undo_action_for_user(conn, token)
+        if error:
+            return None, error
+        child_action_id = str(child.get('action_id') or '')
+        if child_action_id:
+            _agent_action_mark_undone(conn, child_action_id, now)
+    return {'children': len(children)}, ''
 
 
 @app.route('/api/gateway/actions/<action_id>/undo', methods=['POST'])
@@ -14425,7 +14599,10 @@ def gateway_undo_action(action_id):
         if not action:
             conn.rollback()
             return _gateway_response(error=('not_found', 'Agent action 不存在或已经撤销'), status=404)
-        undone, error = _undo_action_for_user(conn, action['undo_token'])
+        if (action.get('action_type') or '') == 'batch':
+            undone, error = _undo_batch_action(conn, action)
+        else:
+            undone, error = _undo_action_for_user(conn, action['undo_token'])
         if error:
             conn.rollback()
             return _gateway_response(error=('conflict', error), status=409)
@@ -15677,6 +15854,226 @@ def create_customer_contact(customer_id, data, before_commit=None):
         return {'id': contact_id, 'customer_id': customer_id, 'contact': after,
                 'undo_token': undo_token, 'undo_description': '撤销新增联系人'}
     return _run_crm_write(operation, before_commit)
+
+
+class _DuplicateCustomerError(CrmWriteError):
+    """A create request matched an existing customer identity."""
+
+    def __init__(self, message, customer_id, matched_on=''):
+        super().__init__(message, 409)
+        self.customer_id = customer_id
+        self.matched_on = matched_on
+
+
+def _find_customer_by_website_domain(conn, c, domain):
+    if postgres_mode():
+        for row in _active_customers(conn):
+            if str(row.get('website') or '').strip() and _canonical_website_domain(row['website']) == domain:
+                return {'id': row.get('id'), 'company': row.get('company') or '', 'name': row.get('name') or ''}
+        return None
+    rows = c.execute(
+        "SELECT id, company, name, website FROM customers "
+        "WHERE (is_deleted=0 OR is_deleted IS NULL) AND trim(COALESCE(website, '')) <> ''"
+    ).fetchall()
+    for row in rows:
+        if _canonical_website_domain(row['website']) == domain:
+            return dict(row)
+    return None
+
+
+def _find_customer_by_email(conn, c, email):
+    if postgres_mode():
+        return next((
+            {'id': customer.get('id'), 'company': customer.get('company') or '', 'name': customer.get('name') or ''}
+            for customer in _active_customers(conn)
+            for contact in _customer_contacts(conn, int(customer['id']))
+            if _canonical_email(contact.get('email')) == email
+        ), None)
+    c.execute('''SELECT c.id, c.company, c.name FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+                 WHERE lower(ct.email)=? AND (c.is_deleted=0 OR c.is_deleted IS NULL) LIMIT 1''', (email,))
+    row = c.fetchone()
+    return dict(row) if row else None
+
+
+def _find_customer_by_phone(conn, c, phone):
+    if postgres_mode():
+        return next((
+            {'id': customer.get('id'), 'company': customer.get('company') or '', 'name': customer.get('name') or ''}
+            for customer in _active_customers(conn)
+            for contact in _customer_contacts(conn, int(customer['id']))
+            if phone in {str(contact.get('phone') or '').strip(), str(contact.get('whatsapp') or '').strip()}
+        ), None)
+    c.execute('''SELECT c.id, c.company, c.name FROM contacts ct JOIN customers c ON c.id=ct.customer_id
+                 WHERE ct.phone=? OR ct.whatsapp=? LIMIT 1''', (phone, phone))
+    row = c.fetchone()
+    return dict(row) if row else None
+
+
+def create_customer_profile(data, before_commit=None, *, duplicate_check='reject', with_undo=False):
+    """Create one Customer through the shared reversible writer.
+
+    ``duplicate_check='reject'`` preserves the page behaviour: a website
+    domain, email or phone already present is a 409.  ``'candidate'`` is the
+    Agent Gateway contract: only a normalized, unique exact email/phone is a
+    dedupe signal, and a hit returns a ``duplicate_candidate`` instead of
+    writing anything (no automatic merge).
+    """
+    data = data if isinstance(data, dict) else {}
+    customer_name = str(data.get('name') or '').strip()
+    company_name = str(data.get('company') or '').strip()
+    if not customer_name and not company_name:
+        raise CrmWriteError('请至少填写客户名称或公司名称')
+    country = normalize_country(data.get('country', ''))
+    customer_timezone = _infer_customer_timezone(country)
+    customer_level = _normalize_customer_level(data.get('level', 'C'))
+    business_stage = str(data.get('business_stage') or '').strip()
+    business_role = str(data.get('business_role', data.get('type', '')) or '').strip()
+    if business_stage not in ('', '成交', '流失'):
+        raise CrmWriteError('业务阶段只能是成交、流失或留空')
+    if business_role not in ('', '中间商', '终端'):
+        raise CrmWriteError('客户角色只能是中间商、终端或留空')
+    contacts = _merge_contact_candidates(data.get('contacts') or [])
+    last_contact = _normalize_optional_date(data.get('last_contact'), '上次联系日期')
+    next_follow_up = _normalize_optional_date(data.get('next_follow_up'), '下次跟进日期')
+    customer_source = _normalize_customer_source(data.get('source'))
+    customer_source_detail = _normalize_customer_source_detail(data.get('source_detail'))
+    website = normalize_website(data.get('website'))
+    website_domain = _canonical_website_domain(website)
+
+    def duplicate_result(duplicate, message, matched_on):
+        if duplicate_check != 'candidate':
+            raise _DuplicateCustomerError(message, duplicate['id'], matched_on)
+        return {'id': None, 'customer_id': duplicate['id'], 'created': False,
+                '_gateway_skip_action': True, '_gateway_http_status': 200,
+                '_gateway_response': {'created': False, 'duplicate_candidate': {
+                    'customer_id': duplicate['id'],
+                    'name': duplicate.get('name') or '',
+                    'company': duplicate.get('company') or '',
+                    'matched_on': matched_on,
+                    'message': message}}}
+
+    def operation(conn, c):
+        # A website-domain clash is still surfaced to the page; the Agent
+        # contract deliberately does not treat a domain as automatic identity.
+        if duplicate_check == 'reject' and website_domain:
+            duplicate = _find_customer_by_website_domain(conn, c, website_domain)
+            if duplicate:
+                raise _DuplicateCustomerError(
+                    f'网站域名已属于客户：{duplicate["company"] or duplicate["name"]}',
+                    duplicate['id'], 'website')
+        for contact in contacts:
+            email = (contact.get('email') or '').strip().lower()
+            if email:
+                duplicate = _find_customer_by_email(conn, c, email)
+                if duplicate:
+                    return duplicate_result(
+                        duplicate, f'邮箱已属于客户：{duplicate["company"] or duplicate["name"]}', 'email')
+            for phone in filter(None, [(contact.get('phone') or '').strip(),
+                                       (contact.get('whatsapp') or '').strip()]):
+                duplicate = _find_customer_by_phone(conn, c, phone)
+                if duplicate:
+                    return duplicate_result(
+                        duplicate,
+                        f'电话或 WhatsApp 已属于客户：{duplicate["company"] or duplicate["name"]}',
+                        'phone')
+        creation_values = {
+            'name': data.get('name', ''), 'company': data.get('company', ''), 'country': country,
+            'level': customer_level, 'business_role': business_role, 'business_stage': business_stage,
+            'customer_judgment': str(data.get('customer_judgment') or '').strip()[:1000],
+            'website': website, 'profile': data.get('profile', ''),
+            'field': data.get('field', ''), 'notes': data.get('notes', ''),
+            'system_notes': data.get('system_notes', ''), 'last_contact': last_contact,
+            'next_follow_up': next_follow_up, 'manual_next_follow': bool(next_follow_up),
+            'industry': data.get('industry', ''), 'company_size': data.get('company_size', ''),
+            'annual_revenue': data.get('annual_revenue', ''), 'tags': data.get('tags', ''),
+            'import_source': 'manual', 'source': customer_source,
+            'source_detail': customer_source_detail,
+            'timezone': customer_timezone,
+            'timezone_source': _TIMEZONE_SOURCE_INFERRED if customer_timezone else '',
+        }
+        now = _calendar_now_text()
+        if postgres_mode():
+            customer_id = _create_customer_record(conn, values=creation_values)
+        else:
+            c.execute('''
+                INSERT INTO customers (name, company, country, level, type, business_role, business_stage, customer_judgment, website, profile, field, notes, system_notes, last_contact, next_follow_up, industry, company_size, annual_revenue, tags, import_source, source, source_detail, timezone, timezone_source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (data.get('name', ''), data.get('company', ''), country, customer_level,
+                  '', business_role, business_stage, creation_values['customer_judgment'],
+                  website, data.get('profile', ''), data.get('field', ''), data.get('notes', ''),
+                  data.get('system_notes', ''), last_contact, next_follow_up, data.get('industry', ''),
+                  data.get('company_size', ''), data.get('annual_revenue', ''), data.get('tags', ''), 'manual',
+                  customer_source, customer_source_detail, customer_timezone,
+                  creation_values['timezone_source'], now, now))
+            customer_id = c.lastrowid
+        for index, contact in enumerate(contacts):
+            if not any((contact.get(key) or '').strip() for key in ('name', 'email', 'phone', 'whatsapp', 'linkedin')):
+                continue
+            _create_contact(conn, customer_id=customer_id, values={
+                **contact, 'is_primary': 1 if index == 0 else 0,
+                'email': (contact.get('email') or '').strip().lower(),
+            }, created_at=now)
+        if next_follow_up:
+            task_title = (data.get('task_title') or f'联系 {data.get("name", "客户")}').strip()
+            _merge_or_create_reminder(c, customer_id, task_title, task_title,
+                                      data.get('notes', ''), next_follow_up, now=now)
+        result = {'id': customer_id, 'customer_id': customer_id, 'created': True}
+        if with_undo:
+            # Undo of a creation archives the new Customer rather than
+            # destroying it: the snapshot's "before" is the same row in its
+            # archived state, so replaying it hides the customer reversibly.
+            created_after = _snapshot_entity(conn, 'customers', customer_id)
+            archived_before = dict(created_after) if created_after else None
+            if archived_before is not None:
+                archived_before['is_deleted'] = 1
+                archived_before['deleted_at'] = now
+            description = f'撤销创建客户：{customer_name or company_name}'
+            result['undo_token'] = _create_undo_action(
+                conn, 'CREATE_CUSTOMER', 'customer', customer_id,
+                [_undo_entity('customers', customer_id, archived_before, created_after)], description)
+            result['undo_description'] = description
+        return result
+
+    result = _run_crm_write(operation, before_commit)
+    if result.get('created'):
+        log_operation('CREATE', 'customer', result['id'], f'创建客户: {data.get("name", "")}')
+    return result
+
+
+def _set_customer_archived(customer_id, *, deleted, before_commit=None):
+    """Shared archive/restore writer: soft delete and its exact inverse."""
+    if not isinstance(customer_id, int):
+        raise CrmWriteError('归档或恢复客户需要 customer_id')
+
+    def operation(conn, c):
+        before = _snapshot_entity(conn, 'customers', customer_id)
+        if not before:
+            raise CrmWriteError('客户不存在', 404)
+        if bool(before.get('is_deleted')) == bool(deleted):
+            raise CrmWriteError('客户已在回收站' if deleted else '客户不在回收站', 409)
+        now = _calendar_now_text()
+        _set_customer_deleted(conn, customer_id=customer_id, deleted=deleted, changed_at=now)
+        after = _snapshot_entity(conn, 'customers', customer_id)
+        description = '撤销归档客户' if deleted else '撤销恢复客户'
+        undo_token = _create_undo_action(
+            conn, 'ARCHIVE_CUSTOMER' if deleted else 'RESTORE_CUSTOMER', 'customer', customer_id,
+            [_undo_entity('customers', customer_id, before, after)], description)
+        return {'id': customer_id, 'customer_id': customer_id,
+                'is_deleted': bool(after.get('is_deleted')) if after else bool(deleted),
+                'undo_token': undo_token, 'undo_description': description}
+
+    result = _run_crm_write(operation, before_commit)
+    log_operation('ARCHIVE' if deleted else 'RESTORE', 'customer', customer_id,
+                  '归档客户（回收站）' if deleted else '恢复客户')
+    return result
+
+
+def archive_customer_profile(customer_id, before_commit=None):
+    return _set_customer_archived(customer_id, deleted=True, before_commit=before_commit)
+
+
+def restore_customer_profile(customer_id, before_commit=None):
+    return _set_customer_archived(customer_id, deleted=False, before_commit=before_commit)
 
 
 def update_customer_profile(customer_id, data, before_commit=None):

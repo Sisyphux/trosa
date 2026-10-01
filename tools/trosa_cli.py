@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Thin command line client for the Trosa Agent Gateway (``/api/gateway/*``).
 
-It exists so that any agent session can read CRM facts and submit *proposals*
-without hand-writing HTTP.  It only uses the standard library and never prints
-the token.  Writes are limited to proposals (``crm:propose``): the user confirms
-them inside Trosa.  See ``docs/AGENT_ACCESS.md``.
+It exists so that any agent session can read CRM facts and act on a member's
+explicit instruction without hand-writing HTTP.  It only uses the standard
+library and never prints the token.  With ``crm:write`` it can create, update,
+reschedule, archive/restore and batch reversible actions; every write returns an
+``action_id`` that ``undo`` can reverse.  There is deliberately no delete
+command: permanent deletion, outreach and commitments stay human-only.  See
+``docs/AGENT_ACCESS.md``.
 
 Credentials (first match wins):
   1. ``TROSA_AGENT_TOKEN`` environment variable
@@ -161,11 +164,15 @@ def issue_token(args, root=None):
     scopes = sorted({item.strip() for item in args.scopes.split(',') if item.strip()})
     if not scopes or not set(scopes).issubset(SCOPES):
         raise CliError(f'--scopes 只能是 {", ".join(SCOPES)} 的逗号组合', 2)
+    if not 1 <= args.expires_days <= 3650:
+        raise CliError('--expires-days 必须在 1-3650 之间', 2)
     root = root or base_url()
     call = human_session(args.user, root)
-    created = call('POST', '/api/agent-gateway/tokens', {'label': args.label, 'scopes': scopes})['data']
+    created = call('POST', '/api/agent-gateway/tokens', {
+        'label': args.label, 'scopes': scopes, 'expires_in_days': args.expires_days})['data']
     path = write_token_file(created['token'], args.file)
     return {'success': True, 'data': {'id': created['id'], 'scopes': created['scopes'], 'saved_to': path,
+                                      'expires_at': created.get('expires_at', ''),
                                       'note': '令牌只保存在该文件，不会显示。用完请 revoke-token ' + created['id']}}
 
 
@@ -177,12 +184,22 @@ def revoke_token(args, root=None):
     return call('DELETE', f'/api/agent-gateway/tokens/{args.id}')
 
 
+def _deterministic_key(body):
+    """Same request => same Idempotency-Key, so a retry replays instead of duplicating."""
+    return 'cli-' + hashlib.sha256(
+        json.dumps(body, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()[:40]
+
+
 class Gateway:
     def __init__(self, token, root=None):
         self.token, self.root = token, root or base_url()
 
     def get(self, path, **params):
         return request_json('GET', '/api/gateway' + path, params=params, token=self.token, root=self.root)
+
+    def agent_get(self, path, **params):
+        """Read an Agent read surface (``/api/agent/*``) with the same token."""
+        return request_json('GET', '/api/agent' + path, params=params, token=self.token, root=self.root)
 
     def page_all(self, path, key, max_items=5000, **params):
         """Follow ``offset`` until the server returns a short page."""
@@ -198,11 +215,83 @@ class Gateway:
 
     def propose(self, action, customer_id, payload, key=None):
         body = {'action': action, 'customer_id': customer_id, 'payload': payload}
-        # Same request => same key, so a retry replays instead of duplicating.
-        key = key or 'cli-' + hashlib.sha256(
-            json.dumps(body, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()[:40]
         return request_json('POST', '/api/gateway/proposals', body=body,
-                            headers={'Idempotency-Key': key}, token=self.token, root=self.root)
+                            headers={'Idempotency-Key': key or _deterministic_key(body)},
+                            token=self.token, root=self.root)
+
+    def act(self, action, customer_id, payload, key=None):
+        """Execute one reversible write; the key makes retries idempotent."""
+        body = {'action': action, 'customer_id': customer_id, 'payload': payload}
+        return request_json('POST', '/api/gateway/actions', body=body,
+                            headers={'Idempotency-Key': key or _deterministic_key(body)},
+                            token=self.token, root=self.root)
+
+    def batch(self, actions, key=None):
+        """Apply several reversible writes as one all-or-nothing request."""
+        body = {'action': 'batch', 'payload': {'actions': actions}}
+        return request_json('POST', '/api/gateway/actions', body=body,
+                            headers={'Idempotency-Key': key or _deterministic_key(body)},
+                            token=self.token, root=self.root)
+
+    def undo(self, action_id):
+        return request_json('POST', f'/api/gateway/actions/{action_id}/undo',
+                            token=self.token, root=self.root)
+
+    def whoami(self):
+        return self.get('/whoami')
+
+
+def _with_undo_hint(payload):
+    """Add the exact undo command (or the duplicate candidate) to a write result."""
+    if not isinstance(payload, dict):
+        return payload
+    data = payload.get('data') if isinstance(payload.get('data'), dict) else {}
+    candidate = data.get('duplicate_candidate')
+    action = data.get('action') if isinstance(data.get('action'), dict) else {}
+    enriched = dict(payload)
+    if candidate:
+        enriched['duplicate_candidate'] = candidate
+        enriched['undo_hint'] = ('未写入：已存在客户 {cid}（duplicate_candidate，未自动合并）'
+                                 .format(cid=candidate.get('customer_id')))
+    elif action.get('id'):
+        enriched['undo_hint'] = f'撤销：python3 tools/trosa_cli.py undo {action["id"]}'
+    return enriched
+
+
+def _merge_json_payload(base, extra_json):
+    """Merge an optional ``--json`` object on top of explicit flags."""
+    payload = dict(base)
+    if not extra_json:
+        return payload
+    try:
+        extra = json.loads(extra_json)
+    except ValueError:
+        raise CliError('--json 必须是合法 JSON 对象', 2)
+    if not isinstance(extra, dict):
+        raise CliError('--json 必须是 JSON 对象', 2)
+    payload.update(extra)
+    return payload
+
+
+def _read_batch_actions(source):
+    """Read the batch action list from a file, ``-`` or stdin."""
+    if source and source != '-':
+        try:
+            with open(source, encoding='utf-8') as handle:
+                raw = handle.read()
+        except OSError as error:
+            raise CliError(f'无法读取批次文件 {source}：{error}', 2)
+    else:
+        raw = sys.stdin.read()
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise CliError('批次内容必须是合法 JSON', 2)
+    if isinstance(parsed, dict):
+        parsed = parsed.get('actions')
+    if not isinstance(parsed, list) or not parsed:
+        raise CliError('批次内容必须是非空的动作数组', 2)
+    return parsed
 
 
 def snapshot(gateway):
@@ -225,7 +314,8 @@ def build_parser():
     p = sub.add_parser('issue-token', help='【成员本人运行】登录并领取令牌，写入 ~/.config/trosa/agent.token')
     p.add_argument('--user', required=True, help='你的 Trosa 账号')
     p.add_argument('--label', default='agent')
-    p.add_argument('--scopes', default='crm:read,crm:propose')
+    p.add_argument('--scopes', default='crm:read,crm:write')
+    p.add_argument('--expires-days', type=int, default=90, help='有效期天数（默认 90）')
     p.add_argument('--file', default='', help='令牌保存位置（默认 ~/.config/trosa/agent.token）')
     p = sub.add_parser('revoke-token', help="【成员本人运行】撤销令牌；id 填 'list' 可列出现有令牌")
     p.add_argument('--user', required=True)
@@ -256,6 +346,19 @@ def build_parser():
     p = sub.add_parser('actions', help='本 token 所属用户最近的 Agent 动作')
     p.add_argument('--limit', type=int, default=25)
     sub.add_parser('snapshot', help='全部客户 + 全部未完成待办（做整体跟进审查用）')
+    sub.add_parser('brief', help='今天的工作简报（需 crm:read）')
+    p = sub.add_parser('workspace', help='单个客户工作区：承诺 / 最近事实 / 信息缺口（需 crm:read）')
+    p.add_argument('id', type=int)
+    p = sub.add_parser('timeline', help='单个客户完整沟通时间线（需 crm:read）')
+    p.add_argument('id', type=int)
+    p.add_argument('--limit', type=int, default=50)
+    p = sub.add_parser('search', help='跨客户消息搜索（需 crm:read）')
+    p.add_argument('--query', default='')
+    p.add_argument('--country', default='')
+    p.add_argument('--direction', choices=DIRECTIONS, default='')
+    p.add_argument('--from', dest='from_date', default='', help='起始日期 YYYY-MM-DD')
+    p.add_argument('--to', dest='to_date', default='', help='结束日期 YYYY-MM-DD')
+    p.add_argument('--limit', type=int, default=50)
     p = sub.add_parser('propose-task', help='提议新待办（需 crm:propose；你在 Trosa 里确认）')
     p.add_argument('customer', type=int)
     p.add_argument('--title', required=True, help='明确动作')
@@ -269,6 +372,93 @@ def build_parser():
     p.add_argument('--date', default='', help='沟通发生日期 YYYY-MM-DD')
     p.add_argument('--type', dest='activity_type', default='')
     p.add_argument('--source-reference', default='')
+    # Direct, reversible writes: no delete command exists on purpose.
+    p = sub.add_parser('create-customer', help='新建客户（可逆：撤销=归档；需 crm:write）')
+    p.add_argument('--name', default='')
+    p.add_argument('--company', default='')
+    p.add_argument('--country', default='')
+    p.add_argument('--website', default='')
+    p.add_argument('--source', default='', help='客户来源（固定选项之一）')
+    p.add_argument('--notes', default='')
+    p.add_argument('--email', default='')
+    p.add_argument('--phone', default='')
+    p.add_argument('--next-follow-up', dest='next_follow_up', default='')
+    p.add_argument('--task-title', dest='task_title', default='')
+    p.add_argument('--json', default='', help='附加字段（JSON 对象）')
+    p = sub.add_parser('update-customer', help='修改客户资料（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p.add_argument('--name', default='')
+    p.add_argument('--company', default='')
+    p.add_argument('--country', default='')
+    p.add_argument('--website', default='')
+    p.add_argument('--field', default='')
+    p.add_argument('--industry', default='')
+    p.add_argument('--profile', default='')
+    p.add_argument('--notes', default='')
+    p.add_argument('--tags', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('create-contact', help='新增联系人（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p.add_argument('--name', default='')
+    p.add_argument('--title', default='')
+    p.add_argument('--email', default='')
+    p.add_argument('--phone', default='')
+    p.add_argument('--whatsapp', default='')
+    p.add_argument('--linkedin', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('update-contact', help='修改联系人（可逆；需 crm:write）')
+    p.add_argument('contact', type=int)
+    p.add_argument('--name', default='')
+    p.add_argument('--title', default='')
+    p.add_argument('--email', default='')
+    p.add_argument('--phone', default='')
+    p.add_argument('--whatsapp', default='')
+    p.add_argument('--linkedin', default='')
+    p.add_argument('--notes', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('record-communication', help='记录已发生的沟通事实（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p.add_argument('--content', required=True, help='实际发生的事实，不要写推测')
+    p.add_argument('--direction', choices=DIRECTIONS, default='unknown')
+    p.add_argument('--date', default='', help='沟通发生日期 YYYY-MM-DD')
+    p.add_argument('--type', dest='activity_type', default='')
+    p.add_argument('--result', default='')
+    p.add_argument('--contact', type=int, default=0)
+    p.add_argument('--next-task', dest='next_task', default='')
+    p.add_argument('--next-follow-up', dest='next_follow_up', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('create-task', help='新建待办（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p.add_argument('--title', required=True, help='明确动作')
+    p.add_argument('--due', required=True, help='日期 YYYY-MM-DD')
+    p.add_argument('--reason', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('update-task', help='修改待办（可逆；需 crm:write）')
+    p.add_argument('task', type=int)
+    p.add_argument('--title', default='')
+    p.add_argument('--content', default='')
+    p.add_argument('--reason', default='')
+    p.add_argument('--due', default='', help='新日期 YYYY-MM-DD（等同 reschedule）')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('complete-task', help='完成待办并记录结果（可逆；需 crm:write）')
+    p.add_argument('task', type=int)
+    p.add_argument('--result', default='')
+    p.add_argument('--direction', choices=DIRECTIONS, default='unknown')
+    p.add_argument('--next-task', dest='next_task', default='')
+    p.add_argument('--next-follow-up', dest='next_follow_up', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('reschedule', help='调整待办日期（update-task 改日期的等价命令）')
+    p.add_argument('task', type=int)
+    p.add_argument('--date', required=True, help='新日期 YYYY-MM-DD')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('archive-customer', help='归档客户到回收站（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p = sub.add_parser('restore-customer', help='从回收站恢复客户（可逆；需 crm:write）')
+    p.add_argument('customer', type=int)
+    p = sub.add_parser('batch', help='一次应用多个可逆动作（最多 50；整体可撤销）')
+    p.add_argument('source', nargs='?', default='', help='动作数组 JSON 文件；留空或 - 读 stdin')
+    p = sub.add_parser('undo', help='撤销某个 action_id')
+    p.add_argument('action_id')
     return parser
 
 
@@ -284,8 +474,13 @@ def run(args, gateway=None, root=None):
         {'data': {key: gateway.page_all(path, key, **extra)}} if args.all
         else gateway.get(path, limit=args.limit, offset=args.offset, **extra))
     if args.command == 'whoami':
-        gateway.get('/today', limit=1)
-        return {'success': True, 'data': {'authenticated': True, 'base_url': gateway.root}}
+        payload = gateway.whoami()
+        data = payload.get('data') if isinstance(payload, dict) else {}
+        result = {'success': True, 'data': {**(data or {}), 'authenticated': True, 'base_url': gateway.root}}
+        hint = (data or {}).get('renew_hint')
+        if hint:
+            result['renew_hint'] = hint
+        return result
     if args.command == 'today':
         return gateway.get('/today', limit=PAGE_SIZE)
     if args.command == 'customers':
@@ -304,6 +499,16 @@ def run(args, gateway=None, root=None):
         return gateway.get('/actions/recent', limit=args.limit)
     if args.command == 'snapshot':
         return {'success': True, 'data': snapshot(gateway)}
+    if args.command == 'brief':
+        return gateway.agent_get('/brief/today')
+    if args.command == 'workspace':
+        return gateway.agent_get(f'/customers/{args.id}/workspace')
+    if args.command == 'timeline':
+        return gateway.agent_get(f'/customers/{args.id}/timeline', limit=args.limit)
+    if args.command == 'search':
+        return gateway.agent_get('/messages/search', query=args.query, country=args.country,
+                                 direction=args.direction, from_date=args.from_date,
+                                 to_date=args.to_date, limit=args.limit)
     if args.command == 'propose-task':
         if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
             raise CliError('--due 必须是 YYYY-MM-DD', 2)
@@ -324,6 +529,99 @@ def run(args, gateway=None, root=None):
         if args.source_reference:
             payload['source_reference'] = args.source_reference
         return gateway.propose('record_communication', args.customer, payload)
+    if args.command == 'create-customer':
+        base = {key: getattr(args, key) for key in ('name', 'company', 'country', 'website', 'source', 'notes')
+                if getattr(args, key)}
+        if args.email or args.phone:
+            contact = {}
+            if args.email:
+                contact['email'] = args.email
+            if args.phone:
+                contact['phone'] = args.phone
+            base['contacts'] = [contact]
+        if args.next_follow_up:
+            base['next_follow_up'] = args.next_follow_up
+        if args.task_title:
+            base['task_title'] = args.task_title
+        return _with_undo_hint(gateway.act('create_customer', None, _merge_json_payload(base, args.json)))
+    if args.command == 'update-customer':
+        base = {key: getattr(args, key) for key in
+                ('name', 'company', 'country', 'website', 'field', 'industry', 'profile', 'notes', 'tags')
+                if getattr(args, key)}
+        payload = _merge_json_payload(base, args.json)
+        if not payload:
+            raise CliError('请至少提供一个要修改的字段', 2)
+        return _with_undo_hint(gateway.act('update_customer', args.customer, payload))
+    if args.command == 'create-contact':
+        base = {key: getattr(args, key) for key in ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin')
+                if getattr(args, key)}
+        return _with_undo_hint(gateway.act('create_contact', args.customer, _merge_json_payload(base, args.json)))
+    if args.command == 'update-contact':
+        base = {key: getattr(args, key) for key in
+                ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin', 'notes') if getattr(args, key)}
+        payload = _merge_json_payload(base, args.json)
+        if not payload:
+            raise CliError('请至少提供一个要修改的字段', 2)
+        payload['contact_id'] = args.contact
+        return _with_undo_hint(gateway.act('update_contact', None, payload))
+    if args.command == 'record-communication':
+        payload = {'content': args.content, 'direction': args.direction}
+        if args.date:
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.date):
+                raise CliError('--date 必须是 YYYY-MM-DD', 2)
+            payload['follow_date'] = args.date
+        if args.activity_type:
+            payload['activity_type'] = args.activity_type
+        if args.result:
+            payload['result'] = args.result
+        if args.contact:
+            payload['contact_id'] = args.contact
+        if args.next_task:
+            payload['next_task'] = args.next_task
+        if args.next_follow_up:
+            payload['next_follow_up'] = args.next_follow_up
+        payload = _merge_json_payload(payload, args.json)
+        return _with_undo_hint(gateway.act('record_communication', args.customer, payload))
+    if args.command == 'create-task':
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
+            raise CliError('--due 必须是 YYYY-MM-DD', 2)
+        payload = {'title': args.title, 'due_date': args.due}
+        if args.reason:
+            payload['reason'] = args.reason
+        return _with_undo_hint(gateway.act('create_task', args.customer, _merge_json_payload(payload, args.json)))
+    if args.command == 'update-task':
+        payload = {key: getattr(args, key) for key in ('title', 'content', 'reason') if getattr(args, key)}
+        if args.due:
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
+                raise CliError('--due 必须是 YYYY-MM-DD', 2)
+            payload['remind_date'] = args.due
+        payload = _merge_json_payload(payload, args.json)
+        if not payload:
+            raise CliError('请至少提供一个要修改的字段', 2)
+        payload['task_id'] = args.task
+        return _with_undo_hint(gateway.act('update_task', None, payload))
+    if args.command == 'complete-task':
+        payload = {'task_id': args.task, 'direction': args.direction}
+        if args.result:
+            payload['result'] = args.result
+        if args.next_task:
+            payload['next_task'] = args.next_task
+        if args.next_follow_up:
+            payload['next_follow_up'] = args.next_follow_up
+        return _with_undo_hint(gateway.act('complete_task', None, _merge_json_payload(payload, args.json)))
+    if args.command == 'reschedule':
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.date):
+            raise CliError('--date 必须是 YYYY-MM-DD', 2)
+        payload = _merge_json_payload({'task_id': args.task, 'remind_date': args.date}, args.json)
+        return _with_undo_hint(gateway.act('update_task', None, payload))
+    if args.command == 'archive-customer':
+        return _with_undo_hint(gateway.act('archive_customer', args.customer, {}))
+    if args.command == 'restore-customer':
+        return _with_undo_hint(gateway.act('restore_customer', args.customer, {}))
+    if args.command == 'batch':
+        return _with_undo_hint(gateway.batch(_read_batch_actions(args.source)))
+    if args.command == 'undo':
+        return gateway.undo(args.action_id)
     raise CliError(f'未知命令 {args.command}', 2)
 
 
