@@ -8355,7 +8355,7 @@ function customerProfileHtml(customer) {
       (researchSources ? '<p class="cw-subs">公开来源：' + researchSources + '</p>' : '') +
     '</div>';
   }
-  html += '<div class="cw-foot"><button type="button" class="cw-link" onclick="exportCurrentCustomerEmails()">导出邮箱</button><button type="button" class="cw-link" onclick="copyCustomerContext(\'timeline\')">导出全部沟通</button></div>';
+  // 一键导出入口固定在客户工作台顶栏（#cwExportTools），不再只藏在「资料」分区底部。
   return html;
 }
 

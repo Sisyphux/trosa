@@ -1053,6 +1053,17 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   background: var(--dl-gold);
   box-shadow: 0 0 0 3px rgba(188, 144, 82, .14);
 }
+/* one-click exports: quiet, always visible beside who/close */
+#trosa #customerEditModal .cw-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.05em;
+  font-size: .7em;
+  letter-spacing: .05em;
+  color: var(--dl-mut);
+  white-space: nowrap;
+}
+#trosa #customerEditModal .cw-tools .cw-link { color: inherit; }
 #trosa #customerEditModal .cw-close {
   margin-right: -.4em;
   padding: .1em .35em;
@@ -1488,6 +1499,8 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
     background: color-mix(in srgb, var(--dl-hi) 98%, transparent);
   }
   #trosa #customerEditModal .cw-who { margin-left: auto; }
+  /* the exports keep their own line so the tabs and identity never collide */
+  #trosa #customerEditModal .cw-tools { order: 1; flex-basis: 100%; }
   /* deliberate deviation from the reference: there is no other way to reach
      the sections, so the nav wraps to its own scrollable line, never hides */
   #trosa #customerEditModal .cw-nav { order: 9; width: 100%; margin-left: 0; padding-bottom: .15rem; overflow-x: auto; gap: 1.3em; scrollbar-width: none; }
@@ -1531,6 +1544,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
   #trosa #customerEditModal .cw-quick { gap: .9rem; }
   #trosa #customerEditModal .cw-row-acts .cw-link,
   #trosa #customerEditModal .cw-foot .cw-link,
+  #trosa #customerEditModal .cw-tools .cw-link,
   #trosa #customerEditModal .cw-quick .cw-link { min-height: 32px; }
 }
 @media (hover: none), (max-width: 1024px) {

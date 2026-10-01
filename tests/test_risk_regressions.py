@@ -623,6 +623,13 @@ class CalendarAndAccessTest(unittest.TestCase):
                            'customerTaskQuickActions', 'saveCustomerFooterBtn', 'editNextFollowUp'):
             self.assertIn(f'id="{element_id}"', modal)
         self.assertIn('aria-label="关闭"', modal)
+        # One-click exports live in the always-visible top bar, not buried in 资料.
+        self.assertIn('id="cwExportTools"', modal)
+        tools = modal[modal.index('id="cwExportTools"'):modal.index('aria-label="关闭"')]
+        self.assertIn('exportCurrentCustomerEmails()', tools)
+        self.assertIn("copyCustomerContext('timeline')", tools)
+        # They are not also appended into the 资料 profile footer (one canonical entry).
+        self.assertNotIn('html += \'<div class="cw-foot">', javascript)
         # The retired card-and-panel structure is gone, not restyled.
         for retired in ('customer-workspace-summary', 'customerWorkspaceSummary', 'customer-next-panel',
                         'customer-now-next-grid', 'modal-customer-workspace', 'customer-workspace-tabs'):

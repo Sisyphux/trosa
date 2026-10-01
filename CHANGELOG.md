@@ -8,7 +8,14 @@
 - 文档：`docs/AGENT_ACCESS.md` 按「可逆即自由」重写权限表、明确永不可做的动作与「出错了怎么 undo」。
 - 验证：`tests/test_agent_data_freedom.py`（策略表「未登记即拒绝 / 不可逆永不放行」、`create_customer` 去重与撤销、归档 / 恢复往返、`batch` 成功 / 中途失败回滚 / 整体撤销、令牌读 GET 成功而写方法与其它登录接口仍 403 / 401、跨成员隔离、分页 offset、CLI 端到端生命周期）与更新后的 `tests/test_agent_cli.py` 通过；完整门禁见任务证据。
 
+## 2026-10-01 — 客户工作台恢复顶栏一键导出邮箱 / 导出全部沟通
 
+- 现象：客户工作台的「导出邮箱」「导出全部沟通」在 2026-09-28 的房间化重排里被移进了「资料」分区底部，用户打开工作台时在首屏看不到；这两个动作在日常跟进里仍很常用（把客户资料、需求备注、完整沟通记录一次性复制到外部模型，或把去重后的联系人邮箱复制出来群发）。
+- 变更：把两个动作恢复到工作台顶栏，紧跟身份标记、位于关闭键之前，任何分区下都常驻可见（`#cwExportTools`，仍用安静的 `.cw-link` 文字动作，不动「一个实心按钮」的收敛）；不再在「资料」分区底部重复一份，保持单一入口。
+- 窄屏与触屏：`≤1024px` 时两个动作单独占一行，不挤占分区标签；触屏下点按目标高度与其它文字动作一致（≥32px）。动作本身与后端 `/api/customers/<id>/context?mode=timeline`、`exportCurrentCustomerEmails()` 契约完全不变。
+- 验证：`node --check app/static/app.js`、`tests.test_risk_regressions.test_customer_workspace_is_one_daylight_room`（新增顶栏入口断言）。
+
+## 2026-09-30 — 浏览器验收改为锁定的无头 Chromium：唯一运行标记、按故障类型重跑、证据按 commit 追加
 
 - 现象：真实 Chromium 验收由桌面浏览器任务驱动，多次在「main + 一个 docs 文件」上出现与改动无关的间歇性失败（同一页面等待超时、弹窗光标未落位两种错误），而失败到底该重跑还是该查缺陷没有区分；证据文件每跑一次就被整文件覆盖，发布后重跑会改写已发布的验证结论。
 - 变更（终态：自己起无头浏览器）：浏览器验收改为每次运行自己启动一个由 `browser-extension/package-lock.json` 锁定的 Playwright 无头 Chromium（`tools/run_browser_acceptance.cjs` 驱动 `tools/browser_acceptance.js` / `tools/inbox_browser_acceptance.js`），不再共用开发机上的桌面浏览器；缺 Playwright 一律硬失败，不标记为 SKIP。

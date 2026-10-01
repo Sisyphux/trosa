@@ -703,6 +703,10 @@
         <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabTasks" tabindex="-1" data-customer-tab="editTabTasks" data-key="5" onclick="switchTab(this, 'editTabTasks')">待办</button>
       </nav>
       <span class="cw-who"><i aria-hidden="true"></i><span id="cwWho"></span></span>
+      <span class="cw-tools" id="cwExportTools" aria-label="一键导出">
+        <button type="button" class="cw-link" onclick="exportCurrentCustomerEmails()" title="复制该客户全部去重联系人邮箱">导出邮箱</button>
+        <button type="button" class="cw-link" onclick="copyCustomerContext('timeline')" title="导出客户资料、需求备注与完整沟通记录">导出全部沟通</button>
+      </span>
       <button type="button" class="cw-close" onclick="closeModal('customerEditModal')" aria-label="关闭" title="关闭（Esc）">×</button>
     </header>
 
