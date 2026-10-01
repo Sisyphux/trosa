@@ -1049,11 +1049,12 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             '/api/agent/brief/today', f'/api/agent/customers/{customer_id}/workspace',
             f'/api/agent/customers/{customer_id}/timeline', '/api/agent/messages/search?q=Confirmed',
             '/api/stats', '/api/overview/stats', '/api/overview/all-customers',
-            f'/api/overview/customers/hamid/{customer_id}', '/api/calendar/refresh',
+            f'/api/overview/customers/hamid/{customer_id}',
+            '/api/reminders/today', '/api/reminders/upcoming',
             '/api/system', '/api/health',
         )
         for route in get_routes:
-            response = client.post(route) if route == '/api/calendar/refresh' else client.get(route)
+            response = client.get(route)
             self.assertEqual(response.status_code, 200, (route, response.get_json(silent=True)))
 
         # Email validation is a normal Trosa fact and must persist in the
