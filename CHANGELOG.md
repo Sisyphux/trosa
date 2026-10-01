@@ -28,6 +28,12 @@
 - 变更：把两个动作恢复到工作台顶栏，紧跟身份标记、位于关闭键之前，任何分区下都常驻可见（`#cwExportTools`，仍用安静的 `.cw-link` 文字动作，不动「一个实心按钮」的收敛）；不再在「资料」分区底部重复一份，保持单一入口。
 - 窄屏与触屏：`≤1024px` 时两个动作单独占一行，不挤占分区标签；触屏下点按目标高度与其它文字动作一致（≥32px）。动作本身与后端 `/api/customers/<id>/context?mode=timeline`、`exportCurrentCustomerEmails()` 契约完全不变。
 - 验证：`node --check app/static/app.js`、`tests.test_risk_regressions.test_customer_workspace_is_one_daylight_room`（新增顶栏入口断言）。
+## 2026-10-01 — 文档清理：修正 Sela 工作区旧路径、移除已退役的 follow-up 接口说明
+
+- 现象：`docs/architecture/trosa-system.summary.md` 仍把 Sela 的本地 runtime 路径写成 `/Users/luoxin/Desktop/Sela`，而 Sela 已于 2026-09-26 迁到 `/Users/luoxin/Sela`；`deploy/cloud/README.md` 的 sela 契约清单仍列着 `POST /api/integrations/sela/follow-up`，该路由已退役，`app.py` 中已不存在。
+- 变更：将 summary.md 中的 Sela 路径更正为 `/Users/luoxin/Sela`；从 `deploy/cloud/README.md` 删除 follow-up 提案接口条目（退役证据见本文件 `[retire-sela-follow-up]` 记录）。
+- 未改动：仅文档文字；未改动任何代码、测试、配置或数据；涉及「谁负责发送/客户关系边界」的表述保留原样，留待人工决定。
+- 验证：路径与 Sela 现行 canonical 工作区一致；`app.py` 中 `/api/integrations/sela/*` 路由核对为 16 条，无 follow-up。
 
 ## 2026-10-01 — 外联退信不再当成客户回复；时间线显示「外联退信」
 

@@ -113,7 +113,7 @@ trosa_domain.py ──→ db.py（仅取 postgres_mode）
 | 数据 schema 与兼容边界 | **强** | 来自迁移 DDL、契约文件与触发器定义 |
 | 正式 PostgreSQL 契约 | **强（本地代码 + ECS live）** | `serve.py`/`db.py`/ping 已强制；ECS release、公网 ping 和 migration ledger 已受控核验 |
 | Cloudflare Access 策略 | **未知** | 仓库只体现 Tunnel |
-| Sela 内部实现 | **已确认边界** | `/Users/luoxin/Desktop/Sela` 的本地 runtime、HTTPS Gateway、有界 outbox 和 Gmail delivery journal；不保存业务事实副本 |
+| Sela 内部实现 | **已确认边界** | `/Users/luoxin/Sela` 的本地 runtime、HTTPS Gateway、有界 outbox 和 Gmail delivery journal；不保存业务事实副本 |
 | 列级外键与生命周期取值 | **部分** | 等级词汇已查明；阶段/判词取值未核实 |
 
 ## 未决校验任务（按重要性）

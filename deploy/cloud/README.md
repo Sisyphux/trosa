@@ -90,7 +90,6 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
 - `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；读取由业务事实派生的 `lifecycle_stage` 与 `customer_linked`，不把 `trosa_id`/`customer_type` 当身份；
 - `POST /api/integrations/sela/reply`：记录已确认的真实外联结果；
-- `POST /api/integrations/sela/follow-up`：提交需要人工核对的跟进提案。
 
 当前 `sela-v2` 写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
 
