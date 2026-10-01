@@ -5033,7 +5033,7 @@ function renderTodayFacts(items, customerId) {
   body.innerHTML = items.slice(0, _TODAY_FACTS_LIMIT).map(function(item) {
     var text = richPlainText(item.content || item.subject || '', 150);
     var result = richPlainText(item.result || item.reply_content || '', 60);
-    var kind = item.activity_type || (item.type === 'outreach' ? '开发邮件' : '沟通');
+    var kind = item.activity_type ? communicationTypeLabel(item.activity_type) : (item.type === 'outreach' ? '开发邮件' : '沟通');
     return '<button type="button" class="room-row lit-row" onclick="openEditModal(' + Number(customerId) + ')">' +
       '<span class="room-dt tnum">' + escapeHtml(todayFactDate(item.date || item.follow_date || item.sent_date)) + '</span>' +
       '<span class="room-row-copy"><span class="room-tx">' + escapeHtml(text || '（无正文）') + '</span>' +
@@ -9444,7 +9444,7 @@ async function deleteCustomerFile(fileId) {
 // Follow Timeline - 混排跟进记录 + 开发信
 var _followTimelineCache = {};
 function communicationTypeLabel(type) {
-  var labels = { whatsapp:'WhatsApp', email:'邮件', phone:'电话', meeting:'会议', quote:'报价', sample:'寄样', follow_up:'其他跟进', customer_reply:'客户回复', task_completed:'完成任务' };
+  var labels = { whatsapp:'WhatsApp', email:'邮件', phone:'电话', meeting:'会议', quote:'报价', sample:'寄样', follow_up:'其他跟进', customer_reply:'客户回复', outreach_bounced:'外联退信', task_completed:'完成任务' };
   return labels[type] || type || '沟通记录';
 }
 // The timeline stores where a fact came from as an internal key. Showing the
@@ -9456,7 +9456,7 @@ function interactionSourceLabel(source) {
 }
 function customerFactLabel(type, sourceDetail) {
   var detail = String(sourceDetail || '');
-  var contactTypes = { whatsapp:1, email:1, phone:1, meeting:1, quote:1, sample:1, follow_up:1, customer_reply:1, task_completed:1 };
+  var contactTypes = { whatsapp:1, email:1, phone:1, meeting:1, quote:1, sample:1, follow_up:1, customer_reply:1, outreach_bounced:1, task_completed:1 };
   var typeLabel = type === 'outreach' ? '开发邮件'
     : (Object.prototype.hasOwnProperty.call(contactTypes, detail.toLowerCase()) ? communicationTypeLabel(detail) : '');
   var channel = interactionSourceLabel(detail);

@@ -330,5 +330,136 @@ class SelaReplyApiTest(unittest.TestCase):
         self.assertEqual(response.get_json()['reason'], 'TROSA_CUSTOMER_NOT_FOUND')
 
 
+    def test_sela_minimal_reply_payload_is_accepted(self):
+        # This is the exact minimal payload sela's agent_session_sync_replies
+        # builds: flat reply + action.event only, no intent/route/next_task.
+        outbound = outbound_payload('candidate-minimal-reply')
+        first = self.post_outbound(outbound)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        payload = {
+            'candidate_id': outbound['candidate_id'],
+            'reply': {
+                'from': 'Ana Silva <ana@acrilicos.com>',
+                'subject': 'Re: Acrylic sheet supply',
+                'body': 'Thanks, let us talk next week.',
+                'received_at': 'Mon, 17 Aug 2026 09:00:00 +0800',
+                'message_id': 'gmail-minimal-1',
+            },
+            'action': {'event': 'REPLIED'},
+            'idempotency_key': 'sela:gmail-reply:gmail-minimal-1',
+        }
+        response = self.client.post(
+            '/api/integrations/sela/reply',
+            json=payload,
+            headers=self.headers(payload['idempotency_key']),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(body['status'], 'SYNCED')
+        self.assertIsNotNone(body['activity_id'])
+
+        # The handoff makes the prospect read as engaged, so sela's send
+        # policy (relationship_stage in engaged_lead/qualified_opportunity)
+        # refuses any further outreach.
+        listed = self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers()
+        )
+        self.assertEqual(listed.status_code, 200, listed.get_data(as_text=True))
+        rows = {row['id']: row for row in listed.get_json()['prospects']}
+        view = rows[outbound['candidate_id']]
+        self.assertEqual(view['lifecycle_stage'], 'engaged_lead')
+        self.assertTrue(view['customer_linked'])
+
+    def _post_bounce(self, candidate_id, message_id='gmail-bounce-1'):
+        payload = {
+            'candidate_id': candidate_id,
+            'reply': {
+                'from': 'Mail Delivery Subsystem <mailer-daemon@googlemail.com>',
+                'subject': 'Delivery Status Notification (Failure)',
+                'body': 'Delivery to ana@acrilicos.com failed permanently.',
+                'received_at': '2026-09-10T09:00:00+08:00',
+                'message_id': message_id,
+            },
+            'action': {'event': 'BOUNCED'},
+            'idempotency_key': f'sela:gmail-bounce:{message_id}',
+        }
+        response = self.client.post(
+            '/api/integrations/sela/reply',
+            json=payload,
+            headers=self.headers(payload['idempotency_key']),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'SYNCED')
+        return response
+
+    def test_bounce_is_not_an_inbound_customer_reply(self):
+        # Regression (E2): a bounce must not be written to the timeline as an
+        # inbound customer reply.
+        outbound = outbound_payload('candidate-bounce')
+        first = self.post_outbound(outbound)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        trosa_id = first.get_json()['trosa_id']
+        self._post_bounce(outbound['candidate_id'])
+
+        conn = self.hamid_db()
+        try:
+            outreach = conn.execute(
+                'SELECT reply_status FROM outreach_emails'
+            ).fetchone()
+            self.assertEqual(outreach['reply_status'], 'bounced')
+            log = conn.execute(
+                '''SELECT direction, activity_type, content FROM follow_up_logs
+                   WHERE customer_id=? AND source='sela_reply_engine'
+                   ORDER BY id DESC LIMIT 1''',
+                (trosa_id,),
+            ).fetchone()
+            self.assertNotEqual(log['direction'], 'inbound')
+            self.assertNotEqual(log['activity_type'], 'customer_reply')
+            self.assertNotIn('客户通过 Gmail 回复', log['content'])
+        finally:
+            conn.close()
+
+    def test_bounce_does_not_engage_the_prospect(self):
+        # Regression (E1): a bounce's timestamp/body must not feed the inbound
+        # lifecycle signals, so the prospect stays a cold prospect.
+        outbound = outbound_payload('candidate-bounce')
+        first = self.post_outbound(outbound)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        self._post_bounce(outbound['candidate_id'])
+
+        listed = self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers()
+        )
+        rows = {row['id']: row for row in listed.get_json()['prospects']}
+        view = rows[outbound['candidate_id']]
+        self.assertEqual(view['outreach_status'], 'BOUNCED')
+        self.assertEqual(view['lifecycle_stage'], 'cold_prospect')
+        self.assertFalse(view['customer_linked'])
+
+
+    def test_flat_reply_payload_is_rejected(self):
+        # Regression (B): sela's old flat payload is not the reply contract;
+        # Trosa requires nested reply + action objects.
+        outbound = outbound_payload('candidate-flat')
+        first = self.post_outbound(outbound)
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        flat = {
+            'candidate_id': outbound['candidate_id'],
+            'message_id': 'gmail-flat-1',
+            'from': 'Ana Silva <ana@acrilicos.com>',
+            'subject': 'Re: Acrylic sheet supply',
+            'body': 'Old flat shape.',
+            'received_at': 'Mon, 17 Aug 2026 09:00:00 +0800',
+            'idempotency_key': 'sela:gmail-reply:gmail-flat-1',
+        }
+        response = self.client.post(
+            '/api/integrations/sela/reply',
+            json=flat,
+            headers=self.headers(flat['idempotency_key']),
+        )
+        self.assertEqual(response.status_code, 400)
+
+
 if __name__ == '__main__':
     unittest.main()

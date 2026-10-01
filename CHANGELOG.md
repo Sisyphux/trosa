@@ -29,6 +29,14 @@
 - 窄屏与触屏：`≤1024px` 时两个动作单独占一行，不挤占分区标签；触屏下点按目标高度与其它文字动作一致（≥32px）。动作本身与后端 `/api/customers/<id>/context?mode=timeline`、`exportCurrentCustomerEmails()` 契约完全不变。
 - 验证：`node --check app/static/app.js`、`tests.test_risk_regressions.test_customer_workspace_is_one_daylight_room`（新增顶栏入口断言）。
 
+## 2026-10-01 — 外联退信不再当成客户回复；时间线显示「外联退信」
+
+- 现象：Gmail 投递失败（如 mailer-daemon / postmaster 退信）此前会作为普通回信写入客户时间线，客户被误判为「已回复 / 已接触」，实际上邮件并未送达；新出现的沟通类型在页面上还会显示英文原始键名。
+- 变更（后端）：Trosa 收到 Sela 的退信同步时不再把它记成客户回复——沟通记录活动类型为 `outreach_bounced`、方向为「我方发出」，不回填「收到回复时间」、不写入邮件正文，外联回复状态保持 `bounced`，不会让客户看起来已接触；同一邮件仍按幂等键去重，重复同步不产生重复记录。
+- 变更（前端）：沟通类型标签认识 `outreach_bounced`，在客户时间线与概览中显示为「外联退信」；房间「最近沟通」列表改用同一套标签，不再直接显示原始键名。
+- 未改动：客户 / 联系人匹配、待办与下一步、Inbox 与 Search、Sela 幂等同步契约不变；退信仍保留完整证据（主题、发件人、消息 ID、正文）在沟通记录中供人判断。
+- 验证：`node --check app/static/app.js`、`py_compile app.py` 通过；`tests.test_sela_reply_api` 7 项与全量 `unittest` 636 项（skipped=1）通过。
+
 ## 2026-09-30 — 浏览器验收改为锁定的无头 Chromium：唯一运行标记、按故障类型重跑、证据按 commit 追加
 
 - 现象：真实 Chromium 验收由桌面浏览器任务驱动，多次在「main + 一个 docs 文件」上出现与改动无关的间歇性失败（同一页面等待超时、弹窗光标未落位两种错误），而失败到底该重跑还是该查缺陷没有区分；证据文件每跑一次就被整文件覆盖，发布后重跑会改写已发布的验证结论。

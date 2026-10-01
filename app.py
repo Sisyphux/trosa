@@ -5477,11 +5477,17 @@ def _sela_prospect_view(conn, profile):
         route_status = 'UNVERIFIED'
     reply_status = str(outreach.get('reply_status') or '').lower()
     stored_event = _sela_latest_reply_event(conn, int(customer['id']))
-    reply_received_at = str(
-        (outreach.get('external_updated_at') if reply_status in {'replied', 'bounced'} else '')
-        or outreach.get('reply_date')
-        or ''
-    )
+    # A bounce is a delivery failure, not an inbound customer reply. Its
+    # timestamp and body must never feed the inbound-reply lifecycle signals,
+    # otherwise a bounced prospect would look like an engaged lead.
+    if reply_status == 'bounced':
+        reply_received_at = ''
+    else:
+        reply_received_at = str(
+            (outreach.get('external_updated_at') if reply_status in {'replied', 'bounced'} else '')
+            or outreach.get('reply_date')
+            or ''
+        )
     if permission == 'do_not_contact':
         outreach_status, outcome = 'PAUSED', 'NOT_INTERESTED'
     elif reply_status == 'bounced':
@@ -5502,6 +5508,8 @@ def _sela_prospect_view(conn, profile):
     # Relationship stage comes from the same business facts Sela reads, never
     # from the presence of the customer row.  A cold prospect keeps
     # ``customer_linked=false`` even though every synced lead has a trosa_id.
+    # Bounce text is stored for the record but is not inbound customer evidence.
+    observed_inbound_body = '' if reply_status == 'bounced' else (outreach.get('reply_content') or '')
     lead_stage = _sela_prospect_lifecycle_facts({
         'business_stage': str(customer.get('business_stage') or ''),
         'status': str(customer.get('status') or ''),
@@ -5509,7 +5517,7 @@ def _sela_prospect_view(conn, profile):
         'reply_event': stored_event,
         'sent_at': outreach.get('sent_date') or '',
         'last_inbound_at': reply_received_at,
-        'last_reply_body': outreach.get('reply_content') or '',
+        'last_reply_body': observed_inbound_body,
     })
     view = {
         'id': str(profile['source_id']),
@@ -7214,8 +7222,28 @@ def sela_integration_reply():
             response=response_body, now=now,
         )
 
-    try:
-        result = record_customer_communication(trosa_id, {
+    # A bounce is not an inbound customer reply. Keep the timeline entry, but
+    # record it as an outbound delivery event so it is never mistaken for a
+    # customer response (which would make the prospect look engaged).
+    if reply_event == 'BOUNCED':
+        communication = {
+            'activity_content': (
+                '外联邮件退信\n'
+                f'主题：{subject}\n'
+                f'发件人：{str(reply.get("from") or "").strip()}\n'
+                f'消息 ID：{str(reply.get("message_id") or "").strip()}\n'
+                f'正文：\n{body}'
+            )[:30000],
+            'activity_result': activity_result,
+            'activity_type': 'outreach_bounced',
+            'direction': 'outbound',
+            'follow_date': follow_date,
+            'source': 'sela_reply_engine',
+            'source_reference': str(reply.get('message_id') or '').strip()[:1000],
+            'is_reported': True,
+        }
+    else:
+        communication = {
             'activity_content': activity_content,
             'activity_result': activity_result,
             'activity_type': 'customer_reply',
@@ -7226,7 +7254,10 @@ def sela_integration_reply():
             'source': 'sela_reply_engine',
             'source_reference': str(reply.get('message_id') or '').strip()[:1000],
             'is_reported': True,
-        }, before_commit=before_commit)
+        }
+
+    try:
+        result = record_customer_communication(trosa_id, communication, before_commit=before_commit)
     except _SelaReplyReplay as replay:
         return jsonify(replay.response_body)
     except CrmWriteError as error:
