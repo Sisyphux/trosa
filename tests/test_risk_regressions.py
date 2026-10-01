@@ -1556,6 +1556,33 @@ class CalendarAndAccessTest(unittest.TestCase):
         confirmed = session_client.post(f'/api/agent/proposals/{proposal_id}/confirm')
         self.assertEqual(confirmed.status_code, 200, confirmed.get_json())
 
+    def test_agent_gateway_lists_page_with_offset(self):
+        spec = importlib.util.spec_from_file_location('crm_app_gateway_offset_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            for index in range(5):
+                conn.execute("INSERT INTO customers (name, company) VALUES (?, ?)", (f'offset-{index}', f'Offset Co {index}'))
+            conn.commit()
+        finally:
+            conn.close()
+        session_client = module.app.test_client()
+        session_client.post('/api/auth/login', json={'user': 'hamid'})
+        token = session_client.post('/api/agent-gateway/tokens', json={'label': 'offset', 'scopes': ['crm:read']}).get_json()['data']['token']
+        gateway = module.app.test_client()
+        headers = {'Authorization': 'Bearer ' + token}
+        pages = []
+        for offset in (0, 2, 4):
+            response = gateway.get(f'/api/gateway/customers?query=Offset Co&limit=2&offset={offset}', headers=headers)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            pages.append([row['id'] for row in response.get_json()['data']['customers']])
+        flat = [cid for page in pages for cid in page]
+        self.assertEqual(len(flat), 5)
+        self.assertEqual(len(set(flat)), 5)
+        bad = gateway.get('/api/gateway/customers?query=Offset Co&limit=2&offset=abc', headers=headers)
+        self.assertEqual([row['id'] for row in bad.get_json()['data']['customers']], pages[0])
+
     def test_agent_gateway_write_uses_shared_undo_for_grouped_crm_actions(self):
         spec = importlib.util.spec_from_file_location('crm_app_gateway_write_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)

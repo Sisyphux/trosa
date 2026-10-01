@@ -13940,6 +13940,13 @@ def _gateway_limit(default=25):
         return default
 
 
+def _gateway_offset():
+    try:
+        return max(0, min(int(request.args.get('offset', 0)), 100000))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _gateway_reject_user_override(data):
     if not isinstance(data, dict):
         return False
@@ -13956,7 +13963,7 @@ def _gateway_customer_payload(row):
 @gateway_scope_required('crm:read')
 def gateway_search_customers():
     query = str(request.args.get('query') or '').strip()[:200]
-    limit = _gateway_limit()
+    limit, offset = _gateway_limit(), _gateway_offset()
     if postgres_mode():
         conn = get_db()
         try:
@@ -13971,7 +13978,7 @@ def gateway_search_customers():
                 projected['next_follow_up'] = row.get('next_task_on') or ''
                 rows.append(projected)
             rows.sort(key=lambda row: (str(row.get('updated_at') or ''), int(row.get('id') or 0)), reverse=True)
-            rows = rows[:limit]
+            rows = rows[offset:offset + limit]
         finally:
             conn.close()
         return _gateway_response({'customers': [_gateway_customer_payload(row) for row in rows]},
@@ -13984,7 +13991,7 @@ def gateway_search_customers():
     conn = get_db()
     try:
         rows = conn.execute('''SELECT id, name, company, country, last_contact, next_follow_up FROM customers WHERE '''
-                            + ' AND '.join(where) + ' ORDER BY updated_at DESC, id DESC LIMIT ?', params + [limit]).fetchall()
+                            + ' AND '.join(where) + ' ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', params + [limit, offset]).fetchall()
     finally:
         conn.close()
     return _gateway_response({'customers': [_gateway_customer_payload(row) for row in rows]}, pagination={'limit': limit, 'has_more': len(rows) == limit})
@@ -14026,7 +14033,7 @@ def gateway_get_today():
 @app.route('/api/gateway/activity', methods=['GET'])
 @gateway_scope_required('crm:read')
 def gateway_search_activity():
-    limit = _gateway_limit()
+    limit, offset = _gateway_limit(), _gateway_offset()
     customer_id = request.args.get('customer_id', type=int)
     query = str(request.args.get('query') or '').strip()[:200]
     if postgres_mode():
@@ -14053,7 +14060,7 @@ def gateway_search_activity():
                         '_created_at': item.get('created_at') or '',
                     })
             items.sort(key=lambda row: (row.get('date') or '', row.get('_created_at') or '', row.get('id') or 0), reverse=True)
-            items = items[:limit]
+            items = items[offset:offset + limit]
             for row in items:
                 row.pop('_created_at', None)
         finally:
@@ -14069,7 +14076,7 @@ def gateway_search_activity():
         rows = conn.execute('''SELECT f.id, f.customer_id, f.follow_date, f.content, f.result, f.activity_type,
                                       f.direction, f.source, c.name, c.company
                                FROM follow_up_logs f JOIN customers c ON c.id=f.customer_id WHERE ''' + ' AND '.join(where)
-                            + ' ORDER BY f.follow_date DESC, f.created_at DESC, f.id DESC LIMIT ?', params + [limit]).fetchall()
+                            + ' ORDER BY f.follow_date DESC, f.created_at DESC, f.id DESC LIMIT ? OFFSET ?', params + [limit, offset]).fetchall()
     finally:
         conn.close()
     return _gateway_response({'activities': [{'id': row['id'], 'customer_id': row['customer_id'], 'date': row['follow_date'],
@@ -14108,7 +14115,7 @@ def gateway_get_contacts(customer_id):
 @gateway_scope_required('crm:read')
 def gateway_get_open_tasks():
     customer_id = request.args.get('customer_id', type=int)
-    limit = _gateway_limit()
+    limit, offset = _gateway_limit(), _gateway_offset()
     if postgres_mode():
         conn = get_db()
         try:
@@ -14127,7 +14134,7 @@ def gateway_get_open_tasks():
                         'customer_name': customer.get('company') or customer.get('name') or '',
                     })
             tasks.sort(key=lambda row: (str(row.get('due_date') or ''), int(row.get('id') or 0)))
-            tasks = tasks[:limit]
+            tasks = tasks[offset:offset + limit]
         finally:
             conn.close()
         return _gateway_response({'tasks': tasks}, pagination={'limit': limit, 'has_more': len(tasks) == limit})
@@ -14138,7 +14145,7 @@ def gateway_get_open_tasks():
     try:
         rows = conn.execute('''SELECT r.id, r.customer_id, r.title, r.content, r.reason, r.remind_date,
                                       r.reminder_type, c.name, c.company FROM reminders r JOIN customers c ON c.id=r.customer_id
-                               WHERE ''' + ' AND '.join(filters) + ' ORDER BY r.remind_date, r.manual_order, r.id LIMIT ?', params + [limit]).fetchall()
+                               WHERE ''' + ' AND '.join(filters) + ' ORDER BY r.remind_date, r.manual_order, r.id LIMIT ? OFFSET ?', params + [limit, offset]).fetchall()
     finally:
         conn.close()
     return _gateway_response({'tasks': [{'id': row['id'], 'customer_id': row['customer_id'], 'title': row['title'] or row['content'] or '',
