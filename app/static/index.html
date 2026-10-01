@@ -211,7 +211,6 @@
             <div class="tide-later-error" id="todayUpcomingError" hidden role="alert"></div>
             <div class="tide-later-actions">
               <button class="text-action" data-module="calendar_sync" onclick="switchPage('calendar')">完整日历</button>
-              <button class="text-action" data-module="calendar_sync" onclick="openCalendarSync()">同步 Apple 日历</button>
             </div>
             <details class="today-more">
               <summary>本周记录与工作概览</summary>
@@ -474,25 +473,16 @@
         <div class="page-heading">
           <div class="page-eyebrow">时间视图</div>
           <h2>跟进日历</h2>
-          <p class="page-lede">按日期查看下一步安排；日历只读订阅，不会回写 CRM。</p>
+          <p class="page-lede">按日期查看下一步安排。</p>
         </div>
       </div>
       <div class="page-body">
-        <div class="ical-subscription">
-          <span class="ical-subscription-label">日历订阅</span>
-          <input type="text" id="icalUrlInput" class="ical-url-input" readonly value="正在获取...">
-          <button class="btn btn-sm" onclick="copyIcalUrl()">复制链接</button>
-          <button class="btn btn-sm" onclick="showIcalHelp()">使用说明</button>
-          <button class="btn btn-sm btn-primary" onclick="refreshCalendarFeed()">检查订阅内容</button>
-          <div class="ical-sync-status" id="icalSyncStatus">正在核对个人订阅源...</div>
-        </div>
         <div class="calendar-header">
           <h3 id="calendarTitle" style="font-family:var(--font-display);font-weight:600;"></h3>
           <div class="calendar-nav">
             <button class="btn-icon" onclick="changeMonth(-1)" aria-label="上个月"><span class="ui-icon ui-icon-left" aria-hidden="true"></span></button>
             <button class="btn btn-sm" onclick="goToday()">今天</button>
             <button class="btn-icon" onclick="changeMonth(1)" aria-label="下个月"><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
-            <button class="btn btn-sm" onclick="exportCalendarICS()" style="margin-left:12px;">导出日历</button>
           </div>
         </div>
         <div class="calendar-grid" id="calendarGrid"></div>

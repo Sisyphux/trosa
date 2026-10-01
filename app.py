@@ -49,7 +49,6 @@ from db import (
     backup_database, cancel_safety_backup, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
     DB_DIR, run_startup_maintenance, entry_field_color,
 )
-from ical_gen import build_icalendar
 from scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 from app.engine import (
     fetch_website_content,
@@ -18710,124 +18709,7 @@ def recover_excel_history():
         return jsonify({'success': False, 'error': f'恢复失败：{str(e)}'}), 500
 
 
-# ========== 日历 API ==========
-
-def _get_calendar_token(user, rotate=False):
-    if user not in USERS:
-        return ''
-    key = f'calendar_subscription_token:{user}'
-    conn = get_system_db()
-    try:
-        row = conn.execute('SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
-        token = str(row['value'] or '') if row else ''
-        if rotate or len(token) < 32:
-            token = secrets.token_urlsafe(32)
-            conn.execute('''INSERT INTO app_settings (key, value, updated_at)
-                            VALUES (?, ?, datetime('now', 'localtime'))
-                            ON CONFLICT(key) DO UPDATE SET value=excluded.value,
-                                updated_at=excluded.updated_at''', (key, token))
-            conn.commit()
-        return token
-    finally:
-        conn.close()
-
-
-def _calendar_user_from_token(token):
-    if not token:
-        return ''
-    conn = get_system_db()
-    try:
-        rows = conn.execute("SELECT key, value FROM app_settings WHERE key LIKE 'calendar_subscription_token:%'").fetchall()
-    finally:
-        conn.close()
-    for row in rows:
-        stored = str(row['value'] or '')
-        if stored and secrets.compare_digest(stored, token):
-            user = row['key'].split(':', 1)[1]
-            return user if user in USERS else ''
-    return ''
-
-
-def _calendar_feed_data(user):
-    """Return the same actionable reminder set used by the signed-in calendar."""
-    today = _calendar_today()
-    previous_user = get_current_user()
-    set_db_user(user)
-    conn = get_db()
-    try:
-        if postgres_mode():
-            # Calendar is a read-only presentation of the canonical Task
-            # queue.  It must not resurrect the retired reminders table or
-            # infer customer identity from a compatibility payload.
-            customer_by_id = {
-                int(row['id']): row for row in _active_customers(conn)
-            }
-            active = []
-            for customer in customer_by_id.values():
-                for task in _customer_tasks(conn, int(customer['id'])):
-                    if (task.get('remind_date') or '')[:10] < today.isoformat():
-                        continue
-                    created_at = task.get('created_at') or '2000-01-01 00:00:00'
-                    active.append({
-                        'id': task['id'], 'customer_id': task['customer_id'],
-                        'title': task.get('title') or '', 'content': task.get('content') or '',
-                        'reason': task.get('reason') or '',
-                        'remind_date': task.get('remind_date') or '',
-                        'created_at': created_at, 'completed_at': task.get('completed_at'),
-                        'customer_name': customer.get('company') or customer.get('name') or '客户',
-                        'source': 'reminder', 'status': 'CONFIRMED',
-                        'changed_at': created_at,
-                    })
-            active.sort(key=lambda row: (row.get('remind_date') or '', row.get('id') or 0))
-        else:
-            active = conn.execute('''
-                SELECT r.id, r.customer_id, r.title, r.content, r.reason,
-                       r.remind_date, r.created_at, r.completed_at,
-                       COALESCE(NULLIF(TRIM(c.company), ''), NULLIF(TRIM(c.name), ''), '客户') customer_name,
-                       'reminder' source, 'CONFIRMED' status,
-                       COALESCE(NULLIF(r.created_at, ''), '2000-01-01 00:00:00') changed_at
-                FROM reminders r
-                JOIN customers c ON c.id = r.customer_id
-                WHERE r.is_done = 0 AND r.remind_date >= ?
-                  AND COALESCE(r.reminder_type, '') NOT LIKE 'outreach_%'
-                  AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-                ORDER BY r.remind_date, r.id
-            ''', (today.isoformat(),)).fetchall()
-    finally:
-        conn.close()
-        set_db_user(previous_user)
-    rows = [dict(row) for row in active]
-    last_changed = max((row.get('changed_at') or '' for row in rows), default='2000-01-01 00:00:00')
-    return {
-        'rows': rows,
-        'active_count': len(active),
-        'cancelled_count': 0,
-        'last_changed_at': last_changed,
-    }
-
-
-@app.route('/api/calendar/ical/<token>.ics')
-def calendar_ical(token):
-    """Private, read-only feed for one user; no browser session is required."""
-    user = _calendar_user_from_token(token)
-    if not user:
-        return Response('日历订阅链接无效或已更新。\n', status=404, mimetype='text/plain')
-    feed = _calendar_feed_data(user)
-    content = build_icalendar(
-        feed['rows'], owner_id=user, calendar_name='客户跟进',
-        timezone_name='Asia/Shanghai', last_modified=feed['last_changed_at'],
-    )
-    etag = hashlib.sha256(content.encode('utf-8')).hexdigest()
-    if request.if_none_match and request.if_none_match.contains(etag):
-        response = Response(status=304)
-    else:
-        response = Response(content, mimetype='text/calendar; charset=utf-8')
-    response.set_etag(etag)
-    response.headers['Cache-Control'] = 'private, no-cache, must-revalidate'
-    response.headers['X-Calendar-Owner'] = user
-    response.headers['X-Calendar-Active-Count'] = str(feed['active_count'])
-    return response
-
+# ========== 网络 ==========
 
 def _discover_local_ip():
     """Best-effort LAN address for this host. Returns (local_ip, all_ips)."""
@@ -18859,50 +18741,18 @@ def _request_port():
     return request.host.split(':')[1] if ':' in request.host else '8080'
 
 
-@app.route('/api/network/ip')
-@login_required
-def get_local_ip():
-    local_ip, ips = _discover_local_ip()
-    port = _request_port()
-    token = _get_calendar_token(g.current_user)
-    feed = _calendar_feed_data(g.current_user)
-    return jsonify({
-        'local_ip': local_ip, 'all_ips': ips, 'port': port,
-        'subscribe_url': f'{os.environ.get("CRM_PUBLIC_URL", f"{request.scheme}://{request.host}").rstrip("/")}/api/calendar/ical/{token}.ics',
-        'active_count': feed['active_count'],
-        'cancelled_count': feed['cancelled_count'],
-        'last_changed_at': feed['last_changed_at'],
-        'test_url': f'http://{local_ip}:{port}/api/network/ping',
-    })
-
-
 @app.route('/api/network/lan')
 def network_lan():
     """Address a colleague on the same office network can open.
 
     The account-selection page runs before any session exists, so this has to be
-    readable anonymously; it is deliberately narrow and never exposes the
-    calendar subscribe token that /api/network/ip carries.  Production is served
+    readable anonymously; it is deliberately narrow.  Production is served
     through the public tunnel, so the LAN hint is switched off there.
     """
     if _production_mode:
         return jsonify({'enabled': False})
     local_ip, _ips = _discover_local_ip()
     return jsonify({'enabled': True, 'local_ip': local_ip, 'port': _request_port()})
-
-
-@app.route('/api/calendar/refresh', methods=['POST'])
-@login_required
-def calendar_refresh():
-    """Confirm server-side feed freshness without claiming to push to Apple."""
-    feed = _calendar_feed_data(g.current_user)
-    return jsonify({
-        'success': True,
-        'active_count': feed['active_count'],
-        'cancelled_count': feed['cancelled_count'],
-        'last_changed_at': feed['last_changed_at'],
-        'message': '订阅源已是最新，Apple 日历会在下次获取时同步',
-    })
 
 
 @app.route('/api/network/ping')

@@ -37,7 +37,7 @@ ECS 单机：127.0.0.1:8080（Waitress 8线程 / Flask 单进程单体）
         │     ├─ postgres_schema_contract.py：63 必需关系 + 38 必需视图的契约
         │     └─ postgres_compat.py（延迟导入）：SQLite形状SQL改写路由到PG
         ├─ 可选层：app/engine.py（模型调用/网站读取）、gmail_sync.py（只读同步）、
-        │          email_verifier.py（MX+握手，不发DATA）、ical_gen.py（ICS订阅）、
+        │          email_verifier.py（MX+握手，不发DATA）、
         │          scheduler.py、maintenance.py、config.py
         └─ 前端：app/static（原生JS单页，无构建步骤）+ visual-v2.css
         ↓
@@ -60,7 +60,7 @@ PostgreSQL（ECS本机容器，仅监听127.0.0.1:5432）——正式唯一业�
 形态总结：**单进程 Flask 单体 + 单一 PostgreSQL 事实源 + 原生JS前端 + MV3采集扩展**。
 没有微服务、没有消息队列、没有前端构建产物。复杂度集中在**数据兼容边界**，
 不在分布式协作。模块依赖为清晰单向无环（`serve→db→contract`，
-`app→{db,trosa_domain,gmail_sync,scheduler,ical_gen,config,app.engine}`，
+`app→{db,trosa_domain,gmail_sync,scheduler,config,app.engine}`，
 `gmail_sync→{trosa_domain,db,app.engine}`，`trosa_domain→db`仅取postgres_mode）。
 
 路由面实测：158 条 = 154 API（31个`/api`前缀；最大为 customers 36、integrations 21、
@@ -80,7 +80,6 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | 外部只读/集成 | `/api/integrations/sela/*` + 普通业务读 API + `/api/agent/*` | Sela 服务身份可只读客户/沟通/Today/Inbox；`/api/agent/*` 限登录会话原子读取与确认式提案；`/api/gateway/*` 个人 token 入口保留可用 | 在用 |
 | Gmail同步 | `gmail_sync.py` + 5条集成路由 | `gmail.readonly`；仅唯一精确邮箱匹配自动写入，其余进Inbox | 可选，关闭不影响核心 |
 | AI辅助 | `app/engine.py` | 沟通整理/截图识别/官网导入/问答；只预填与草稿，不直接写入 | 可选，关闭核心完整可用 |
-| 日历 | `ical_gen.py` | 个人ICS订阅，只读，不回写 | 在用 |
 | 调度器 | `scheduler.py` | 到期提醒、可选监控、后台任务（与Web同进程） | 在用 |
 | 备份恢复 | `deploy/cloud/*.sh` + 应用undo | PG logical dump+附件bundle+SHA-256+restore-check；`undo_actions`冲突感知快照 | 在用 |
 | 导入导出 | 应用内Excel链路 | 导入/导出/历史恢复格式；保留来源指纹；不可靠匹配进审阅 | 在用 |
@@ -99,7 +98,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 - `customer_facts` 是“关系与下一步”事实的唯一共享定义；各页面不得各自拼装。
 - 写入统一走 `trosa_domain.py`；`POST /api/customers/<id>/follow_history` 自动完成匹配到期待办、
   建立下一待办、成功后才解决Inbox信号。Inbox“记录客户回复”复用同一确认入口，不另建写入路径。
-- Excel 只是格式，不做持续双向同步；Apple日历只是ICS订阅；iCloud链路不存在。
+- Excel 只是格式，不做持续双向同步；Apple 日历 ICS 订阅已退役（2026-10-01）；iCloud链路不存在。
 
 ## 5. 权限边界
 
@@ -190,7 +189,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 ## 12. 事实 / 推断 / 不确定
 
 - 已确认事实：单体形态、无蓝图158路由、单向无环依赖、trosa_domain唯一写入通道、
-  PG为正式唯一源、正式运行 guard/health 契约、兼容层可写触发器机制、Sela/Gmail/ICS/AI
+  PG为正式唯一源、正式运行 guard/health 契约、兼容层可写触发器机制、Sela/Gmail/AI
   边界、冻结清单、三类兼容层故障史、90个共享account计数（2026-09-07只读核验）；
   ECS 最近一次运行代码 release 为 `auto-20260912085022-9d7d87b`，公网正式契约通过，生产库
   `audit.schema_migrations` 0001–0029 全部通过，两个 legacy reference orphan count 为 0。

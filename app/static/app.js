@@ -280,8 +280,8 @@ function applyHoverLabels(root) {
 var _ICON_ONLY_ACTIONS = {
   '关闭': ['close', '关闭'], '取消': ['close', '取消'], '删除': ['trash', '删除'],
   '编辑': ['edit', '编辑'], '快速编辑': ['edit', '快速编辑'], '导出邮箱': ['mail', '导出邮箱'],
-  '导出全部沟通': ['export', '导出全部沟通'], '导出日历': ['export', '导出日历'],
-  '同步 Apple 日历': ['calendar', '同步 Apple 日历'], '完整日历': ['calendar', '打开完整日历'],
+  '导出全部沟通': ['export', '导出全部沟通'],
+  '完整日历': ['calendar', '打开完整日历'],
   '复制链接': ['link', '复制链接'], '使用说明': ['info', '使用说明'], '操作日志': ['list', '操作日志'],
   '一键诊断': ['settings', '一键诊断'], '重新加载': ['refresh', '重新加载'],
   '重新检测': ['refresh', '重新检测'], '查看原文': ['open', '查看原文'], '清空': ['trash', '清空'],
@@ -295,8 +295,7 @@ var _INLINE_ICON_ACTIONS = {
   '记录沟通': 'message',
   '添加客户': 'plus',
   '批量记录': 'list',
-  '打开完整日历': 'calendar',
-  '同步 Apple 日历': 'calendar'
+  '打开完整日历': 'calendar'
 };
 
 function applyIconButtons(root) {
@@ -1312,7 +1311,7 @@ function switchPage(page) {
     case 'dashboard': loadDashboard(); break;
     case 'inbox': loadInbox(); break;
     case 'customers': loadCustomers(); break;
-    case 'calendar': loadCalendar(); initIcalUrl(); break;
+    case 'calendar': loadCalendar(); break;
     case 'history': loadHistory(); break;
     case 'logs': loadLogs(); break;
     case 'settings': loadSettings(); break;
@@ -1873,7 +1872,7 @@ function scheduleGlobalSync() {
     else if (currentPage === 'dashboard') loadDashboard();
     else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else if (currentPage === 'overview') loadOverview();
-    else if (currentPage === 'calendar') { loadCalendar(); initIcalUrl(); }
+    else if (currentPage === 'calendar') { loadCalendar(); }
   }, 180);
 }
 
@@ -5237,11 +5236,6 @@ function showTodayScheduleDetail(dateStr) {
   el.innerHTML = html + '</div>';
 }
 
-function openCalendarSync() {
-  switchPage('calendar');
-  initIcalUrl();
-}
-
 async function loadWeeklyFollowList(prefetchedData) {
   try {
     var data = prefetchedData || await api('/api/my-weekly-logs');
@@ -5447,7 +5441,7 @@ async function submitTodayQuickEdit() {
 var MODULE_LABELS = {
   ai_assistant: ['沟通整理', '按需总结沟通记录'],
   email_validation: ['邮箱验证', '邮箱检查与批量导入'],
-  calendar_sync: ['日历同步', '完整日历与 Apple 日历'],
+  calendar_sync: ['完整日历', '按月查看待办安排'],
   weekly_overview: ['本周工作', '周度工作汇总'],
   outreach: ['开发邮件', '开发信与回复记录'],
   excel_import: ['Excel 导入', '历史表格导入与恢复']
@@ -11209,92 +11203,6 @@ function changeMonth(delta) {
 
 function goToday() {
   var now = new Date(); calendarYear = now.getFullYear(); calendarMonth = now.getMonth(); loadCalendar();
-}
-
-function exportCalendarICS() {
-  if (Object.keys(calendarData).length === 0) { showToast('没有可导出的任务', 'warning'); return; }
-  var ics = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//CRM Follow-up//EN\r\n';
-  for (var date in calendarData) {
-    var tasks = calendarData[date];
-    tasks.forEach(function(t) {
-      var d = date.replace(/-/g, '');
-      ics += 'BEGIN:VEVENT\r\nDTSTART;VALUE=DATE:' + d + '\r\nDTEND;VALUE=DATE:' + d + '\r\nSUMMARY:' + (t.customer_name || 'Follow-up') + '\r\nDESCRIPTION:' + (t.content || '').replace(/[,;\\n]/g, ' ') + '\r\nEND:VEVENT\r\n';
-    });
-  }
-  ics += 'END:VCALENDAR';
-  var blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a'); a.href = url; a.download = 'followup_calendar.ics'; a.click();
-  URL.revokeObjectURL(url);
-  showToast('日历导出成功', 'success');
-}
-
-// ========== CALENDAR SUBSCRIPTION (iCal) ==========
-function initIcalUrl() {
-  var input = document.getElementById('icalUrlInput');
-  var status = document.getElementById('icalSyncStatus');
-  if (!input) return;
-  input.value = '正在检测网络...';
-  api('/api/network/ip').then(function(net) {
-    input.value = net.subscribe_url || '';
-    if (status) {
-      status.textContent = calendarFeedStatus(net);
-    }
-  }).catch(function() {
-    input.value = '获取个人订阅链接失败';
-    if (status) status.textContent = '请确认服务正在运行后重试';
-  });
-}
-
-function calendarFeedStatus(data) {
-  var changed = data.last_changed_at && !data.last_changed_at.startsWith('2000-') ? data.last_changed_at : '';
-  var activeCount = Number(data.active_count) || 0;
-  if (changed) return '订阅源已更新：' + changed + (activeCount ? '' : ' · 暂无待办');
-  return activeCount ? activeCount + ' 项待办' : '暂无待办';
-}
-
-function copyIcalUrl() {
-  var input = document.getElementById('icalUrlInput');
-  if (!input || !/^https?:\/\//.test(input.value)) { showToast('个人订阅链接尚未就绪', 'warning'); return; }
-  input.select();
-  try {
-    document.execCommand('copy');
-    showToast('订阅链接已复制', 'success');
-  } catch(e) {
-    showToast('复制失败，请手动复制', 'error');
-  }
-}
-
-function showIcalHelp() {
-  var helpHtml = '<div style="max-width:500px;">' +
-    '<h3 style="font-weight:600;margin-bottom:14px;">在 iPhone 上订阅日历</h3>' +
-    '<ol style="margin:0;padding-left:20px;line-height:1.8;font-size:0.85rem;color:var(--fg-secondary);">' +
-    '<li>打开 iPhone <strong>设置</strong> App</li>' +
-    '<li>依次选择 <strong>App</strong>、<strong>日历</strong></li>' +
-    '<li>依次选择 <strong>日历账户</strong>、<strong>添加账户</strong></li>' +
-    '<li>依次选择 <strong>其他</strong>、<strong>添加已订阅的日历</strong></li>' +
-    '<li>粘贴上方链接，轻点 <strong>下一步</strong></li>' +
-    '</ol>' +
-    '<p style="margin-top:14px;font-size:0.82rem;color:var(--danger);">如果以前订阅过不带个人令牌的旧链接，请先在日历账户中取消旧订阅，再添加当前个人链接，避免手机继续显示旧缓存。</p>' +
-    '<p style="margin-top:14px;font-size:0.82rem;color:var(--fg-muted);">这是当前账号的私有只读链接，请勿转发。完成、新建或改期待办后，Trosa 会立即更新订阅源；iPhone 会在下一次获取时同步，也可以在日历中下拉刷新。</p>' +
-    '<p style="font-size:0.82rem;color:var(--fg-muted);">如验证失败：先在 iPhone Safari 浏览器中打开链接测试能否访问，如无法访问请检查防火墙设置（需放行 TCP 8080 端口）。</p>' +
-    '</div>';
-  
-  // 用已有的自定义 modal 展示
-  showCustomModal('日历订阅说明', helpHtml);
-}
-
-function refreshCalendarFeed() {
-  var status = document.getElementById('icalSyncStatus');
-  showToast('正在检查个人订阅源...', 'info');
-  api('/api/calendar/refresh', { method: 'POST' }).then(function(data){
-    if (data.success) {
-      if (status) status.textContent = calendarFeedStatus(data);
-      showToast('订阅源已是最新，Apple 日历会在下次获取时同步', 'success');
-    }
-  }).catch(function() {
-    showToast('检查失败，请确认服务正在运行', 'error');
-  });
 }
 
 var _ephemeralModalSeq = 0;

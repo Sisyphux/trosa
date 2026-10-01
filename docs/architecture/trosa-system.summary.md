@@ -31,11 +31,11 @@ Trosa 是一个**三人使用的外贸 CRM 工作台**，形态是「**单进程
 
 ## 系统边界（L1）
 
-**边界内**：客户、联系人、沟通时间线、待办/Today、Inbox、Search、日历（ICS 订阅）、归档恢复、导入导出、备份，以及受限的 Sela 同步接口。
+**边界内**：客户、联系人、沟通时间线、待办/Today、Inbox、Search、日历、归档恢复、导入导出、备份，以及受限的 Sela 同步接口。
 
-**边界外**：Sela（外联代理）、Google Gmail API、AI 模型服务、收件方邮件服务器、Apple 日历、Cloudflare 边缘。
+**边界外**：Sela（外联代理）、Google Gmail API、AI 模型服务、收件方邮件服务器、Cloudflare 边缘。
 
-**关键边界特征**：外部系统一律**单向或只读**。Gmail 是 `gmail.readonly`；Apple 日历只订阅 ICS、不能回写；邮箱验证只做 MX + 握手、不发 `DATA`；Sela 只能同步**已确认**外联。发送消息、报价、价格与交期承诺始终由人完成——这既是产品规则，也体现在接口设计里。
+**关键边界特征**：外部系统一律**单向或只读**。Gmail 是 `gmail.readonly`；邮箱验证只做 MX + 握手、不发 `DATA`；Sela 只能同步**已确认**外联。发送消息、报价、价格与交期承诺始终由人完成——这既是产品规则，也体现在接口设计里。
 
 ## 关键容器与运行单元（L2）
 
@@ -72,7 +72,7 @@ serve.py ──→ db.py ──→ postgres_schema_contract.py
     │          └─────→ postgres_compat.py（延迟导入）
     └──→ scheduler.py ──→ email_verifier.py（延迟）
                    └───→ gmail_sync.py（延迟）
-app.py ──→ { db, trosa_domain, gmail_sync, scheduler, ical_gen, config, app.engine }
+app.py ──→ { db, trosa_domain, gmail_sync, scheduler, config, app.engine }
 gmail_sync.py ──→ { trosa_domain, db, app.engine }
 trosa_domain.py ──→ db.py（仅取 postgres_mode）
 ```

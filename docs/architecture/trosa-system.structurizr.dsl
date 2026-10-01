@@ -37,7 +37,6 @@ workspace "Trosa 外贸 CRM" "三人使用的外贸 CRM 工作台。当前状态
 
         recipientMta = softwareSystem "收件方邮件服务器" "SMTP 可达性探测：MX 查询 + 握手，不发送 DATA。默认关闭。" "External"
 
-        appleCalendar = softwareSystem "Apple 日历" "仅订阅 /api/calendar/ical/<token>.ics，单向只读，不能回写 CRM。" "External"
 
         // ============================================================
         // 系统边界
@@ -71,7 +70,6 @@ workspace "Trosa 外贸 CRM" "三人使用的外贸 CRM 工作台。当前状态
 
                 backgroundJobs = component "后台调度（scheduler.py）" "APScheduler（Asia/Shanghai）：每日本地快照 02:15、邮箱验证 worker、Gmail 同步 worker。161 行。" "Python"
 
-                icsGen = component "ICS 生成（ical_gen.py）" "RFC 5545 日历源生成，供 Apple 日历订阅。143 行。" "Python"
 
                 settings = component "配置（config.py）" "存储保留策略与邮箱验证开关。45 行。" "Python"
             }
@@ -101,13 +99,11 @@ workspace "Trosa 外贸 CRM" "三人使用的外贸 CRM 工作台。当前状态
 
         appServer -> postgres "读写业务数据" "SQL（经 postgres_compat 或 psycopg）"
         appServer -> evidenceStore "读写附件与回滚材料" "文件"
-        appServer -> icsGen "生成 ICS 订阅源" "in-process"
 
         sela -> appServer "同步已确认外联" "HTTPS + Bearer（/api/integrations/sela/*）"
         appServer -> gmailApi "增量读取邮件（只读）" "HTTPS / OAuth"
         appServer -> llmProviders "可选：AI 能力" "HTTPS"
         appServer -> recipientMta "可选：SMTP 可达性探测" "SMTP（不发送 DATA）"
-        appleCalendar -> appServer "订阅 ICS 日历源" "HTTPS GET"
 
         // 组件级关系（来自真实 import 边）
         routeLayer -> domainCore "调用业务读写模型"

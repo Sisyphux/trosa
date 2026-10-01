@@ -1,3 +1,10 @@
+## 2026-10-01 — 移除 Apple 日历（ICS 订阅）功能
+
+- 用户可见变化：Today「接下来 14 天」下方不再有「同步 Apple 日历」；完整日历页去掉「日历订阅」栏（订阅链接、复制、使用说明、检查订阅内容）和「导出日历」按钮；设置里的「日历同步」开关改名为「完整日历」。按月查看待办的完整日历页保持不变。
+- 接口：删除 `/api/calendar/ical/<token>.ics`、`/api/calendar/refresh`、`/api/network/ip` 与 `ical_gen.py`。已订阅的 Apple 日历会显示链接无效；团队确认无人使用。`app_settings` 中已有的 `calendar_subscription_token:*` 历史行保留不动。
+- 文档：`AGENTS.md`、`README.md`、`使用说明.md`、`PRODUCT_DIRECTION.md`、`DEPLOYMENT.md` 与架构文档同步去掉 Apple 日历 / ICS 口径。
+- 验证：新增 `test_apple_calendar_subscription_is_retired`（路由、文件、前端文案均已移除，完整日历页与模块开关保留）。
+
 ## 2026-10-01 — Agent 数据访问改为「可逆即自由」：动作策略表 + 增删改查放开 + CLI 直写
 
 - 产品原则变更：无人值守的后台自动化（Sela、AI 预填、定时任务）仍不得自动创建客户、联系人、待办或商业承诺；但在成员本人指令下，持有 `crm:write` 令牌的 Agent 可以直接**新增、修改、调整日程、归档 / 恢复**，每一步都保留来源、审计与撤销。永久删除、对外发送消息、报价、价格与交期承诺仍由人完成。

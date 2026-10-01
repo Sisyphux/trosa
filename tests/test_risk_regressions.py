@@ -23,7 +23,6 @@ import db
 import postgres_schema_contract as postgres_contract
 from postgres_compat import _translate_sql
 import scheduler
-from ical_gen import build_icalendar
 from tools.unified_postgres_import import (
     compat_dedupe_key, compat_uuid, clean, domain, legacy_bool, legacy_int, parse_time,
     sela_evidence_entries,
@@ -233,14 +232,22 @@ class CalendarAndAccessTest(unittest.TestCase):
             os.environ['CRM_SEED_DEMO_DATA'] = self.original_demo
         self.tempdir.cleanup()
 
-    def test_shanghai_timestamp_converts_to_utc_without_changing_all_day_date(self):
-        feed = build_icalendar([{
-            'id': 7, 'source': 'reminder', 'customer_name': '客户', 'title': '跟进',
-            'remind_date': '2026-07-27', 'created_at': '2026-07-27 08:00:00',
-        }], owner_id='hamid', last_modified='2026-07-27 08:00:00')
-        self.assertIn('LAST-MODIFIED:20260727T000000Z', feed)
-        self.assertIn('DTSTART;VALUE=DATE:20260727', feed)
-        self.assertIn('DTEND;VALUE=DATE:20260728', feed)
+    def test_apple_calendar_subscription_is_retired(self):
+        spec = importlib.util.spec_from_file_location('crm_app_calendar_retired_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        rules = {rule.rule for rule in module.app.url_map.iter_rules()}
+        for retired in ('/api/calendar/refresh', '/api/network/ip', '/api/calendar/ical/<token>.ics'):
+            self.assertNotIn(retired, rules)
+        self.assertFalse((ROOT / 'ical_gen.py').exists())
+        index = (ROOT / 'app/static/index.html').read_text(encoding='utf-8')
+        javascript = (ROOT / 'app/static/app.js').read_text(encoding='utf-8')
+        for gone in ('ical-subscription', 'icalUrlInput', 'Apple 日历', 'exportCalendarICS'):
+            self.assertNotIn(gone, index)
+            self.assertNotIn(gone, javascript)
+        # The month view and its module switch stay.
+        self.assertIn('id="page-calendar"', index)
+        self.assertIn('calendar_sync', module._OPTIONAL_MODULES)
 
     def test_scheduler_uses_shanghai_time(self):
         self.assertEqual(str(scheduler.SCHEDULER_TIMEZONE), 'Asia/Shanghai')
@@ -725,7 +732,7 @@ class CalendarAndAccessTest(unittest.TestCase):
         # (8bb4553 re-purposed #completeCustomerName as the dialog title, so its
         # old modal-fact-value hook is now the complete-sheet what/task pair.)
         for moved in ('class="modal-note"', 'class="modal-subhead"', 'class="report-cat-section" id="reportCatSection"',
-                      'class="ical-subscription"', 'class="complete-what" id="completeSummary"'):
+                      'class="complete-what" id="completeSummary"'):
             self.assertIn(moved, index)
         self.assertNotIn('style="margin-bottom:16px;padding:12px;background:var(--brand-50)', index)
         self.assertNotIn('data-cat="follow" style=', index)

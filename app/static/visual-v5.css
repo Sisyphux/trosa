@@ -2515,12 +2515,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .modal .smart-preview-contacts li strong,
 #trosa .modal .smart-preview-contacts li span { color: var(--dl-ink); font-size: .84rem; font-weight: 400; }
 
-/* ---- pages: the calendar subscription is a line of text, its link keeps a box ---- */
-#trosa .ical-subscription { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--dl-hair-2); }
-#trosa .ical-subscription-label { color: var(--dl-mut); font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
-#trosa .ical-url-input { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--dl-hair); border-radius: 4px; background: none; color: var(--dl-mut); font-family: monospace; font-size: .78rem; }
-#trosa .ical-sync-status { flex-basis: 100%; color: var(--dl-mut); font-size: .76rem; }
-
 /* ============================================================================
    9. COMPLETE MODAL — 完成这次跟进
    Two sentences: what happened today, and what comes next. Everything below is paper and ink.
