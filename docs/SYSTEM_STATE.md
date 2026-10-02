@@ -12,7 +12,7 @@
 
 ## 1. 系统目标
 
-Trosa 是**三人使用的外贸 CRM 工作台**。只做一件事：
+Trosa 是**目前四人使用**、设计上不限于四人、可按需增加使用者的外贸 CRM 工作台。只做一件事：
 
 > **恢复客户上下文 → 执行已确认动作 → 记录实际事实 → 按需确认下一步及日期。**
 
@@ -103,7 +103,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 ## 5. 权限边界
 
 - 写入绑定已认证用户，落到其 PostgreSQL 组织作用域；`TRADE_OS_DATABASE_URL` 是正式写入边界。
-- 跨用户读取只返回白名单字段；三位用户（Hamid/Amy/Kelley）数据隔离。
+- 跨用户读取只返回白名单字段；现有账号（Hamid/Amy/Kelley）数据隔离（以上为当前系统内已有账号）。
 - 客户/联系人自动确认只允许**规范化后唯一精确邮箱或手机号**；名称、昵称、公司简称、
   不完整电话只进候选/待审阅。
 - Sela 用独立 Bearer token（prospect/exclusion `sela-v2`，并复用同一受限身份只读客户/沟通/Today/Inbox）；

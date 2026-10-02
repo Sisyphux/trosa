@@ -70,7 +70,7 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
 `deploy/macos/` 只保留灾难恢复所需的备用运行入口：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于在确认 ECS 已停止且 Mac 将成为唯一正式主机后启动 `serve.py`。它们要求 `CRM_ENV=production`、PostgreSQL backend、非空 DSN 和 `PGPASSFILE`；缺少任何一项都会在启动前失败，不会启动 SQLite writer。ECS 正常运行期间不得启用这套备用入口。
 
-- 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；三位用户的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 PostgreSQL 兼容设置表（按当前用户作用域隔离）。
+- 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；各账号的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 PostgreSQL 兼容设置表（按当前用户作用域隔离）。
 - 只有执行灾难回退并让 Mac 成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`；切换前先停止 ECS 的应用与 Tunnel，并确认没有第二个 writer。
 - Mac 上的 `CRM_DB_PATH` 只可保存附件、导入来源和 SQLite 回滚材料；正式业务表、事务和身份仍在 PostgreSQL。不要把任何 `data/` 目录解释为日常业务数据库。
 - 日常开发始终在桌面项目目录完成。任何代码发布都必须经过仓库的发布门禁和 PostgreSQL 健康门；不要用旧的本地启动器复制或合并业务数据。
@@ -134,7 +134,7 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
 5. 创建 Cloudflare Named Tunnel，修改 `deploy/cloudflared-config.yml.example` 中的域名和 Tunnel UUID，并把 cloudflared 注册为系统服务。
 
-6. 在 Cloudflare Zero Trust 中创建 Access Application，只允许三位团队成员邮箱，并为 Tunnel 开启“Protect with Access”。应用访问码继续保留，形成两层访问控制。
+6. 在 Cloudflare Zero Trust 中创建 Access Application，只允许团队成员邮箱，并为 Tunnel 开启“Protect with Access”。应用访问码继续保留，形成两层访问控制。
 
 ### Gmail 沟通同步（可选）
 
@@ -167,13 +167,13 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 3. 每月在测试目录恢复一次。
 4. 恢复前先保留当前版本；恢复后核对数据库完整性、客户数、最近沟通和待办。
 5. `data/`、`.env` 和备份文件均不得提交到 Git。
-6. 每季度在备用机完成一次真实演练：从异地副本恢复、启动服务、以测试地址登录并检查三位用户的数据；演练结束后关闭备用机服务，避免双写。
+6. 每季度在备用机完成一次真实演练：从异地副本恢复、启动服务、以测试地址登录并检查现有账号的数据；演练结束后关闭备用机服务，避免双写。
 
 ## 上线验收
 
 - 公网 HTTPS 域名可用，家庭公网 IP 和 8080 端口未直接暴露。
 - Cloudflare Access 只接受授权邮箱。
-- 三位用户分别使用自己的访问码登录，数据互相隔离。
+- 各账号分别使用自己的访问码登录，数据互相隔离。
 - 在未配置模型密钥的情况下，可创建客户、记录沟通、安排待办、处理 Inbox、导入 Excel、打开日历并创建恢复快照。
 - 重启服务器后 `trade-os` 与 `cloudflared` 自动恢复。
 - 异地 PostgreSQL dump 与附件 bundle 已完成一次真实恢复演练。
@@ -182,4 +182,4 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 
 ## 当前容量边界
 
-PostgreSQL 与单进程服务适合当前三人低并发使用。出现高频同时编辑、十几位以上用户、异地高可用或多应用实例需求时，再评估托管化、高可用、读写分离和备份恢复自动化。
+PostgreSQL 与单进程服务适合目前四人低并发使用。出现高频同时编辑、十几位以上用户、异地高可用或多应用实例需求时，再评估托管化、高可用、读写分离和备份恢复自动化。

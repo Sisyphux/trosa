@@ -85,7 +85,7 @@ PostgreSQL（ECS 正式唯一业务源）
 文件存储（/var/lib/trade-os/uploads/）
 ```
 
-当前三位用户通过统一 PostgreSQL 中的 `identity.memberships` 和兼容引用隔离数据；不再把用户数据库作为正式运行时的物理分片。应用采用单进程运行，符合当前低并发规模。
+目前四人使用；账号通过统一 PostgreSQL 中的 `identity.memberships` 和兼容引用隔离数据；不再把用户数据库作为正式运行时的物理分片。应用采用单进程运行，符合当前低并发规模。
 
 ## 6. 数据单源与交换
 

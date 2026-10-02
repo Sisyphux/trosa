@@ -113,7 +113,7 @@ Sela/扩展提供的准确来源、时间、渠道、联系人和原文只做预
 - 在隔离 SQLite 副本中覆盖：只记录事实、记录并完成到期待办、记录并创建下一步、补录旧日期、Inbox 回复、重复提交、撤销；PostgreSQL 关键读写另须在真实/隔离 PostgreSQL 中验收。
 - 确认每种路径最多新增一条沟通、一条明确待办；Today、时间线和 Inbox 的结果一致。
 - 无模型配置时完整可用；AI 失败时保留人工表单。
-- 回归 Sela 幂等同步、浏览器扩展精确匹配和三用户隔离。
+- 回归 Sela 幂等同步、浏览器扩展精确匹配和用户隔离。
 
 ### 2. Customer 工作区的“现在”优先层
 
@@ -206,7 +206,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py`、`python3 tools/check_migrations.py --dir .`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search；涉及 PG 时再运行 `python3 tools/postgres_rehearsal.py test`。
 5. **自动发布入口**：普通代码任务先在自己的 worktree 完成 commit（message 以 `[<id>]` 开头），再使用 `deploy/cloud/agent-worktree.sh publish --task <id>` 或 `deploy/cloud/auto-publish.sh --commit <sha>`；多个成果可重复传入 `--commit`，或使用 `--branch <ref>`。入口只从临时 release worktree 发布候选，执行本地回归、发布前只读 ECS 状态、必要备份、推送、原子发布和公网健康检查，不读取调用者的 index、未暂存改动或未跟踪文件。
 6. **数据库改动保护**：`migrations/` 是迁移唯一事实源，新迁移必须先预留编号并通过 `tools/check_migrations.py`；两个并行任务不得占用同一编号（后合并者改名）。涉及 schema、迁移或导入边界时，自动入口先执行 PostgreSQL logical dump + 附件 bundle 备份；疑似破坏性 SQL 不自动执行。
-7. **发布后事实检查**：健康接口、三位用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
+7. **发布后事实检查**：健康接口、用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
 
 ## 绝对不能破坏的能力
 

@@ -28,6 +28,14 @@
 - 变更：把两个动作恢复到工作台顶栏，紧跟身份标记、位于关闭键之前，任何分区下都常驻可见（`#cwExportTools`，仍用安静的 `.cw-link` 文字动作，不动「一个实心按钮」的收敛）；不再在「资料」分区底部重复一份，保持单一入口。
 - 窄屏与触屏：`≤1024px` 时两个动作单独占一行，不挤占分区标签；触屏下点按目标高度与其它文字动作一致（≥32px）。动作本身与后端 `/api/customers/<id>/context?mode=timeline`、`exportCurrentCustomerEmails()` 契约完全不变。
 - 验证：`node --check app/static/app.js`、`tests.test_risk_regressions.test_customer_workspace_is_one_daylight_room`（新增顶栏入口断言）。
+## 2026-10-02 — 文档清理：统一“使用人数”说法为“目前四人使用”
+
+- 现象：现行文档里“使用人数”说法不一致——`AGENTS.md`、`README.md` 已写四人，但 `docs/SYSTEM_STATE.md`、`docs/architecture/trosa-business-architecture.md`、`docs/architecture/trosa-system.summary.md`、`Trade OS 系统设计说明.md`、`DEPLOYMENT.md`、`TROSA_MAINTENANCE.md` 仍写“三人/三位用户”，容易把团队规模和系统账号数混为一谈。
+- 变更：描述“当前使用人数”的地方统一为“目前四人使用”，并补“设计上不限于四人，可按需增加使用者”；`DEPLOYMENT.md` 中按账号描述的地方改为“各账号/现有账号”；`TROSA_MAINTENANCE.md` 的“三用户隔离”改为“用户隔离”；列出现有账号（Hamid/Amy/Kelley）的三处保留清单并加注“以上为当前系统内已有账号”。
+- 未改动：未新增第四个账号名，未写“四个账号”；未改动任何代码、测试、配置或数据；历史 `CHANGELOG.md` 条目、`archive/`、带行号的审计证据文件与一次性报告保持原样。
+- 依据：代码中内置账号只是种子，运行时可经邀请流程动态增加账号（`db.py` 的 `USERS` / `refresh_users_registry()` / `get_registered_users()`、`app.py` 的邀请接口），没有写死的人数上限，因此“可按需增加使用者”有代码依据。
+- 验证：逐文件 `git diff` 确认无前后文误删；重新 `git grep` 确认现行文档已无“三人/三位/三用户”的人数说法（历史记录、证据文件与归档除外），改后统一为“目前四人使用”。
+
 ## 2026-10-01 — 文档清理：修正 Sela 工作区旧路径、移除已退役的 follow-up 接口说明
 
 - 现象：`docs/architecture/trosa-system.summary.md` 仍把 Sela 的本地 runtime 路径写成 `/Users/luoxin/Desktop/Sela`，而 Sela 已于 2026-09-26 迁到 `/Users/luoxin/Sela`；`deploy/cloud/README.md` 的 sela 契约清单仍列着 `POST /api/integrations/sela/follow-up`，该路由已退役，`app.py` 中已不存在。

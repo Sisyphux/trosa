@@ -11,7 +11,7 @@
 
 ## 一句话结论
 
-Trosa 是一个**三人使用的外贸 CRM 工作台**，形态是「**单进程 Flask 单体 + 单一 PostgreSQL 事实源**」：一个约 1.5 万行的 `app.py` 承载全部 158 条路由（实测 `register_blueprint` / `add_url_rule` 计数为 **0**，没有蓝图），一个业务域模块 `trosa_domain.py` 承载全部业务读写语义，前端是原生 JavaScript 静态资源，沟通采集靠一个 MV3 浏览器扩展，整套东西跑在一台云主机上、经 Cloudflare Tunnel 回源到本机回环地址。
+Trosa 是一个**目前四人使用的外贸 CRM 工作台**（设计上不限于四人，可按需增加使用者），形态是「**单进程 Flask 单体 + 单一 PostgreSQL 事实源**」：一个约 1.5 万行的 `app.py` 承载全部 158 条路由（实测 `register_blueprint` / `add_url_rule` 计数为 **0**，没有蓝图），一个业务域模块 `trosa_domain.py` 承载全部业务读写语义，前端是原生 JavaScript 静态资源，沟通采集靠一个 MV3 浏览器扩展，整套东西跑在一台云主机上、经 Cloudflare Tunnel 回源到本机回环地址。
 
 **没有微服务、没有消息队列、没有独立前端构建产物**——这是一个"刻意保持小"的系统。它的复杂度不在分布式协作，而集中在**数据层的兼容边界**：保留 SQLite 形状的历史兼容面，同时让 PostgreSQL 成为唯一正式业务内核。
 
