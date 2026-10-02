@@ -103,6 +103,21 @@ class MainErrorHandlingTest(unittest.TestCase):
         self.assertIn('连接失败', stderr.getvalue())
 
 
+class ApplyCandidatesErrorTest(unittest.TestCase):
+    def test_failed_write_is_reported_without_attribute_error(self):
+        from clean_communication_content import apply_candidates
+
+        class Failing:
+            def act(self, action, customer_id, payload):
+                raise CliError('服务暂时不可用', 5)
+
+        candidates = [{'log_id': 42}, {'log_id': 43}]
+        results = apply_candidates(Failing(), candidates)
+        self.assertEqual([item['status'] for item in results], ['error', 'error'])
+        self.assertEqual(results[0]['error'], '服务暂时不可用')
+        self.assertEqual(results[0]['log_id'], 42)
+
+
 class FetchPageRetryTest(unittest.TestCase):
     def test_retries_transient_tunnel_errors(self):
         from clean_communication_content import _fetch_page

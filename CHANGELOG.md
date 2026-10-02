@@ -34,7 +34,7 @@
 - 变更（入库清洗）：新增纯函数模块 `communication_text.py`（`strip_quoted_email_text` / `looks_like_quoted_email`），确定性地剥离引用历史、转发头、Outlook 分隔线与签名，幂等、绝不把非空内容清成空。`gmail_sync.py` 在 `_source_payload` 里用清洗后的正文作为 `text`、把原始正文保留为 `raw_text`，AI 摘要与无 AI 兜底摘要都改用清洗后正文；确认归属时写入 `communication_source_items` 的仍是原始正文，审计不丢。
 - 变更（读取与确认）：`app.py` 的 `_inbox_capture_context` 对每条消息文本应用同一清洗，因此收件箱展示、确认面板与「快捷确认」写入的时间线内容都不再带引用历史——对修复前已存进 Inbox 的 capture 同样生效。
 - 变更（可撤销修复能力）：新增网关动作 `update_communication`（`crm:write`、可逆，复用共享写入函数，带快照与撤销）与 CLI `update-communication <log> [--content] [--result] [--date] [--type] [--direction] [--strip-quotes] [--json]`；`/api/agent/messages/search` 增加 `offset`（CLI `search --offset` / `--all` 自动翻页），让 Agent 能完整枚举后逐条修复。
-- 历史数据：新增一次性修复工具 `tools/clean_communication_content.py`（默认只列出候选，`--apply` 才逐条通过上面这个可撤销动作重写，并打印每条记录的 `undo` 指令）。已对线上 11 条仍带引用历史的记录执行清洗，原始正文保留在来源表，必要时可撤销。
+- 历史数据：新增一次性修复工具 `tools/clean_communication_content.py`（默认只列出候选，`--apply` 才逐条通过上面这个可撤销动作重写，并打印每条记录的 `undo` 指令；分页遇到隧道抖动会自动重试）。真实入库正文常被压成单行、引用标记内联在正文里，因此清洗同时支持按行与内联边界识别（`Sent from` / `Original Message` / `On … wrote:` / `&gt;` / 中文「写道」），且不误伤正文里的 `>` 或小写 `sent from`。已对线上 9 条仍带引用历史的记录执行清洗，原始正文保留在来源表，必要时可用打印出的 `undo` 逐条撤销。
 - 验证：`tests/test_communication_text.py`（清洗、幂等、escaped `&gt;`、永不置空、去重复段落）、`tests/test_gmail_sync.py`（capture 的 `text` 已清洗而 `raw_text` 保留原文）、`tests/test_agent_data_freedom.py`（`update_communication` 清洗内容且可撤销、缺失记录 404、消息搜索 offset 分页）、`tests/test_agent_cli.py`（`update-communication --strip-quotes` 载荷、`search --offset`）、`tests/test_clean_communication_content.py`（候选筛选与翻页）通过；完整门禁见任务证据。
 
 ## 2026-10-01 — Agent 数据访问改为「可逆即自由」：动作策略表 + 增删改查放开 + CLI 直写

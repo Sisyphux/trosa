@@ -135,7 +135,7 @@ def apply_candidates(gateway, candidates):
         try:
             payload = gateway.act('update_communication', None, {'log_id': log_id, 'strip_quotes': True})
         except CliError as error:
-            results.append({**candidate, 'status': 'error', 'error': error.message})
+            results.append({**candidate, 'status': 'error', 'error': str(error)})
             continue
         action_id, undo_token, undo_description = _action_ref(payload)
         results.append({
