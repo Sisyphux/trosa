@@ -13960,6 +13960,25 @@ def _gateway_customer_payload(row):
             'next_follow_up': row['next_follow_up'] or ''}
 
 
+def _gateway_authoritative_dates(conn, rows):
+    """Overwrite cached customer rollup dates with the authoritative facts.
+
+    ``last_contact`` / ``next_follow_up`` on a customer record are only a cached
+    rollup (``last_interaction_on`` / ``next_task_on``) and can be stale after
+    imports, Sela syncs or legacy writes. Agent-facing reads must answer from
+    facts instead: the newest real communication record and the earliest open
+    human follow-up task. Reuse the same projection the detail endpoint already
+    trusts (``trosa_domain.customer_facts``) so list and detail agree.
+    """
+    ids = [int(row['id']) for row in rows]
+    facts = _customer_business_facts(conn, ids) if ids else {}
+    for row in rows:
+        fact = facts.get(int(row['id'])) or {}
+        row['last_contact'] = fact.get('latest_communication_date') or ''
+        row['next_follow_up'] = fact.get('next_task_date') or ''
+    return rows
+
+
 @app.route('/api/gateway/customers', methods=['GET'])
 @gateway_scope_required('crm:read')
 def gateway_search_customers():
@@ -13980,6 +13999,7 @@ def gateway_search_customers():
                 rows.append(projected)
             rows.sort(key=lambda row: (str(row.get('updated_at') or ''), int(row.get('id') or 0)), reverse=True)
             rows = rows[offset:offset + limit]
+            rows = _gateway_authoritative_dates(conn, rows)
         finally:
             conn.close()
         return _gateway_response({'customers': [_gateway_customer_payload(row) for row in rows]},
@@ -13991,8 +14011,10 @@ def gateway_search_customers():
         params.extend((term, term, term))
     conn = get_db()
     try:
-        rows = conn.execute('''SELECT id, name, company, country, last_contact, next_follow_up FROM customers WHERE '''
-                            + ' AND '.join(where) + ' ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', params + [limit, offset]).fetchall()
+        rows = [dict(row) for row in conn.execute(
+            '''SELECT id, name, company, country, last_contact, next_follow_up FROM customers WHERE '''
+            + ' AND '.join(where) + ' ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', params + [limit, offset]).fetchall()]
+        rows = _gateway_authoritative_dates(conn, rows)
     finally:
         conn.close()
     return _gateway_response({'customers': [_gateway_customer_payload(row) for row in rows]}, pagination={'limit': limit, 'has_more': len(rows) == limit})
@@ -14013,6 +14035,11 @@ def gateway_get_customer(customer_id):
     customer = dict(row)
     customer['next_task'] = facts['next_task']
     customer.update({key: facts[key] for key in ('contact_state', 'has_contact', 'latest_communication_date', 'next_task_date', 'next_task_title', 'waiting_reply')})
+    # Keep the two cached rollup fields aligned with the authoritative facts so
+    # list and detail do not disagree about "has anyone contacted this
+    # customer?" or "is there a next step?".
+    customer['last_contact'] = facts.get('latest_communication_date') or ''
+    customer['next_follow_up'] = facts.get('next_task_date') or ''
     customer['primary_contact'] = contacts[0] if contacts else None
     return _gateway_response({'customer': customer})
 

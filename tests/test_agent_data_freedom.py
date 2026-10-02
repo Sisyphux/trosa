@@ -339,6 +339,47 @@ class AgentDataFreedomTest(unittest.TestCase):
         self.assertEqual(len(flat), 5)
         self.assertEqual(len(set(flat)), 5)
 
+    def test_gateway_customer_dates_come_from_authoritative_facts(self):
+        """last_contact/next_follow_up must project facts, not cached rollups."""
+        module = self._load_module('crm_app_gateway_dates_test')
+        contacted = self._insert_customer('hamid', '事实客户', 'Fact Dates Co')
+        stale_only = self._insert_customer('hamid', '残留客户', 'Stale Dates Co')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            # Stale cached rollups that must not leak through the gateway.
+            conn.execute("UPDATE customers SET last_contact='2020-01-01', next_follow_up='2020-01-02' WHERE id=?", (contacted,))
+            conn.execute("UPDATE customers SET last_contact='2020-02-01', next_follow_up='2020-02-02' WHERE id=?", (stale_only,))
+            conn.execute('''INSERT INTO follow_up_logs
+                            (customer_id, content, follow_date, activity_type, direction, source)
+                            VALUES (?, ?, ?, ?, ?, ?)''',
+                         (contacted, '客户确认九月见', '2026-08-30', 'whatsapp', 'inbound', 'manual'))
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, ?, ?, 0, 'follow_up')", (contacted, '最早下一步', '2026-09-20'))
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, ?, ?, 0, 'follow_up')", (contacted, '更晚下一步', '2026-10-20'))
+            conn.execute("INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type) VALUES (?, ?, ?, 1, 'follow_up')", (contacted, '已完成待办', '2026-09-01'))
+            conn.commit()
+        finally:
+            conn.close()
+
+        token = self._mint(module, ('crm:read',))['token']
+        gateway = module.app.test_client()
+        headers = {'Authorization': 'Bearer ' + token}
+
+        listed = gateway.get('/api/gateway/customers?query=Fact Dates Co', headers=headers).get_json()['data']['customers']
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]['last_contact'], '2026-08-30')
+        self.assertEqual(listed[0]['next_follow_up'], '2026-09-20')
+
+        # A customer with only stale cached values reports no facts, not the cache.
+        stale = gateway.get('/api/gateway/customers?query=Stale Dates Co', headers=headers).get_json()['data']['customers']
+        self.assertEqual(len(stale), 1)
+        self.assertEqual(stale[0]['last_contact'], '')
+        self.assertEqual(stale[0]['next_follow_up'], '')
+
+        # Detail agrees with the list for the same two fields.
+        detail = gateway.get(f'/api/gateway/customers/{contacted}', headers=headers).get_json()['data']['customer']
+        self.assertEqual(detail['last_contact'], '2026-08-30')
+        self.assertEqual(detail['next_follow_up'], '2026-09-20')
+
     def test_token_expiry_whoami_and_revocation(self):
         module = self._load_module()
         created = self._mint(module, ('crm:read',), expires_in_days=1)

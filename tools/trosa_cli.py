@@ -322,7 +322,14 @@ def build_parser():
     p.add_argument('id')
     sub.add_parser('whoami', help='检查 token 是否有效（读一条 Today）')
     sub.add_parser('today', help='今天及逾期的待办')
-    p = sub.add_parser('customers', help='搜索客户（含最近联系与下一次跟进日期）')
+    p = sub.add_parser(
+        'customers',
+        help='搜索客户（last_contact/next_follow_up 是派生日期摘要，不能单独当结论）',
+        description=('搜索客户。last_contact 是该客户最新一条真实沟通记录的日期，'
+                     'next_follow_up 是最早一条未完成人工待办的日期；它们由事实投影得出，'
+                     '不是客户记录上的缓存值，但日期本身回答不了业务问题。正确口径：'
+                     '是否联系过读沟通时间线 activity 并看 type/direction；'
+                     '有没有下一步读未完成待办 tasks（或 snapshot 的 open_tasks）。'))
     p.add_argument('--query', default='')
     p.add_argument('--limit', type=int, default=25)
     p.add_argument('--offset', type=int, default=0)

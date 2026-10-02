@@ -59,6 +59,19 @@ python3 tools/trosa_cli.py workspace <id>                    # 客户工作区�
 python3 tools/trosa_cli.py search --query 报价               # 跨客户消息搜索
 ```
 
+### `customers` 的 `last_contact` / `next_follow_up` 不是结论，只是派生摘要
+
+`customers`（网关 `GET /api/gateway/customers`，含单个客户详情）返回的 `last_contact`、`next_follow_up` 是**派生摘要**，不要只凭这两个日期下业务结论：
+
+- `last_contact`：该客户最新一条**真实沟通记录**的日期（沟通时间线里 `kind=communication` 的 `follow_up_logs`）。
+- `next_follow_up`：该客户最早一条**未完成**人工待办（`is_done=0`，非 `outreach_*`）的日期；没有未完成待办时为空。
+- 它们由事实投影得出，**不再直接信任客户记录上的缓存 `last_interaction_on` / `next_task_on`**：那些缓存值在导入、Sela 同步或历史数据之后可能残留或过期。
+
+即便如此，日期本身回答不了业务问题，**正确口径**：
+
+- **是否联系过 / 是客户回复还是我们主动**：读沟通时间线 `activity`（`trosa_cli.py activity --customer <id>`），看每条记录的 `type`（`activity_type`，如 `whatsapp`/`call`/`email`）与 `direction`（`inbound`/`outbound`/`two_way`）。`contact_state=contacted` 只表示“客户回复过”，不等于有沟通记录。
+- **有没有下一步 / 下一步做什么**：读未完成待办 `tasks`（`trosa_cli.py tasks --customer <id>`），或用 `snapshot` 的 `open_tasks` / `customers_without_open_task`；`next_follow_up` 只给出最早日期，不含动作与标题。
+
 **直接写入**（仅在成员明确指令下）：
 
 ```bash
@@ -85,6 +98,7 @@ echo '[{"action":"create_task","customer_id":12,"payload":{"title":"寄样","due
 
 - 所有输出为 JSON；列表接口单页最多 50 条，用 `--offset` 翻页或直接加 `--all`。
 - “没有结果”不等于现实中没发生沟通：记录来自 Trosa 已录入的数据（接口返回里带 `fact_policy` 的就是这个提醒）。
+- `customers` 的 `last_contact` / `next_follow_up` 只是派生日期摘要，不能替代 `activity`（看 `type`/`direction`）与 `tasks`（看未完成待办）；判断口径见上文。
 - 令牌对 `/api/gateway/*` 与 `/api/agent/*` 生效，且对 `/api/agent/*` **只在 GET 且持有 `crm:read` 时**通过；`/api/agent/*` 的写方法（如提交提议）与其它网页登录接口对令牌一律 403 / 401。附件只开放元数据列表，不开放文件内容下载。
 
 ## 退出码
