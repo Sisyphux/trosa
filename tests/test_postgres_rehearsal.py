@@ -3253,6 +3253,374 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(foreign['index'], [])
         self.assertEqual(other.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows'], [])
 
+    # -------------------------------------------- Agent gateway undo in PG
+    #
+    # Undo conflict detection compares the snapshot's business columns.  These
+    # tests pin the PostgreSQL behaviour that a same-Customer batch advances the
+    # auto-maintained ``updated_at`` between child restores, and that a real
+    # business edit is still refused.
+
+    # Auto-maintained columns excluded from the deterministic state signature.
+    # Keep this in sync with ``app._UNDO_VOLATILE_COLUMNS``: the guard and the
+    # test must ignore exactly the same set, no broad timestamp wildcard.
+    _SIGNATURE_VOLATILE_COLUMNS = {
+        'customers': frozenset({'updated_at'}),
+        'reminders': frozenset({'updated_at'}),
+        'follow_up_logs': frozenset({'updated_at'}),
+    }
+
+    def _agent_gateway(self, module, scopes=('crm:write',)):
+        """Mint a write token and return (gateway client, auth headers)."""
+        session = module.app.test_client()
+        self.assertEqual(
+            session.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200
+        )
+        created = session.post('/api/agent-gateway/tokens', json={'scopes': list(scopes)})
+        self.assertEqual(created.status_code, 201, created.get_json())
+        token = created.get_json()['data']['token']
+        return module.app.test_client(), {'Authorization': 'Bearer ' + token}
+
+    def _gateway_action(self, gateway, headers, action, payload, key, customer_id=None):
+        body = {'action': action, 'payload': payload}
+        if customer_id is not None:
+            body['customer_id'] = customer_id
+        return gateway.post(
+            '/api/gateway/actions',
+            headers={**headers, 'Idempotency-Key': key}, json=body,
+        )
+
+    def _undo_gateway_action(self, gateway, headers, action_id):
+        return gateway.post(f'/api/gateway/actions/{action_id}/undo', headers=headers)
+
+    @staticmethod
+    def _gateway_key(label):
+        """Idempotency keys must be unique per request and per test run."""
+        return f'{label}-{os.urandom(8).hex()}'
+
+    def _create_pg_customer(self, name):
+        import trosa_domain
+
+        customer_id = trosa_domain.create_customer(self.connection, values={
+            'name': name, 'company': name + ' Co',
+        })
+        self.connection.commit()
+        return int(customer_id)
+
+    def _create_pg_task(self, customer_id, title, due_date):
+        import trosa_domain
+
+        task_id = trosa_domain.merge_open_task(
+            self.connection, customer_id=customer_id, title=title, content=title,
+            reason='gateway round trip', due_on=due_date, now='2026-11-01 09:00:00',
+        )
+        self.connection.commit()
+        return int(task_id)
+
+    def _create_pg_contact(self, customer_id, name, email):
+        import trosa_domain
+
+        contact_id = trosa_domain.create_contact(self.connection, customer_id=customer_id, values={
+            'name': name, 'email': email, 'contact_type': 'person',
+        }, created_at='2026-11-01 09:00:00')
+        self.connection.commit()
+        return int(contact_id)
+
+    def _create_pg_inbox(self, customer_id, title, dedupe_key):
+        import trosa_domain
+
+        item_id = trosa_domain.create_inbox_item(
+            self.connection, item_type=('browser_capture' if customer_id is None else 'rehearsal_review'),
+            title=title, content='回归 gateway round trip', customer_id=customer_id,
+            dedupe_key=dedupe_key, status='open', created_at='2026-11-01 09:00:00',
+        )
+        self.connection.commit()
+        return int(item_id)
+
+    def _open_task_titles(self, customer_id):
+        self.connection.rollback()
+        return sorted(
+            row['title'] for row in self.connection.execute(
+                "SELECT title FROM trade_os_compat.reminders WHERE customer_id=? AND is_done=0",
+                (customer_id,),
+            ).fetchall()
+        )
+
+    def _normalized_signature_row(self, table, row):
+        volatile = self._SIGNATURE_VOLATILE_COLUMNS.get(table, frozenset())
+        return {
+            key: None if value is None else str(value)
+            for key, value in dict(row).items() if key not in volatile
+        }
+
+    def _business_signature(self, customer_id):
+        """Deterministic business state for one Customer, ignoring auto columns."""
+        self.connection.rollback()
+        signature = {}
+        for table in ('customers', 'contacts', 'reminders', 'follow_up_logs',
+                      'inbox_items', 'outreach_emails'):
+            column = 'id' if table == 'customers' else 'customer_id'
+            rows = self.connection.execute(
+                f"SELECT * FROM trade_os_compat.{table} WHERE {column}=? ORDER BY id",
+                (customer_id,),
+            ).fetchall()
+            signature[table] = [self._normalized_signature_row(table, row) for row in rows]
+        activity_ids = [
+            row['id'] for row in self.connection.execute(
+                "SELECT id FROM trade_os_compat.follow_up_logs WHERE customer_id=?",
+                (customer_id,),
+            ).fetchall()
+        ]
+        for table in ('communication_sources', 'communication_source_items'):
+            if activity_ids:
+                marks = ','.join('?' for _ in activity_ids)
+                rows = self.connection.execute(
+                    f"SELECT * FROM trade_os_compat.{table} "
+                    f"WHERE activity_id IN ({marks}) ORDER BY id", activity_ids,
+                ).fetchall()
+            else:
+                rows = []
+            signature[table] = [self._normalized_signature_row(table, row) for row in rows]
+        return signature
+
+    def _active_customer_ids(self):
+        self.connection.rollback()
+        return sorted(
+            int(row['id']) for row in self.connection.execute(
+                "SELECT id FROM trade_os_compat.customers WHERE COALESCE(is_deleted, 0)=0"
+            ).fetchall()
+        )
+
+    def test_batch_two_tasks_same_customer_undo_on_postgres(self):
+        """One Customer with two created tasks undoes as a whole in PostgreSQL."""
+        module = self._app_module()
+        gateway, headers = self._agent_gateway(module)
+        customer_id = self._create_pg_customer('回归 批次撤销客户')
+        created = self._gateway_action(gateway, headers, 'batch', {'actions': [
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 批次待办甲', 'due_date': '2026-11-11'}},
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 批次待办乙', 'due_date': '2026-11-12'}},
+        ]}, self._gateway_key('pg-batch-undo'))
+        self.assertEqual(created.status_code, 201, created.get_json())
+        action_id = created.get_json()['data']['action']['id']
+        self.assertEqual(
+            set(self._open_task_titles(customer_id)), {'回归 批次待办甲', '回归 批次待办乙'}
+        )
+
+        undone = self._undo_gateway_action(gateway, headers, action_id)
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._open_task_titles(customer_id), [])
+
+    def test_batch_failure_rolls_back_landed_children_on_postgres(self):
+        """A failed batch leaves no residue, including a second landed child."""
+        module = self._app_module()
+        gateway, headers = self._agent_gateway(module)
+
+        # First child valid, second child invalid: the first must not remain.
+        customer_id = self._create_pg_customer('回归 批次失败甲')
+        failed = self._gateway_action(gateway, headers, 'batch', {'actions': [
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 残留甲', 'due_date': '2026-11-13'}},
+            {'action': 'create_task', 'customer_id': 987654321,
+             'payload': {'title': '回归 不存在客户', 'due_date': '2026-11-14'}},
+        ]}, self._gateway_key('pg-batch-fail-1'))
+        self.assertEqual(failed.status_code, 404, failed.get_json())
+        self.assertEqual(self._open_task_titles(customer_id), [])
+
+        # Two landed same-Customer children followed by a failure exercise the
+        # reverse rollback path that advances the shared Customer updated_at.
+        customer_id = self._create_pg_customer('回归 批次失败乙')
+        failed = self._gateway_action(gateway, headers, 'batch', {'actions': [
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 残留乙一', 'due_date': '2026-11-15'}},
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 残留乙二', 'due_date': '2026-11-16'}},
+            {'action': 'create_task', 'customer_id': 987654321,
+             'payload': {'title': '回归 不存在客户二', 'due_date': '2026-11-17'}},
+        ]}, self._gateway_key('pg-batch-fail-2'))
+        self.assertEqual(failed.status_code, 404, failed.get_json())
+        self.assertEqual(self._open_task_titles(customer_id), [])
+
+    def test_single_undo_tolerates_updated_at_drift_on_postgres(self):
+        """An unrelated write touching updated_at must not block a single undo."""
+        module = self._app_module()
+        gateway, headers = self._agent_gateway(module)
+        customer_id = self._create_pg_customer('回归 updated_at 漂移')
+        created = self._gateway_action(gateway, headers, 'create_task', {
+            'title': '回归 漂移待办', 'due_date': '2026-11-18',
+        }, self._gateway_key('pg-drift'), customer_id=customer_id)
+        self.assertEqual(created.status_code, 201, created.get_json())
+        action_id = created.get_json()['data']['action']['id']
+        self.assertIn('回归 漂移待办', self._open_task_titles(customer_id))
+
+        # An unrelated write advances the Customer's auto timestamp only.
+        self.connection.rollback()
+        self.connection.execute(
+            '''UPDATE trosa.accounts
+                  SET updated_at = now() + interval '1 hour'
+                WHERE id = (SELECT account_id FROM trosa.account_legacy_refs
+                             WHERE organization_id=trosa.compat_org_id()
+                               AND legacy_user_id='hamid' AND legacy_customer_id=?)''',
+            (customer_id,),
+        )
+        self.connection.commit()
+
+        undone = self._undo_gateway_action(gateway, headers, action_id)
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertNotIn('回归 漂移待办', self._open_task_titles(customer_id))
+
+    def test_undo_rejects_real_business_conflict_on_postgres(self):
+        """A genuine edit to a snapshot business column is still refused (409)."""
+        module = self._app_module()
+        gateway, headers = self._agent_gateway(module)
+        customer_id = self._create_pg_customer('回归 真冲突客户')
+        created = self._gateway_action(gateway, headers, 'create_task', {
+            'title': '回归 冲突待办', 'due_date': '2026-11-19',
+        }, self._gateway_key('pg-conflict'), customer_id=customer_id)
+        self.assertEqual(created.status_code, 201, created.get_json())
+        action_id = created.get_json()['data']['action']['id']
+
+        # A genuine concurrent edit to a business column in the undo snapshot.
+        self.connection.rollback()
+        self.connection.execute(
+            "UPDATE trade_os_compat.customers SET notes=? WHERE id=?",
+            ('人工端到端备注', customer_id),
+        )
+        self.connection.commit()
+
+        undone = self._undo_gateway_action(gateway, headers, action_id)
+        self.assertEqual(undone.status_code, 409, undone.get_json())
+        self.connection.rollback()
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT notes FROM trade_os_compat.customers WHERE id=?", (customer_id,)
+            ).fetchone()['notes'],
+            '人工端到端备注',
+        )
+        self.assertIn('回归 冲突待办', self._open_task_titles(customer_id))
+
+    def test_every_reversible_gateway_action_round_trips_on_postgres(self):
+        """Every reversible=True action executes, undoes, and restores its data."""
+        import trosa_domain
+
+        module = self._app_module()
+        gateway, headers = self._agent_gateway(module)
+        tested = set()
+
+        def key(label):
+            return self._gateway_key('pg-roundtrip-' + label)
+
+        def run(action, payload, customer_id, label):
+            tested.add(action)
+            before = self._business_signature(customer_id)
+            response = self._gateway_action(
+                gateway, headers, action, payload, key(label), customer_id=customer_id,
+            )
+            self.assertIn(response.status_code, (200, 201), (action, response.get_json()))
+            action_id = response.get_json()['data']['action']['id']
+            self.assertTrue(action_id, action)
+            undone = self._undo_gateway_action(gateway, headers, action_id)
+            self.assertEqual(undone.status_code, 200, (action, undone.get_json()))
+            self.assertEqual(self._business_signature(customer_id), before, action)
+
+        customer_id = self._create_pg_customer('回归 回环沟通')
+        run('record_communication', {
+            'activity_content': '回归 回环沟通内容', 'follow_date': '2026-11-21',
+            'activity_type': 'follow_up', 'direction': 'outbound',
+        }, customer_id, 'record-communication')
+
+        customer_id = self._create_pg_customer('回归 回环联系人')
+        run('create_contact', {
+            'name': '回归 回环买家', 'email': 'pg-roundtrip-contact@example.test',
+            'contact_type': 'person',
+        }, customer_id, 'create-contact')
+
+        customer_id = self._create_pg_customer('回归 回环待办')
+        run('create_task', {'title': '回归 回环待办一', 'due_date': '2026-11-22'},
+            customer_id, 'create-task')
+
+        customer_id = self._create_pg_customer('回归 回环完成待办')
+        task_id = self._create_pg_task(customer_id, '回归 回环完成一', '2026-11-23')
+        run('complete_task', {'task_id': task_id, 'activity_content': '回归 回环完成'},
+            customer_id, 'complete-task')
+
+        customer_id = self._create_pg_customer('回归 回环修改待办')
+        task_id = self._create_pg_task(customer_id, '回归 回环修改前', '2026-11-24')
+        run('update_task', {'task_id': task_id, 'title': '回归 回环修改后',
+                            'remind_date': '2026-11-25'}, customer_id, 'update-task')
+
+        customer_id = self._create_pg_customer('回归 回环修改客户')
+        run('update_customer', {'notes': '回归 回环新备注'}, customer_id, 'update-customer')
+
+        customer_id = self._create_pg_customer('回归 回环修改联系人')
+        contact_id = self._create_pg_contact(
+            customer_id, '回归 回环联系人前', 'pg-roundtrip-update-contact@example.test')
+        run('update_contact', {'contact_id': contact_id, 'name': '回归 回环联系人后',
+                               'notes': '回归 回环联系人备注'}, customer_id, 'update-contact')
+
+        customer_id = self._create_pg_customer('回归 回环处理 Inbox')
+        inbox_id = self._create_pg_inbox(customer_id, '回归 回环待处理', 'pg-roundtrip-inbox-resolve')
+        run('resolve_inbox', {'inbox_item_id': inbox_id, 'resolution_note': '回环处理'},
+            customer_id, 'resolve-inbox')
+
+        customer_id = self._create_pg_customer('回归 回环归属 Inbox')
+        inbox_id = self._create_pg_inbox(None, '回归 回环待归属', 'pg-roundtrip-inbox-assign')
+        run('assign_inbox_customer', {'inbox_item_id': inbox_id}, customer_id, 'assign-inbox')
+
+        customer_id = self._create_pg_customer('回归 回环归档客户')
+        run('archive_customer', {}, customer_id, 'archive-customer')
+
+        customer_id = self._create_pg_customer('回归 回环恢复客户')
+        trosa_domain.set_customer_deleted(
+            self.connection, customer_id=customer_id, deleted=True,
+            changed_at='2026-11-26 09:00:00',
+        )
+        self.connection.commit()
+        run('restore_customer', {}, customer_id, 'restore-customer')
+
+        # batch is itself reversible; its round trip is covered above too.
+        tested.add('batch')
+        customer_id = self._create_pg_customer('回归 回环批次')
+        before = self._business_signature(customer_id)
+        created = self._gateway_action(gateway, headers, 'batch', {'actions': [
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 回环批次一', 'due_date': '2026-11-27'}},
+            {'action': 'create_task', 'customer_id': customer_id,
+             'payload': {'title': '回归 回环批次二', 'due_date': '2026-11-28'}},
+        ]}, key('batch'))
+        self.assertEqual(created.status_code, 201, created.get_json())
+        undone = self._undo_gateway_action(
+            gateway, headers, created.get_json()['data']['action']['id'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._business_signature(customer_id), before)
+
+        # create_customer undo archives the new Customer, restoring visibility.
+        tested.add('create_customer')
+        active_before = self._active_customer_ids()
+        created = self._gateway_action(gateway, headers, 'create_customer', {
+            'name': '回归 回环新客户', 'company': '回归 回环新客户 Co',
+        }, key('create-customer'))
+        self.assertIn(created.status_code, (200, 201), created.get_json())
+        created_data = created.get_json()['data']
+        new_customer_id = int(created_data['action']['customer_id'])
+        undone = self._undo_gateway_action(gateway, headers, created_data['action']['id'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._active_customer_ids(), active_before)
+        self.connection.rollback()
+        self.assertEqual(
+            int(self.connection.execute(
+                "SELECT is_deleted FROM trade_os_compat.customers WHERE id=?",
+                (new_customer_id,),
+            ).fetchone()['is_deleted']),
+            1,
+        )
+
+        reversible = {
+            name for name, entry in module._GATEWAY_ACTION_POLICY.items()
+            if entry.get('reversible')
+        }
+        self.assertEqual(tested, reversible)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main(verbosity=2)

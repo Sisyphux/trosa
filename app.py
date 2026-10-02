@@ -1648,6 +1648,33 @@ _UNDO_TABLES = {
     'communication_sources', 'communication_source_items', 'outreach_emails',
 }
 
+# Columns the database maintains itself, so their value is not a business
+# signal and can change without any user edit.  ``updated_at`` is the one this
+# guard must skip: in PostgreSQL ``trade_os_compat.customers.updated_at`` is
+# projected from ``trosa.accounts.updated_at`` and the write trigger advances
+# it on each UPDATE; a batch undoes its children one at a time, so restoring an
+# earlier child advances the shared Customer row before the next child's
+# snapshot is checked.  Comparing that timestamp would turn a safe multi-child
+# undo into a phantom conflict (HTTP 409).  For ``follow_up_logs`` the
+# compatibility view names a creation timestamp ``updated_at``; it is likewise
+# not a user-editable value.  Undo conflict detection therefore compares only
+# business columns and skips the auto-maintained columns declared per table
+# below.  The lists are explicit on purpose: a new auto-maintained column must
+# be registered deliberately, while every other column (name, notes, dates,
+# status, ...) keeps the strict equality check that protects real data.
+_UNDO_VOLATILE_COLUMNS = {
+    'customers': frozenset({'updated_at'}),
+    'reminders': frozenset({'updated_at'}),
+    'follow_up_logs': frozenset({'updated_at'}),
+    # The remaining undo tables expose no auto-maintained column in the
+    # compatibility view; they are listed so the contract is complete.
+    'contacts': frozenset(),
+    'inbox_items': frozenset(),
+    'communication_sources': frozenset(),
+    'communication_source_items': frozenset(),
+    'outreach_emails': frozenset(),
+}
+
 
 def _snapshot_entity(conn, table_name, entity_id):
     """Capture one row for a conflict-aware undo snapshot."""
@@ -1676,7 +1703,10 @@ def _undo_entity_matches(conn, table_name, entity_id, expected):
         return current is None
     if current is None:
         return False
+    volatile = _UNDO_VOLATILE_COLUMNS.get(table_name, frozenset())
     for key, value in expected.items():
+        if key in volatile:
+            continue
         current_value = current.get(key)
         if isinstance(current_value, UUID):
             current_value = str(current_value)
