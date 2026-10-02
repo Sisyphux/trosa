@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, 'tools')
@@ -36,6 +37,19 @@ for path in (ROOT, TOOLS):
 
 from communication_text import looks_like_quoted_email, strip_quoted_email_text  # noqa: E402
 from trosa_cli import CliError, Gateway, load_token  # noqa: E402
+
+
+def _fetch_page(gateway, params, attempts=4):
+    """Fetch one search page, retrying transient TLS/tunnel resets."""
+    last = None
+    for attempt in range(attempts):
+        try:
+            return gateway.agent_get('/messages/search', **params)
+        except CliError as error:
+            last = error
+            if attempt < attempts - 1:
+                time.sleep(1 + attempt)
+    raise last
 
 
 def iter_events(gateway, *, query='', country='', direction='', from_date='',
@@ -50,7 +64,7 @@ def iter_events(gateway, *, query='', country='', direction='', from_date='',
         }
         if customer_id:
             params['customer_id'] = customer_id
-        page = gateway.agent_get('/messages/search', **params)
+        page = _fetch_page(gateway, params)
         if not isinstance(page, dict):
             break
         batch = page.get('items') or []
@@ -160,6 +174,7 @@ def _print_report(candidates, results, as_json):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--apply', action='store_true', help='真正执行清洗（默认只列出候选）')
+    parser.add_argument('--query', default='', help='只扫描内容命中该关键字的记录（推荐用引用历史标记缩小范围）')
     parser.add_argument('--min-length', dest='min_length', type=int, default=200,
                         help='只处理内容长度不低于该值的记录（默认 200，设 0 不过滤）')
     parser.add_argument('--customer', type=int, default=0, help='只处理某个客户 ID')
@@ -176,7 +191,7 @@ def main(argv=None):
     try:
         gateway = Gateway(load_token())
         items = list(iter_events(
-            gateway,
+            gateway, query=args.query,
             from_date=args.from_date, to_date=args.to_date,
             customer_id=args.customer or None,
             page_size=max(1, min(args.limit, 100)), max_pages=max(0, args.max_pages),
@@ -184,7 +199,7 @@ def main(argv=None):
         candidates = find_candidates(items, min_length=max(0, args.min_length))
         results = apply_candidates(gateway, candidates) if args.apply else []
     except CliError as error:
-        print(error.message, file=sys.stderr)
+        print(str(error), file=sys.stderr)
         return error.code
     _print_report(candidates, results, args.json)
     return 0

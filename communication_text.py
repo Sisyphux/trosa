@@ -55,6 +55,32 @@ _HEADER_HINT = re.compile(
     re.IGNORECASE,
 )
 
+# --- Inline boundaries -------------------------------------------------------
+# Gmail/Proton plain-text parts often collapse the whole thread onto one line,
+# so the same markers also have to be found mid-text, not only at a line start.
+# These are deliberately narrow to avoid cutting legitimate prose.
+_INLINE_SEPARATOR = re.compile(
+    r'[-_=]{2,}\s*'
+    r'(?:original message|forwarded message|forward message|original email|'
+    r'原始邮件|原始邮件内容|转发邮件|转发的邮件|原邮件|原邮件内容|邮箱转发)'
+    r'\s*[-_=]{2,}',
+    re.IGNORECASE,
+)
+_INLINE_ON_WROTE = re.compile(r'\bOn\b[^\n]{0,320}?\bwrote\s*:\s*', re.IGNORECASE)
+_INLINE_MOBILE = re.compile(r'(?<!\S)(?:Sent from|Sent with|Get Outlook for)\b')
+_INLINE_OUTLOOK_DIVIDER = re.compile(r'(?<!\S)_{5,}')
+# Escaped quote markers ("&gt;") and their full-width forms; a bare ">" is
+# intentionally skipped inline because it also occurs in ordinary prose.
+_INLINE_QUOTE = re.compile(r'(?<!\S)(?:&gt;|＞|﹥)(?=\s)')
+_INLINE_CN_WROTE = re.compile(
+    r'(?<!\S)(?:&lt;|<)[^<>\n]{0,80}(?:&gt;|>)?[^\n]{0,80}?写道\s*[:：]'
+)
+_INLINE_CN_DATE = re.compile(r'\d{4}年\d{1,2}月\d{1,2}日[^\n]{0,40}?写道\s*[:：]')
+_INLINE_PATTERNS = (
+    _INLINE_SEPARATOR, _INLINE_ON_WROTE, _INLINE_MOBILE,
+    _INLINE_OUTLOOK_DIVIDER, _INLINE_QUOTE, _INLINE_CN_WROTE, _INLINE_CN_DATE,
+)
+
 
 def _normalize(value, limit=_MAX_LENGTH):
     text = str(value or '').replace('\x00', '')
@@ -108,13 +134,26 @@ def _is_boundary(lines, index):
     return _is_forward_block(lines, index)
 
 
+def _inline_cut(text):
+    """Earliest inline boundary offset, or None when the body is already clean."""
+    cut = None
+    for pattern in _INLINE_PATTERNS:
+        match = pattern.search(text)
+        if match and match.start() > 0:
+            if cut is None or match.start() < cut:
+                cut = match.start()
+    return cut
+
+
 def looks_like_quoted_email(value):
     """True when the captured body still carries quoted history or a signature."""
     normalized = _normalize(value)
     if not normalized.strip():
         return False
     lines = normalized.split('\n')
-    return any(_is_boundary(lines, index) for index in range(1, len(lines)))
+    if any(_is_boundary(lines, index) for index in range(1, len(lines))):
+        return True
+    return _inline_cut(normalized) is not None
 
 
 def strip_quoted_email_text(value, limit=_MAX_LENGTH):
@@ -128,12 +167,15 @@ def strip_quoted_email_text(value, limit=_MAX_LENGTH):
     if not original.strip():
         return ''
     lines = original.split('\n')
-    cut = len(lines)
+    cut = len(original)
     for index in range(1, len(lines)):
         if _is_boundary(lines, index):
-            cut = index
+            cut = min(cut, sum(len(part) + 1 for part in lines[:index]))
             break
-    kept = _dedupe_paragraphs('\n'.join(lines[:cut]))
+    inline = _inline_cut(original)
+    if inline is not None:
+        cut = min(cut, inline)
+    kept = _dedupe_paragraphs(original[:cut])
     cleaned = _collapse(kept)
     if not cleaned:
         return _collapse(_dedupe_paragraphs(original)) or original.strip()

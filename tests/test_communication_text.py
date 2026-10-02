@@ -19,6 +19,21 @@ On Friday, 09/11/26 at 10:28 Hamid Luo &lt;hamid.luo.pronamax@gmail.com&gt; wrot
 acryplex &lt;acryplex@proton.me&gt;于2026年9月9日 周三23:02写道：
 &gt;&gt; good morming we need samples"""
 
+# Gmail/Proton plain-text parts often collapse the whole thread onto one line;
+# this mirrors a real stored record.
+INLINE_PROTON_SAMPLE = (
+    'Fri, 11 Sep 2026 14:34:06 +0000 · acryplex &lt;acryplex@proton.me&gt;\n'
+    'Name below Thanks MOE AFTAB SALES, Acrylic / Plexiglas 647 774 7623 | '
+    'ACRYLICPLEX@PROTON.ME [622 MAGNETIC DR,TORONTO,ONTARIO,M3J 3J2]'
+    '(https://maps.google.com/?q=622%20MAGNETIC%20DR,TORONTO,ONTARIO,M3J%203J2) '
+    'Sent from [Proton Mail](https://proton.me/mail/home) for Android. '
+    '-------- Original Message -------- On Friday, 09/11/26 at 10:28 Hamid Luo '
+    '&lt;hamid.luo.pronamax@gmail.com&gt; wrote: &gt; Good morning Boss Moe, '
+    '&gt; &gt; Great, we will arrange the samples. '
+    'acryplex &lt;acryplex@proton.me&gt;于2026年9月9日 周三23:02写道： '
+    '&gt;&gt; good morming we need samples'
+)
+
 
 class LooksLikeQuotedTest(unittest.TestCase):
     def test_detects_quoted_mail(self):
@@ -79,6 +94,31 @@ class StripQuotedEmailTest(unittest.TestCase):
         message = 'Good morning Boss Moe, we will arrange the samples.'
         body = message + '\n\n' + message + '\n\nOn Monday Buyer wrote:\n> old'
         self.assertEqual(strip_quoted_email_text(body), message)
+
+    def test_inline_single_line_proton_body_is_cleaned(self):
+        self.assertTrue(looks_like_quoted_email(INLINE_PROTON_SAMPLE))
+        cleaned = strip_quoted_email_text(INLINE_PROTON_SAMPLE)
+        self.assertIn('Name below Thanks MOE', cleaned)
+        self.assertIn('ACRYLICPLEX@PROTON.ME', cleaned)
+        for marker in ('Sent from [Proton Mail]', 'Original Message', 'wrote:',
+                       '写道', ' &gt; ', '&gt;&gt;',
+                       '&lt;hamid.luo.pronamax@gmail.com&gt;'):
+            self.assertNotIn(marker, cleaned)
+        self.assertEqual(strip_quoted_email_text(cleaned), cleaned)
+
+    def test_inline_attribution_without_newline_is_a_boundary(self):
+        body = 'Current reply On Monday Buyer wrote: old quoted text'
+        self.assertEqual(strip_quoted_email_text(body), 'Current reply')
+
+    def test_bare_greater_than_in_prose_is_not_a_boundary(self):
+        body = 'Please review > see below for the revised numbers.'
+        self.assertFalse(looks_like_quoted_email(body))
+        self.assertEqual(strip_quoted_email_text(body), body)
+
+    def test_lowercase_sent_from_prose_is_not_a_signature(self):
+        body = 'The parcel was sent from Guangzhou last week.'
+        self.assertFalse(looks_like_quoted_email(body))
+        self.assertEqual(strip_quoted_email_text(body), body)
 
 
 if __name__ == '__main__':

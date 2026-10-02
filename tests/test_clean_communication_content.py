@@ -6,7 +6,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 
-from clean_communication_content import find_candidates, iter_events
+from clean_communication_content import find_candidates, iter_events, main
+import clean_communication_content as tool
+from trosa_cli import CliError
 
 
 class _FakeGateway:
@@ -79,6 +81,51 @@ class IterEventsTest(unittest.TestCase):
         items = list(iter_events(gateway, page_size=2, max_pages=1))
         self.assertEqual([item['event_id'] for item in items], [1, 2])
         self.assertEqual(gateway.offsets, [0])
+
+
+class MainErrorHandlingTest(unittest.TestCase):
+    def test_cli_error_is_reported_without_attribute_error(self):
+        original = tool.load_token
+
+        def boom():
+            raise CliError('连接失败', 3)
+
+        tool.load_token = boom
+        try:
+            import contextlib
+            import io
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = main([])
+        finally:
+            tool.load_token = original
+        self.assertEqual(code, 3)
+        self.assertIn('连接失败', stderr.getvalue())
+
+
+class FetchPageRetryTest(unittest.TestCase):
+    def test_retries_transient_tunnel_errors(self):
+        from clean_communication_content import _fetch_page
+
+        class Flaky:
+            def __init__(self):
+                self.calls = 0
+
+            def agent_get(self, path, **params):
+                self.calls += 1
+                if self.calls < 3:
+                    raise CliError('SSL EOF')
+                return {'items': [{'event_id': 1}], 'total': 1}
+
+        gateway = Flaky()
+        original = tool.time.sleep
+        tool.time.sleep = lambda *_: None
+        try:
+            page = _fetch_page(gateway, {'limit': 1, 'offset': 0})
+        finally:
+            tool.time.sleep = original
+        self.assertEqual(gateway.calls, 3)
+        self.assertEqual(page['total'], 1)
 
 
 if __name__ == '__main__':
