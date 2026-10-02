@@ -34,6 +34,7 @@
 - 变更：删除发送/报价/商业承诺“始终由人完成”“由用户执行”等句子（保留“不能自动创建客户/联系人/待办/商业承诺”红线）；把 Sela 职责改写为 prospect 开发（发开信、读邮箱检测回信、检测到回信后交接给 Trosa）；在 Gmail 同步相关位置加注“当前未配置、已停用，客户回信与退信由 sela 读取邮箱并经 `/api/integrations/sela/reply` 交接”；`reply` 接口描述改为“记录 sela 检测到的客户回信/退信事实”；`TROSA_MAINTENANCE.md` 第 4 项与 `deploy/cloud/README.md` 的旧 sela 同步排查方式改为现行 outbox/quarantine 描述。
 - 未改动：未改动任何代码、测试、配置或数据；`TRADE_OS_*` 环境变量与 `trade-os` 服务名作为兼容标识保持不动；本次不做人数说法（B3）、Trade OS 品牌名（B4）与规模数字（B9）调整；历史 `CHANGELOG.md` 条目、`archive/` 与审计证据文件保持原样。
 - 验证：逐文件 `git diff` 确认无前后文误删；`grep` 复核“始终由人 / 永远由人 / 只保留可靠性 / gmail_sync”等口径，已处理处均已清除。
+- 补充（同日）：`AGENTS.md` 与 `docs/AGENT_ACCESS.md` 仍残留“对外发送消息、报价、价格与交期承诺仍由人完成”的旧口径（sela 自行发送开发信后已不成立），本次删除这两处、仅保留“永久删除仍由人完成”；`docs/AGENT_ACCESS.md` 的“不可逆或对外的动作”同步改为“不可逆的动作”。
 
 ## 2026-10-02 — 文档清理：统一“使用人数”说法为“目前四人使用”
 
