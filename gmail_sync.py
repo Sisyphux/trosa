@@ -24,6 +24,7 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.engine import ask_llm, get_ai_config_status
+from communication_text import strip_quoted_email_text
 from db import (
     USERS,
     get_current_user,
@@ -714,7 +715,8 @@ def _ai_configured():
 
 def _fallback_summary(message):
     subject = str(message.get('subject') or '').strip()
-    text = re.sub(r'\s+', ' ', str(message.get('text') or message.get('snippet') or '')).strip()
+    body = strip_quoted_email_text(message.get('text') or '') or message.get('snippet') or ''
+    text = re.sub(r'\s+', ' ', str(body)).strip()
     text = text[:280] + ('…' if len(text) > 280 else '')
     external = str(message.get('primary_external_name') or message.get('primary_external_email') or '对方').strip()
     if message.get('direction') == 'outbound':
@@ -731,7 +733,7 @@ def _summary_from_ai(message, customer, contact):
     fallback = _fallback_summary(message)
     if not _ai_configured():
         return fallback, False
-    original = _clean_text(message.get('text') or message.get('snippet') or '', 12000)
+    original = _clean_text(strip_quoted_email_text(message.get('text') or '') or message.get('snippet') or '', 12000)
     if not original:
         return fallback, False
     direction = message.get('direction') or 'unknown'
@@ -796,7 +798,7 @@ def _source_payload(message):
         'sender_email': message.get('sender_email', ''),
         'to': message.get('to', []),
         'subject': message.get('subject', ''),
-        'text': message.get('text', ''),
+        'text': strip_quoted_email_text(message.get('text', '')),
         'raw_text': message.get('text', ''),
         'snippet': message.get('snippet', ''),
         'attachments': message.get('attachments', []),
@@ -1185,7 +1187,7 @@ def attach_gmail_capture_to_activity(cursor, inbox_item, activity_id, customer_i
         'sender_email': str(message.get('sender_email') or ''),
         'to': message.get('to') if isinstance(message.get('to'), list) else [],
         'subject': str(message.get('subject') or ''),
-        'text': _clean_text(message.get('text') or message.get('raw_text') or '', 50000),
+        'text': _clean_text(message.get('raw_text') or message.get('text') or '', 50000),
         'snippet': str(message.get('snippet') or ''),
         'attachments': message.get('attachments') if isinstance(message.get('attachments'), list) else [],
         'source_url': str(message.get('source_url') or payload.get('source_url') or ''),

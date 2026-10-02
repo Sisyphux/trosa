@@ -27,6 +27,16 @@
 - 覆盖入口：客户工作台「标记完成」/行内「完成」（`completeCustomerNextTask`）、「完成这次跟进」弹窗（`runSubmitComplete`）、Today/Inbox「记录沟通｜完成并记录」（`saveInboxReply`）、批量完成（`submitBatchComplete`，同一批多条待办一次撤销）。服务端未返回 `undo_token` 时仍显示普通轻提示，不伪造撤销。
 - 未改动：`/api/reminders/<id>` 与 `/api/undo/<token>` 的后端契约、撤销快照与冲突保护、Today 的「人类已建联」过滤逻辑均不变。
 - 验证：`tests/test_risk_regressions.py` 新增 `ActionFeedbackRegressionTest.test_complete_undo_flow_in_a_real_dom`（jsdom 断言撤销按钮渲染、点击后 POST 撤销并刷新 Today、无 token 时不显示撤销）与 `CalendarAndAccessTest.test_completing_a_today_reminder_is_undoable_back_into_today`（完成返回 `undo_token`、待办离开 Today，撤销后 `is_done=0` 且重新出现在 Today）；`node --check app/static/app.js` 与既有前端回归（complete_modal / customer_context_race / frontend_architecture / action_feedback / customer_task_action）全部通过。
+
+## 2026-10-02 — Gmail / Proton 引用历史不再写入沟通记录：入库清洗 + 可撤销的历史清洗
+
+- 现象：Gmail 同步的未精确匹配邮件进入 Inbox 后，若走快捷确认、或整理时 AI 不可用，时间线写入的是整封原始正文——包含 `-------- Original Message --------`、`On … wrote:` / `…写道：` 引用块、`>` 引用行、`Sent from Proton Mail for Android` 手机签名与 markdown 链接，客户沟通记录因此变成一大段「乱码」邮件线程。
+- 变更（入库清洗）：新增纯函数模块 `communication_text.py`（`strip_quoted_email_text` / `looks_like_quoted_email`），确定性地剥离引用历史、转发头、Outlook 分隔线与签名，幂等、绝不把非空内容清成空。`gmail_sync.py` 在 `_source_payload` 里用清洗后的正文作为 `text`、把原始正文保留为 `raw_text`，AI 摘要与无 AI 兜底摘要都改用清洗后正文；确认归属时写入 `communication_source_items` 的仍是原始正文，审计不丢。
+- 变更（读取与确认）：`app.py` 的 `_inbox_capture_context` 对每条消息文本应用同一清洗，因此收件箱展示、确认面板与「快捷确认」写入的时间线内容都不再带引用历史——对修复前已存进 Inbox 的 capture 同样生效。
+- 变更（可撤销修复能力）：新增网关动作 `update_communication`（`crm:write`、可逆，复用共享写入函数，带快照与撤销）与 CLI `update-communication <log> [--content] [--result] [--date] [--type] [--direction] [--strip-quotes] [--json]`；`/api/agent/messages/search` 增加 `offset`（CLI `search --offset` / `--all` 自动翻页），让 Agent 能完整枚举后逐条修复。
+- 历史数据：新增一次性修复工具 `tools/clean_communication_content.py`（默认只列出候选，`--apply` 才逐条通过上面这个可撤销动作重写，并打印每条记录的 `undo` 指令）。已对线上 11 条仍带引用历史的记录执行清洗，原始正文保留在来源表，必要时可撤销。
+- 验证：`tests/test_communication_text.py`（清洗、幂等、escaped `&gt;`、永不置空、去重复段落）、`tests/test_gmail_sync.py`（capture 的 `text` 已清洗而 `raw_text` 保留原文）、`tests/test_agent_data_freedom.py`（`update_communication` 清洗内容且可撤销、缺失记录 404、消息搜索 offset 分页）、`tests/test_agent_cli.py`（`update-communication --strip-quotes` 载荷、`search --offset`）、`tests/test_clean_communication_content.py`（候选筛选与翻页）通过；完整门禁见任务证据。
+
 ## 2026-10-01 — Agent 数据访问改为「可逆即自由」：动作策略表 + 增删改查放开 + CLI 直写
 
 - 产品原则变更：无人值守的后台自动化（Sela、AI 预填、定时任务）仍不得自动创建客户、联系人、待办或商业承诺；但在成员本人指令下，持有 `crm:write` 令牌的 Agent 可以直接**新增、修改、调整日程、归档 / 恢复**，每一步都保留来源、审计与撤销。永久删除、对外发送消息、报价、价格与交期承诺仍由人完成。

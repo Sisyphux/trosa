@@ -62,6 +62,7 @@ from app.engine import (
     list_ai_models,
 )
 from config import EMAIL_VERIFICATION_CONFIG
+from communication_text import looks_like_quoted_email, strip_quoted_email_text
 from gmail_sync import (
     GmailConfigurationError,
     GmailSyncError,
@@ -1395,6 +1396,7 @@ def _agent_action_write(conn, principal, action, result, payload, customer_id):
         'update_task': ('reminder', payload.get('task_id')),
         'update_customer': ('customer', result.get('id')),
         'update_contact': ('contact', result.get('id')),
+        'update_communication': ('follow_up_log', result.get('id')),
         'resolve_inbox': ('inbox_item', result.get('id')),
         'assign_inbox_customer': ('inbox_item', result.get('id')),
         'create_customer': ('customer', result.get('id')),
@@ -7449,7 +7451,7 @@ def _inbox_capture_context(raw_content, created_at=''):
     for message in messages:
         if not isinstance(message, dict):
             continue
-        text = str(message.get('text') or message.get('raw_text') or '').strip()
+        text = strip_quoted_email_text(str(message.get('text') or message.get('raw_text') or '')).strip()
         if not text:
             continue
         direction = str(message.get('direction') or '').strip()
@@ -13793,6 +13795,10 @@ def search_agent_messages():
         limit = max(1, min(int(request.args.get('limit', 50)), 100))
     except (TypeError, ValueError):
         limit = 50
+    try:
+        offset = max(0, min(int(request.args.get('offset', 0)), 100000))
+    except (TypeError, ValueError):
+        offset = 0
 
     for value, label in ((from_date, '起始日期'), (to_date, '结束日期')):
         if value:
@@ -13872,12 +13878,15 @@ def search_agent_messages():
                         'created_at': item.get('created_at') or '',
                     })
             items.sort(key=lambda item: (item.get('event_date') or '', item.get('created_at') or '', item.get('event_id') or 0), reverse=True)
-            items = items[:limit]
+            total = len(items)
+            items = items[offset:offset + limit]
         finally:
             conn.close()
         return jsonify({
             'items': items,
             'count': len(items),
+            'total': total,
+            'offset': offset,
             'query': query,
             'filters': {
                 'country': country, 'direction': direction, 'reply_status': reply_status, 'from_date': from_date,
@@ -13959,15 +13968,16 @@ def search_agent_messages():
                    JOIN customers c ON c.id=o.customer_id
                    WHERE ''' + ' AND '.join(email_filters)
     sql = f'''SELECT * FROM ({activity_sql} UNION ALL {email_sql}) events
-              ORDER BY event_date DESC, created_at DESC, event_id DESC LIMIT ?'''
+              ORDER BY event_date DESC, created_at DESC, event_id DESC LIMIT ? OFFSET ?'''
 
     conn = get_db()
-    rows = conn.execute(sql, activity_params + email_params + [limit]).fetchall()
+    rows = conn.execute(sql, activity_params + email_params + [limit, offset]).fetchall()
     conn.close()
     items = [dict(row) for row in rows]
     return jsonify({
         'items': items,
         'count': len(items),
+        'offset': offset,
         'query': query,
         'filters': {
             'country': country, 'direction': direction, 'reply_status': reply_status, 'from_date': from_date,
@@ -14473,6 +14483,13 @@ def _gateway_handle_update_contact(ctx):
     return update_customer_contact(ctx['payload']['contact_id'], ctx['payload'], before_commit=ctx['before_commit'])
 
 
+def _gateway_handle_update_communication(ctx):
+    log_id = ctx['payload'].get('log_id', ctx['payload'].get('id'))
+    if not isinstance(log_id, int):
+        raise CrmWriteError('修改沟通记录需要 log_id')
+    return update_customer_communication(log_id, ctx['payload'], before_commit=ctx['before_commit'])
+
+
 def _gateway_handle_resolve_inbox(ctx):
     if not isinstance(ctx['payload'].get('inbox_item_id'), int):
         raise CrmWriteError('处理 Inbox 需要 inbox_item_id')
@@ -14612,6 +14629,7 @@ _GATEWAY_ACTION_POLICY = {
     'update_task': {'handler': _gateway_handle_update_task, 'reversible': True, 'scope': 'crm:write'},
     'update_customer': {'handler': _gateway_handle_update_customer, 'reversible': True, 'scope': 'crm:write'},
     'update_contact': {'handler': _gateway_handle_update_contact, 'reversible': True, 'scope': 'crm:write'},
+    'update_communication': {'handler': _gateway_handle_update_communication, 'reversible': True, 'scope': 'crm:write'},
     'resolve_inbox': {'handler': _gateway_handle_resolve_inbox, 'reversible': True, 'scope': 'crm:write'},
     'assign_inbox_customer': {'handler': _gateway_handle_assign_inbox_customer, 'reversible': True, 'scope': 'crm:write'},
     'create_customer': {'handler': _gateway_handle_create_customer, 'reversible': True, 'scope': 'crm:write'},
@@ -15865,6 +15883,73 @@ def record_customer_communication(customer_id, data, before_commit=None):
 
     result = _run_crm_write(operation, before_commit)
     log_operation('FOLLOW_UP', 'customer', customer_id, f'添加活动: {activity_content}')
+    return result
+
+
+def update_customer_communication(log_id, data, before_commit=None):
+    """Edit one recorded communication fact and keep an undo snapshot.
+
+    ``strip_quotes`` lets a caller deterministically drop quoted mail history
+    from the stored body; the caller never has to round-trip the (HTML-escaped)
+    content through the read API, and the raw original stays in the captured
+    source item.
+    """
+    data = data or {}
+    if not isinstance(data, dict):
+        data = {}
+    log_id = _normalize_positive_id(log_id, '沟通记录', allow_empty=False)
+
+    def operation(conn, c):
+        if postgres_mode():
+            existing = next((item for customer in _active_customers(conn)
+                             for item in _customer_interactions(conn, int(customer['id']))
+                             if item.get('kind') == 'communication' and int(item.get('id') or 0) == int(log_id)),
+                            None)
+        else:
+            row = c.execute('''SELECT id, customer_id, activity_type, direction, follow_date,
+                                          content, result, next_plan
+                                     FROM follow_up_logs
+                                    WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (log_id,)).fetchone()
+            existing = dict(row) if row else None
+        if not existing:
+            raise CrmWriteError('记录不存在', 404)
+        customer_id = int(existing['customer_id'])
+        content = existing.get('content') or '' if data.get('content') is None else str(data.get('content'))
+        if data.get('strip_quotes'):
+            content = strip_quoted_email_text(content)
+        content = content.strip()
+        if not content:
+            raise CrmWriteError('沟通内容不能为空')
+        occurred_on = _normalize_required_date(data.get('follow_date') or existing.get('follow_date'), '沟通日期')
+        activity_type = str(data.get('activity_type') or existing.get('activity_type') or 'follow_up').strip()
+        direction = _validate_direction(data.get('direction') or existing.get('direction'))
+        result = str(existing.get('result') or '') if data.get('result') is None else str(data.get('result'))
+        next_plan = str(existing.get('next_plan') or '') if data.get('next_plan') is None else str(data.get('next_plan'))
+        customer_before = _snapshot_entity(conn, 'customers', customer_id)
+        log_before = _snapshot_entity(conn, 'follow_up_logs', log_id)
+        _update_interaction(
+            conn, interaction_id=log_id, occurred_on=occurred_on, activity_type=activity_type,
+            direction=direction, content=sanitize_mark_html(content),
+            result=sanitize_mark_html(result), next_plan=sanitize_mark_html(next_plan),
+        )
+        now = _calendar_now_text()
+        _refresh_customer_activity_rollups(c, customer_id, now)
+        log_after = _snapshot_entity(conn, 'follow_up_logs', log_id)
+        customer_after = _snapshot_entity(conn, 'customers', customer_id)
+        undo_description = '撤销修改沟通记录'
+        undo_token = _create_undo_action(
+            conn, 'UPDATE_COMMUNICATION', 'follow_up_log', log_id,
+            [_undo_entity('follow_up_logs', log_id, log_before, log_after),
+             _undo_entity('customers', customer_id, customer_before, customer_after)],
+            undo_description,
+        )
+        return {
+            'success': True, 'id': log_id, 'customer_id': customer_id,
+            'undo_token': undo_token, 'undo_description': undo_description,
+        }
+
+    result = _run_crm_write(operation, before_commit)
+    log_operation('UPDATE', 'follow_up_log', log_id, f'修改沟通记录 #{log_id}')
     return result
 
 

@@ -143,6 +143,82 @@ class AgentDataFreedomTest(unittest.TestCase):
             self.assertEqual(response.status_code, 409, (name, response.get_json()))
 
     # ----------------------------------------------------------- create
+    def test_update_communication_strips_quotes_and_is_undoable(self):
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Quote', 'Quote Co')
+        quoted = ('We will arrange the samples.\n'
+                  'Sent from my iPhone\n'
+                  'On Monday Buyer wrote:\n'
+                  '> old thread')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''INSERT INTO follow_up_logs
+                            (customer_id, content, follow_date, activity_type, direction, source, created_at)
+                            VALUES (?, ?, '2026-09-01', 'email', 'inbound', 'trosa', '2026-09-01 09:00:00')''',
+                         (customer_id, quoted))
+            log_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+        updated = self._action(gateway, token, 'update_communication', None,
+                               {'log_id': log_id, 'strip_quotes': True}, 'update-comm-1')
+        self.assertEqual(updated.status_code, 201, updated.get_json())
+        action = updated.get_json()['data']['action']
+        self.assertEqual(action['related_type'], 'follow_up_log')
+        self.assertEqual(action['related_id'], log_id)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            content = conn.execute('SELECT content FROM follow_up_logs WHERE id=?', (log_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(content, 'We will arrange the samples.')
+        undone = gateway.post('/api/gateway/actions/' + action['id'] + '/undo',
+                              headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            restored = conn.execute('SELECT content FROM follow_up_logs WHERE id=?', (log_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(restored, quoted)
+
+    def test_update_communication_requires_an_existing_log(self):
+        module = self._load_module()
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+        missing = self._action(gateway, token, 'update_communication', None,
+                               {'log_id': 999999, 'strip_quotes': True}, 'update-comm-missing')
+        self.assertEqual(missing.status_code, 404, missing.get_json())
+
+    def test_agent_message_search_pages_with_offset(self):
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Msg', 'Msg Co')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            for index in range(5):
+                conn.execute('''INSERT INTO follow_up_logs
+                                (customer_id, content, follow_date, activity_type, direction, source, created_at)
+                                VALUES (?, ?, ?, 'follow_up', 'inbound', 'test', ?)''',
+                             (customer_id, f'msg-{index}', f'2026-09-{index + 1:02d}',
+                              f'2026-09-{index + 1:02d} 09:00:00'))
+            conn.commit()
+        finally:
+            conn.close()
+        token = self._mint(module, ('crm:read',))['token']
+        gateway = module.app.test_client()
+        headers = {'Authorization': 'Bearer ' + token}
+        first = gateway.get('/api/agent/messages/search?limit=2&offset=0', headers=headers)
+        self.assertEqual(first.status_code, 200, first.get_json())
+        second = gateway.get('/api/agent/messages/search?limit=2&offset=2', headers=headers)
+        self.assertEqual(second.status_code, 200, second.get_json())
+        first_ids = [item['event_id'] for item in first.get_json()['items']]
+        second_ids = [item['event_id'] for item in second.get_json()['items']]
+        self.assertEqual(len(first_ids), 2)
+        self.assertEqual(len(second_ids), 2)
+        self.assertEqual(set(first_ids) & set(second_ids), set())
+
     def test_create_customer_dedupe_candidate_and_undo_archives(self):
         module = self._load_module()
         existing_id = self._insert_customer('hamid', 'Existing', 'Existing Co', email='dup@example.test')

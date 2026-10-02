@@ -1,5 +1,6 @@
 import base64
 import importlib.util
+import json
 import os
 import sqlite3
 import sys
@@ -178,6 +179,44 @@ class GmailSyncTest(unittest.TestCase):
                              'resolved')
         finally:
             conn.close()
+
+    def test_quoted_reply_history_is_stripped_from_capture_payload(self):
+        body = ('Please confirm the quotation details.\n'
+                'Sent from my iPhone\n'
+                'On Monday Buyer wrote:\n'
+                '> old message\n'
+                '> > older message')
+        text = base64.urlsafe_b64encode(body.encode()).decode().rstrip('=')
+        raw = self._raw_message('quoted-1', 'new@example.com')
+        raw['payload']['parts'][0]['body']['data'] = text
+        message = gmail_sync.normalize_gmail_message(raw, 'owner@example.com')
+        captured = gmail_sync._capture_payload(message, 'owner@example.com')['messages'][0]
+        self.assertEqual(captured['text'], 'Please confirm the quotation details.')
+        self.assertIn('On Monday Buyer wrote:', captured['raw_text'])
+        self.assertIn('> old message', captured['raw_text'])
+
+    def test_unmatched_capture_stores_clean_text_and_keeps_raw(self):
+        body = ('We need samples.\n'
+                '\n'
+                'Sent from Proton Mail for Android.\n'
+                '-------- Original Message --------\n'
+                'On Monday Buyer wrote:\n'
+                '> here is the old thread')
+        text = base64.urlsafe_b64encode(body.encode()).decode().rstrip('=')
+        raw = self._raw_message('quoted-2', 'new@example.com')
+        raw['payload']['parts'][0]['body']['data'] = text
+        message = gmail_sync.normalize_gmail_message(raw, 'owner@example.com')
+        stored = gmail_sync._store_message('hamid', 'owner@example.com', message, '新联系人来信')
+        self.assertEqual(stored['state'], 'unmatched')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            content = conn.execute('SELECT content FROM inbox_items WHERE id=?',
+                                   (stored['inbox_item_id'],)).fetchone()[0]
+        finally:
+            conn.close()
+        captured = json.loads(content)['messages'][0]
+        self.assertEqual(captured['text'], 'We need samples.')
+        self.assertIn('Original Message', captured['raw_text'])
 
     def test_scheduler_registers_optional_gmail_incremental_worker_when_configured(self):
         fake_scheduler = mock.Mock()

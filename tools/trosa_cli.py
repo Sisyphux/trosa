@@ -366,6 +366,8 @@ def build_parser():
     p.add_argument('--from', dest='from_date', default='', help='起始日期 YYYY-MM-DD')
     p.add_argument('--to', dest='to_date', default='', help='结束日期 YYYY-MM-DD')
     p.add_argument('--limit', type=int, default=50)
+    p.add_argument('--offset', type=int, default=0)
+    p.add_argument('--all', action='store_true', help='自动翻页取全部结果')
     p = sub.add_parser('propose-task', help='提议新待办（需 crm:propose；你在 Trosa 里确认）')
     p.add_argument('customer', type=int)
     p.add_argument('--title', required=True, help='明确动作')
@@ -433,6 +435,16 @@ def build_parser():
     p.add_argument('--contact', type=int, default=0)
     p.add_argument('--next-task', dest='next_task', default='')
     p.add_argument('--next-follow-up', dest='next_follow_up', default='')
+    p.add_argument('--json', default='')
+    p = sub.add_parser('update-communication', help='修改一条沟通记录（可逆；需 crm:write）')
+    p.add_argument('log', type=int, help='沟通记录 / 时间线事件 ID')
+    p.add_argument('--content', default='')
+    p.add_argument('--result', default='')
+    p.add_argument('--date', default='', help='沟通日期 YYYY-MM-DD')
+    p.add_argument('--type', dest='activity_type', default='')
+    p.add_argument('--direction', choices=DIRECTIONS, default='')
+    p.add_argument('--strip-quotes', dest='strip_quotes', action='store_true',
+                   help='剥离邮件引用历史与签名，只保留当前正文')
     p.add_argument('--json', default='')
     p = sub.add_parser('create-task', help='新建待办（可逆；需 crm:write）')
     p.add_argument('customer', type=int)
@@ -513,9 +525,22 @@ def run(args, gateway=None, root=None):
     if args.command == 'timeline':
         return gateway.agent_get(f'/customers/{args.id}/timeline', limit=args.limit)
     if args.command == 'search':
+        if args.all:
+            items, offset, total = [], args.offset, None
+            while True:
+                page = gateway.agent_get('/messages/search', query=args.query, country=args.country,
+                                         direction=args.direction, from_date=args.from_date,
+                                         to_date=args.to_date, limit=100, offset=offset)
+                batch = page.get('items') or []
+                items.extend(batch)
+                total = page.get('total', total)
+                if len(batch) < 100 or (total is not None and len(items) >= total):
+                    break
+                offset += 100
+            return {'success': True, 'items': items, 'count': len(items), 'total': total, 'offset': args.offset}
         return gateway.agent_get('/messages/search', query=args.query, country=args.country,
                                  direction=args.direction, from_date=args.from_date,
-                                 to_date=args.to_date, limit=args.limit)
+                                 to_date=args.to_date, limit=args.limit, offset=args.offset)
     if args.command == 'propose-task':
         if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
             raise CliError('--due 必须是 YYYY-MM-DD', 2)
@@ -589,6 +614,26 @@ def run(args, gateway=None, root=None):
             payload['next_follow_up'] = args.next_follow_up
         payload = _merge_json_payload(payload, args.json)
         return _with_undo_hint(gateway.act('record_communication', args.customer, payload))
+    if args.command == 'update-communication':
+        payload = {'log_id': args.log}
+        if args.date:
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.date):
+                raise CliError('--date 必须是 YYYY-MM-DD', 2)
+            payload['follow_date'] = args.date
+        if args.content:
+            payload['content'] = args.content
+        if args.result:
+            payload['result'] = args.result
+        if args.activity_type:
+            payload['activity_type'] = args.activity_type
+        if args.direction:
+            payload['direction'] = args.direction
+        if args.strip_quotes:
+            payload['strip_quotes'] = True
+        payload = _merge_json_payload(payload, args.json)
+        if len(payload) <= 1:
+            raise CliError('请至少提供一个要修改的字段或 --strip-quotes', 2)
+        return _with_undo_hint(gateway.act('update_communication', None, payload))
     if args.command == 'create-task':
         if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
             raise CliError('--due 必须是 YYYY-MM-DD', 2)

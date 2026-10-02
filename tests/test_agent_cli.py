@@ -135,8 +135,8 @@ class PagingTest(unittest.TestCase):
         names = set(trosa_cli.build_parser()._subparsers._group_actions[0].choices)
         self.assertFalse([n for n in names if 'delete' in n or n == 'permanent'])
         for expected in ('create-customer', 'update-customer', 'create-contact', 'update-contact',
-                         'record-communication', 'create-task', 'update-task', 'complete-task',
-                         'reschedule', 'archive-customer', 'restore-customer', 'batch', 'undo'):
+                         'record-communication', 'update-communication', 'create-task', 'update-task',
+                         'complete-task', 'reschedule', 'archive-customer', 'restore-customer', 'batch', 'undo'):
             self.assertIn(expected, names)
 
     def test_proposal_idempotency_key_is_deterministic(self):
@@ -176,6 +176,16 @@ class DirectWriteCliTest(unittest.TestCase):
         self.assertEqual(gateway.actions[0][2]['remind_date'], '2026-10-09')
         self.assertEqual(gateway.actions[1][2]['remind_date'], '2026-10-09')
 
+    def test_update_communication_sends_strip_quotes(self):
+        gateway = FakeGateway()
+        result = trosa_cli.run(self.parse('update-communication', '42', '--strip-quotes'), gateway)
+        action, customer_id, payload = gateway.actions[0][:3]
+        self.assertEqual(action, 'update_communication')
+        self.assertIsNone(customer_id)
+        self.assertEqual(payload['log_id'], 42)
+        self.assertTrue(payload['strip_quotes'])
+        self.assertIn('undo', result['undo_hint'])
+
     def test_write_idempotency_key_is_deterministic(self):
         sent = []
         original = trosa_cli.request_json
@@ -210,10 +220,11 @@ class DirectWriteCliTest(unittest.TestCase):
     def test_agent_read_commands_use_the_agent_surface(self):
         gateway = FakeGateway()
         trosa_cli.run(self.parse('workspace', '7'), gateway)
-        trosa_cli.run(self.parse('search', '--query', '报价'), gateway)
+        trosa_cli.run(self.parse('search', '--query', '报价', '--offset', '50'), gateway)
         self.assertEqual(gateway.calls[0][0], '/customers/7/workspace')
         self.assertEqual(gateway.calls[1][0], '/messages/search')
         self.assertEqual(gateway.calls[1][1]['query'], '报价')
+        self.assertEqual(gateway.calls[1][1]['offset'], 50)
 
     def test_whoami_surfaces_renew_hint(self):
         gateway = FakeGateway()

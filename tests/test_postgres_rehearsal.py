@@ -3658,6 +3658,24 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         run('update_contact', {'contact_id': contact_id, 'name': '回归 回环联系人后',
                                'notes': '回归 回环联系人备注'}, customer_id, 'update-contact')
 
+        customer_id = self._create_pg_customer('回归 回环修改沟通')
+        recorded = self._gateway_action(gateway, headers, 'record_communication', {
+            'activity_content': '回归 回环修改沟通原始内容', 'follow_date': '2026-11-29',
+            'activity_type': 'follow_up', 'direction': 'outbound',
+        }, key('update-communication-record'), customer_id=customer_id)
+        self.assertIn(recorded.status_code, (200, 201), recorded.get_json())
+        communication_id = recorded.get_json()['data']['action']['related_id']
+        tested.add('update_communication')
+        before = self._business_signature(customer_id)
+        updated = self._gateway_action(gateway, headers, 'update_communication', {
+            'log_id': communication_id, 'content': '回归 回环修改沟通新内容',
+        }, key('update-communication-update'), customer_id=customer_id)
+        self.assertIn(updated.status_code, (200, 201), updated.get_json())
+        undone = self._undo_gateway_action(
+            gateway, headers, updated.get_json()['data']['action']['id'])
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._business_signature(customer_id), before)
+
         customer_id = self._create_pg_customer('回归 回环处理 Inbox')
         inbox_id = self._create_pg_inbox(customer_id, '回归 回环待处理', 'pg-roundtrip-inbox-resolve')
         run('resolve_inbox', {'inbox_item_id': inbox_id, 'resolution_note': '回环处理'},
