@@ -3718,7 +3718,12 @@ async function saveInboxReply() {
       return;
     }
     closeModal('inboxReplyModal', true);
-    showToast('沟通已保存到时间线', 'success');
+    if (context.reminderId && saved && saved.undo_token) {
+      // 来自 Today 的「完成并记录」：待办已完成，给出撤销入口并可恢复回今日待办。
+      showCompleteUndoToast(saved, '沟通已保存，待办已完成');
+    } else {
+      showToast('沟通已保存到时间线', 'success');
+    }
     loadInbox();
     if (currentPage === 'dashboard') loadDashboard();
   } catch (e) {
@@ -7622,6 +7627,7 @@ async function submitBatchComplete() {
 
     var today = new Date().toISOString().split('T')[0];
     var completed = 0;
+    var undoTokens = [];
 
     for (var i = 0; i < targets.length; i++) {
       try {
@@ -7636,13 +7642,18 @@ async function submitBatchComplete() {
             await api('/api/customers/' + cid, { method: 'PUT', body: JSON.stringify({ next_follow_up: nextDate }) });
           }
         } else if (_batchCompleteMode === 'today') {
-          await api('/api/reminders/' + item.id, { method: 'PUT', body: JSON.stringify({ result: result, next_follow_up: nextDate }) });
+          var savedItem = await api('/api/reminders/' + item.id, { method: 'PUT', body: JSON.stringify({ result: result, next_follow_up: nextDate }) });
+          if (savedItem && savedItem.undo_token) undoTokens.push(savedItem.undo_token);
         }
         completed++;
       } catch(e) {}
     }
     closeModal('batchCompleteModal', true);
-    showToast('已完成 ' + completed + ' 条跟进', 'success');
+    if (undoTokens.length) {
+      showToastAction('已完成 ' + completed + ' 条跟进', 'success', '撤销', function() { undoCompletedTasks(undoTokens); });
+    } else {
+      showToast('已完成 ' + completed + ' 条跟进', 'success');
+    }
     if (_batchCompleteMode === 'newpool') loadNewPool();
     else loadDashboard();
     _batchCompleteTargets = [];
@@ -8751,9 +8762,11 @@ async function completeCustomerNextTask(button, taskId) {
     // 客户详情覆盖在 Today 之上；完成详情里的待办后同步刷新底层列表，
     // 避免关闭详情后仍看到已经完成的今日事项。
     if (currentPage === 'dashboard') loadDashboard();
-    // The panel itself changes to the next state, so a second success toast
-    // would only repeat what the user can already see.
+    // The panel itself changes to the next state. The only thing the user
+    // cannot see for themselves is how to take the completion back, so the
+    // toast exists purely to carry the 撤销 action and restore the customer to Today.
     reset();
+    showCompleteUndoToast(saved, '已标记完成');
   } catch (e) {
     setActionFeedback(button, 'error', '保存失败');
     showToast('完成操作未保存，请重试', 'error');
@@ -10278,6 +10291,40 @@ function refreshSourceListsAfterComplete(reminderId, nextEntry) {
   }
 }
 
+// 完成待办是可撤销的业务动作：服务端在完成时返回 undo_token，撤销会把待办、随之写入的
+// 时间线记录和客户快照一起回滚。这里统一给出撤销入口，并在撤销后刷新 Today 与已打开的
+// 客户工作区，避免「撤销了但客户仍从今日待办里消失」的观感。
+function refreshAfterCompleteUndo() {
+  if (currentPage === 'dashboard') loadDashboard();
+  var workspace = document.getElementById('customerEditModal');
+  if (workspace && workspace.classList.contains('show') && _customerDetailCache && _customerDetailCache.id) {
+    Promise.all([refreshCustomerTimeline(), refreshCustomerWorkspace()]).catch(function() {});
+  }
+}
+
+function undoCompletedTasks(tokens) {
+  tokens = (tokens || []).filter(Boolean);
+  if (!tokens.length) return Promise.resolve();
+  // 多个完成各有一条独立撤销，按完成的相反顺序回滚，避免同日合并的待办互相盖回。
+  return tokens.slice().reverse().reduce(function(chain, token) {
+    return chain.then(function() {
+      return api('/api/undo/' + encodeURIComponent(token), { method: 'POST', body: '{}' });
+    });
+  }, Promise.resolve()).then(function() {
+    showToast('已撤销完成，待办已恢复', 'success');
+    refreshAfterCompleteUndo();
+  }).catch(function() {
+    showToast('撤销失败，请刷新后重试', 'error');
+    refreshAfterCompleteUndo();
+  });
+}
+
+function showCompleteUndoToast(saved, message) {
+  var token = saved && saved.undo_token;
+  if (!token) { showToast(message, 'success'); return; }
+  showToastAction(message, 'success', '撤销', function() { undoCompletedTasks([token]); });
+}
+
 // 连续打开两次“记录跟进”时（比如快速点两条今日待办），先打开的那次读取返回
 // 较慢会重新 fillCompleteModal，把用户已经在第二次弹窗里输入的内容整个清掉。
 // fillToken 保证只有最后一次 openCompleteModal 的响应才能填充表单。
@@ -10595,7 +10642,7 @@ async function runSubmitComplete() {
     }
     closeModal('completeModal', true);
     try { refreshSourceListsAfterComplete(id, nextEntry); } catch (e) {}
-    showToast('已记录' + (nextTask && nextDate ? ' · 下一步 ' + formatChineseDate(nextDate) : ''), 'success');
+    showCompleteUndoToast(saved, '已记录' + (nextTask && nextDate ? ' · 下一步 ' + formatChineseDate(nextDate) : ''));
   } catch (e) {
     showCompleteSubmitError((e && e.message) ? ('保存失败：' + e.message) : '保存失败，请稍后重试');
   } finally {

@@ -1054,6 +1054,62 @@ class CalendarAndAccessTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_completing_a_today_reminder_is_undoable_back_into_today(self):
+        """A mistaken 标记完成 must be reversible: the server returns an undo_token
+        and /api/undo reopens the reminder so it shows in Today again."""
+        spec = importlib.util.spec_from_file_location('crm_app_complete_undo_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("INSERT INTO customers (name, company) VALUES ('Unico', 'Unico Co.')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        client = module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        # A genuine inbound reply makes the customer human-owned, so its task shows in Today.
+        reply = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '客户回复询价', 'direction': 'inbound', 'follow_date': '2026-01-02',
+        })
+        self.assertEqual(reply.status_code, 200, reply.get_json())
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("""INSERT INTO reminders (customer_id, title, remind_date, is_done, reminder_type)
+                            VALUES (?, '跟进 Unico 报价', '2026-01-01', 0, 'follow_up')""", (customer_id,))
+            reminder_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+
+        def today_ids():
+            return {int(item['id']) for item in client.get('/api/reminders/today').get_json()}
+
+        self.assertIn(reminder_id, today_ids())
+
+        with mock.patch.object(module, 'schedule_safety_backup'):
+            completed = client.put(f'/api/reminders/{reminder_id}', json={
+                'result': '已完成', 'activity_type': 'task_completed',
+            })
+        self.assertEqual(completed.status_code, 200, completed.get_json())
+        token = completed.get_json().get('undo_token')
+        self.assertTrue(token, '完成待办必须返回 undo_token 供撤销')
+        self.assertNotIn(reminder_id, today_ids())
+
+        with mock.patch.object(module, 'schedule_safety_backup'):
+            undone = client.post(f'/api/undo/{token}')
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertIn(reminder_id, today_ids(), '撤销完成后待办必须回到 Today')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            reopened = conn.execute('SELECT is_done FROM reminders WHERE id=?', (reminder_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(reopened, 0)
+
     def test_recording_an_inbox_reply_through_follow_history_resolves_only_that_reply(self):
         """The shared communication form must preserve the Inbox item's resolution boundary."""
         spec = importlib.util.spec_from_file_location('crm_app_shared_inbox_record_test', ROOT / 'app.py')
@@ -3901,6 +3957,9 @@ class ActionFeedbackRegressionTest(unittest.TestCase):
 
     def test_action_feedback_flow_in_a_real_dom(self):
         self._run_harness('action_feedback_check.cjs', 'action feedback regression: OK')
+
+    def test_complete_undo_flow_in_a_real_dom(self):
+        self._run_harness('complete_undo_check.cjs', 'complete undo regression: OK')
 
     def test_unified_action_status_is_wired_into_the_shell(self):
         html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')

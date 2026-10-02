@@ -11,7 +11,13 @@
 - 接口：删除 `/api/calendar/ical/<token>.ics`、`/api/calendar/refresh`、`/api/network/ip` 与 `ical_gen.py`。已订阅的 Apple 日历会显示链接无效；团队确认无人使用。`app_settings` 中已有的 `calendar_subscription_token:*` 历史行保留不动。
 - 文档：`AGENTS.md`、`README.md`、`使用说明.md`、`PRODUCT_DIRECTION.md`、`DEPLOYMENT.md` 与架构文档同步去掉 Apple 日历 / ICS 口径。
 - 验证：新增 `test_apple_calendar_subscription_is_retired`（路由、文件、前端文案均已移除，完整日历页与模块开关保留）。
+## 2026-10-02 — 完成待办可撤销：误点「标记完成」后能把待办恢复到今日
 
+- 现象：误点客户工作台的「标记完成」（或 Today 的「记录沟通 / 完成并记录」、「完成这次跟进」、批量完成）后，待办直接从「今日待办」消失，界面上没有任何撤销入口——服务端其实已经返回了 `undo_token`，但完成流程把它丢弃了，于是误操作无法恢复（用户报告 Unico 客户因此从今日待办消失）。
+- 变更：完成待办成功后统一弹出带「撤销」按钮的轻提示。点击后调用既有的 `/api/undo/<token>` 撤销服务端完成动作（恢复待办为未完成、删除完成时写入的时间线记录与新建的下一步），并刷新 Today 与当前客户工作台；`/api/undo` 的冲突保护、审计与幂等契约不变。
+- 覆盖入口：客户工作台「标记完成」/行内「完成」（`completeCustomerNextTask`）、「完成这次跟进」弹窗（`runSubmitComplete`）、Today/Inbox「记录沟通｜完成并记录」（`saveInboxReply`）、批量完成（`submitBatchComplete`，同一批多条待办一次撤销）。服务端未返回 `undo_token` 时仍显示普通轻提示，不伪造撤销。
+- 未改动：`/api/reminders/<id>` 与 `/api/undo/<token>` 的后端契约、撤销快照与冲突保护、Today 的「人类已建联」过滤逻辑均不变。
+- 验证：`tests/test_risk_regressions.py` 新增 `ActionFeedbackRegressionTest.test_complete_undo_flow_in_a_real_dom`（jsdom 断言撤销按钮渲染、点击后 POST 撤销并刷新 Today、无 token 时不显示撤销）与 `CalendarAndAccessTest.test_completing_a_today_reminder_is_undoable_back_into_today`（完成返回 `undo_token`、待办离开 Today，撤销后 `is_done=0` 且重新出现在 Today）；`node --check app/static/app.js` 与既有前端回归（complete_modal / customer_context_race / frontend_architecture / action_feedback / customer_task_action）全部通过。
 ## 2026-10-01 — Agent 数据访问改为「可逆即自由」：动作策略表 + 增删改查放开 + CLI 直写
 
 - 产品原则变更：无人值守的后台自动化（Sela、AI 预填、定时任务）仍不得自动创建客户、联系人、待办或商业承诺；但在成员本人指令下，持有 `crm:write` 令牌的 Agent 可以直接**新增、修改、调整日程、归档 / 恢复**，每一步都保留来源、审计与撤销。永久删除、对外发送消息、报价、价格与交期承诺仍由人完成。
