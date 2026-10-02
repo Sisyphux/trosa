@@ -824,6 +824,27 @@ class CalendarAndAccessTest(unittest.TestCase):
         )
         self.assertEqual(infer('还需要 3D 图纸', *aliases)[0], 'unknown')
 
+    def test_outbound_english_email_is_not_read_as_inbound(self):
+        """A body line like “update:” is not a speaker tag and must not flip direction."""
+        spec = importlib.util.spec_from_file_location('crm_app_direction_en_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        infer = module._infer_communication_direction
+        aliases = (['hamid'], ['YXE Acrylics'])
+
+        email = (
+            'Sorry for the slow reply on your quote! We did see it and have been trying to find '
+            'a better shipping option to Saskatoon, but freight costs kept coming out too high.\n\n'
+            "update: we'll have stock in the US by the end of this year. Would you be interested "
+            "in a quote based on US stock? I'll send you the details once it's ready.\n\nThanks,"
+        )
+        self.assertEqual(infer(email, *aliases)[0], 'outbound')
+
+        # A bare lowercase keyword before a colon is ordinary prose, not a speaker.
+        self.assertEqual(infer('update: we will ship next week', *aliases)[0], 'unknown')
+        # A name-shaped label still counts as the counterparty.
+        self.assertEqual(infer('SK Crafts Limited: We order acrylic & PS sheets', ['hamid'], ['SK Crafts Limited'])[0], 'inbound')
+
     def test_customer_views_require_a_customer_reply_for_contact(self):
         """Sent development emails and outbound logs stay outside “已有联系”."""
         spec = importlib.util.spec_from_file_location('crm_app_contact_view_test', ROOT / 'app.py')

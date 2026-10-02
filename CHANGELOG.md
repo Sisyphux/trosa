@@ -1,3 +1,12 @@
+## 2026-10-02 — 记录沟通弹窗恢复方向选择，并修正 update: 被误当成发言人的方向误判
+
+- 现象一：客户工作区点「记录沟通」弹出的统一弹窗把方向控件丢了。重构前它打开的是带「识别有误？」方向选择的 inline 表单（`followCompose`），重构后改成统一弹窗（`openCommunicationConfirm`），弹窗里没有方向入口，成员再也改不了识别结果。
+- 恢复：在弹窗内容框下方补回 `.auto-direction-row`（提示 + 「识别有误？」里的 自动识别 / 我发给客户 / 客户发给我 / 双方沟通），沿用客户工作区既有的同一套样式与文案；成员的手动选择优先于自动识别，并作为实际保存的方向。
+- 现象二：一封业务员写给客户的英文邮件（正文里有一行 `update: we'll have stock…`）被 AI 整理成「客户回复致歉…客户今年年底将在美国有库存」。原因：方向推断把 `update:` 当成发言人标签；既不是我方别名也不是客户别名，就被算作「对方在说话」，于是整封邮件被判定为客户来信，AI 摘要也跟着写反。
+- 修正：服务端与前端的方向推断都增加「像不像发言人」的判断——`update`、`re`、`subject`、`thanks`、`note` 等常见正文起头词不再当作发言人，仅当标签是姓名 / 公司名形状（含中日韩文字、大写或首字母大写、多词、含分隔符）或命中已知别名时才计为一方发言；同时补了几条只有卖方会写的英文措辞（`please find…`、`thank you for your interest/inquiry…`、`would you be interested…`）作为 outbound 信号。AI 提示词在无方向标记时也明确要求先判断这封第一人称信息是谁写的，再按该方向总结，不得把写方的陈述安到对方身上。
+- 保存方向不再固定用打开弹窗时的方向：手动选择 → AI / 发言人识别结果 → 打开时的上下文 → 本地文本规则，依次回退；弹窗顶部仍显示「AI 整理 · 我发给客户」等实际方向，方便成员随时核对。
+- 验证：`node --check app/static/app.js`、`py_compile app.py`；`tests.test_risk_regressions.CalendarAndAccessTest.test_summary_direction_inference_covers_common_crm_notes`（原有中文方向用例）与新增 `test_outbound_english_email_is_not_read_as_inbound`（英文 email → outbound、`update: we will ship next week` → unknown、`SK Crafts Limited: …` → inbound）；`tests.test_risk_regressions.CommunicationAssistTest`（含 AI 在 unknown 时解析方向的用例）。
+
 ## 2026-10-02 — 修复 PostgreSQL 上批量撤销误判冲突
 
 - 现象：正式环境（PostgreSQL）对同一客户提交含 2 个 `create_task` 的 `batch` 成功后，`undo <批次 action id>` 返回 409「相关数据已经被再次修改，系统拒绝用旧快照覆盖新数据」；批次中途失败的反向回滚也可能留下已落地的前几条。

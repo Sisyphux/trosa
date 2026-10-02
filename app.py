@@ -11986,6 +11986,50 @@ def _speaker_key(value):
     return re.sub(r'[^a-z0-9\u00c0-\u024f\u4e00-\u9fff]+', '', (value or '').casefold())
 
 
+# Ordinary body words that commonly end in a colon on their own line
+# ("update:", "subject:", "re:"). They look like the ``Name:`` speaker tag the
+# transcript parser expects, but counting them as a speaker flips the inferred
+# direction: the whole message appears to come from the counterparty.
+# Values are stored in ``_speaker_key`` normal form (lowercase, alphanumerics).
+_SPEAKER_LABEL_STOPWORDS = {
+    'update', 'updates', 're', 'fwd', 'fw', 'subject', 'from', 'to', 'cc', 'bcc',
+    'date', 'sent', 'time', 'reply', 'regards', 'thanks', 'thank', 'note', 'notes',
+    'ps', 'pss', 'summary', 'status', 'hi', 'hello', 'dear', 'message', 'content',
+    'body', 'attachment', 'attachments', 'important', 'urgent', 'reminder', 'action',
+    'attention', 'fyi', 'info', 'details', 'question', 'answer', 'transcript',
+    'caption', 'description', 'title', 'label', 'name', 'email', 'phone', 'address',
+    'company', 'customer', 'buyer', 'seller', 'order', 'quote', 'quotation', 'invoice',
+    'payment', 'price', 'shipping', 'delivery', 'tracking', 'meeting', 'call',
+    'todo', 'task', 'agenda', 'minutes', 'intro', 'introduction', 'background',
+    'context', 'goal', 'next', 'previous', 'current', 'new', 'old', 'draft',
+    'pricing', 'moq', 'spec', 'specs', 'paymentterms', 'deliverytime', 'leadtime',
+}
+
+
+def _looks_like_speaker_label(label):
+    """Decide whether a ``word:`` prefix is really a transcript speaker tag.
+
+    A speaker in a pasted transcript is a person or company name: it matches a
+    known alias, or it is name-shaped (CJK, capitalised, multi-word, or carries a
+    non-letter separator such as ``john_doe``). A bare lowercase English word
+    such as ``update`` is a sentence opener, not a speaker, and must not be
+    counted as the counterparty.
+    """
+    text = (label or '').strip()
+    if not text:
+        return False
+    if _speaker_key(text) in _SPEAKER_LABEL_STOPWORDS:
+        return False
+    if re.search(r'[\u4e00-\u9fff]', text):
+        return True
+    # Spaces, underscores, dots, hyphens and digits all make a label name-like.
+    if re.search(r'[^0-9A-Za-z\u00c0-\u024f]', text):
+        return True
+    # Capitalised or ALL-CAPS single tokens are names; all-lowercase words are
+    # far more likely to be ordinary body text (e.g. "update:").
+    return bool(re.search(r'[A-Z\u00c0-\u00de]', text))
+
+
 def _infer_summary_direction(content):
     """Infer ownership from the concise Chinese notes commonly saved in the CRM."""
     text = re.sub(r'\s+', ' ', content or '').strip()
@@ -12002,6 +12046,11 @@ def _infer_summary_direction(content):
         r'(?:询问|问|回复|提醒|跟进|联系)(?:了)?(?:客户|买家|对方|联系人)',
         r'(?:二次|再次|继续)?(?:开发|跟进)(?:客户|需求)?',
         r'(?:^|[。；;，,])(?:已|再次|继续)?(?:提供|发送|解释|介绍|询问|告知|提醒|跟进|报价|确认)(?:了)?',
+        # Seller-only English phrasing: only our side offers a quote, thanks the
+        # buyer for their inquiry, or sends documents with “please find”.
+        r'\bplease find (?:the|our|attached|below)\b',
+        r'\bthank you for your (?:interest|inquiry|enquiry|patience|understanding)\b',
+        r'\bwould you (?:be interested|like us to|like a)\b',
     )
     inbound = any(re.search(pattern, text, re.IGNORECASE) for pattern in inbound_patterns)
     outbound = any(re.search(pattern, text, re.IGNORECASE) for pattern in outbound_patterns)
@@ -12031,8 +12080,9 @@ def _infer_communication_direction(content, user_aliases, customer_aliases):
             ours = True
         elif any(key == alias or key in alias or alias in key for alias in customer_keys):
             theirs = True
-        else:
+        elif _looks_like_speaker_label(label):
             # A named speaker that is not the logged-in salesperson is external.
+            # Ordinary body words ("update:") must not count as a speaker.
             theirs = True
     if ours and theirs:
         return 'two_way', 'high', list(dict.fromkeys(speakers))
@@ -12126,7 +12176,10 @@ def analyze_inbox_reply():
         'outbound': '以下内容是“我方发给客户”的信息。摘要必须写清楚我方发送、询问、报价或承诺了什么，不得把我方陈述写成客户需求。',
         'inbound': '以下内容是“客户发给我方”的信息。摘要必须写清楚客户回复、询问、确认或拒绝了什么，不得把客户陈述写成我方动作。',
         'two_way': '以下内容包含双方沟通。摘要必须分别写清“我方”和“客户”的动作与观点，不得混淆发送方。',
-        'unknown': '请先根据每段消息前的发言人标签判断归属，再分别总结我方和客户的动作。',
+        'unknown': '原文没有可靠的方向标记，请先判断这段文字是谁写的：'
+                   '当第一人称（我/我们/I/we）是在向对方道歉、报价、承诺、提供资料或询问对方意向时，说明这是业务员（我方）发给客户的内容，direction 记为 outbound；'
+                   '当第一人称是在向业务员回复、询问、下单、索要报价或提出要求时，说明这是客户发给业务员的内容，direction 记为 inbound；'
+                   '只有原文同时出现双方各自明确的发言时才用 two_way。先确定 direction，再按该方向总结，绝不能把写方的陈述安到对方身上，也不得编造原文没有的动作。',
     }[direction]
     user_display = user_info.get('name') or g.current_user
     customer_context = '、'.join(value for value in dict.fromkeys(customer_aliases) if value)

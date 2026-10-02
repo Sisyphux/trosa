@@ -3248,6 +3248,10 @@ async function openCommunicationConfirm(options) {
   _inboxReplyRawContent = context.content || '';
   _inboxReplyAnalysis = null;
   document.getElementById('inboxReplyAnalysis').hidden = true;
+  var directionSelect = document.getElementById('inboxReplyDirectionOverride');
+  if (directionSelect) {
+    directionSelect.value = ['outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0 ? context.direction : 'auto';
+  }
   document.getElementById('inboxReplyDate').value = context.followDate || localDateString();
   if (rawDetails && rawText) {
     var hasRaw = !!(context.rawContent && context.rawContent !== context.content);
@@ -3294,6 +3298,7 @@ async function openCommunicationConfirm(options) {
   }
   setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '');
   setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
+  updateInboxReplyDirectionPreview();
   openModal('inboxReplyModal');
   setTimeout(function() { document.getElementById('inboxReplyContent').focus(); }, 0);
   if (context.autoAnalyze && context.content) analyzeInboxReply(true, { autoFillSummary: true });
@@ -3303,12 +3308,42 @@ function openInboxReplyModal() {
   return openCommunicationConfirm({ source: 'manual', direction: 'inbound', activityType: 'customer_reply' });
 }
 
+function inboxReplyDirectionValue() {
+  var select = document.getElementById('inboxReplyDirectionOverride');
+  return select && select.value ? select.value : 'auto';
+}
+
+// The direction that will actually be saved: an explicit manual choice wins,
+// then the AI/speaker result, then the context the dialog opened with, and
+// finally the local text rules. Mirrors resolvedCommunicationDirection().
+function resolvedInboxReplyDirection() {
+  var override = inboxReplyDirectionValue();
+  if (override !== 'auto') return override;
+  var analysis = _inboxReplyAnalysis || {};
+  if (['outbound', 'inbound', 'two_way'].indexOf(analysis.direction) >= 0) return analysis.direction;
+  var context = _communicationConfirmContext || {};
+  if (['outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0) return context.direction;
+  var textarea = document.getElementById('inboxReplyContent');
+  return inferCommunicationDirectionFromText(textarea ? textarea.value : '');
+}
+
+function updateInboxReplyDirectionPreview() {
+  var hint = document.getElementById('inboxReplyDirectionHint');
+  if (!hint) return;
+  var override = inboxReplyDirectionValue();
+  var direction = resolvedInboxReplyDirection();
+  if (override !== 'auto') hint.textContent = '手动指定：' + communicationDirectionLabel(override);
+  else if (direction !== 'unknown') hint.textContent = '系统识别：' + communicationDirectionLabel(direction);
+  else hint.textContent = '系统将在 AI 整理时结合发言人和内容判断沟通方向';
+}
+
 function clearInboxReplyAnalysis() {
   clearTimeout(_inboxReplyAnalysisTimer);
   _inboxReplyAnalysis = null;
   var panel = document.getElementById('inboxReplyAnalysis');
   if (panel) panel.hidden = true;
   setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '');
+  updateInboxReplyDirectionPreview();
 }
 
 function extractInboxReplyImage(input) {
@@ -3347,8 +3382,9 @@ async function analyzeInboxReply(force, options) {
   else panel.innerHTML = '<div class="quick-analysis-loading">AI 正在整理这次沟通的摘要…</div>';
   try {
     var context = _communicationConfirmContext || {};
-    var requestedDirection = ['auto', 'outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0
-      ? context.direction : 'auto';
+    var directionOverride = inboxReplyDirectionValue();
+    var requestedDirection = directionOverride !== 'auto' ? directionOverride
+      : (['outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0 ? context.direction : 'auto');
     var result = await api('/api/inbox/analyze-reply', { method: 'POST', body: JSON.stringify({
       content: content, direction: requestedDirection, customer_id: context.customerId || ''
     }) });
@@ -3370,6 +3406,7 @@ async function analyzeInboxReply(force, options) {
       textarea.value = summary;
       _inboxReplyRawContent = context.rawContent || _inboxReplyRawContent;
     }
+    updateInboxReplyDirectionPreview();
   } catch(e) {
     panel.innerHTML = '<div class="quick-analysis-error">暂时无法使用 AI 分析，仍可手动选择客户并保存原文。</div>';
   }
@@ -3380,7 +3417,8 @@ function renderInboxReplyAnalysis(result) {
   var analysis = result.analysis || {};
   var facts = (analysis.key_facts || []).concat(analysis.needs || []).slice(0, 6);
   var candidates = (_communicationConfirmContext && _communicationConfirmContext.customerId) ? [] : (result.candidates || []);
-  var html = '<div class="quick-analysis-head"><strong>AI 整理</strong><span>' + escapeHtml(analysis.intent || '未知') + '</span></div>';
+  var directionLabel = ['outbound', 'inbound', 'two_way'].indexOf(analysis.direction) >= 0 ? ' · ' + communicationDirectionLabel(analysis.direction) : '';
+  var html = '<div class="quick-analysis-head"><strong>AI 整理' + escapeHtml(directionLabel) + '</strong><span>' + escapeHtml(analysis.intent || '未知') + '</span></div>';
   html += '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>';
   if (facts.length) html += '<div class="quick-analysis-facts">' + facts.map(function(f) { return '<span>' + escapeHtml(f) + '</span>'; }).join('') + '</div>';
   if (candidates.length) {
@@ -3422,6 +3460,20 @@ function normalizeSpeakerName(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9\u00c0-\u024f\u4e00-\u9fff]+/g, '');
 }
 
+// Ordinary body words that end in a colon on their own line ("update:").
+// Counting them as a transcript speaker flips the inferred direction, so the
+// client must reject them exactly like the server does.
+var SPEAKER_LABEL_STOPWORDS = ['update', 'updates', 're', 'fwd', 'fw', 'subject', 'from', 'to', 'cc', 'bcc', 'date', 'sent', 'time', 'reply', 'regards', 'thanks', 'thank', 'note', 'notes', 'ps', 'pss', 'summary', 'status', 'hi', 'hello', 'dear', 'message', 'content', 'body', 'attachment', 'attachments', 'important', 'urgent', 'reminder', 'action', 'attention', 'fyi', 'info', 'details', 'question', 'answer', 'transcript', 'caption', 'description', 'title', 'label', 'name', 'email', 'phone', 'address', 'company', 'customer', 'buyer', 'seller', 'order', 'quote', 'quotation', 'invoice', 'payment', 'price', 'shipping', 'delivery', 'tracking', 'meeting', 'call', 'todo', 'task', 'agenda', 'minutes', 'intro', 'introduction', 'background', 'context', 'goal', 'next', 'previous', 'current', 'new', 'old', 'draft', 'pricing', 'moq', 'spec', 'specs'];
+
+function looksLikeSpeakerLabel(label) {
+  var text = String(label || '').trim();
+  if (!text) return false;
+  if (SPEAKER_LABEL_STOPWORDS.indexOf(normalizeSpeakerName(text)) >= 0) return false;
+  if (/[\u4e00-\u9fff]/.test(text)) return true;          // CJK names carry no case
+  if (/[^0-9A-Za-z\u00c0-\u024f]/.test(text)) return true; // dots, underscores, multi-word
+  return /[A-Z\u00c0-\u00de]/.test(text);                  // capitalised names
+}
+
 function communicationContextData(context) {
   if (context === 'complete') {
     var modal = document.getElementById('completeModal');
@@ -3447,7 +3499,7 @@ function inferCommunicationDirectionFromText(content) {
     var speaker = normalizeSpeakerName(match[1]);
     if (!speaker) continue;
     if (userKey && (speaker === userKey || speaker.endsWith(userKey) || userKey.endsWith(speaker))) ours = true;
-    else theirs = true;
+    else if (looksLikeSpeakerLabel(match[1])) theirs = true;
   }
   if (ours && theirs) return 'two_way';
   if (ours) return 'outbound';
@@ -3463,7 +3515,12 @@ function inferCommunicationDirectionFromText(content) {
     /(?:向|给)(?:客户|买家|对方|联系人)[^。；;\n]{0,28}(?:回复|确认|询问|提供|发送|报价|建议|告知|提醒)/i,
     /(?:询问|问|回复|提醒|跟进|联系)(?:了)?(?:客户|买家|对方|联系人)/i,
     /(?:二次|再次|继续)?(?:开发|跟进)(?:客户|需求)?/i,
-    /(?:^|[。；;，,])(?:已|再次|继续)?(?:提供|发送|解释|介绍|询问|告知|提醒|跟进|报价|确认)(?:了)?/i
+    /(?:^|[。；;，,])(?:已|再次|继续)?(?:提供|发送|解释|介绍|询问|告知|提醒|跟进|报价|确认)(?:了)?/i,
+    // Seller-only English phrasing (our side offering, thanking for an inquiry
+    // or sending documents), mirroring the server-side rules.
+    /please find (?:the|our|attached|below)/i,
+    /thank you for your (?:interest|inquiry|enquiry|patience|understanding)/i,
+    /would you (?:be interested|like us to|like a)/i
   ];
   var inbound = inboundPatterns.some(function(pattern) { return pattern.test(text); });
   var outbound = outboundPatterns.some(function(pattern) { return pattern.test(text); });
@@ -3637,6 +3694,7 @@ async function saveInboxReply() {
   var customerId = context.customerId || document.getElementById('inboxReplyCustomer').value;
   var content = document.getElementById('inboxReplyContent').value.trim();
   var followDate = document.getElementById('inboxReplyDate').value || localDateString();
+  var savedDirection = resolvedInboxReplyDirection();
   if (!content) {
     setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '请先记录沟通内容');
     document.getElementById('inboxReplyContent').focus();
@@ -3657,7 +3715,7 @@ async function saveInboxReply() {
       var proposalPayload = Object.assign({}, context.agentProposalPayload || {}, {
         content: content, activity_content: content, follow_date: followDate,
         activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
-        activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
+        activity_type: context.activityType || 'follow_up', direction: savedDirection,
         next_task: '', next_follow_up: '',
         inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
       });
@@ -3667,7 +3725,7 @@ async function saveInboxReply() {
       saved = await api('/api/reminders/' + context.reminderId, {
         method: 'PUT', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
-          activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
+          activity_type: context.activityType || 'follow_up', direction: savedDirection,
           next_task: '', next_follow_up: '', is_reported: 0
         })
       });
@@ -3675,7 +3733,7 @@ async function saveInboxReply() {
       saved = await api('/api/customers/' + customerId + '/follow_history', {
         method: 'POST', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
-          activity_type: context.activityType || 'follow_up', direction: context.direction || 'unknown',
+          activity_type: context.activityType || 'follow_up', direction: savedDirection,
           follow_date: followDate, next_task: '', next_follow_up: '',
           source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
         })
@@ -3687,7 +3745,7 @@ async function saveInboxReply() {
         follow_date: followDate, content: content,
         result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
         next_plan: '', activity_type: context.activityType || 'customer_reply',
-        direction: context.direction || 'unknown', is_reported: false
+        direction: savedDirection, is_reported: false
       }, saved && saved.activity ? saved.activity : {});
       if (activity.id) {
         var changedKey = upsertCustomerTimelineEntry(activity);
