@@ -128,7 +128,6 @@ Apple 日历通过个人 ICS 地址读取当前待办。它是只读订阅通道
 - 输出区分事实、推断和未知。
 - 失败时返回清楚状态，不阻断客户、记录、待办和备份操作。
 - 结构化写入前由用户确认。
-- 发送、报价和承诺由用户执行。
 - 关闭模块后停止对应后台处理并保留历史内容。
 
 外部 Agent 的正式只读入口是受限的 Sela 服务身份（`/api/integrations/sela/*`）与普通业务读 API（客户、客户时间线/待办/沟通历史、Inbox、`/api/reminders/today|upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）；登录会话可用 `/api/agent/*` 读取今日工作、客户工作区、客户沟通时间线和跨客户沟通搜索。结构化写入要么生成登录会话下的提议，要么遵守 Gateway scope、幂等和撤销边界。Trosa 不包含独立 Agent/Web runtime，核心 CRM 业务独立运行。

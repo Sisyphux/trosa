@@ -138,7 +138,7 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
 ### Gmail 沟通同步（可选）
 
-Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和 Search 都不依赖它。
+Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和 Search 都不依赖它。当前未配置、已停用；客户回信与退信由 sela 读取邮箱，经 `/api/integrations/sela/reply` 交接。
 
 1. 在 Google Cloud 创建 OAuth Web application，启用 Gmail API，并将生产回调地址精确配置为 `https://你的域名/api/integrations/gmail/oauth/callback`。
 2. 在 `/etc/trade-os/trade-os.env` 设置 `GMAIL_CLIENT_ID`、`GMAIL_CLIENT_SECRET`、`GMAIL_REDIRECT_URI`、`GMAIL_TOKEN_ENCRYPTION_KEY` 和 `GMAIL_SYNC_ENABLED=true`。加密密钥至少 32 个字符，只保存在权限为 600 的环境文件中，不能提交到仓库。

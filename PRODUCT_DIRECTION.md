@@ -83,14 +83,13 @@ AI 是可关闭的辅助阅读层，可整理用户主动提交的官网内容�
 - 输出需区分事实、推断和未知。
 - 模型输出不会直接改写客户、联系人、记录或待办。
 - 建议形成待办前，用户确认客户、动作和日期。
-- 消息发送、报价和商业承诺始终由用户完成。
 - 未配置模型时，固定核心功能保持可用。
 
 外部 Agent 的正式只读入口是受限的 Sela 服务身份（`/api/integrations/sela/*`）加上普通业务读 API（`/api/customers`、`/api/customers/<id>/timeline|tasks|follow_history|contacts`、`/api/inbox`、`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）；登录会话可用 `/api/agent/*` 做原子读取与确认式提议。工具负责单一业务动作，固定流程才使用对应 Skill；Trosa 不包含独立 Agent/Web runtime。客户、联系人、沟通记录、待办、Inbox、日历和备份恢复等固定核心不依赖模型。
 
 - 通用 Agent 可以直接搜索客户、查询沟通记录、读取客户时间线和整理下一步建议。
 - 原子工具返回已记录事实和信息缺口，不替用户推断客户价值、意向或商业承诺。
-- 新增、修改、完成待办和记录沟通仍需用户确认；发送消息、报价和商业承诺仍由用户执行。
+- 新增、修改、完成待办和记录沟通仍需用户确认。
 - Agent 通过 Trosa 业务接口访问数据，不直接访问 PostgreSQL、SQLite、文件或 Shell。
 
 ## 私人定制

@@ -39,9 +39,10 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 
 ## Sela 与 AI
 
-- Sela 通过受限 `/api/integrations/sela/*` 接口同步**已确认**外联，使用精确身份匹配、幂等键和 `REVIEW` 处理歧义；不得直接读写 SQLite。Sela 只保留本地 Agent session、Gmail delivery journal、Trosa outbox、诊断和安全暂停等可靠性职责，不维护客户/联系人/任务/阶段或人工判断副本；它只接受 Trosa 的 `trosa-postgresql-v1` 健康契约。
+- Sela 负责 prospect 开发：发开信、读邮箱检测回信，检测到回信后交接给 Trosa；退信由 Sela 处理（标记 BOUNCED、停止发信）。它通过受限 `/api/integrations/sela/*` 接口同步事实，使用精确身份匹配、幂等键和 `REVIEW` 处理歧义；不得直接读写 SQLite。Sela 本地只保留 Agent session、delivery journal、outbox、诊断和安全暂停等执行状态，不维护客户/联系人/任务/阶段或人工判断副本；它只接受 Trosa 的 `trosa-postgresql-v1` 健康契约。
 - AI/Sela 应预填来源、时间、渠道、证据、摘要和候选，优先减少手工操作；无人值守的后台自动化（Sela、AI 预填、定时任务）不得自动创建客户、联系人、待办或商业承诺；成员本人指令下、持有 `crm:write` 令牌的 Agent 可以直接新增、修改、调整日程、归档/恢复，所有写入保留来源、审计与撤销。永久删除、对外发送消息、报价、价格与交期承诺仍由人完成。
-- 没有足够信息时宁可进入 Inbox/待审阅，也不要自动执行高风险业务动作。发送消息、报价、价格/交期承诺始终由人完成。
+- 没有足够信息时宁可进入 Inbox/待审阅，也不要自动执行高风险业务动作。
+- Trosa 自带的 Gmail 同步（`gmail_sync.py`）当前未配置、已停用；客户回信与退信由 sela 读取邮箱，经 `/api/integrations/sela/reply` 交接。
 
 ## 已冻结与不应扩张的内容
 

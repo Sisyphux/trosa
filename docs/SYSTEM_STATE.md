@@ -76,9 +76,9 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | 迁移 | `migrations/0001–0029` | 6 schema沉淀；0019退役旧AI/监控兼容视图；0020建customer_states事实；0023–0029收敛兼容写边界与审计 | 在用，ledger在`audit.schema_migrations`（SHA-256） |
 | 前端 | `app/static/` | 单页应用；Customer/Today/Inbox共同确认入口已发布并通过公网健康门 | 在用 |
 | 采集扩展 | `browser-extension/` | MV3侧边栏，从网页邮箱/WhatsApp采集回POST `/api/extension/*` | 在用 |
-| Sela同步 | `/api/integrations/sela/*` 16条 | 只同步**已确认**外联；精确身份匹配+幂等键+REVIEW；不直连DB | 在用 |
+| Sela同步 | `/api/integrations/sela/*` 16条 | prospect 开发（发开信、读邮箱检测回信，交接给 Trosa）；精确身份匹配+幂等键+REVIEW；不直连DB | 在用 |
 | 外部只读/集成 | `/api/integrations/sela/*` + 普通业务读 API + `/api/agent/*` | Sela 服务身份可只读客户/沟通/Today/Inbox；`/api/agent/*` 限登录会话原子读取与确认式提案；`/api/gateway/*` 个人 token 入口保留可用 | 在用 |
-| Gmail同步 | `gmail_sync.py` + 5条集成路由 | `gmail.readonly`；仅唯一精确邮箱匹配自动写入，其余进Inbox | 可选，关闭不影响核心 |
+| Gmail同步 | `gmail_sync.py` + 5条集成路由 | `gmail.readonly`；仅唯一精确邮箱匹配自动写入，其余进Inbox。当前未配置、已停用；客户回信与退信由 sela 读取邮箱，经 `/api/integrations/sela/reply` 交接 | 可选，关闭不影响核心 |
 | AI辅助 | `app/engine.py` | 沟通整理/截图识别/官网导入/问答；只预填与草稿，不直接写入 | 可选，关闭核心完整可用 |
 | 调度器 | `scheduler.py` | 到期提醒、可选监控、后台任务（与Web同进程） | 在用 |
 | 备份恢复 | `deploy/cloud/*.sh` + 应用undo | PG logical dump+附件bundle+SHA-256+restore-check；`undo_actions`冲突感知快照 | 在用 |
@@ -114,7 +114,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 ## 6. Agent 职责（AI/Sela/上层Agent）
 
 - 只能做：预填来源/时间/渠道/证据/摘要/候选、去重、沟通摘要与事实提取、生成草稿与提案。
-- 不能做：自动创建客户/联系人/待办、自动商业承诺、发送消息/报价/价格交期承诺（始终由人完成）。
+- 不能做：自动创建客户/联系人/待办、自动商业承诺。
 - 无足够信息时进 Inbox/待审阅，不自动执行高风险动作。
 - 技术对应：AI产物落 `audit.agent_proposals`/`agent_actions`（提案与动作分离）；
   外部同步靠 `integration_receipts` 幂等；Agent 经受限业务 API 访问，不直连 PG/SQLite/文件/Shell。

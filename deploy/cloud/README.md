@@ -89,7 +89,7 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 - `GET /api/integrations/sela/health`：轻量健康检查和契约版本；
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
 - `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；读取由业务事实派生的 `lifecycle_stage` 与 `customer_linked`，不把 `trosa_id`/`customer_type` 当身份；
-- `POST /api/integrations/sela/reply`：记录已确认的真实外联结果；
+- `POST /api/integrations/sela/reply`：记录 sela 检测到的客户回信/退信事实；
 
 当前 `sela-v2` 写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
 
@@ -97,7 +97,7 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 1. 先通过 `deploy/cloud/publish-workbench.sh` 发布包含 `sela-v2` 的 Trosa commit。服务启动时会自动执行增量数据库迁移，既有数据不会被重建。
 2. 在 Mac 的 sela 项目中运行 `python3 tools/lab.py trosa-status`，确认健康检查中的 prospect/exclusion 契约版本，再按需运行对应的重试命令处理历史积压。
-3. 观察 `data/trosa_auto_sync_state.json` 和 `data/server.log`；只有成功同步的 candidate 才会从 retry queue 消失，`review` 必须人工确认。
+3. 在 sela 侧观察 outbox/quarantine 并运行 `python3 tools/lab.py trosa-status`；临时网络失败会在 outbox 重试，被 Trosa 拒绝或过期的事件进入 quarantine，不会自动重放。
 
 如果发布健康检查失败，发布脚本会切回上一份 release；若已经有新契约写入数据，不要把旧代码作为长期运行版本，应重新发布包含 `sela-v2` 的版本。数据库新增字段和回执表是向后兼容的，发布前不需要停掉本地 sela。
 

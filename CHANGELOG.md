@@ -28,6 +28,13 @@
 - 变更：把两个动作恢复到工作台顶栏，紧跟身份标记、位于关闭键之前，任何分区下都常驻可见（`#cwExportTools`，仍用安静的 `.cw-link` 文字动作，不动「一个实心按钮」的收敛）；不再在「资料」分区底部重复一份，保持单一入口。
 - 窄屏与触屏：`≤1024px` 时两个动作单独占一行，不挤占分区标签；触屏下点按目标高度与其它文字动作一致（≥32px）。动作本身与后端 `/api/customers/<id>/context?mode=timeline`、`exportCurrentCustomerEmails()` 契约完全不变。
 - 验证：`node --check app/static/app.js`、`tests.test_risk_regressions.test_customer_workspace_is_one_daylight_room`（新增顶栏入口断言）。
+## 2026-10-02 — 文档清理：按现行事实修正 Sela 分工与“发送由人完成”口径
+
+- 现象：现行文档把“发送消息/报价/商业承诺”整体说成始终由人（用户）完成，并把 Sela 描述成“只保留可靠性职责 / 只能同步已确认外联”；这与现行事实不符——sela 自己发开发信（首次触达与第 7/14 天跟进）、自己读邮箱检测回信，检测到回信后交接给 Trosa；Trosa 负责 CRM 与人工确认。
+- 变更：删除发送/报价/商业承诺“始终由人完成”“由用户执行”等句子（保留“不能自动创建客户/联系人/待办/商业承诺”红线）；把 Sela 职责改写为 prospect 开发（发开信、读邮箱检测回信、检测到回信后交接给 Trosa）；在 Gmail 同步相关位置加注“当前未配置、已停用，客户回信与退信由 sela 读取邮箱并经 `/api/integrations/sela/reply` 交接”；`reply` 接口描述改为“记录 sela 检测到的客户回信/退信事实”；`TROSA_MAINTENANCE.md` 第 4 项与 `deploy/cloud/README.md` 的旧 sela 同步排查方式改为现行 outbox/quarantine 描述。
+- 未改动：未改动任何代码、测试、配置或数据；`TRADE_OS_*` 环境变量与 `trade-os` 服务名作为兼容标识保持不动；本次不做人数说法（B3）、Trade OS 品牌名（B4）与规模数字（B9）调整；历史 `CHANGELOG.md` 条目、`archive/` 与审计证据文件保持原样。
+- 验证：逐文件 `git diff` 确认无前后文误删；`grep` 复核“始终由人 / 永远由人 / 只保留可靠性 / gmail_sync”等口径，已处理处均已清除。
+
 ## 2026-10-02 — 文档清理：统一“使用人数”说法为“目前四人使用”
 
 - 现象：现行文档里“使用人数”说法不一致——`AGENTS.md`、`README.md` 已写四人，但 `docs/SYSTEM_STATE.md`、`docs/architecture/trosa-business-architecture.md`、`docs/architecture/trosa-system.summary.md`、`Trade OS 系统设计说明.md`、`DEPLOYMENT.md`、`TROSA_MAINTENANCE.md` 仍写“三人/三位用户”，容易把团队规模和系统账号数混为一谈。
