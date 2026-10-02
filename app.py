@@ -1299,10 +1299,18 @@ def _agent_gateway_receipt_write(conn, action, idempotency_key, request_sha256,
     response_json = _json_text(response)
     user = _db_scope_user()
     if not postgres_mode():
+        # Upsert on purpose: a receipt whose action has been undone is reissued
+        # by a fresh execution, so writing the same key again must replace the
+        # stale cached response instead of tripping the UNIQUE(action, key).
         conn.execute(
             '''INSERT INTO agent_gateway_idempotency
                (action, idempotency_key, request_sha256, proposal_id, response_json, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(action, idempotency_key) DO UPDATE SET
+                 request_sha256=excluded.request_sha256,
+                 proposal_id=excluded.proposal_id,
+                 response_json=excluded.response_json,
+                 updated_at=excluded.updated_at''',
             (action, idempotency_key, request_sha256, proposal_id, response_json, created_at, created_at),
         )
         return
@@ -14531,6 +14539,39 @@ _GATEWAY_ACTION_POLICY = {
 }
 
 
+def _gateway_receipt_action_id(response_json):
+    """Extract the ``action.id`` embedded in a cached gateway response, if any."""
+    try:
+        payload = json.loads(response_json)
+    except (TypeError, ValueError):
+        return ''
+    if not isinstance(payload, dict):
+        return ''
+    action = payload.get('action')
+    if not isinstance(action, dict):
+        return ''
+    return str(action.get('id') or '')
+
+
+def _gateway_receipt_superseded(conn, receipt):
+    """True when a cached idempotency receipt points at an undone action.
+
+    A receipt is the dedupe anchor only while the action it recorded is still
+    active.  Once that action is undone the effect no longer exists, so replaying
+    the cached ``completed`` response would report success without doing
+    anything.  In that one case the caller must execute again and reissue the
+    receipt.  A receipt with no action id (a validated duplicate-candidate no-op)
+    is never superseded, so ordinary retries keep deduping.
+    """
+    if not receipt:
+        return False
+    action_id = _gateway_receipt_action_id(receipt.get('response_json'))
+    if not action_id:
+        return False
+    record = _agent_action_read(conn, action_id)
+    return bool(record) and str(record.get('status') or '') != 'completed'
+
+
 def _gateway_direct_write(action, data, idempotency_key):
     """Dispatch one registered, reversible action through its shared handler."""
     policy = _GATEWAY_ACTION_POLICY.get(action)
@@ -14550,12 +14591,17 @@ def _gateway_direct_write(action, data, idempotency_key):
     preflight_conn = get_db()
     try:
         existing = _agent_gateway_receipt_read(preflight_conn, 'write:' + action, idempotency_key)
+        replayable = bool(existing) and not _gateway_receipt_superseded(preflight_conn, existing)
     finally:
         preflight_conn.close()
     if existing:
         if not secrets.compare_digest(existing['request_sha256'], request_hash):
             raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
-        return json.loads(existing['response_json']), True, 200
+        if replayable:
+            return json.loads(existing['response_json']), True, 200
+        # The recorded action was undone, so this is not a live retry: fall
+        # through, re-apply the effect and reissue the receipt under the same
+        # key.  A still-active action returned above and keeps deduping.
 
     source = str(payload.get('source') or 'agent_gateway').strip()[:100]
     effective_payload = dict(payload) if action == 'create_customer' else {**payload, 'source': source}
@@ -14563,9 +14609,13 @@ def _gateway_direct_write(action, data, idempotency_key):
     def receipt_hook(conn, cursor, result):
         existing = _agent_gateway_receipt_read(conn, 'write:' + action, idempotency_key)
         if existing:
-            if secrets.compare_digest(existing['request_sha256'], request_hash):
+            if not secrets.compare_digest(existing['request_sha256'], request_hash):
+                raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
+            if not _gateway_receipt_superseded(conn, existing):
                 raise _GatewayIdempotentReplay(json.loads(existing['response_json']))
-            raise CrmWriteError('该 Idempotency-Key 已用于不同请求', 409)
+            # A superseded receipt (recorded action already undone) is replaced
+            # by the fresh action below; the original request hash is preserved
+            # so the same key still cannot be reused for different content.
         if result.get('_gateway_skip_action'):
             # A duplicate candidate is a validated no-op: record the receipt so
             # a retry replays it, but do not fake a completed write action.

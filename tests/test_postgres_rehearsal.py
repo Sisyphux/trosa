@@ -2067,6 +2067,106 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(operation_logs.status_code, 200, operation_logs.get_json())
         self.assertTrue(operation_logs.get_json())
 
+    def test_z_agent_gateway_write_reapplies_after_undo_in_postgres(self):
+        """Undo then resend an identical gateway write must apply again, not replay.
+
+        Production report: a deterministic CLI ``Idempotency-Key`` hit the cached
+        gateway receipt after the action was undone and returned a stale
+        ``completed`` while the server state stayed undone.
+        """
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        session_client = module.app.test_client()
+        self.assertEqual(session_client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        write_token = session_client.post(
+            '/api/agent-gateway/tokens', json={'scopes': ['crm:write']}
+        ).get_json()['data']['token']
+        gateway = module.app.test_client()
+
+        def act(body, key):
+            return gateway.post('/api/gateway/actions', headers={
+                'Authorization': 'Bearer ' + write_token,
+                'Idempotency-Key': key,
+            }, json=body)
+
+        def is_archived(customer_id):
+            row = self.connection.execute(
+                'SELECT is_deleted FROM trade_os_compat.customers WHERE id=?',
+                (customer_id,),
+            ).fetchone()
+            return bool(row and row['is_deleted'])
+
+        def action_status(action_id):
+            return self.connection.execute(
+                '''SELECT status FROM audit.agent_actions
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=? AND action_id=?''',
+                ('hamid', action_id),
+            ).fetchone()['status']
+
+        create_body = {
+            'action': 'create_customer',
+            'payload': {'name': 'PG Replay', 'company': 'PG Replay Co',
+                        'contacts': [{'email': 'pg-replay@example.test'}]},
+        }
+        created = act(create_body, 'pg-replay-create-1')
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['data']['action']['customer_id']
+        create_action_id = created.get_json()['data']['action']['id']
+
+        # Invariant 2: a live create still dedupes on an identical resend.
+        create_replay = act(create_body, 'pg-replay-create-1')
+        self.assertEqual(create_replay.status_code, 200, create_replay.get_json())
+        self.assertEqual(create_replay.get_json()['data']['action']['id'], create_action_id)
+
+        # create_task -> undo -> identical resend recreates the Task.
+        task_body = {
+            'action': 'create_task', 'customer_id': customer_id,
+            'payload': {'title': 'PG Replay Task', 'due_date': '2026-10-28'},
+        }
+        task = act(task_body, 'pg-replay-task-1')
+        self.assertEqual(task.status_code, 201, task.get_json())
+        task_action_id = task.get_json()['data']['action']['id']
+        task_undo = gateway.post('/api/gateway/actions/' + task_action_id + '/undo',
+                                 headers={'Authorization': 'Bearer ' + write_token})
+        self.assertEqual(task_undo.status_code, 200, task_undo.get_json())
+        task_second = act(task_body, 'pg-replay-task-1')
+        self.assertEqual(task_second.status_code, 201, task_second.get_json())
+        self.assertNotEqual(task_second.get_json()['data']['action']['id'], task_action_id)
+
+        # archive -> undo -> identical resend must re-apply and report the truth.
+        archive_body = {'action': 'archive_customer', 'customer_id': customer_id, 'payload': {}}
+        first = act(archive_body, 'pg-replay-archive-1')
+        self.assertEqual(first.status_code, 201, first.get_json())
+        first_action_id = first.get_json()['data']['action']['id']
+        self.assertTrue(is_archived(customer_id))
+
+        undone = gateway.post('/api/gateway/actions/' + first_action_id + '/undo',
+                              headers={'Authorization': 'Bearer ' + write_token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertFalse(is_archived(customer_id))
+        self.assertEqual(action_status(first_action_id), 'undone')
+
+        second = act(archive_body, 'pg-replay-archive-1')
+        self.assertEqual(second.status_code, 201, second.get_json())
+        second_action = second.get_json()['data']['action']
+        self.assertNotEqual(second_action['id'], first_action_id)
+        self.assertEqual(second_action['status'], 'completed')
+        self.assertTrue(is_archived(customer_id))
+        self.assertEqual(action_status(second_action['id']), 'completed')
+
+        # With a live action again, the same key still dedupes.
+        third = act(archive_body, 'pg-replay-archive-1')
+        self.assertEqual(third.status_code, 200, third.get_json())
+        self.assertEqual(third.get_json()['data']['action']['id'], second_action['id'])
+
+        # Undo itself stays idempotent: a second undo reports already-undone.
+        repeat_undo = gateway.post('/api/gateway/actions/' + first_action_id + '/undo',
+                                   headers={'Authorization': 'Bearer ' + write_token})
+        self.assertEqual(repeat_undo.status_code, 404, repeat_undo.get_json())
+
 
     def test_concurrent_same_day_task_merge_creates_single_task(self):
         """Two writers racing on one due date must not duplicate the Task."""

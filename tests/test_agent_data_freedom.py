@@ -78,6 +78,35 @@ class AgentDataFreedomTest(unittest.TestCase):
             'Authorization': 'Bearer ' + token, 'Idempotency-Key': key,
         }, json={'action': action, 'customer_id': customer_id, 'payload': payload})
 
+    @staticmethod
+    def _customer_field(customer_id, column):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            row = conn.execute(f'SELECT {column} FROM customers WHERE id=?', (customer_id,)).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _open_task_count(customer_id):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            return conn.execute(
+                'SELECT COUNT(*) FROM reminders WHERE customer_id=? AND is_done=0',
+                (customer_id,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _action_status(action_id):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            row = conn.execute('SELECT status FROM agent_actions WHERE action_id=?',
+                               (action_id,)).fetchone()
+            return row[0] if row else None
+        finally:
+            conn.close()
+
     # --------------------------------------------------------- policy table
     def test_policy_table_is_the_single_gateway_contract(self):
         module = self._load_module()
@@ -200,6 +229,117 @@ class AgentDataFreedomTest(unittest.TestCase):
                                           (customer_id,)).fetchone()[0], 1)
         finally:
             conn.close()
+
+    # ------------------------------------------- idempotency after undo
+    def test_archive_undo_same_request_reapplies_instead_of_stale_replay(self):
+        """Undo then resend the identical archive: it must run again, not replay."""
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Replay Archive', 'Replay Archive Co')
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+
+        first = self._action(gateway, token, 'archive_customer', customer_id, {}, 'archive-replay-1')
+        self.assertEqual(first.status_code, 201, first.get_json())
+        first_action = first.get_json()['data']['action']
+        self.assertEqual(first_action['status'], 'completed')
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
+
+        undone = gateway.post('/api/gateway/actions/' + first_action['id'] + '/undo',
+                              headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 0)
+        self.assertEqual(self._action_status(first_action['id']), 'undone')
+
+        # Identical body + identical key.  The recorded action is undone, so the
+        # server must apply the archive again and report the new, real state.
+        second = self._action(gateway, token, 'archive_customer', customer_id, {}, 'archive-replay-1')
+        self.assertEqual(second.status_code, 201, second.get_json())
+        second_action = second.get_json()['data']['action']
+        self.assertNotEqual(second_action['id'], first_action['id'])
+        self.assertEqual(second_action['status'], 'completed')
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
+        self.assertEqual(self._action_status(second_action['id']), 'completed')
+
+        # Now that the recorded action is live again, the same key still dedupes.
+        third = self._action(gateway, token, 'archive_customer', customer_id, {}, 'archive-replay-1')
+        self.assertEqual(third.status_code, 200, third.get_json())
+        self.assertEqual(third.get_json()['data']['action']['id'], second_action['id'])
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
+
+    def test_active_action_same_request_still_dedupes(self):
+        """Invariant 2: a live create_customer request is not re-executed."""
+        module = self._load_module()
+        token = self._mint(module, ('crm:read', 'crm:write'))['token']
+        gateway = module.app.test_client()
+        body = {'name': 'Dedupe', 'company': 'Dedupe Co',
+                'contacts': [{'email': 'dedupe@example.test'}]}
+
+        first = self._action(gateway, token, 'create_customer', None, body, 'create-dedupe-1')
+        self.assertEqual(first.status_code, 201, first.get_json())
+        action_id = first.get_json()['data']['action']['id']
+
+        second = self._action(gateway, token, 'create_customer', None, body, 'create-dedupe-1')
+        self.assertEqual(second.status_code, 200, second.get_json())
+        self.assertEqual(second.get_json()['data']['action']['id'], action_id)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM customers WHERE company='Dedupe Co'").fetchone()[0], 1)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM agent_actions WHERE action_id=?', (action_id,)).fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_create_task_undo_same_request_recreates_task(self):
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Task Replay', 'Task Replay Co')
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+        payload = {'title': '回访客户', 'due_date': '2026-10-25'}
+
+        first = self._action(gateway, token, 'create_task', customer_id, payload, 'task-replay-1')
+        self.assertEqual(first.status_code, 201, first.get_json())
+        first_action = first.get_json()['data']['action']
+        self.assertEqual(self._open_task_count(customer_id), 1)
+
+        undone = gateway.post('/api/gateway/actions/' + first_action['id'] + '/undo',
+                              headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(self._open_task_count(customer_id), 0)
+
+        second = self._action(gateway, token, 'create_task', customer_id, payload, 'task-replay-1')
+        self.assertEqual(second.status_code, 201, second.get_json())
+        second_action = second.get_json()['data']['action']
+        self.assertNotEqual(second_action['id'], first_action['id'])
+        self.assertEqual(self._open_task_count(customer_id), 1)
+
+        third = self._action(gateway, token, 'create_task', customer_id, payload, 'task-replay-1')
+        self.assertEqual(third.status_code, 200, third.get_json())
+        self.assertEqual(third.get_json()['data']['action']['id'], second_action['id'])
+        self.assertEqual(self._open_task_count(customer_id), 1)
+
+    def test_undo_endpoint_stays_idempotent(self):
+        """Undoing an action twice neither doubles the effect nor revives it."""
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Undo Twice', 'Undo Twice Co')
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+
+        archived = self._action(gateway, token, 'archive_customer', customer_id, {}, 'undo-twice-1')
+        action_id = archived.get_json()['data']['action']['id']
+        first_undo = gateway.post('/api/gateway/actions/' + action_id + '/undo',
+                                  headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(first_undo.status_code, 200, first_undo.get_json())
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 0)
+        second_undo = gateway.post('/api/gateway/actions/' + action_id + '/undo',
+                                   headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(second_undo.status_code, 404, second_undo.get_json())
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 0)
+        # A receipt recorded before the undo is now superseded; the same request
+        # re-applies once (not twice) and reports the archived state.
+        replay = self._action(gateway, token, 'archive_customer', customer_id, {}, 'undo-twice-1')
+        self.assertEqual(replay.status_code, 201, replay.get_json())
+        self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
 
     # -------------------------------------------------------------- batch
     def test_batch_success_rollback_and_whole_undo(self):
@@ -490,6 +630,67 @@ class AgentDataFreedomTest(unittest.TestCase):
                                               (customer_id,)).fetchone()[0], 0)
             finally:
                 conn.close()
+        finally:
+            trosa_cli.request_json = original
+
+    def test_cli_archive_after_undo_reapplies_with_same_deterministic_key(self):
+        """The reported sequence through the real CLI key generator."""
+        module = self._load_module()
+        token = self._mint(module, ('crm:read', 'crm:write'))['token']
+        customer_id = self._insert_customer('hamid', 'CLI Replay', 'CLI Replay Co')
+        gateway = trosa_cli.Gateway(token, 'http://isolated.test')
+        parser = trosa_cli.build_parser()
+
+        def run(*argv):
+            return trosa_cli.run(parser.parse_args(list(argv)), gateway)
+
+        original = trosa_cli.request_json
+
+        def routed_request_json(method, path, params=None, body=None, headers=None,
+                                token=None, root=None, timeout=30):
+            if params:
+                query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, '')})
+                if query:
+                    path = path + '?' + query
+            final_headers = dict(headers or {})
+            if token:
+                final_headers['Authorization'] = 'Bearer ' + token
+            response = module.app.test_client().open(path, method=method, json=body, headers=final_headers)
+            payload = response.get_json()
+            if response.status_code >= 400:
+                message = (payload or {}).get('error')
+                if isinstance(message, dict):
+                    message = message.get('message')
+                raise trosa_cli.CliError(str(message or response.status_code),
+                                         4 if response.status_code in (401, 403) else 1)
+            return payload
+
+        # The deterministic key is the whole point: every identical archive call
+        # sends the same Idempotency-Key.
+        archive_body = {'action': 'archive_customer', 'customer_id': customer_id, 'payload': {}}
+        self.assertEqual(trosa_cli._deterministic_key(archive_body),
+                         trosa_cli._deterministic_key(dict(archive_body)))
+
+        trosa_cli.request_json = routed_request_json
+        try:
+            first = run('archive-customer', str(customer_id))
+            first_action = first['data']['action']['id']
+            self.assertEqual(first['data']['action']['status'], 'completed')
+            self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
+
+            undone = run('undo', first_action)
+            self.assertEqual(undone['data']['action']['status'], 'undone')
+            self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 0)
+
+            second = run('archive-customer', str(customer_id))
+            second_action = second['data']['action']['id']
+            self.assertNotEqual(second_action, first_action)
+            self.assertEqual(second['data']['action']['status'], 'completed')
+            self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
+
+            third = run('archive-customer', str(customer_id))
+            self.assertEqual(third['data']['action']['id'], second_action)
+            self.assertEqual(self._customer_field(customer_id, 'is_deleted'), 1)
         finally:
             trosa_cli.request_json = original
 
