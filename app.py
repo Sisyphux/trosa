@@ -7324,6 +7324,14 @@ def index():
     return jsonify({'error': 'index.html not found', 'tried': candidates}), 404
 
 
+@app.route('/privacy')
+def privacy_policy():
+    """Public privacy policy page (no login); required by Google OAuth app branding."""
+    response = send_from_directory(app.static_folder, 'privacy.html', mimetype='text/html')
+    response.headers['Cache-Control'] = 'public, max-age=300'
+    return response
+
+
 @app.route('/invite/<token>')
 def invitation_page(token):
     """Serve the normal shell; its first screen verifies and accepts the invite."""
