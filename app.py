@@ -9174,10 +9174,18 @@ def _create_modern_file(conn, *, customer_id, original_name, stored_name, file_p
     legacy_id = conn.execute(
         "SELECT trosa.compat_next_id('customer_files', trosa.compat_current_user())",
     ).fetchone()[0]
-    file_object_id = conn.execute(
-        "SELECT trosa.compat_uuid('file:' || trosa.compat_current_user() || ':' || ?::text)",
-        (legacy_id,),
-    ).fetchone()[0]
+    # The file object id is derived from (owner, legacy id).  A customer transfer
+    # re-keys its attachments to the new owner, which can free this owner's highest
+    # legacy id; the next upload would then derive the id of a file that still
+    # exists under the new owner.  Skip legacy ids whose object already exists.
+    while True:
+        file_object_id = conn.execute(
+            "SELECT trosa.compat_uuid('file:' || trosa.compat_current_user() || ':' || ?::text)",
+            (legacy_id,),
+        ).fetchone()[0]
+        if not conn.execute('SELECT 1 FROM core.file_objects WHERE id=?', (file_object_id,)).fetchone():
+            break
+        legacy_id = int(legacy_id) + 1
     entity_file_id = conn.execute(
         "SELECT trosa.compat_uuid('entity-file:' || trosa.compat_current_user() || ':' || ?::text)",
         (legacy_id,),

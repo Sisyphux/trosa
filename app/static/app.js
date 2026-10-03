@@ -1752,7 +1752,15 @@ async function apiOnce(url, options) {
         if (resp.status === 401) {
           showToast('登录已过期，请重新登录', 'error');
           showLogin();
-          return null;
+          // 读取沿用 null 约定（调用方已按它处理）。写入必须以失败抛出：否则调用方
+          // 会走成功分支，关闭弹窗并提示“已保存”，而这次写入其实没有发生。
+          if (method === 'GET' || url.indexOf('/api/auth/') === 0) return null;
+          var authError = new Error('登录已过期，请重新登录');
+          authError.kind = 'auth';
+          authError.status = 401;
+          authError.url = url;
+          authError.method = method;
+          throw authError;
         }
         if (!resp.ok) {
           var err = await resp.json().catch(function() { return {}; });
@@ -1812,6 +1820,9 @@ async function apiOnce(url, options) {
       if (!navigator.onLine || _networkFailureCount >= 2) setConnectionStatus('offline', '网络中断，正在重连…');
     } else if (e && e.name === 'AbortError') {
       // 请求被主动取消（如搜索输入时替换旧预览请求），是正常流程，不视为失败。
+    } else if (e && e.kind === 'auth') {
+      // 401 已经提示“登录已过期”并切回账号界面，不再叠加第二条报错；请求仍以
+      // 失败抛出，调用方必须走失败分支。
     } else {
       if (!options.silentError) showToast('请求失败: ' + e.message, 'error');
     }
@@ -12954,12 +12965,91 @@ window.addEventListener('resize', function() {
   }, 140);
 });
 
+// 下面这些状态都属于“当前登录身份”。身份结束（退出、切换账号、401）的那一刻必须
+// 全部丢弃，否则下一位使用者会在缓存期内读到上一位的客户、时间线和私密备注，
+// 旧身份还在途的请求也可能写进新会话。新增任何按用户分域的缓存都要加到这里。
+function resetUserScopedState() {
+  _customerScopeGeneration++;
+  if (_customerDetailController) {
+    try { _customerDetailController.abort(); } catch (ignore) {}
+  }
+  _customerDetailController = null;
+  _customerDetailLoadToken++;
+  _customerDetailLoadingId = null;
+  _customerDetailCache = null;
+  _customerWorkspaceCache = {};
+  _customerSectionLoads = {};
+  _customerTimelinePage = 1;
+  _customerTimelineLoading = false;
+  _editingContactId = null;
+  _editingContactOriginal = null;
+  _customerSearchResultById = {};
+  _customerPickerRegistry = {};
+  _globalSearchResults = [];
+  _globalSearchTotal = 0;
+  _globalSearchActiveIndex = 0;
+  _customerLoadToken++;
+  _followTimelineCache = {};
+  _followCache = {};
+  _pendingMutations = {};
+  _inboxReplyAnalysis = null;
+  _inboxReplyRawContent = '';
+  _inboxReplyAnalysisToken++;
+  _inboxLoadToken++;
+  _inboxQuestionsContractLoaded = false;
+  inboxItems = [];
+  inboxQuestions = [];
+  inboxState.questions = [];
+  inboxState.counts = {};
+  inboxState.expandedQuestionId = '';
+  inboxState.draftResponses = {};
+  inboxState.pendingQuestionId = '';
+  inboxState.uploadStates = {};
+  inboxState.analysisStates = {};
+  inboxState.inlineErrors = {};
+  inboxState.responseAttempts = {};
+  inboxState.contactEmailSaveAttempts = {};
+  inboxState.contactEmailSaveResults = {};
+  inboxState.contactEmailSavePendingId = '';
+  inboxState.selaRuns = [];
+  inboxState.tray = [];
+  inboxState.questionIndex = null;
+  inboxState.loadError = '';
+  dashboardReminders = [];
+  todayScheduleData = {};
+  calendarData = {};
+  _todayFactsToken++;
+  _todayFactsCache = {};
+  _tideWindowsCache = {};
+  _tideActiveReminders = [];
+  _tideUpcomingCache = [];
+  _batchCompleteTargets = [];
+  selectedCustomers.clear();
+  selectedNewPool.clear();
+  selectedTodayCustomers.clear();
+  customerFilters = {};
+  _pageDataLoadedAt = 0;
+  if (LD.ready) {
+    // 账页行与行缓存带着上一身份的客户；清空后下一次进入只会显示“正在读取”。
+    LD.token++;
+    LD.refreshing = false;
+    LD.total = 0;
+    LD.counts = null;
+    LD.segments = [];
+    LD.rows = {};
+    LD.blocks = {};
+    LD.query = '';
+    try { ledgerShowState('loading'); } catch (ignore) {}
+  }
+}
+
 function showLogin() {
   // Account-specific preferences must not affect the shared weekly overview
   // available from the account-selection screen.
   var loginViewToken = ++_loginViewToken;
   if (_loginUsersController) _loginUsersController.abort();
   _loginUsersController = typeof AbortController === 'function' ? new AbortController() : null;
+  resetUserScopedState();
   currentUser = null;
   resetActionStatus();
   var invitationOverlay = document.getElementById('invitationOverlay');
@@ -13146,6 +13236,8 @@ function enterOverview() {
 async function showApp() {
   _loginViewToken++;
   if (_loginUsersController) _loginUsersController.abort();
+  // 进入新身份时不继承上一身份的任何缓存。
+  resetUserScopedState();
   document.getElementById('loginOverlay').style.display = 'none';
   document.getElementById('appLayout').style.display = 'flex';
   // 显示个人导航，隐藏总览导航

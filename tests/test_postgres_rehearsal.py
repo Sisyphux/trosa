@@ -777,6 +777,121 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             db.set_db_user('hamid')
         self.assertIsNone(trosa_domain.customer_record(self.connection, customer_id))
 
+    def test_transfer_moves_attachments_to_the_new_owner(self):
+        """After a transfer the new owner can address the file; the old owner cannot."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        customer_id = trosa_domain.create_customer(self.connection, values={
+            'name': 'Attachment Transfer Customer',
+            'company': 'Attachment Transfer Co',
+            'website': 'https://attachment-transfer.example',
+        })
+        file_id = module._create_modern_file(
+            self.connection, customer_id=customer_id, original_name='quote.pdf',
+            stored_name='quote.pdf', file_path=f'uploads/customer_files/{customer_id}/quote.pdf',
+            file_size=12, mime_type='application/pdf', category='quote',
+            sha256='0' * 64, uploaded_by='hamid', created_at='2026-10-03 10:00:00',
+        )
+        self.connection.commit()
+        before = module._modern_file_rows(self.connection, customer_id)
+        self.assertEqual([row['id'] for row in before], [file_id])
+
+        moved = trosa_domain.transfer_customer(self.connection, customer_id=customer_id, to_user='amy')
+        self.connection.commit()
+
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            rows = module._modern_file_rows(amy_connection, moved)
+            self.assertEqual(len(rows), 1, rows)
+            self.assertIsNotNone(rows[0]['id'], 'the new owner must be able to address the attachment')
+            self.assertEqual(rows[0]['original_name'], 'quote.pdf')
+            by_id = module._modern_file_rows(amy_connection, moved, file_id=rows[0]['id'])
+            self.assertEqual(len(by_id), 1, 'preview/download/delete resolve the file by its integer id')
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+        leftover = self.connection.execute(
+            '''SELECT count(*) FROM trade_os_compat.customer_file_rows
+                WHERE legacy_user_id='hamid' AND customer_id=?''', (customer_id,),
+        ).fetchone()[0]
+        self.assertEqual(leftover, 0, 'the previous owner keeps no attachment row for the transferred customer')
+
+        # Moving the attachment away freed the previous owner's highest legacy id.
+        # Their next upload must not derive the object id of the moved file.
+        other_customer = trosa_domain.create_customer(self.connection, values={
+            'name': 'Attachment After Transfer Customer',
+            'company': 'Attachment After Transfer Co',
+            'website': 'https://attachment-after-transfer.example',
+        })
+        next_file = module._create_modern_file(
+            self.connection, customer_id=other_customer, original_name='next.pdf',
+            stored_name='next.pdf', file_path=f'uploads/customer_files/{other_customer}/next.pdf',
+            file_size=3, mime_type='application/pdf', category='quote',
+            sha256='2' * 64, uploaded_by='hamid', created_at='2026-10-03 11:00:00',
+        )
+        self.connection.commit()
+        self.assertEqual([row['id'] for row in module._modern_file_rows(self.connection, other_customer)], [next_file])
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            still = module._modern_file_rows(amy_connection, moved)
+            self.assertEqual([row['original_name'] for row in still], ['quote.pdf'],
+                             'the transferred attachment is untouched by the previous owner uploading again')
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+    def test_attachment_transfer_migration_repairs_prior_transfers_and_replays(self):
+        """Rows orphaned by an older transfer are re-keyed; replaying is a no-op."""
+        import db
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        customer_id = trosa_domain.create_customer(self.connection, values={
+            'name': 'Attachment Repair Customer',
+            'company': 'Attachment Repair Co',
+            'website': 'https://attachment-repair.example',
+        })
+        module._create_modern_file(
+            self.connection, customer_id=customer_id, original_name='spec.pdf',
+            stored_name='spec.pdf', file_path=f'uploads/customer_files/{customer_id}/spec.pdf',
+            file_size=7, mime_type='application/pdf', category='spec',
+            sha256='1' * 64, uploaded_by='hamid', created_at='2026-10-03 10:00:00',
+        )
+        self.connection.commit()
+        moved = trosa_domain.transfer_customer(self.connection, customer_id=customer_id, to_user='amy')
+        # Recreate the pre-fix state: the attachment row is still keyed to the old owner.
+        self.connection.execute(
+            '''UPDATE trade_os_compat.customer_file_rows
+                  SET legacy_user_id='hamid', id=(SELECT coalesce(max(id),0)+1
+                        FROM trade_os_compat.customer_file_rows WHERE legacy_user_id='hamid'),
+                      customer_id=?
+                WHERE legacy_user_id='amy' AND customer_id=?''', (customer_id, moved),
+        )
+        self.connection.commit()
+        migration = (ROOT / 'migrations' / '0113_transfer_customer_attachments.sql').read_text(encoding='utf-8')
+        import psycopg
+
+        # Apply the file exactly as the migrator does: raw driver, no parameter
+        # translation (the compatibility layer rewrites ``%``, which PL/pgSQL
+        # RAISE messages legitimately contain).
+        for _ in range(2):  # the second pass proves replay is harmless
+            with psycopg.connect(self.dsn, autocommit=True) as raw:
+                raw.execute(migration)
+        count_for = lambda user, customer: self.connection.execute(
+            '''SELECT count(*) FROM trade_os_compat.customer_file_rows
+                WHERE legacy_user_id=? AND customer_id=?''', (user, customer),
+        ).fetchone()[0]
+        self.assertEqual(count_for('hamid', customer_id), 0)
+        self.assertEqual(count_for('amy', moved), 1)
+
     def test_owner_heal_splits_multi_user_accounts(self):
         """The drift heal gives each user their own account for a shared company."""
         from tools.postgres_rehearsal import load_fixture

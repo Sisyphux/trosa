@@ -85,16 +85,18 @@ def make_fake_pg(root: Path, *, sha_body: str = "sha256") -> Path:
 
 
 def run_backup_remote(pg: Path, backup_root: Path, restore_cmd: str,
-                      **env) -> subprocess.CompletedProcess:
+                      bundle: bool = False, **env) -> subprocess.CompletedProcess:
     extra = {
         "TRADE_OS_POSTGRES_ROOT": str(pg),
         "TRADE_OS_RELEASE_BACKUP_ROOT": str(backup_root),
         "TRADE_OS_PG_RESTORE_LIST_CMD": restore_cmd,
     }
     extra.update(env)
+    argv = ["bash", str(BACKUP_REMOTE), "rel-test-1"]
+    if bundle:
+        argv.append("--bundle")
     return subprocess.run(
-        ["bash", str(BACKUP_REMOTE), "rel-test-1"],
-        capture_output=True, text=True, timeout=60, cwd=str(ROOT),
+        argv, capture_output=True, text=True, timeout=60, cwd=str(ROOT),
         env=clean_env(**extra),
     )
 
@@ -178,6 +180,61 @@ class BackupRemoteTests(unittest.TestCase):
         self.assertEqual(doc["storage"], "ecs-durable+oss")
         self.assertTrue(doc["oss"]["verified"])
         self.assertTrue(doc["oss"]["uri"].startswith("oss://bucket/prefix/"))
+
+
+    def _data_dir_with_attachment(self) -> Path:
+        data_dir = self.tmp / "data"
+        target = data_dir / "uploads" / "customer_files"
+        target.mkdir(parents=True)
+        (target / "quote.pdf").write_bytes(b"%PDF-1.4 quote content")
+        return data_dir
+
+    def _fake_failing_tar(self) -> Path:
+        bindir = self.tmp / "fakebin"
+        bindir.mkdir()
+        script = bindir / "tar"
+        script.write_text(
+            "#!/usr/bin/env bash\n"
+            "for arg in \"$@\"; do\n"
+            "  case \"$arg\" in *uploads.tar) echo 'injected tar failure' >&2; exit 2;; esac\n"
+            "done\n"
+            "exec /usr/bin/tar \"$@\"\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return bindir
+
+    def test_bundle_attachment_archive_failure_blocks_backup(self):
+        pg = make_fake_pg(self.tmp)
+        data_dir = self._data_dir_with_attachment()
+        bindir = self._fake_failing_tar()
+        proc = run_backup_remote(
+            pg, self.backup_root, "true", bundle=True,
+            TRADE_OS_DATA_DIR=str(data_dir),
+            PATH=str(bindir) + os.pathsep + os.environ.get("PATH", ""))
+        self.assertEqual(proc.returncode, 10, proc.stderr)
+        doc = backup_json_line(proc)
+        self.assertEqual(doc["status"], "failed")
+        self.assertEqual(doc["failure_class"], "backup_failed")
+
+    def test_bundle_attachment_success_is_manifested(self):
+        pg = make_fake_pg(self.tmp)
+        data_dir = self._data_dir_with_attachment()
+        proc = run_backup_remote(
+            pg, self.backup_root, "true", bundle=True,
+            TRADE_OS_DATA_DIR=str(data_dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        doc = backup_json_line(proc)
+        self.assertEqual(doc["status"], "ok")
+        archives = [line.split("=", 1)[1] for line in proc.stdout.splitlines()
+                    if line.startswith("ARCHIVE=")]
+        self.assertEqual(len(archives), 1)
+        listing = subprocess.run(["tar", "-tzf", archives[0]], capture_output=True, text=True)
+        self.assertIn("./uploads.tar", listing.stdout)
+        manifest = subprocess.run(
+            ["tar", "-xzOf", archives[0], "./manifest.txt"], capture_output=True, text=True)
+        self.assertIn("attachments=uploads.tar", manifest.stdout)
+        self.assertIn("attachments_files=1", manifest.stdout)
 
 
 class BackupWorkbenchTests(unittest.TestCase):

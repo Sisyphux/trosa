@@ -137,14 +137,22 @@ if [ "$USE_BUNDLE" = "1" ]; then
   rm -rf "\$staging"; mkdir -p "\$staging"
   cp -- "\$dump_path" "\$staging/database.dump"
   if [ -d "\$DATA_DIR/uploads/customer_files" ]; then
-    tar -C "\$DATA_DIR" -cf "\$staging/uploads.tar" uploads/customer_files
+    # The attachment archive is part of the backup contract: a failed or empty
+    # archive must fail the backup rather than be reported as verified.
+    if ! tar -C "\$DATA_DIR" -cf "\$staging/uploads.tar" uploads/customer_files 2>/dev/null; then
+      printf '%s\\n' 'cannot archive attachments' >&2; exit 10
+    fi
+    if [ ! -s "\$staging/uploads.tar" ]; then
+      printf '%s\\n' 'attachment archive is empty' >&2; exit 11
+    fi
   fi
   { printf 'format=trosa-postgres-backup-v1\\n'
     printf 'database_dump=database.dump\\n'
     printf 'database_dump_sha256=%s\\n' "\$database_sha"
     if [ -f "\$staging/uploads.tar" ]; then printf 'attachments=uploads.tar\\n'; else printf 'attachments=none\\n'; fi
   } > "\$staging/manifest.txt"
-  tar -C "\$staging" -czf "\$REMOTE_ARCHIVE" .
+  tar -C "\$staging" -czf "\$REMOTE_ARCHIVE" . \\
+    || { printf '%s\\n' 'cannot create bundle archive' >&2; exit 10; }
   rm -rf "\$staging"
   printf 'ARCHIVE=%s\\n' "\$REMOTE_ARCHIVE"
   printf 'SHA256=%s\\n' "\$(sha256sum "\$REMOTE_ARCHIVE" | awk '{print \$1}')"

@@ -235,8 +235,29 @@ if [ "$BUNDLE" = 1 ]; then
   rm -rf -- "$staging"
   mkdir -p -- "$staging" || fail 10 backup_failed "cannot create bundle staging dir"
   cp -f -- "$dst" "$staging/database.dump"
+  attachments_manifest="none"
   if [ -d "$DATA_DIR/uploads/customer_files" ]; then
-    tar -C "$DATA_DIR" -cf "$staging/uploads.tar" uploads/customer_files 2>/dev/null || true
+    # The attachment archive is part of the backup contract.  A missing or
+    # unreadable archive must fail the whole backup instead of producing a
+    # "verified/restorable" result with silently absent attachments.
+    attachments_log="$SNAP_DIR/attachments.log"
+    if ! tar -C "$DATA_DIR" -cf "$staging/uploads.tar" uploads/customer_files 2>"$attachments_log"; then
+      fail 10 backup_failed "cannot archive attachments at $DATA_DIR/uploads/customer_files"
+    fi
+    if [ ! -s "$staging/uploads.tar" ]; then
+      fail 11 backup_verification_failed "attachment archive is empty"
+    fi
+    if ! tar -tf "$staging/uploads.tar" >/dev/null 2>&1; then
+      fail 11 backup_verification_failed "attachment archive is not readable"
+    fi
+    # Prove the archive contains every non-directory entry present at the source.
+    source_files=$(find "$DATA_DIR/uploads/customer_files" ! -type d 2>/dev/null | wc -l | tr -d ' ')
+    archived_files=$(tar -tf "$staging/uploads.tar" 2>/dev/null | grep -v '/$' | wc -l | tr -d ' ')
+    if [ "${source_files:-0}" != "${archived_files:-0}" ]; then
+      fail 11 backup_verification_failed \
+        "attachment archive incomplete: source=$source_files archived=$archived_files"
+    fi
+    attachments_manifest="uploads.tar"
   fi
   {
     printf 'format=trosa-postgres-backup-v1\n'
@@ -244,7 +265,11 @@ if [ "$BUNDLE" = 1 ]; then
     printf 'database_dump=database.dump\n'
     printf 'database_dump_sha256=%s\n' "$actual_sha"
     printf 'database_dump_size=%s\n' "$size_bytes"
-    if [ -f "$staging/uploads.tar" ]; then printf 'attachments=uploads.tar\n'; else printf 'attachments=none\n'; fi
+    printf 'attachments=%s\n' "$attachments_manifest"
+    if [ "$attachments_manifest" != "none" ]; then
+      printf 'attachments_files=%s\n' "$archived_files"
+      printf 'attachments_sha256=%s\n' "$(sha256_of "$staging/uploads.tar")"
+    fi
   } >"$staging/manifest.txt"
   tar -C "$staging" -czf "$archive" . 2>/dev/null || fail 10 backup_failed "cannot create bundle archive"
   rm -rf -- "$staging"

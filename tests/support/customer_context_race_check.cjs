@@ -464,6 +464,116 @@ async function run() {
     restoreRealApi();
   });
 
+  console.log('scenario: identity-scoped caches and 401 failure semantics');
+
+  function stubStatus(status, matchUrl) {
+    const previousFetch = win.fetch;
+    win.fetch = (url) => {
+      if (String(url) === matchUrl) {
+        return Promise.resolve({ ok: false, status, json: async () => ({ error: 'unauthorized' }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    };
+    return () => { win.fetch = previousFetch; };
+  }
+
+  await check('a 401 on a write rejects instead of returning null, and returns to the account screen', async () => {
+    restoreRealApi();
+    const restore = stubStatus(401, '/api/customers/1/follow_history');
+    let caught = null;
+    let value;
+    try {
+      value = await win.apiOnce('/api/customers/1/follow_history', { method: 'POST', body: '{}' });
+    } catch (error) {
+      caught = error;
+    }
+    restore();
+    assert.ok(caught, 'a 401 write must reject so the caller takes its failure branch (got ' + JSON.stringify(value) + ')');
+    assert.equal(caught.status, 401);
+    assert.equal(caught.kind, 'auth');
+    assert.equal(doc.getElementById('loginOverlay').style.display, 'flex',
+      'a 401 must return the user to the account screen');
+  });
+
+  await check('a 401 on a read keeps the existing null contract (callers already handle it)', async () => {
+    restoreRealApi();
+    const restore = stubStatus(401, '/api/customers/ledger?view=all');
+    const value = await win.apiOnce('/api/customers/ledger?view=all', { silentError: true });
+    restore();
+    assert.equal(value, null);
+  });
+
+  await check('a 401 from /api/auth/* keeps returning null so the login form is not hijacked', async () => {
+    restoreRealApi();
+    const restore = stubStatus(401, '/api/auth/login');
+    const value = await win.apiOnce('/api/auth/login', { method: 'POST', body: '{}' });
+    restore();
+    assert.equal(value, null);
+  });
+
+  await check('a rejected 401 write does not raise a second generic failure toast', async () => {
+    restoreRealApi();
+    const messages = [];
+    const originalToast = win.showToast;
+    win.showToast = (message) => { messages.push(String(message)); };
+    const restore = stubStatus(401, '/api/customers/1/follow_history');
+    try { await win.apiOnce('/api/customers/1/follow_history', { method: 'POST', body: '{}' }); } catch (ignore) {}
+    restore();
+    win.showToast = originalToast;
+    assert.ok(messages.some((m) => m.indexOf('登录已过期') >= 0), 'the expiry notice is shown once');
+    assert.ok(!messages.some((m) => m.indexOf('请求失败') >= 0), 'no extra 请求失败 toast on top of it');
+  });
+
+  await check('resetUserScopedState drops every identity-scoped cache', async () => {
+    win._customerWorkspaceCache = {
+      901: { savedAt: Date.now(), summary: { id: 901, name: 'Hamid 的客户', notes: '保密报价底价' }, timeline: { items: [] } },
+    };
+    win._customerDetailCache = { id: 901, name: 'Hamid 的客户' };
+    win._customerSearchResultById = { 901: { id: 901 } };
+    win._followCache = { 5: { content: '私密' } };
+    win._followTimelineCache = { 901: [{ id: 5 }] };
+    win._inboxReplyAnalysis = { summary: '私密' };
+    win._pendingMutations = { 'POST /x': Promise.resolve() };
+    win.inboxState.questions = [{ id: 'q1' }];
+    win.inboxState.draftResponses = { q1: '草稿' };
+    win._todayFactsCache = { a: 1 };
+    win.LD.ready = true;
+    win.LD.rows = { 0: { name: 'Hamid 的客户' } };
+    win.LD.blocks = { 0: true };
+    const tokenBefore = win.LD.token;
+    win.resetUserScopedState();
+    assert.equal(Object.keys(win._customerWorkspaceCache).length, 0, 'workspace cache must not survive an identity change');
+    assert.equal(win._customerDetailCache, null, 'open detail cache must be dropped');
+    assert.equal(Object.keys(win._customerSearchResultById).length, 0, 'search result cache must be dropped');
+    assert.equal(Object.keys(win._followCache).length, 0, 'follow edit cache must be dropped');
+    assert.equal(Object.keys(win._followTimelineCache).length, 0, 'timeline cache must be dropped');
+    assert.equal(win._inboxReplyAnalysis, null, 'private analysis must be dropped');
+    assert.equal(Object.keys(win._pendingMutations).length, 0, 'in-flight mutation dedupe must be dropped');
+    assert.equal(win.inboxState.questions.length, 0, 'inbox questions must be dropped');
+    assert.equal(Object.keys(win.inboxState.draftResponses).length, 0, 'unsent inbox drafts of the old identity must be dropped');
+    assert.equal(Object.keys(win._todayFactsCache).length, 0, 'Today facts cache must be dropped');
+    assert.equal(Object.keys(win.LD.rows).length + Object.keys(win.LD.blocks).length, 0, 'customer ledger row cache must be dropped');
+    assert.ok(win.LD.token > tokenBefore, 'an in-flight ledger read from the old identity must be invalidated');
+    assert.equal(win.LD.items.length, 0, 'ledger must not keep showing the old identity customers');
+  });
+
+  await check('showLogin and showApp clear the cache before the next account can read it', async () => {
+    const seed = () => {
+      win._customerWorkspaceCache = { 901: { savedAt: Date.now(), summary: { id: 901, name: 'Hamid 的客户' }, timeline: { items: [] } } };
+      win._customerDetailCache = { id: 901, name: 'Hamid 的客户' };
+    };
+    seed();
+    win.showLogin();
+    assert.equal(Object.keys(win._customerWorkspaceCache).length, 0, 'showLogin must clear the workspace cache');
+    assert.equal(win._customerDetailCache, null, 'showLogin must clear the open detail cache');
+    seed();
+    win.eval("currentUser = { id: 2, username: 'amy', name: 'Amy' };");
+    const entering = win.showApp();
+    assert.equal(Object.keys(win._customerWorkspaceCache).length, 0, 'showApp must not inherit the previous identity cache');
+    assert.equal(win._customerDetailCache, null);
+    await entering.catch(() => {});
+  });
+
   if (failures) {
     console.error('\ncustomer context race regression: ' + failures + ' check(s) failed');
     process.exit(1);

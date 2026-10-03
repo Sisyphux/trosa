@@ -98,6 +98,9 @@ let inboxPayload = {
 };
 win.fetch = async (url) => {
   const target = String(url);
+  // Keep the automatic session probe pending: resolving to "no session" would
+  // return to the account screen and drop the state this check renders.
+  if (target.indexOf('/api/auth/me') === 0) return new Promise(() => {});
   if (target.indexOf('/api/inbox') !== -1 && target.indexOf('capture-matches') === -1 && target.indexOf('counts') === -1) {
     return respond(inboxPayload);
   }

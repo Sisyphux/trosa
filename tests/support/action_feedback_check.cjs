@@ -38,7 +38,13 @@ for (const name of ['style.css', 'visual-v2.css']) {
   doc.head.appendChild(style);
 }
 win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
-win.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+// The automatic session probe must not race the scenario below: a probe that
+// resolves to "no session" returns to the account screen, which (correctly)
+// drops the identity-scoped state these checks seed themselves.  Keep it pending.
+win.fetch = (url) => {
+  if (String(url).indexOf('/api/auth/me') === 0) return new Promise(() => {});
+  return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+};
 win.eval(script);
 
 const toasts = [];

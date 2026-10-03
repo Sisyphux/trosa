@@ -6,6 +6,23 @@
 - 审计：原始文本仍按原样保留在来源记录中（读取时投影清洗），符合「保留来源、可审计」，不是删除事实。
 - 验证：`tests/test_communication_text.py` 新增 `LegacySelaEnvelopeTest`（保留中文摘要、结构化字段改写、仅标签、幂等、绝不清空、普通正文不变、`strip_quoted_email_text` 一并覆盖）与 `CompatibilityAliasesTest`（读取别名清洗 communication.content 与 email.result）；`tests/test_clean_communication_content.py` 保持通过。
 
+## 2026-10-03 — 修复审计问题：切换账号清空缓存、客户转移附件跟随、备份附件失败阻断、写请求 401 不再显示保存成功
+
+来自 2026-09-20 审计的 7 个问题里，本次只处理 4 个不涉及产品语义的（3、4、5、7）。第 1 项（记录沟通时可以顺带完成一条待办）、第 2 项（同客户同日只保留一个待办，要多件事就在文字里写 1、2、3）经成员确认是预期行为，保持现状不改；第 6 项（联系人邮箱连续修改）main 已有同样修复，均不在本次范围。
+
+- 问题 3（切换账号后可读到上一账号的缓存）：客户工作区缓存、打开中的客户详情、搜索结果、沟通时间线缓存、Inbox 问题与未发送草稿、Today 事实/潮汐缓存、账页行缓存、在途请求标记等都没有按登录身份分域，`showLogin()` 也不清理。旧账号的客户名、时间线、私密备注会在缓存期内渲染给新账号。
+- 修复 3：新增 `resetUserScopedState()`，在 `showLogin()`（含 401、切换账号）和 `showApp()` 时一并清空上述状态，递增作用域与加载令牌使旧身份在途的读取无法写回，账页回到“正在读取”而不是显示上一位的客户。以后新增按用户分域的缓存都要加进这个函数。
+- 问题 4（客户转移后附件成幽灵记录）：`trosa.transfer_customer_account`（0036）迁移了客户、联系人、待办、沟通、开发信和 Inbox，却遗漏 `trade_os_compat.customer_file_rows`；新负责人看得到文件名，但没有可用的文件编号，无法预览、下载或删除。
+- 修复 4：新增迁移 `0113_transfer_customer_attachments.sql`，用与 0036 完全相同的函数加上“转移时把该账号的附件行改归新负责人并重新分配编号”；同一迁移还会修复此前已发生转移留下的孤儿附件行（只处理仅有一个旧编号引用的账号，二义的不动）。迁移幂等，重放不改变结果。
+- 附带修正：附件转走后，原负责人的最大文件编号被释放，他下一次上传会推出已被转走文件占用的对象 id 而失败。`_create_modern_file` 现在会跳过已存在的对象 id。
+- 问题 5（备份附件归档失败仍标记成功）：`backup-remote.sh` 对附件归档用 `2>/dev/null || true`，tar 失败后仍生成 manifest 并返回 `status=ok`；`backup-workbench.sh` 的旧版内联兜底同样不检查 tar 的退出码。
+- 修复 5：附件归档失败返回 10（`backup_failed`）；归档为空或不可读、归档内条目数与源目录不一致返回 11（`backup_verification_failed`）；manifest 增记 `attachments_files` 与 `attachments_sha256`。旧版内联兜底也在 tar 失败或归档为空时非 0 退出。
+- 问题 7（写请求 401 仍显示保存成功）：`apiOnce` 遇到 401 只切回登录界面并 `return null`，写入调用方继续走成功分支，关闭弹窗并提示“已保存”，而这次写入其实没有发生。
+- 修复 7：非 GET 且不属于 `/api/auth/*` 的请求遇到 401 改为抛出 `kind='auth'`、`status=401` 的错误，调用方走失败分支（保留录入界面与草稿）；只显示一条“登录已过期”，不再叠加“请求失败”。读取请求保持原有的 `null` 约定（账页等调用方已按它处理），`/api/auth/*` 也保持不变，登录表单不受影响。
+- 影响范围：`app/static/app.js`、`app.py`、`deploy/cloud/backup-remote.sh`、`deploy/cloud/backup-workbench.sh`、迁移 `0113`、测试与本文件。不改 Today、Inbox、完成弹窗的口径。
+- 是否需要迁移：是（`0113`，只替换一个函数并修复历史孤儿附件行，不删表不删列）。涉及 `deploy/*` 与迁移，发布前需成员审阅 diff。
+- 验证：`tests/support/customer_context_race_check.cjs` 新增账号缓存清空与 401 语义用例；`tests.test_postgres_rehearsal` 新增转移后附件归属、转移后原负责人再上传、迁移修复旧孤儿行并可重放；`tests.test_release_backup_transfer` 新增附件归档失败阻断与成功写入 manifest。
+
 ## 2026-10-02 — 记录沟通弹窗恢复方向选择，并修正 update: 被误当成发言人的方向误判
 
 - 现象一：客户工作区点「记录沟通」弹出的统一弹窗把方向控件丢了。重构前它打开的是带「识别有误？」方向选择的 inline 表单（`followCompose`），重构后改成统一弹窗（`openCommunicationConfirm`），弹窗里没有方向入口，成员再也改不了识别结果。
