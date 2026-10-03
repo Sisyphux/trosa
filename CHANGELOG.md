@@ -1,3 +1,11 @@
+## 2026-10-03 — 历史 Sela 反馈信封不再出现在沟通记录：读取时确定性清洗
+
+- 现象：早期 Sela 历史导入在 `follow_up_logs` 写入了一条「原始信封」——`[Sela Feedback ID: …]` + `历史客户回复` + `事件：…` + `时间：…` + `Gmail 同步（RULES_V1 / SYSTEM_FALLBACK / CODEX_REVIEW）：主题：… 发件人：… Gmail message_id：… 规则意图：… 路由：… 正文：…`。写入代码已在业务核心收敛时移除，但线上仍残留 17 条（event_id 34623–34639，2026-09-09 导入，客户含 Hideout Signs、GrenGraphics、Stilform 等），客户工作区「最近沟通」因此显示整段内部同步文本。
+- 变更（读取清洗，单一入口）：`communication_text.py` 新增 `looks_like_legacy_sela_content` / `clean_legacy_sela_content`——去掉信封标记、`历史客户回复` 与 `事件：/时间：` 行、前导 `Gmail 同步（…）` 等同步标签，并把 `主题：…正文：…` 结构化字段还原成与现网回信一致的 `客户通过 Gmail 回复 / 主题：… / 正文：…`；幂等、绝不清空。`trosa_domain._add_compatibility_aliases` 是时间线 / 跨客户搜索 / CLI / 导出的唯一读取出口，在这里对 `content` 与 `result` 做清洗，因此升级后所有读取面立即干净，无需改动数据库。
+- 变更（写入防御）：`record_external_interaction` 在落库前同样剥离该信封，即使旧流程被重放也不会再写入。
+- 审计：原始文本仍按原样保留在来源记录中（读取时投影清洗），符合「保留来源、可审计」，不是删除事实。
+- 验证：`tests/test_communication_text.py` 新增 `LegacySelaEnvelopeTest`（保留中文摘要、结构化字段改写、仅标签、幂等、绝不清空、普通正文不变、`strip_quoted_email_text` 一并覆盖）与 `CompatibilityAliasesTest`（读取别名清洗 communication.content 与 email.result）；`tests/test_clean_communication_content.py` 保持通过。
+
 ## 2026-10-02 — 记录沟通弹窗恢复方向选择，并修正 update: 被误当成发言人的方向误判
 
 - 现象一：客户工作区点「记录沟通」弹出的统一弹窗把方向控件丢了。重构前它打开的是带「识别有误？」方向选择的 inline 表单（`followCompose`），重构后改成统一弹窗（`openCommunicationConfirm`），弹窗里没有方向入口，成员再也改不了识别结果。

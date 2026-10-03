@@ -81,6 +81,38 @@ _INLINE_PATTERNS = (
     _INLINE_OUTLOOK_DIVIDER, _INLINE_QUOTE, _INLINE_CN_WROTE, _INLINE_CN_DATE,
 )
 
+# --- Legacy Sela feedback envelope -------------------------------------------
+# A retired Sela history import wrote an import/sync provenance envelope in
+# front of the real reply text:
+#
+#     [Sela Feedback ID: <event_id>]
+#     历史客户回复
+#     事件：INTERESTED
+#     时间：Tue, 25 Aug 2026 09:11:31 -0400
+#     Gmail 同步（CODEX_REVIEW）：Re: ... <body>
+#
+# None of the envelope lines nor the leading ``Gmail 同步（…）`` label is the
+# communication fact; they are provenance.  The cleaner drops them and keeps
+# the reply itself.  It also normalizes a raw Gmail sync block (``主题：`` /
+# ``发件人：`` / ``正文：``) into the same shape the live reply path stores.
+_SELA_ENVELOPE_MARKER = re.compile(r'^\s*\[\s*Sela\s*Feedback\s*ID\s*:.*?\]\s*$', re.IGNORECASE)
+_SELA_ENVELOPE_HEADING = re.compile(r'^\s*历史\s*客户回复\s*[:：]?\s*$')
+_SELA_ENVELOPE_EVENT = re.compile(r'^\s*(?:事件|事件类型)\s*[:：]\s*\S')
+_SELA_ENVELOPE_TIME = re.compile(r'^\s*(?:时间|发生时间)\s*[:：]\s*\S')
+# Import/sync provenance labels that used to prefix the stored detail.  Kept in
+# step with ``trosa_domain._RE_SYNC_LABEL``.
+_SYNC_PROVENANCE = re.compile(
+    r'^\s*(?:'
+    r'Gmail\s*同步|本地\s*Gmail\s*API|Gmail\s*exact-?thread|Gmail\s*DSN|Gmail\s*connector|'
+    r'SYSTEM_FALLBACK|CODEX_REVIEW|RULES_V1|历史\s*sela\s*外联'
+    r')\s*(?:[（(][^）)]*[）)])?\s*[:：]?\s*',
+    re.IGNORECASE,
+)
+# Structured labels of a raw Gmail sync block; only 主题/正文 carry the fact.
+_SYNC_FIELD_TOKEN = re.compile(
+    r'(?P<label>主题|发件人|收件人|Gmail\s+message_id|消息\s*ID|规则意图|路由|正文)\s*[:：]\s*'
+)
+
 
 def _normalize(value, limit=_MAX_LENGTH):
     text = str(value or '').replace('\x00', '')
@@ -145,11 +177,123 @@ def _inline_cut(text):
     return cut
 
 
+def _first_nonempty_index(lines):
+    for index, line in enumerate(lines):
+        if line.strip():
+            return index
+    return None
+
+
+def looks_like_sela_feedback_envelope(value):
+    """True when the body still carries the retired Sela import envelope."""
+    normalized = _normalize(value)
+    if not normalized.strip():
+        return False
+    lines = normalized.split('\n')
+    index = _first_nonempty_index(lines)
+    return index is not None and bool(_SELA_ENVELOPE_MARKER.match(lines[index]))
+
+
+def looks_like_sync_provenance(value):
+    """True when the body starts with a raw Gmail/Sela sync provenance label."""
+    normalized = _normalize(value)
+    if not normalized.strip():
+        return False
+    lines = normalized.split('\n')
+    index = _first_nonempty_index(lines)
+    return index is not None and bool(_SYNC_PROVENANCE.match(lines[index]))
+
+
+def looks_like_legacy_sela_content(value):
+    """True when ``clean_legacy_sela_content`` would change this stored body."""
+    return looks_like_sela_feedback_envelope(value) or looks_like_sync_provenance(value)
+
+
+def _strip_sync_provenance_labels(text):
+    """Drop every leading sync label; the reply itself is left untouched."""
+    cleaned = text.strip()
+    while True:
+        match = _SYNC_PROVENANCE.match(cleaned)
+        if not match:
+            return cleaned
+        remainder = cleaned[match.end():].lstrip()
+        if remainder == cleaned:
+            return cleaned
+        cleaned = remainder
+
+
+def _reformat_sync_detail(text):
+    """Turn a raw ``主题：…正文：…`` sync block into the live reply shape.
+
+    Returns ``None`` when the block has no structured fields, so the caller can
+    keep the already-readable detail unchanged.
+    """
+    matches = list(_SYNC_FIELD_TOKEN.finditer(text))
+    if not matches:
+        return None
+    fields = {}
+    for position, match in enumerate(matches):
+        end = matches[position + 1].start() if position + 1 < len(matches) else len(text)
+        value = text[match.end():end].strip()
+        fields.setdefault(match.group('label'), value)
+    subject = (fields.get('主题') or '').strip()
+    body = (fields.get('正文') or '').strip()
+    if not subject and not body:
+        return None
+    parts = ['客户通过 Gmail 回复']
+    if subject:
+        parts.append(f'主题：{subject}')
+    if body:
+        parts.append(f'正文：\n{body}')
+    return '\n'.join(parts)
+
+
+def clean_legacy_sela_content(value, limit=_MAX_LENGTH):
+    """Strip the retired Sela import envelope from a stored communication body.
+
+    The raw row is left in the source store for audit; this only cleans the
+    value handed to a read surface.  Idempotent, and it never returns an empty
+    string for a non-empty input.
+    """
+    original = _normalize(value, limit)
+    if not original.strip():
+        return ''
+    lines = original.split('\n')
+    marker = next((index for index, line in enumerate(lines) if _SELA_ENVELOPE_MARKER.match(line)), None)
+    if marker is None and not looks_like_sync_provenance(original):
+        return original.strip()
+    if marker is not None:
+        # The retired writer always emitted heading/事件/时间 immediately after
+        # the marker; consume only that header so a ``时间：`` line inside a
+        # multi-line detail is never mistaken for the envelope.
+        index = marker + 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        if index < len(lines) and _SELA_ENVELOPE_HEADING.match(lines[index]):
+            index += 1
+        for pattern in (_SELA_ENVELOPE_EVENT, _SELA_ENVELOPE_TIME):
+            while index < len(lines) and not lines[index].strip():
+                index += 1
+            if index < len(lines) and pattern.match(lines[index]):
+                index += 1
+        detail = _collapse('\n'.join(lines[:marker] + lines[index:]))
+    else:
+        detail = _collapse(original)
+    detail = _strip_sync_provenance_labels(detail)
+    reformatted = _reformat_sync_detail(detail)
+    cleaned = _collapse(reformatted if reformatted else detail)
+    if not cleaned:
+        return _collapse(original) or original.strip()
+    return cleaned[:limit]
+
+
 def looks_like_quoted_email(value):
     """True when the captured body still carries quoted history or a signature."""
     normalized = _normalize(value)
     if not normalized.strip():
         return False
+    if looks_like_legacy_sela_content(normalized):
+        return True
     lines = normalized.split('\n')
     if any(_is_boundary(lines, index) for index in range(1, len(lines))):
         return True
@@ -159,6 +303,8 @@ def looks_like_quoted_email(value):
 def strip_quoted_email_text(value, limit=_MAX_LENGTH):
     """Return the current message body with quoted history and signatures removed.
 
+    The retired Sela import envelope is dropped first (see
+    :func:`clean_legacy_sela_content`), then quoted history/signatures.
     Idempotent: cleaning an already-clean body returns it unchanged.  If the
     boundary heuristic would remove everything, the normalized original is kept
     so no message is ever silently lost.
@@ -166,6 +312,7 @@ def strip_quoted_email_text(value, limit=_MAX_LENGTH):
     original = _normalize(value, limit)
     if not original.strip():
         return ''
+    original = clean_legacy_sela_content(original, limit)
     lines = original.split('\n')
     cut = len(original)
     for index in range(1, len(lines)):

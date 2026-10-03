@@ -5,7 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from communication_text import looks_like_quoted_email, strip_quoted_email_text
+from communication_text import (
+    clean_legacy_sela_content,
+    looks_like_legacy_sela_content,
+    looks_like_quoted_email,
+    strip_quoted_email_text,
+)
 
 
 PROTON_SAMPLE = """Fri, 11 Sep 2026 14:34:06 +0000 · acryplex &lt;acryplex@proton.me&gt;
@@ -119,6 +124,101 @@ class StripQuotedEmailTest(unittest.TestCase):
         body = 'The parcel was sent from Guangzhou last week.'
         self.assertFalse(looks_like_quoted_email(body))
         self.assertEqual(strip_quoted_email_text(body), body)
+
+
+SELA_ENVELOPE_CURATED = (
+    '[Sela Feedback ID: feedback:c0c50b3549f051b68e5b971ae2dee4ad611d1721]\n'
+    '历史客户回复\n'
+    '事件：INTERESTED\n'
+    '时间：Tue, 25 Aug 2026 09:11:31 -0400\n'
+    '2026-09-03：客户表示当前可从中国供应商获得更好的价格，但对我们产品厚度感兴趣。'
+)
+
+SELA_ENVELOPE_RULES = (
+    '[Sela Feedback ID: feedback:abc]\n'
+    '历史客户回复\n'
+    '事件：REPLIED\n'
+    '时间：2026-09-01 10:00:00 +0800\n'
+    'Gmail 同步（RULES_V1）： 主题：Re: Acrylic sheet supply for Hideout Signs '
+    '发件人：Hideout Signs &lt;hideoutsignsltd@gmail.com&gt; '
+    'Gmail message_id：1a064e9c9410c8d8 规则意图：QUOTE_REQUEST 路由：HUMAN_REVIEW '
+    '正文： We get a better price from China. Please send colour chart.'
+)
+
+
+class LegacySelaEnvelopeTest(unittest.TestCase):
+    def test_keeps_curated_summary_and_drops_envelope(self):
+        self.assertTrue(looks_like_legacy_sela_content(SELA_ENVELOPE_CURATED))
+        cleaned = clean_legacy_sela_content(SELA_ENVELOPE_CURATED)
+        self.assertEqual(cleaned, '2026-09-03：客户表示当前可从中国供应商获得更好的价格，但对我们产品厚度感兴趣。')
+        self.assertNotIn('Sela Feedback ID', cleaned)
+        self.assertNotIn('历史客户回复', cleaned)
+        self.assertNotIn('事件：', cleaned)
+
+    def test_reformats_structured_gmail_block(self):
+        cleaned = clean_legacy_sela_content(SELA_ENVELOPE_RULES)
+        self.assertIn('客户通过 Gmail 回复', cleaned)
+        self.assertIn('主题：Re: Acrylic sheet supply for Hideout Signs', cleaned)
+        self.assertIn('正文：\nWe get a better price from China.', cleaned)
+        for internal in ('Sela Feedback ID', 'Gmail 同步', 'Gmail message_id', '规则意图', '路由：', '发件人'):
+            self.assertNotIn(internal, cleaned)
+
+    def test_strips_a_bare_sync_label_without_envelope(self):
+        body = 'Gmail 同步（SYSTEM_FALLBACK）：Re: Acrylic sheet options for Metacrilato.eu'
+        self.assertTrue(looks_like_legacy_sela_content(body))
+        self.assertEqual(clean_legacy_sela_content(body),
+                         'Re: Acrylic sheet options for Metacrilato.eu')
+
+    def test_multi_line_detail_keeps_its_own_time_line(self):
+        body = (
+            '[Sela Feedback ID: feedback:xyz]\n'
+            '历史客户回复\n'
+            '事件：INTERESTED\n'
+            '时间：2026-09-01 10:00:00 +0800\n'
+            '客户确认了报价。\n'
+            '时间：下周安排样品。'
+        )
+        cleaned = clean_legacy_sela_content(body)
+        self.assertIn('客户确认了报价。', cleaned)
+        self.assertIn('时间：下周安排样品。', cleaned)
+        self.assertNotIn('2026-09-01 10:00:00', cleaned)
+        self.assertEqual(clean_legacy_sela_content(cleaned), cleaned)
+
+    def test_idempotent_and_never_empty(self):
+        for sample in (SELA_ENVELOPE_CURATED, SELA_ENVELOPE_RULES):
+            cleaned = clean_legacy_sela_content(sample)
+            self.assertEqual(clean_legacy_sela_content(cleaned), cleaned)
+            self.assertTrue(cleaned.strip())
+        self.assertEqual(clean_legacy_sela_content('历史 sela 外联'), '历史 sela 外联')
+
+    def test_clean_and_plain_bodies_are_untouched(self):
+        body = '客户确认了报价，下周安排样品。'
+        self.assertFalse(looks_like_legacy_sela_content(body))
+        self.assertEqual(clean_legacy_sela_content(body), body)
+
+    def test_quoted_cleaner_also_drops_the_envelope(self):
+        self.assertTrue(looks_like_quoted_email(SELA_ENVELOPE_CURATED))
+        cleaned = strip_quoted_email_text(SELA_ENVELOPE_CURATED)
+        self.assertEqual(strip_quoted_email_text(cleaned), cleaned)
+        self.assertNotIn('Sela Feedback ID', cleaned)
+
+
+class CompatibilityAliasesTest(unittest.TestCase):
+    def test_read_aliases_clean_legacy_content_and_reply(self):
+        import trosa_domain
+
+        items = [
+            {'kind': 'communication', 'occurred_on': '2026-09-09', 'content': SELA_ENVELOPE_CURATED,
+             'result': 'INTERESTED', 'next_plan': '', 'delivery_status': ''},
+            {'kind': 'email', 'occurred_on': '2026-08-25', 'content': '历史 sela 外联',
+             'result': SELA_ENVELOPE_RULES, 'delivery_status': 'replied'},
+        ]
+        trosa_domain._add_compatibility_aliases(items)
+        self.assertNotIn('Sela Feedback ID', items[0]['content'])
+        self.assertNotIn('Gmail 同步', items[0]['content'])
+        self.assertNotIn('Sela Feedback ID', items[1]['result'])
+        self.assertEqual(items[1]['subject'], '历史 sela 外联')
+        self.assertEqual(items[1]['reply_status'], 'replied')
 
 
 if __name__ == '__main__':

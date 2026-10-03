@@ -21,6 +21,7 @@ import re
 import uuid
 from typing import Any, Iterable
 
+from communication_text import clean_legacy_sela_content, looks_like_legacy_sela_content
 from db import postgres_mode
 
 
@@ -477,7 +478,15 @@ def record_external_interaction(
     Gmail and sela call this boundary instead of inventing an independent
     follow-up-log implementation.  The SQLite branch exists only for local
     recovery fixtures; production writes the canonical event first.
+
+    Any retired Sela import envelope is stripped before it is stored, so the
+    residual provenance that older imports wrote never reaches a read surface
+    again even if such a payload is replayed.
     """
+    if content and looks_like_legacy_sela_content(content):
+        content = clean_legacy_sela_content(content)
+    if result and looks_like_legacy_sela_content(result):
+        result = clean_legacy_sela_content(result)
     if postgres_mode():
         account = conn.execute(
             '''SELECT account_id FROM trosa.account_legacy_refs
@@ -1780,6 +1789,12 @@ def recent_interactions(
 def _add_compatibility_aliases(items: list[dict]) -> None:
     """Keep response contracts stable while callers move to Interaction."""
     for item in items:
+        # The single read choke point for every timeline/search/CLI surface:
+        # strip retired Sela import provenance here so no read path can leak it.
+        for field in ('content', 'result'):
+            value = item.get(field)
+            if isinstance(value, str) and value and looks_like_legacy_sela_content(value):
+                item[field] = clean_legacy_sela_content(value)
         item['type'] = 'follow' if item['kind'] == 'communication' else 'outreach'
         item['date'] = item['occurred_on']
         if item['kind'] == 'communication':
