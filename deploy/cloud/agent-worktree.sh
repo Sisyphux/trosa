@@ -122,7 +122,8 @@ Usage:
   agent-worktree.sh hooks
   agent-worktree.sh sync --task <id> [--offline]
   agent-worktree.sh publish --task <id> [--message "仅记录用的说明"]
-  agent-worktree.sh remove --task <id> [--force] [--delete-branch]
+  agent-worktree.sh remove --task <id> [--force] [--yes]
+                          [--delete-branch] [--ignore-processes]
 
 <id> 只能包含字母、数字、点、下划线、连字符；对应分支为 agent/<id>，
 隔离目录默认为 <仓库同级>/trosa-worktrees/<id>（可用
@@ -172,6 +173,19 @@ publish   只接受真正 ready 的任务：任务区干净、门禁证据对应
           最新 origin/<main>。随后委托 release-commit.sh --branch agent/<id>，在
           基于 origin/main 的临时 release worktree 里 cherry-pick、跑完整门禁、
           推送并发布。调用者工作区（含主工作区的在途改动）不参与发布。
+remove    回收任务隔离区，删除前有多道护栏：
+          1) 进程占用检查：有进程 cwd 或打开文件落在该 worktree 内时默认拒绝，
+             打印 pid / 命令行 / 监听端口 / 目录，绝不自动杀进程；缺少 lsof 时
+             fail closed。显式 --ignore-processes 才能越过（--force 不隐含它）。
+          2) 删除前预览：列出将被删除的 gitignore 内容（按顶层汇总大小，如
+             .local、data、.venv、node_modules）与任务清单 <id>.json。
+          3) 确认：交互环境要求确认；非交互环境必须显式 --yes（--force 也表示
+             已确认）。默认要求 worktree 干净，--force 才允许丢弃未提交改动。
+          删除任务清单/证据前，自动备份到 trosa-tasks/removed/<id>.<UTC时间戳>
+          .{json,verify.log}；之后 evidence --task <id> 仍能显示“已回收”与发布
+          结论。默认保留分支；--delete-branch 仅对该任务已发布（status=landed）
+          或在 <main> 上能找到等价补丁（git cherry 无独有提交）的分支安全删除，
+          未等价合入的分支会拒绝并列出独有提交，仅 --force 才显式丢弃。
 EOF
 }
 
@@ -223,6 +237,23 @@ task_quick_log_path() { printf '%s/%s.quick.log' "$TASK_META_DIR" "$1"; }
 # 开发期快档（test 的默认分档之一）只跑语法 + 单元测试子集，写入独立的 fast 日志。
 # 它同样**不**写 verify_result、不登记可复用验收树，因此发布前完整门禁照跑。
 task_fast_log_path() { printf '%s/%s.fast.log' "$TASK_META_DIR" "$1"; }
+
+# 回收备份目录：remove 在删除任务清单/证据前，把两者复制到
+# trosa-tasks/removed/<id>.<UTC时间戳>.{json,verify.log}。任务清单（owner、goal、
+# landed_commit、landed_release 的唯一记录）因此不再随回收永久丢失，evidence 仍可
+# 读出“已回收 + 备份位置 + 发布结论”。
+TASK_REMOVED_DIR="$TASK_META_DIR/removed"
+
+# 最近一次的回收备份（按 UTC 时间戳字典序取最新）；不存在则输出空。
+latest_removed_asset() {
+  local task=$1 suffix=$2 dir="$TASK_REMOVED_DIR" file
+  [[ -d "$dir" ]] || return 0
+  file="$(ls -1 "$dir/$task".*."$suffix" 2>/dev/null | LC_ALL=C sort | tail -n 1)"
+  [[ -n "$file" ]] && printf '%s' "$file"
+  return 0
+}
+latest_removed_meta() { latest_removed_asset "$1" json; }
+latest_removed_log() { latest_removed_asset "$1" verify.log; }
 
 # 读取任务清单里的 status 字段；清单缺失或没有 status 时输出空。
 task_status() {
@@ -379,8 +410,15 @@ print_task_meta() {
   local task=$1 meta
   meta="$(task_meta_path "$task")"
   if [[ ! -r "$meta" ]]; then
-    printf '  任务清单：无（未通过 create/adopt 创建）\n'
-    return 0
+    local bmeta
+    bmeta="$(latest_removed_meta "$task")"
+    if [[ -n "$bmeta" ]]; then
+      printf '  任务清单：已回收（原清单不存在；备份：%s）\n' "$bmeta"
+      meta="$bmeta"
+    else
+      printf '  任务清单：无（未通过 create/adopt 创建）\n'
+      return 0
+    fi
   fi
   python3 - "$meta" <<'PY'
 import json
@@ -488,6 +526,16 @@ install_git_hooks() {
     if ! cmp -s "$src" "$dest"; then
       cp "$src" "$dest" && chmod 0755 "$dest" || return 0
     fi
+  done
+  return 0
+}
+
+# 只读检查共享 git 目录里的入口隔离护栏是否已安装（不写任何文件）。只读命令据此
+# 提示“hooks 缺失，请运行写命令安装”，而不是隐式写入。
+hooks_installed() {
+  local name
+  for name in pre-commit commit-msg; do
+    [[ -x "$GIT_COMMON_DIR/hooks/$name" ]] || return 1
   done
   return 0
 }
@@ -1073,6 +1121,14 @@ cmd_evidence() {
   print_task_meta "$task"
   local log
   log="$(task_evidence_path "$task")"
+  if [[ ! -r "$log" ]]; then
+    local blog
+    blog="$(latest_removed_log "$task")"
+    if [[ -n "$blog" ]]; then
+      printf '\n任务已回收：完成证据原文件不存在，读取备份 %s：\n' "$blog"
+      log="$blog"
+    fi
+  fi
   if [[ -r "$log" ]]; then
     printf '\n最近一次完成证据（%s）：\n' "$log"
     cat "$log"
@@ -1326,6 +1382,9 @@ cmd_guard() {
       fi
       printf 'guard：可以开始任务\n  角色：%s\n  任务：%s\n  目录：%s\n  分支：%s\n' \
         "$role" "$task" "$top" "$branch"
+      if ! hooks_installed; then
+        printf '提示：入口隔离 hooks 尚未安装（只读命令不写 hooks）；运行写命令（create/adopt/test/hooks 等）会安装。\n' >&2
+      fi
       ;;
     *)
       printf 'guard：可以继续\n  角色：%s（未限制角色，集成/发布场景不受影响）\n  目录：%s\n  分支：%s\n' \
@@ -1532,13 +1591,197 @@ cmd_adopt() {
   printf '下一步：cd %s，用 status 确认本任务，再 commit 到 %s。\n' "$wt" "$(branch_of "$task")"
 }
 
+# ---------------------------------------------------------------------------
+# 回收隔离区的安全护栏（remove）
+# ---------------------------------------------------------------------------
+
+# 找出 cwd 或打开文件落在目标 worktree 内的进程 pid（每行一个）。缺 lsof 时返回 2，
+# 调用方必须 fail closed（拒绝回收），而不是跳过检查。先做 cwd 快查（覆盖本地预览
+# 服务、PostgreSQL 数据目录等常见情况），没有再递归扫描 worktree 内的打开文件。
+# lsof +D 不跟随符号链接，因此 .venv/node_modules 这类指向主仓的链接不会误报。
+# 关键：排除 remove 自身的进程树（本脚本 + 其祖先调用 shell + 扫描时派生的
+# lsof/awk 子进程），否则“在隔离区里执行 remove”会被自己的 cwd 误判为占用。
+collect_descendant_pids() {
+  local parent=$1 child
+  while IFS= read -r child; do
+    [[ -n "$child" ]] || continue
+    printf '%s\n' "$child"
+    collect_descendant_pids "$child"
+  done < <(pgrep -P "$parent" 2>/dev/null || true)
+}
+
+self_process_pids() {
+  local pid=$$ ppid
+  printf '%s\n' "$pid"
+  while true; do
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    [[ -n "$ppid" && "$ppid" != 0 ]] || break
+    printf '%s\n' "$ppid"
+    pid="$ppid"
+  done
+  collect_descendant_pids "$$"
+}
+
+# 从 lsof -Fpn 输出里筛出路径落在 root 之内、且不属于 ignore 集合的 pid。
+filter_worktree_pids() {
+  local root=$1 ignore=$2
+  awk -v root="$root" -v ignore="$ignore" '
+    BEGIN { n = split(ignore, a, " "); for (i = 1; i <= n; i++) skip[a[i]] = 1 }
+    /^p/ { pid = substr($0, 2); next }
+    /^n/ {
+      path = substr($0, 2)
+      if ((path == root || index(path, root "/") == 1) && !(pid in skip)) print pid
+    }
+  '
+}
+
+# 只保留仍然存在的 pid：lsof 扫描自身可能在输出里出现（它扫描时短暂打开了 wt
+# 内的目录），但扫描结束时它已退出。真实占用（服务/数据库）在报告时仍存在。
+only_alive_pids() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    ps -p "$pid" >/dev/null 2>&1 && printf '%s\n' "$pid"
+  done
+}
+
+worktree_using_pids() {
+  local wt=$1 fast ignore
+  command -v lsof >/dev/null 2>&1 || return 2
+  ignore="$(self_process_pids | sort -u | paste -sd' ' -)"
+  # 从主工作区（中性目录）运行扫描，避免扫描自身的 cwd 落在 wt 内被当成占用。
+  fast="$(cd "$MAIN_ROOT" && lsof -w -a -d cwd -Fpn 2>/dev/null \
+    | filter_worktree_pids "$wt" "$ignore" | sort -u | only_alive_pids)"
+  if [[ -n "$fast" ]]; then printf '%s\n' "$fast"; return 0; fi
+  (cd "$MAIN_ROOT" && lsof -w +D "$wt" -Fpn 2>/dev/null \
+    | filter_worktree_pids "$wt" "$ignore" | sort -u | only_alive_pids)
+}
+
+# 打印占用进程的 pid / 命令行 / 所在目录 / 监听端口。无占用返回 0，有占用返回 1，
+# 缺 lsof 返回 2。绝不自动结束任何进程。
+report_worktree_processes() {
+  local task=$1 wt=$2 using="" rc=0 pid cmd cwd ports
+  if using="$(worktree_using_pids "$wt")"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [[ "$rc" == 2 ]]; then
+    printf '任务隔离未完成：系统缺少 lsof，无法确认任务 %s 的隔离区是否仍有进程占用；\n' "$task" >&2
+    printf '  出于安全考虑拒绝回收（不跳过检查）。安装 lsof 后重试；如确认无影响，可显式加 --ignore-processes。\n' >&2
+    return 2
+  fi
+  [[ -n "$using" ]] || return 0
+  printf '任务 %s 的隔离区仍被以下进程占用（未自动结束任何进程）：\n' "$task"
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    cmd="$(ps -o command= -p "$pid" 2>/dev/null | tr -s ' ' | cut -c1-240 || true)"
+    cwd="$(lsof -w -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1 || true)"
+    ports="$(lsof -w -a -p "$pid" -iTCP -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n//p' | paste -sd, - || true)"
+    printf '  pid=%s  监听端口=%s\n    命令：%s\n    目录：%s\n' \
+      "$pid" "${ports:-无}" "${cmd:-未知}" "${cwd:-未知}"
+  done <<<"$using"
+  printf '请先停止这些进程；确认可忽略时显式加 --ignore-processes（--force 不隐含该开关）。\n'
+  return 1
+}
+
+# 列出回收将删除的 gitignore 内容（按顶层汇总大小）与任务清单/证据。
+print_removal_preview() {
+  local task=$1 wt=$2 entry path size entries
+  printf '回收任务 %s：以下内容将被删除（先确认）：\n' "$task"
+  printf '  [隔离目录] %s\n' "$wt"
+  entries="$(git -C "$wt" status --porcelain --ignored=matching 2>/dev/null \
+    | sed -n 's/^!! //p' | sed 's#/*$##' | sed '/^$/d' | sort -u)"
+  if [[ -n "$entries" ]]; then
+    printf '  [被 gitignore、不进入任何 commit]\n'
+    while IFS= read -r entry; do
+      [[ -n "$entry" ]] || continue
+      path="$wt/$entry"
+      if [[ -L "$path" ]]; then
+        printf '    %s -> %s（符号链接，仅删除链接）\n' "$entry" "$(readlink "$path")"
+      elif [[ -e "$path" ]]; then
+        size="$(du -sh "$path" 2>/dev/null | awk '{print $1}' || true)"
+        printf '    %s/  %s\n' "$entry" "${size:-?}"
+      else
+        printf '    %s（已不存在）\n' "$entry"
+      fi
+    done <<<"$entries"
+  else
+    printf '  [没有被 gitignore 的额外内容]\n'
+  fi
+  if [[ -r "$(task_meta_path "$task")" ]]; then
+    printf '  [任务清单] %s（删除前备份到 %s/）\n' "$(task_meta_path "$task")" "$TASK_REMOVED_DIR"
+  fi
+  if [[ -r "$(task_evidence_path "$task")" ]]; then
+    printf '  [完成证据] %s（删除前一并备份）\n' "$(task_evidence_path "$task")"
+  fi
+}
+
+# 删除前把任务清单与完成证据备份到 trosa-tasks/removed/。
+backup_task_assets() {
+  local task=$1 ts meta log
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p -- "$TASK_REMOVED_DIR"
+  meta="$(task_meta_path "$task")"
+  log="$(task_evidence_path "$task")"
+  if [[ -r "$meta" ]]; then
+    cp -p -- "$meta" "$TASK_REMOVED_DIR/$task.$ts.json"
+    printf '  任务清单已备份：%s/%s.%s.json\n' "$TASK_REMOVED_DIR" "$task" "$ts"
+  fi
+  if [[ -r "$log" ]]; then
+    cp -p -- "$log" "$TASK_REMOVED_DIR/$task.$ts.verify.log"
+    printf '  完成证据已备份：%s/%s.%s.verify.log\n' "$TASK_REMOVED_DIR" "$task" "$ts"
+  fi
+}
+
+# 判断任务分支是否已等价合入集成分支：任务清单 status=landed，或分支所有提交在
+# 目标分支上都能找到等价补丁（git cherry 无独有 commit）。返回 0 可安全删除；
+# 返回 1 未等价合入（并打印独有提交）；返回 2 分支不存在。
+branch_equivalently_merged() {
+  local task=$1 branch=$2 base status bmeta cherry plus
+  status="$(task_status "$task")"
+  if [[ -z "$status" ]]; then
+    bmeta="$(latest_removed_meta "$task")"
+    if [[ -n "$bmeta" ]]; then
+      status="$(python3 - "$bmeta" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print((json.load(handle).get("status")) or "")
+PY
+)"
+    fi
+  fi
+  if [[ "$status" == landed ]]; then
+    printf '  依据：任务清单 status=landed（已发布）\n'
+    return 0
+  fi
+  if ! git -C "$MAIN_ROOT" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+    return 2
+  fi
+  base="$(task_base_ref)"
+  cherry="$(git -C "$MAIN_ROOT" cherry "$base" "$branch" 2>/dev/null || true)"
+  plus="$(printf '%s\n' "$cherry" | grep -c '^+' || true)"
+  if [[ "${plus:-0}" == 0 ]]; then
+    printf '  依据：分支 %s 的提交在 %s 上都能找到等价补丁（git cherry 无独有提交）\n' \
+      "$branch" "$base"
+    return 0
+  fi
+  printf '  分支 %s 在 %s 上有 %s 个独有提交（未等价合入）：\n' "$branch" "$base" "$plus"
+  printf '%s\n' "$cherry" | grep '^+' | sed 's/^+ */    /'
+  return 1
+}
+
 cmd_remove() {
-  local task="" force=0 delete_branch=0
+  local task="" force=0 delete_branch=0 yes=0 ignore_processes=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --task) [[ $# -ge 2 ]] || fail '--task 需要一个 id'; task=$2; shift 2 ;;
       --force) force=1; shift ;;
+      --yes|-y) yes=1; shift ;;
       --delete-branch) delete_branch=1; shift ;;
+      --ignore-processes) ignore_processes=1; shift ;;
       *) fail "remove 未知参数：$1" ;;
     esac
   done
@@ -1546,28 +1789,96 @@ cmd_remove() {
   validate_task_id "$task"
   local wt
   wt="$(find_task_path "$task")"
+  # 从中性目录执行后续动作：remove 常被从隔离区内部调用，若 cwd 留在 wt 内，检测
+  # 自身的进程（以及派生的 lsof/awk）会被误判为“占用”。所有 git 调用都用 -C。
+  cd "$MAIN_ROOT"
+
+  # A. 进程占用检查：默认拒绝，绝不自动杀进程；只有显式 --ignore-processes 才能
+  #    越过，且 --force 不隐含它。缺少 lsof 时 fail closed。
+  if [[ "$ignore_processes" != 1 ]]; then
+    local prc=0
+    report_worktree_processes "$task" "$wt" || prc=$?
+    if [[ "$prc" != 0 ]]; then
+      fail "任务 $task 的隔离区可能仍在使用中；未删除任何内容。停止上述进程后重试，或显式加 --ignore-processes。"
+    fi
+  else
+    printf '注意：已指定 --ignore-processes，跳过进程占用检查（风险自负）。\n' >&2
+  fi
+
+  # 未提交改动检查（沿用原语义：默认要求干净，--force 才允许丢弃）。
   if [[ "$force" != 1 ]]; then
     require_clean "$wt" "任务 ${task}（未提交改动会丢失；确认丢弃请加 --force）"
+  fi
+
+  # B. 删除前预览：列出将被删除的 gitignore 内容与任务清单。
+  print_removal_preview "$task" "$wt"
+
+  # 确认：交互环境要求确认；非交互环境必须显式 --yes（--force 也表示已确认）。
+  if [[ "$yes" != 1 && "$force" != 1 ]]; then
+    if [[ -t 0 && -t 1 ]]; then
+      local ans=""
+      printf '确认回收隔离区 %s 及其忽略内容？[y/N] ' "$wt" >&2
+      IFS= read -r ans || ans=""
+      case "$ans" in y|Y|yes|YES|Yes) ;; *) fail '已取消回收（未删除任何内容）' ;; esac
+    else
+      fail "非交互环境回收需要显式确认：请加 --yes（预览见上；--force 也表示已确认）"
+    fi
+  fi
+
+  # C. 分支删除语义（在任何删除动作前判定）：只有已发布 / 已等价合入的分支才允许
+  #    --delete-branch；否则拒绝并列出独有提交（仅 --force 才显式丢弃）。先判定，
+  #    这样拒绝时不会删除隔离区或任务清单。
+  local brc=0
+  if [[ "$delete_branch" == 1 ]]; then
+    branch_equivalently_merged "$task" "$(branch_of "$task")" || brc=$?
+    if [[ "$brc" == 1 && "$force" != 1 ]]; then
+      fail "分支 $(branch_of "$task") 有独有提交、未等价合入，拒绝删除（未删除任何内容）；确认丢弃请加 --force（不会悄悄 -D）"
+    fi
+  fi
+
+  # 删除前备份任务清单与完成证据（任务清单的唯一记录不再随回收丢失）。
+  backup_task_assets "$task"
+
+  if [[ "$force" != 1 ]]; then
     git -C "$MAIN_ROOT" worktree remove -- "$wt"
   else
     git -C "$MAIN_ROOT" worktree remove --force -- "$wt"
   fi
+
   if [[ "$delete_branch" == 1 ]]; then
-    if [[ "$force" == 1 ]]; then git -C "$MAIN_ROOT" branch -D -- "$(branch_of "$task")"
-    else git -C "$MAIN_ROOT" branch -d -- "$(branch_of "$task")" || fail "分支 $(branch_of "$task") 尚未合入；确认丢弃请加 --force"
-    fi
+    case "$brc" in
+      0)
+        git -C "$MAIN_ROOT" branch -D -- "$(branch_of "$task")"
+        printf '  已删除分支 %s（依据见上）。\n' "$(branch_of "$task")"
+        ;;
+      2)
+        printf '  分支 %s 已不存在，跳过删除。\n' "$(branch_of "$task")"
+        ;;
+      *)
+        printf '警告：分支 %s 有独有提交，因显式 --force 丢弃。\n' "$(branch_of "$task")" >&2
+        git -C "$MAIN_ROOT" branch -D -- "$(branch_of "$task")"
+        ;;
+    esac
   fi
+
   git -C "$MAIN_ROOT" worktree prune
   rm -f -- "$(task_meta_path "$task")"
   printf '任务 %s 的隔离区已回收。\n' "$task"
+  printf '任务清单/证据备份在：%s（evidence --task %s 仍可读出已回收状态）。\n' \
+    "$TASK_REMOVED_DIR" "$task"
 }
 
 [[ $# -ge 1 ]] || { usage; exit 1; }
 command=$1
 shift
-# Every session refreshes the shared entry guard, so a dev/review role cannot
-# commit on the integration branch even before it runs create/adopt.
-install_git_hooks
+# 入口隔离护栏只在“会改动仓库状态的写命令”里刷新，保证 dev/review 角色在集成分支
+# 提交时会遇到 pre-commit/commit-msg 兜底。只读命令（status/guard/preflight/list/
+# evidence/flakes/gate/--help）绝不写共享 .git/hooks，避免只读调用的副作用。
+case "$command" in
+  create|adopt|start|reserve-migration|reconcile|hooks|sync|test|ship|publish|remove)
+    install_git_hooks
+    ;;
+esac
 case "$command" in
   status) cmd_status "$@" ;;
   guard) cmd_guard "$@" ;;

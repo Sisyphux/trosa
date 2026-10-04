@@ -27,6 +27,10 @@
 会话忘记设置角色）。必须先 `create`/`adopt` 进入 `agent/<id>` 隔离区；`release` 角色
 与人工集成提交不受影响（人工集成可用 `TRADE_OS_ALLOW_MAIN_COMMIT=1`）。
 `create`/`adopt` 本身也只能在主工作区执行，不能在某个任务隔离区里再建任务。
+护栏只在会改动仓库状态的写命令（`create`/`adopt`/`start`/`reserve-migration`/
+`reconcile`/`sync`/`test`/`ship`/`publish`/`remove`/`hooks`）里刷新；只读命令
+（`status`/`guard`/`preflight`/`list`/`evidence`/`gate`/`flakes`）不写共享 `.git/hooks`，
+因此只读调用没有副作用。
 
 ### Agent 权限（`TRADE_OS_AGENT_ROLE`）
 
@@ -121,7 +125,17 @@ deploy/cloud/agent-worktree.sh test --task <id>    # 与发布候选同一份门
 - 测试失败或任务暂停只影响本隔离区，其它任务与主工作区不受影响。
 - **完成证据**：`test` 与 `publish` 会把 tree commit、门禁结果和发布 release 写入共享文件 `trosa-tasks/<id>.verify.log`，并更新任务清单状态；用 `evidence --task <id>` 查看。Chromium 验收的瞬时失败会记入 `trosa-tasks/.flake-events.log`，用 `flakes [--limit <n>]` 汇总。
 - **完成定义**：`status=landed`（已发布且健康）才算任务完成；绿色门禁只代表“开发完成”，不能用“已修复”描述尚未发布的改动。`gate --task <id>` 可随时只读检查任务是否 ready（证据对应当前 HEAD 且已包含最新 main）。
-- 回收：`remove --task <id>`（默认保留分支；确认丢弃加 `--force`）。
+- 回收：`remove --task <id>` 有多道护栏。删除前先检查进程占用：有进程 cwd 或打开
+  文件落在该 worktree 内时默认拒绝（打印 pid / 命令行 / 端口 / 目录，绝不自动杀
+  进程；缺 `lsof` 时 fail closed），只有显式 `--ignore-processes` 才越过（`--force`
+  不隐含它）。随后列出将被删除的 gitignore 内容（按顶层汇总大小，如 `.local`、
+  `data`、`.venv`、`node_modules`）与任务清单 `<id>.json`；交互环境要求确认，非
+  交互环境必须显式 `--yes`（`--force` 也表示已确认）。默认要求 worktree 干净，
+  `--force` 才允许丢弃未提交改动。删除任务清单/证据前会自动备份到
+  `trosa-tasks/removed/<id>.<UTC时间戳>.{json,verify.log}`，之后 `evidence --task <id>`
+  仍能显示“已回收”与发布结论。默认保留分支；`--delete-branch` 仅对该任务已发布
+  （`status=landed`）或在 `<main>` 上能找到等价补丁（`git cherry` 无独有提交）的
+  分支安全删除，未等价合入的分支会拒绝并列出独有提交，仅 `--force` 才显式丢弃。
 
 ## 5. 合并与发布
 
@@ -307,4 +321,10 @@ deploy/cloud/release-pipeline.sh run --publish
 - **任务失败 / 暂停** → 离开隔离区即可，其它任务不受影响；恢复时回到原目录继续。
 - **`publish` 报“当前角色没有发布权限”？** → 你的会话是 dev/review 角色；把 commit 和证据交给 release 角色发布，这是设计边界，不是错误。
 - **门禁绿了但没人说已修复？** → 只有 `status=landed` 才算完成；`evidence --task <id>` 可核对 commit 与 release。
-- **旧的任务分支 / 隔离区堆积？** → `list` 查看，确认已发布后用 `remove --task <id> --delete-branch` 回收。
+- **旧的任务分支 / 隔离区堆积？** → `list` 查看，确认已发布后用
+  `remove --task <id> --delete-branch` 回收。`--delete-branch` 对已发布任务
+  （`status=landed`）或在 `main` 上能找到等价补丁的分支（`git cherry` 无独有提交）
+  会安全删除并打印依据；对仍有独有提交的分支会拒绝并列出这些提交，不会因为加了
+  `--delete-branch` 就悄悄 `-D`（确认丢弃才加 `--force`）。`publish` 是
+  cherry-pick，已发布任务的分支通常不是 `main` 的祖先，所以旧的 `branch -d` 对
+  它们必失败——这正是分支堆积的原因，现由等价检查解决。

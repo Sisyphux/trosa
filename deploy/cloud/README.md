@@ -313,7 +313,7 @@ deploy/cloud/agent-worktree.sh test --task <id>       # 隔离数据目录跑完
 deploy/cloud/agent-worktree.sh ship --task <id>       # 交付：同步 + 快速门禁 + 登记发布队列
 deploy/cloud/agent-worktree.sh sync --task <id>       # 变基到最新 main
 deploy/cloud/agent-worktree.sh publish --task <id>    # 发布任务分支的已提交成果
-deploy/cloud/agent-worktree.sh remove --task <id>     # 回收（默认保留分支）
+deploy/cloud/agent-worktree.sh remove --task <id>     # 回收（默认保留分支；见下）
 ```
 
 任务清单（负责人 / 目标 / 修改范围 / 预留迁移编号）存放在共享 git 目录

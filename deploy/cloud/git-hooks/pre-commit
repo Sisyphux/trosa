@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # sela/trosa 入口隔离护栏：开发/审查角色不得直接污染集成分支。
 #
-# 安装：`deploy/cloud/agent-worktree.sh hooks`（create/adopt/status 也会自动刷新）。
+# 安装：`deploy/cloud/agent-worktree.sh hooks`（create/adopt 等写命令也会自动刷新；
+# 只读命令 status/guard/preflight/list/evidence/gate/flakes 不写 hooks）。
 # 它由 `agent-worktree.sh` 复制到共享 git 目录（$GIT_COMMON_DIR/hooks/pre-commit），
 # 因此主工作区与所有任务隔离区共享同一份护栏，且随脚本版本更新。
 #
