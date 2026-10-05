@@ -1361,7 +1361,122 @@ class Importer:
                clean(row.get("uploaded_by")), parse_time(row.get("created_at")) or datetime.now(timezone.utc),
                parse_time(row.get("updated_at")) or datetime.now(timezone.utc)))
 
+        self.import_trosa_dialogue_rows(db_name, rows)
         self.import_trosa_runtime_rows(db_name, rows)
+
+    def import_trosa_dialogue_rows(self, db_name: str, rows: dict[str, list[dict[str, Any]]]) -> None:
+        """Import the Inbox dialogue tables introduced for the thread contract."""
+        user = legacy_user_key(db_name)
+
+        def as_uuid(value: Any, seed: str) -> uuid.UUID:
+            try:
+                return uuid.UUID(str(value))
+            except (TypeError, ValueError):
+                return compat_uuid(seed)
+
+        thread_ids: set[uuid.UUID] = set()
+        for row in rows.get("inbox_threads", []):
+            thread_id = as_uuid(row.get("id"), f"thread:{user}:{row.get('id')}")
+            self.execute(
+                """insert into trosa.inbox_threads
+                   (id,organization_id,legacy_user_id,subject,title,status,awaiting,revision,
+                    opened_at,updated_at,closed_at,closed_by,closed_summary)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (id) do update set subject=excluded.subject,title=excluded.title,
+                     status=excluded.status,awaiting=excluded.awaiting,revision=excluded.revision,
+                     updated_at=excluded.updated_at,closed_at=excluded.closed_at,
+                     closed_by=excluded.closed_by,closed_summary=excluded.closed_summary""",
+                (thread_id, ORG_ID, user, clean(row.get("subject")) or None,
+                 clean(row.get("title")) or "历史请求", clean(row.get("status")) or "open",
+                 clean(row.get("awaiting")) or "human", self.legacy_id(row.get("revision")) or 0,
+                 parse_time(row.get("opened_at")) or datetime.now(timezone.utc),
+                 parse_time(row.get("updated_at")) or datetime.now(timezone.utc),
+                 parse_time(row.get("closed_at")), clean(row.get("closed_by")) or None,
+                 clean(row.get("closed_summary")) or None))
+            thread_ids.add(thread_id)
+
+        def thread_exists(thread_id: uuid.UUID) -> bool:
+            if thread_id in thread_ids:
+                return True
+            return self.cur.execute(
+                "select 1 from trosa.inbox_threads where id=%s", (thread_id,)
+            ).fetchone() is not None
+
+        for row in rows.get("inbox_messages", []):
+            thread_id = as_uuid(row.get("thread_id"), f"thread:{user}:{row.get('thread_id')}")
+            if not thread_exists(thread_id):
+                self.issue(f"{db_name}/inbox_messages", clean(row.get("id")), "MISSING_THREAD",
+                           "Message skipped because its thread is unavailable", row)
+                continue
+            message_id = as_uuid(row.get("id"), f"message:{user}:{row.get('id')}")
+            self.execute(
+                """insert into trosa.inbox_messages
+                   (id,thread_id,seq,role,actor,text,suggested_replies,refs,hints,attachments,
+                    awaiting_after,idempotency_key,created_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (id) do update set text=excluded.text,role=excluded.role,
+                     actor=excluded.actor,suggested_replies=excluded.suggested_replies,
+                     refs=excluded.refs,hints=excluded.hints,attachments=excluded.attachments,
+                     awaiting_after=excluded.awaiting_after""",
+                (message_id, thread_id, self.legacy_id(row.get("seq")) or 1,
+                 clean(row.get("role")) or "sela", clean(row.get("actor")) or None,
+                 clean(row.get("text")),
+                 Jsonb(json_value(row.get("suggested_replies")) or []),
+                 Jsonb(json_value(row.get("refs")) or []),
+                 Jsonb(json_value(row.get("hints"))) if row.get("hints") is not None else None,
+                 Jsonb(json_value(row.get("attachments")) or []),
+                 clean(row.get("awaiting_after")) or None,
+                 clean(row.get("idempotency_key")) or None,
+                 parse_time(row.get("created_at")) or datetime.now(timezone.utc)))
+
+        for row in rows.get("inbox_action_receipts", []):
+            thread_id = as_uuid(row.get("thread_id"), f"thread:{user}:{row.get('thread_id')}")
+            if not thread_exists(thread_id):
+                self.issue(f"{db_name}/inbox_action_receipts", clean(row.get("id")), "MISSING_THREAD",
+                           "Receipt skipped because its thread is unavailable", row)
+                continue
+            receipt_id = as_uuid(row.get("id"), f"receipt:{user}:{row.get('id')}")
+            self.execute(
+                """insert into trosa.inbox_action_receipts
+                   (id,organization_id,legacy_user_id,thread_id,operation,idempotency_key,
+                    request_hash,response,message_id,consumed_message_id,created_at)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   on conflict (id) do update set response=excluded.response,
+                     message_id=excluded.message_id,consumed_message_id=excluded.consumed_message_id""",
+                (receipt_id, ORG_ID, user, thread_id, clean(row.get("operation")),
+                 clean(row.get("idempotency_key")), clean(row.get("request_hash")) or "",
+                 Jsonb(json_value(row.get("response")) or {}),
+                 as_uuid(row.get("message_id"), f"message:{user}:{row.get('message_id')}")
+                 if row.get("message_id") else None,
+                 as_uuid(row.get("consumed_message_id"), f"consumed:{user}:{row.get('consumed_message_id')}")
+                 if row.get("consumed_message_id") else None,
+                 parse_time(row.get("created_at")) or datetime.now(timezone.utc)))
+
+        for row in rows.get("inbox_legacy_route_hits", []):
+            day = parse_time(row.get("day"))
+            if day is None:
+                continue
+            self.execute(
+                """insert into trosa.inbox_legacy_route_hits
+                   (organization_id,legacy_user_id,route,day,hits) values (%s,%s,%s,%s,%s)
+                   on conflict (organization_id,legacy_user_id,route,day)
+                     do update set hits=excluded.hits""",
+                (ORG_ID, user, clean(row.get("route")),
+                 day.date() if hasattr(day, "date") else day,
+                 self.legacy_id(row.get("hits")) or 0))
+
+        for row in rows.get("legacy_row_refs", []):
+            legacy_id = self.legacy_id(row.get("legacy_id"))
+            if legacy_id is None or not row.get("target_id"):
+                continue
+            self.execute(
+                """insert into trosa.legacy_row_refs
+                   (organization_id,legacy_user_id,table_name,legacy_id,target_id,created_at)
+                   values (%s,%s,%s,%s,%s,%s)
+                   on conflict (organization_id,legacy_user_id,table_name,legacy_id) do nothing""",
+                (ORG_ID, user, clean(row.get("table_name")), legacy_id,
+                 as_uuid(row.get("target_id"), f"ref:{user}:{row.get('table_name')}:{legacy_id}"),
+                 parse_time(row.get("created_at")) or datetime.now(timezone.utc)))
 
     def import_trosa_runtime_rows(self, db_name: str, rows: dict[str, list[dict[str, Any]]]) -> None:
         """Preserve user-scoped audit/integration ledgers in PostgreSQL runtime tables."""
