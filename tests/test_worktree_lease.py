@@ -58,19 +58,21 @@ class WorktreeLeaseTests(unittest.TestCase):
         self.assertEqual(self.create.returncode, 0, self.create.stderr)
         self.wt = self.worktrees / "t1"
 
-    def _env(self, session, **extra):
+    def _env(self, session, _no_pid=False, **extra):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("TRADE_OS_", "CLAUDE_"))}
-        env.update(TRADE_OS_AGENT_ROLE="dev", TRADE_OS_WORKTREE_ROOT=str(self.worktrees),
-                   CLAUDE_PID=str(os.getpid()))
+        env.update(TRADE_OS_AGENT_ROLE="dev", TRADE_OS_WORKTREE_ROOT=str(self.worktrees))
+        if not _no_pid:
+            env["CLAUDE_PID"] = str(os.getpid())
         if session:
             env["TRADE_OS_AGENT_SESSION"] = session
         env.update(extra)
         return env
 
-    def _run(self, session, *args, cwd=None, **extra):
+    def _run(self, session, *args, cwd=None, _no_pid=False, **extra):
         return subprocess.run(["bash", self.script, *args], capture_output=True, text=True,
-                              env=self._env(session, **extra), cwd=str(cwd or self.wt))
+                              env=self._env(session, _no_pid=_no_pid, **extra),
+                              cwd=str(cwd or self.wt))
 
     def _commit(self, session, name):
         (self.wt / name).write_text(name, encoding="utf-8")
@@ -111,15 +113,39 @@ class WorktreeLeaseTests(unittest.TestCase):
         self.assertEqual(
             self._run("B", "guard", TRADE_OS_ALLOW_SHARED_WORKTREE="1").returncode, 0)
 
-    def _pretool(self, session, path):
+    def _settings_hook_command(self):
+        """Parse the hook command exactly as Claude Code would from settings.json."""
         import json
-        hook = self.repo / "deploy" / "cloud" / "agent-lease-pretool.sh"
-        return subprocess.run(
-            ["bash", str(hook)], capture_output=True, text=True, env=self._env(session),
-            input=json.dumps({"cwd": str(self.wt), "tool_input": {"file_path": str(path)}}))
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        for entry in settings["hooks"]["PreToolUse"]:
+            for hook in entry.get("hooks", []):
+                if hook.get("type") == "command" and hook.get("command"):
+                    return hook["command"]
+        raise AssertionError("settings.json 里没有 PreToolUse command 钩子")
 
-    def test_pretool_hook_blocks_writes_from_second_session(self):
-        # Copy of the shipped hook lives in the temp repo via the *.sh glob above.
+    def _pretool(self, session, path, _no_pid=False, payload=None):
+        """Run the shipped hook through the real settings.json command form.
+
+        Deliberately does not call ``bash <hook>`` directly: the defect was that the
+        settings.json command silently failed (permission denied) because the hook
+        was committed non-executable.  Executing the parsed command as a shell command
+        covers the real invocation path.
+        """
+        import json
+        env = self._env(session, _no_pid=_no_pid)
+        env["CLAUDE_PROJECT_DIR"] = str(ROOT)
+        body = payload if payload is not None else json.dumps(
+            {"session_id": session or "", "cwd": str(self.wt),
+             "tool_input": {"file_path": str(path)}})
+        return subprocess.run(
+            self._settings_hook_command(), shell=True, capture_output=True, text=True,
+            env=env, input=body, cwd=str(self.wt))
+
+    def test_pretool_hook_via_settings_command_blocks_second_session(self):
+        # The shipped command must run and must not depend on an executable bit.
+        hook = ROOT / "deploy" / "cloud" / "agent-lease-pretool.sh"
+        self.assertIn("bash", self._settings_hook_command())
+        self.assertTrue(os.access(str(hook), os.X_OK), "钩子应带可执行位")
         self.assertEqual(self._pretool("A", self.wt / "x.txt").returncode, 0)  # claims
         blocked = self._pretool("B", self.wt / "x.txt")
         self.assertEqual(blocked.returncode, 2, blocked.stderr)
@@ -127,10 +153,24 @@ class WorktreeLeaseTests(unittest.TestCase):
         # Outside an agent/<id> worktree the hook never interferes.
         self.assertEqual(self._pretool("B", self.repo / "README.md").returncode, 0)
 
+    def test_pretool_hook_uses_stdin_session_id_when_env_absent(self):
+        # No TRADE_OS_AGENT_SESSION / CLAUDE_CODE_SESSION_ID in the environment:
+        # the hook must fall back to the session_id in the event JSON, so two
+        # distinct stdin sessions still contend for the same lease.
+        import json
+
+        def body(sid):
+            return json.dumps({"session_id": sid, "cwd": str(self.wt),
+                               "tool_input": {"file_path": str(self.wt / "x.txt")}})
+
+        self.assertEqual(
+            self._pretool(None, self.wt / "x.txt", payload=body("sess-A")).returncode, 0)
+        blocked = self._pretool(None, self.wt / "x.txt", payload=body("sess-B"))
+        self.assertEqual(blocked.returncode, 2, blocked.stderr)
+        self.assertIn("create --task t1-b", blocked.stderr)
+
     def test_pretool_hook_fails_open_on_bad_input(self):
-        hook = self.repo / "deploy" / "cloud" / "agent-lease-pretool.sh"
-        proc = subprocess.run(["bash", str(hook)], input="not json", capture_output=True,
-                              text=True, env=self._env("B"))
+        proc = self._pretool("B", self.wt / "x.txt", payload="not json")
         self.assertEqual(proc.returncode, 0)
 
     def test_release_and_remove_clear_lease(self):

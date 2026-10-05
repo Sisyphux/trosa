@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/deploy/cloud/agent-lease-pretool.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/deploy/cloud/agent-lease-pretool.sh"
           }
         ]
       }
