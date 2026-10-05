@@ -75,6 +75,7 @@ from gmail_sync import (
     start_gmail_sync,
 )
 import inbox_questions as _inbox_questions
+import inbox_dialogue as _dialogue
 from inbox_attachment_analysis import analyze_import_file as _analyze_inbox_import_file
 from inbox_reconcile import reconcile_current_user as _reconcile_inbox_current_user
 from customer_timezone import (
@@ -360,6 +361,8 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/prospects',
             '/api/integrations/sela/needs',
             '/api/integrations/sela/continuations',
+            '/api/integrations/sela/threads',
+            '/api/integrations/sela/inbox-observability',
         })
         or (request.method == 'POST' and request.path in {
             '/api/integrations/sela/reply',
@@ -367,7 +370,16 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/exclusions',
             '/api/integrations/sela/needs',
             '/api/integrations/sela/inbox-captures',
+            '/api/integrations/sela/threads',
         })
+        or (request.method == 'GET' and re.fullmatch(
+            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+            request.path,
+        ))
+        or (request.method == 'POST' and re.fullmatch(
+            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions)',
+            request.path,
+        ))
         or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/email-verification',
             request.path,
@@ -6287,6 +6299,50 @@ def _sela_resolve_exclusion_inbox_items(conn, source_id, note, now):
     return resolved
 
 
+def _sela_block_cold_prospect(conn, source_id, reason, now):
+    """Shared cold-prospect stop-contact write (contract §4.3).
+
+    Used by both the standalone contact-block route and the confirmation-gated
+    irreversible action.  Returns ``(response_body, changed, customer_id)`` and
+    raises ``CrmWriteError`` when the prospect is missing or no longer cold.
+    """
+    profile = _sela_profile_by_source(conn, source_id)
+    if not profile:
+        raise CrmWriteError('Prospect 不存在', 404)
+    profile = dict(profile)
+    note = f'系统判定非目标买家并停止联系：{reason.strip()}'
+    changed = False
+    if str(profile.get('contact_permission') or '') != 'do_not_contact':
+        view = _sela_prospect_view(conn, profile)
+        if not view:
+            raise CrmWriteError('Prospect 不存在', 404)
+        if (view.get('lifecycle_stage') != 'cold_prospect'
+                or view.get('customer_linked') or view.get('lifecycle_rejected')):
+            stage = str(view.get('lifecycle_stage') or '未知阶段')
+            raise CrmWriteError(
+                f'该 Prospect 已进入 Trosa 的 {stage} 阶段（有回复或已转人工），'
+                'Sela 不能直接停止联系，请由人工在 Trosa 处理', 409)
+        _sela_mark_prospect_excluded(
+            conn, profile, note, now, resolution=_SELA_CONTACT_BLOCK_RESOLUTION,
+            actor=_SELA_CONTACT_BLOCK_ACTOR,
+        )
+        _record_operation_log(
+            conn, 'BLOCK', 'sela_prospect', int(profile['customer_id']),
+            f'Sela 服务身份将冷 Prospect {source_id} 设为停止联系：{reason[:500]}', now,
+        )
+        changed = True
+    # Already blocked (by a human or an earlier call) still answers the open
+    # exclusion questions: the fact they ask about is already settled.
+    resolved_inbox = _sela_resolve_exclusion_inbox_items(conn, source_id, note, now)
+    prospect = _sela_prospect_view(conn, _sela_profile_by_source(conn, source_id))
+    response_body = {
+        'success': True, 'status': 'SYNCED', 'prospect_api': 'sela-v2',
+        'already_blocked': not changed, 'resolved_inbox_ids': resolved_inbox,
+        'prospect': prospect,
+    }
+    return response_body, changed, int(profile['customer_id'])
+
+
 @app.route('/api/integrations/sela/prospects/<source_id>/contact-block', methods=['POST'])
 @login_required
 def sela_integration_prospect_contact_block(source_id):
@@ -6326,48 +6382,12 @@ def sela_integration_prospect_contact_block(source_id):
             response_body = json.loads(receipt['response_json'])
             conn.commit()
             return jsonify(response_body)
-        profile = _sela_profile_by_source(conn, source_id)
-        if not profile:
-            conn.rollback()
-            return jsonify({'success': False, 'error': 'Prospect 不存在'}), 404
-        profile = dict(profile)
         now = _sela_now()
-        note = f'系统判定非目标买家并停止联系：{reason.strip()}'
-        if str(profile.get('contact_permission') or '') != 'do_not_contact':
-            view = _sela_prospect_view(conn, profile)
-            if not view:
-                conn.rollback()
-                return jsonify({'success': False, 'error': 'Prospect 不存在'}), 404
-            if (view.get('lifecycle_stage') != 'cold_prospect'
-                    or view.get('customer_linked') or view.get('lifecycle_rejected')):
-                conn.rollback()
-                stage = str(view.get('lifecycle_stage') or '未知阶段')
-                return jsonify({
-                    'success': False,
-                    'error': f'该 Prospect 已进入 Trosa 的 {stage} 阶段（有回复或已转人工），'
-                             'Sela 不能直接停止联系，请由人工在 Trosa 处理',
-                }), 409
-            _sela_mark_prospect_excluded(
-                conn, profile, note, now, resolution=_SELA_CONTACT_BLOCK_RESOLUTION,
-                actor=_SELA_CONTACT_BLOCK_ACTOR,
-            )
-            _record_operation_log(
-                conn, 'BLOCK', 'sela_prospect', int(profile['customer_id']),
-                f'Sela 服务身份将冷 Prospect {source_id} 设为停止联系：{reason.strip()[:500]}', now,
-            )
-            changed = True
-        # Already blocked (by a human or an earlier call) still answers the open
-        # exclusion questions: the fact they ask about is already settled.
-        resolved_inbox = _sela_resolve_exclusion_inbox_items(conn, source_id, note, now)
-        prospect = _sela_prospect_view(conn, _sela_profile_by_source(conn, source_id))
-        response_body = {
-            'success': True, 'status': 'SYNCED', 'prospect_api': 'sela-v2',
-            'already_blocked': not changed, 'resolved_inbox_ids': resolved_inbox,
-            'prospect': prospect,
-        }
+        response_body, changed, customer_id = _sela_block_cold_prospect(
+            conn, source_id, reason.strip(), now)
         _sela_receipt_write(
             conn, integration, idempotency_key, request_hash,
-            candidate_id=source_id, customer_id=int(profile['customer_id']),
+            candidate_id=source_id, customer_id=customer_id,
             response=response_body, now=now,
         )
         conn.commit()
@@ -6386,6 +6406,410 @@ def sela_integration_prospect_contact_block(source_id):
     if changed:
         schedule_safety_backup('sela_prospect_contact_block')
     return jsonify(response_body)
+
+
+# ---------------------------------------------------------------------------
+# Inbox dialogue routes (contract ``inbox-dialogue-contract.md`` v1.1)
+# ---------------------------------------------------------------------------
+
+def _dialogue_idempotency_key(payload):
+    header = str(request.headers.get('X-Idempotency-Key') or '').strip()
+    body = str((payload or {}).get('idempotency_key') or '').strip()
+    if header and body and header != body:
+        raise _dialogue.DialogueError('invalid_request', '幂等键不一致')
+    key = header or body
+    if len(key) > 200:
+        raise _dialogue.DialogueError('invalid_request', '幂等键过长')
+    return key or None
+
+
+def _dialogue_json_body():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise _dialogue.DialogueError('invalid_request', '请求必须是 JSON 对象')
+    return payload
+
+
+def _dialogue_error_response(error):
+    return jsonify(error.body()), error.status
+
+
+def _dialogue_write_failure(where):
+    logger.exception('inbox dialogue %s failed', where)
+    return jsonify({'error': {
+        'code': 'internal_error',
+        'message': '对话写入失败，请稍后重试',
+    }}), 500
+
+
+def _dialogue_legacy_hit(conn, label):
+    """Count a still-live legacy route call so §6.2 can show it is unused."""
+    try:
+        _dialogue.record_legacy_hit(
+            conn, _dialogue.LEGACY_ROUTE_LABELS.get(label, label))
+    except Exception:
+        logger.exception('legacy route hit counter failed: %s', label)
+
+
+def _dialogue_legacy_answer_text(answer):
+    """Render a legacy structured answer as one verbatim-ish human message."""
+    if not isinstance(answer, dict):
+        return str(answer or '')[:8000]
+    for key in ('text', 'note', 'message', 'comment'):
+        value = answer.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:8000]
+    parts = []
+    decision = answer.get('decision') or answer.get('choice')
+    if decision:
+        parts.append(str(decision))
+    for key in ('note', 'reason', 'value', 'email'):
+        value = answer.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(f'{key}: {value.strip()}')
+    if not parts:
+        parts.append(json.dumps(answer, ensure_ascii=False, default=str))
+    return (' / '.join(parts))[:8000]
+
+
+def _dialogue_legacy_evidence(row):
+    """Read evidence JSON into schema-valid refs and hints."""
+    evidence = row.get('evidence')
+    if isinstance(evidence, str) and evidence.strip():
+        try:
+            evidence = json.loads(evidence)
+        except Exception:
+            evidence = None
+    if not isinstance(evidence, dict):
+        return [], None
+    refs = []
+    files = evidence.get('files') or evidence.get('attachments') or []
+    if isinstance(files, list):
+        for item in files[:50]:
+            ref = item.get('file_object_id') or item.get('id') if isinstance(item, dict) else item
+            if ref:
+                refs.append({'type': 'file', 'id': str(ref)[:200]})
+    hints = evidence.get('hints') if isinstance(evidence.get('hints'), dict) else None
+    return refs, hints
+
+
+def _dialogue_legacy_answer_dual(conn, row, item_id, answer):
+    """Mirror a legacy human answer into the dialogue thread (§6.2)."""
+    try:
+        payload_json = row.get('legacy_payload')
+        if isinstance(payload_json, str) and payload_json.strip():
+            try:
+                payload_json = json.loads(payload_json)
+            except Exception:
+                payload_json = None
+        subject = None
+        if isinstance(payload_json, dict):
+            sid = str(payload_json.get('source_id') or '').strip()
+            if sid:
+                subject = ('prospect:' + sid)[:200]
+        refs, hints = _dialogue_legacy_evidence(row)
+        text = _dialogue_legacy_answer_text(answer) or '（人已回复）'
+        _dialogue.dual_write_legacy_answer(
+            conn, legacy_id=int(item_id), title=str(row.get('title') or ''),
+            content=str(row.get('content') or ''), human_text=text[:8000],
+            subject=subject, refs=refs, hints=hints,
+            created_at=row.get('created_at') or None,
+        )
+    except Exception:
+        logger.exception('legacy answer dual-write failed: %s', item_id)
+
+
+def _dialogue_reply_undo(conn, thread_id, message):
+    """A thread-level undo marker; reverting the thread lands with the S3 UI."""
+    seq = int((message or {}).get('seq') or 0)
+    description = (f'撤销对话回复：thread={thread_id} message={message.get("id")} seq={seq}')
+    try:
+        return _create_undo_action(
+            conn, 'THREAD_REPLY', 'inbox_thread', str(thread_id), [], description)
+    except Exception:
+        logger.exception('dialogue reply undo token failed')
+        return None
+
+
+def _dialogue_attachments(conn, attachment_ids):
+    """Resolve human attachment ids to message attachments (PG only for now)."""
+    if not postgres_mode():
+        return []
+    placeholders = ','.join(['?'] * len(attachment_ids))
+    rows = conn.execute(
+        f'SELECT id, original_name, mime_type, size_bytes '
+        f'FROM core.file_objects WHERE id IN ({placeholders})',
+        list(attachment_ids),
+    ).fetchall()
+    out = []
+    for row in rows:
+        data = dict(row)
+        entry = {
+            'file_object_id': str(data.get('id')),
+            'name': str(data.get('original_name') or '附件')[:300],
+        }
+        mime = str(data.get('mime_type') or '').strip()
+        if mime:
+            entry['mime_type'] = mime[:120]
+        entry['size_bytes'] = int(data.get('size_bytes') or 0)
+        out.append(entry)
+    return out
+
+
+def _dialogue_irreversible_handler(action):
+    if action == 'stop_contact':
+        def handler(conn, arguments, now):
+            source_id = str(arguments.get('source_id') or '').strip()
+            reason = str(arguments.get('reason') or '').strip()
+            if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+                raise _dialogue.DialogueError('invalid_request', 'source_id 无效')
+            if len(reason) < 1:
+                raise _dialogue.DialogueError('invalid_request', '缺少停止联系原因')
+            try:
+                body, _changed, customer_id = _sela_block_cold_prospect(
+                    conn, source_id, reason, now)
+            except CrmWriteError as error:
+                code = 'not_found' if error.status == 404 else 'guardrail_rejected'
+                raise _dialogue.DialogueError(code, error.message, error.status)
+            return body
+        return handler
+    if action == 'merge_identity':
+        def handler(conn, arguments, now):
+            source_id = str(arguments.get('source_id') or '').strip()
+            customer_id = arguments.get('target_customer_id') or arguments.get('customer_id')
+            if not source_id or not customer_id:
+                raise _dialogue.DialogueError(
+                    'invalid_request', '缺少 source_id 或 target_customer_id')
+            identifiers = _sela_identity_identifiers(source_id, arguments)
+            applied = _sela_record_identity_decision(
+                conn, decision='same', customer_id=int(customer_id),
+                identifiers=identifiers, source_id=source_id, now=now,
+                actor='sela', inbox_item_id=None,
+            )
+            return {'applied': applied}
+        return handler
+    if action == 'overwrite_email':
+        def handler(conn, arguments, now):
+            customer_id = arguments.get('customer_id') or arguments.get('target_customer_id')
+            email = _sela_prospect_text(arguments.get('email'), 320)
+            if not customer_id or not email:
+                raise _dialogue.DialogueError('invalid_request', '缺少 customer_id 或 email')
+            try:
+                saved = _sela_resolve_contact_email(
+                    conn, int(customer_id), email, now, actor='sela')
+            except CrmWriteError as error:
+                raise _dialogue.DialogueError(
+                    'guardrail_rejected', error.message, error.status)
+            return {'contact_id': saved.get('contact_id'),
+                    'already_present': bool(saved.get('already_present'))}
+        return handler
+    return None
+
+
+@app.route('/api/integrations/sela/threads', methods=['POST'])
+@login_required
+def sela_integration_create_thread():
+    """Create a thread with its first sela message (or return the open one)."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.create_thread(conn, payload=payload, idempotency_key=key,
+                                       actor='sela')
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('create')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/messages', methods=['POST'])
+@login_required
+def sela_integration_append_thread_message(thread_id):
+    """Append a sela message to a thread."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.append_message(conn, thread_id=thread_id, payload=payload,
+                                        idempotency_key=key, actor='sela')
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('append')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/close', methods=['POST'])
+@login_required
+def sela_integration_close_thread(thread_id):
+    """Close a thread as sela with a one-line result."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.close_thread(conn, thread_id=thread_id, payload=payload,
+                                      idempotency_key=key, closed_by='sela')
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('close')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/irreversible-actions',
+           methods=['POST'])
+@login_required
+def sela_integration_irreversible_action(thread_id):
+    """Run a confirmation-gated irreversible action (contract §4.4)."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        action = str(payload.get('action') or '').strip()
+        handler = _dialogue_irreversible_handler(action)
+        if handler is None:
+            raise _dialogue.DialogueError('invalid_request', '未知的不可逆动作')
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.irreversible_action(
+            conn, thread_id=thread_id, action=action,
+            arguments=payload.get('arguments') or {},
+            proposal_message_id=payload.get('proposal_message_id'),
+            confirmed_by_message_id=payload.get('confirmed_by_message_id'),
+            handler=handler, idempotency_key=key, actor='sela',
+        )
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('irreversible')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/threads', methods=['GET'])
+@login_required
+def sela_integration_list_threads():
+    """List threads; ``?awaiting=sela`` is the wake queue."""
+    conn = get_db()
+    try:
+        body = _dialogue.list_threads(
+            conn,
+            awaiting=request.args.get('awaiting'),
+            status=request.args.get('status') or 'open',
+            subject=request.args.get('subject'),
+            updated_after=request.args.get('updated_after'),
+            limit=request.args.get('limit') or 50,
+            cursor=request.args.get('cursor'),
+        )
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        return _dialogue_error_response(error)
+    except Exception:
+        return _dialogue_write_failure('list')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/inbox-observability', methods=['GET'])
+@login_required
+def sela_integration_inbox_observability():
+    """Contract §7 observability counters for the page and health check."""
+    conn = get_db()
+    try:
+        return jsonify(_dialogue.observability(conn))
+    except Exception:
+        return _dialogue_write_failure('observability')
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>', methods=['GET'])
+@login_required
+def sela_integration_get_thread(thread_id):
+    """Return a full conversation for sela to read."""
+    conn = get_db()
+    try:
+        return jsonify(_dialogue.get_thread(conn, thread_id=thread_id))
+    except _dialogue.DialogueError as error:
+        return _dialogue_error_response(error)
+    except Exception:
+        return _dialogue_write_failure('get')
+    finally:
+        conn.close()
+
+
+@app.route('/api/inbox/threads/<thread_id>/reply', methods=['POST'])
+@login_required
+def inbox_thread_reply(thread_id):
+    """Human reply; a success always sets ``awaiting='sela'``."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.reply_human(
+            conn, thread_id=thread_id, payload=payload, idempotency_key=key,
+            actor=str(getattr(g, 'current_user', '') or ''),
+            undo_factory=_dialogue_reply_undo,
+            attachment_lookup=_dialogue_attachments,
+        )
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('reply')
+    finally:
+        conn.close()
+
+
+@app.route('/api/inbox/threads/<thread_id>/close', methods=['POST'])
+@login_required
+def inbox_thread_user_close(thread_id):
+    """Human says the thread is not needed; closing as ``human``."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.user_close(
+            conn, thread_id=thread_id, payload=payload, idempotency_key=key,
+            actor=str(getattr(g, 'current_user', '') or ''),
+        )
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('user_close')
+    finally:
+        conn.close()
 
 
 @app.route('/api/integrations/sela/exclusions', methods=['GET'])
@@ -6522,6 +6946,7 @@ def sela_integration_update_resume_status(item_id):
     facts_applied = payload.get('facts_applied') if isinstance(payload.get('facts_applied'), list) else []
     conn = get_db()
     try:
+        _dialogue_legacy_hit(conn, 'sela_resume_status')
         conn.execute('BEGIN IMMEDIATE')
         if postgres_mode():
             row = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)
@@ -6616,6 +7041,7 @@ def sela_integration_continuations():
     include_all = str(request.args.get('status') or '').strip().lower() == 'all'
     conn = get_db()
     try:
+        _dialogue_legacy_hit(conn, 'sela_continuations')
         rows = []
         for status in ('resolved',):
             for raw in _modern_inbox_rows(conn, status=status) if postgres_mode() else conn.execute(
@@ -6684,6 +7110,7 @@ def sela_integration_create_agent_need():
     integration = _SELA_PROSPECT_INTEGRATION + ':agent-request'
     conn = get_db()
     try:
+        _dialogue_legacy_hit(conn, 'sela_needs_create')
         conn.execute('BEGIN IMMEDIATE')
         receipt = _sela_receipt_read(conn, integration, idempotency_key)
         if receipt:
@@ -6802,6 +7229,7 @@ def sela_integration_resolve_agent_need(item_id):
     integration = _SELA_PROSPECT_INTEGRATION + ':agent-request-resolve'
     conn = get_db()
     try:
+        _dialogue_legacy_hit(conn, 'sela_resolve_need')
         conn.execute('BEGIN IMMEDIATE')
         receipt = _sela_receipt_read(conn, integration, idempotency_key)
         if receipt:
@@ -13410,6 +13838,7 @@ def respond_to_inbox_question(item_id):
         return jsonify({'error': '附件数量无效'}), 400
     conn = get_db()
     try:
+        _dialogue_legacy_hit(conn, 'respond_question')
         request_hash = hashlib.sha256(json.dumps({'revision': revision, 'answer': answer, 'attachment_ids': attachment_ids}, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
         receipt = _agent_gateway_receipt_read(conn, 'inbox_response', idempotency_key)
         if receipt:
@@ -13605,6 +14034,7 @@ def respond_to_inbox_question(item_id):
             }
         remaining_items = _load_open_inbox_items(conn)
         response['counts'] = _inbox_question_counts(_build_inbox_questions(remaining_items, {}, conn), remaining_items)
+        _dialogue_legacy_answer_dual(conn, row, item_id, answer)
         _agent_gateway_receipt_write(conn, 'inbox_response', idempotency_key, request_hash,
                                     json.dumps(response, ensure_ascii=False), None, now)
         conn.commit()
