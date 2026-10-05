@@ -1,3 +1,12 @@
+## 2026-10-05 — 日历 / 沟通记录 / 操作日志加载失败不再显示成空列表，并封死退役的新客户池页面
+
+- 现象：跟进日历加载失败时清空数据、照常画出一整月空日历，看起来像“这个月没有安排”；沟通记录和操作日志失败后一直停在“正在加载...”。登录过期（GET 401 返回 `null`）更糟：沟通记录会显示“暂无沟通记录”，把登录过期当成没有数据；日历则因 `null.concat` 抛异常。`api()` 只弹一次 toast，页面本身没有任何失败状态，toast 消失后用户看到的仍是空的。
+- 变更：`app/static/app.js` 新增共享失败态渲染 `loadFailureHtml(error, what, retryExpr)`（配 `loadFailureKind` / `loadAuthError` / `loadLoadingHtml`），按 auth / permission / network / service / parse 五类给出明确文案，统一带 `data-state="error"`、`data-state-kind`、`role="alert"` 和「重新加载」按钮，复用现有 `.empty-state.list-error-state` 样式，不新增 CSS；文案明确“已保存的记录都还在，这不是没有数据”。
+- 三处接线：日历首次无数据时显示 loading，成功后清除；失败态跨翻月与重画持久（记住最近一次失败），并清空上一次选中日期的旧详情；写入后的后台刷新失败时保留旧数据，只提示“刷新失败，显示的是上一次读取的结果”。操作日志失败后筛选按钮栏保留，重试带上当前筛选值；沟通记录与操作日志各加请求令牌，快速切换筛选或重复进入页面时旧请求不会覆盖新结果。
+- 退役入口守卫：`switchPage` 对目标页面不存在、或对应 `#page-<name>` 带 `hidden` 的请求一律回退到 `customers`，不再激活空壳，也不调用退役页面的 loader；`currentPage` 与导航高亮不会再指向已退役的新客户池页面。新客户池的其余死代码本次保留（Today 批量完成与测试仍在依赖）。
+- 影响范围：`app/static/app.js`、`tests/support/load_failure_state_check.cjs`、`tests/test_risk_regressions.py`、本文件。
+- 验证：新增 `tests/support/load_failure_state_check.cjs` 与 `tests.test_risk_regressions.LoadFailureStateRegressionTest`（401/403/500/断网/非法 JSON 五类、GET 401→auth、成功为空仍显示原空态、日历失败跨翻月持久、后台刷新失败保留旧数据、日志筛选与重试、请求竞态、`switchPage('newpool')` 回退 customers）；该 harness 在改动前的 `app.js` 上失败、改动后通过。`node --check app/static/app.js`、`py_compile`、`frontend_architecture_check.cjs`、全量 `unittest` 752 项通过。
+
 ## 2026-10-05 — 手机端（iPhone）布局修复：统一左右边距、去掉顶栏下方空白、时间轴与底部操作不再被裁
 
 - 现象（390 宽 iPhone）：顶栏下方有一大块空白；标题「今天」比正文多缩进约 16px，各区块左右边距不一致；时间轴左端「00:00」被裁掉一半；卡片底部「记录沟通」浮动操作在个别机型上被底栏/工具栏截断；顶栏与「批量记录」在 iOS 上可能被横向挤出屏幕。

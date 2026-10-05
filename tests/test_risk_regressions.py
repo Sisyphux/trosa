@@ -3956,6 +3956,27 @@ class InboxRenderRegressionTest(unittest.TestCase):
         self.assertIn('inbox render regression: OK', result.stdout)
 
 
+class LoadFailureStateRegressionTest(unittest.TestCase):
+    """加载失败态回归：日历/沟通记录/操作日志失败不再显示成空数据，退役新客户池不可达。"""
+
+    def test_load_failure_states_in_a_real_dom(self):
+        harness = ROOT / 'tests' / 'support' / 'load_failure_state_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('load failure state regression: OK', result.stdout)
+
+
 class ActionFeedbackRegressionTest(unittest.TestCase):
     """用户操作实时反馈：统一全局状态位 + 高频写操作乐观更新/失败回滚。"""
 

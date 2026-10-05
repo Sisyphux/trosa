@@ -1283,6 +1283,10 @@ function switchPage(page) {
   if (_cancelTodayTaskDrag) _cancelTodayTaskDrag();
   if (currentUser && page === 'overview' && userPreferences && userPreferences.modules && userPreferences.modules.weekly_overview === false) page = 'dashboard';
   var nextPage = page;
+  // 退役页面（新客户池）没有任何导航 / hash / 默认页入口可达：目标 section
+  // 不存在或带 hidden 属性时一律退回客户列表，绝不激活空壳，也不调用它的 loader。
+  var targetSection = document.getElementById('page-' + nextPage);
+  if (!targetSection || targetSection.hasAttribute('hidden')) nextPage = 'customers';
   var navigationToken = ++_pageNavigationToken;
   var updatePageState = function() {
     if (navigationToken !== _pageNavigationToken) return;
@@ -1830,6 +1834,50 @@ async function apiOnce(url, options) {
   }
 }
 
+// ===== 加载失败态（日历 / 沟通记录 / 操作日志共用）=====
+// 加载失败绝不能显示成“没有数据”：每一类失败都明确说明已保存的记录仍在，并给出
+// 重试。沿用现有 .empty-state.list-error-state 样式，不新增 CSS。
+var _LOAD_FAILURE_TEXT = {
+  auth: '登录已过期，请重新登录后继续。已保存的记录都还在，这不是「没有数据」。',
+  permission: '当前账号没有权限查看这部分内容。已保存的记录都还在，这不是「没有数据」。',
+  network: '网络连接中断。已保存的记录都还在，这不是「没有数据」，请检查网络后重试。',
+  service: '服务暂时不可用。已保存的记录都还在，这不是「没有数据」，请稍后重试。',
+  parse: '服务返回的数据无法解析。已保存的记录都还在，这不是「没有数据」，请重试。'
+};
+
+function loadFailureKind(error) {
+  if (!error) return 'service';
+  if (error.kind === 'auth') return 'auth';
+  if (Number(error.status || 0) === 401) return 'auth';
+  if (error.kind === 'network' || isApiNetworkError(error)) return 'network';
+  if (error.kind === 'parse') return 'parse';
+  if (Number(error.status || 0) === 403) return 'permission';
+  return 'service';
+}
+
+// GET 命中 401 时 apiOnce 返回 null（沿用读取约定）；调用方用这个错误把它变成
+// 明确的 auth 失败态，而不是把登录过期当成空列表。
+function loadAuthError() {
+  var error = new Error('登录已过期');
+  error.kind = 'auth';
+  error.status = 401;
+  return error;
+}
+
+function loadFailureHtml(error, what, retryExpr) {
+  var kind = loadFailureKind(error);
+  var title = (what || '内容') + '加载失败';
+  return '<div class="empty-state list-error-state" data-state="error" data-state-kind="' + kind + '" role="alert">' +
+    '<strong>' + escapeHtml(title) + '</strong>' +
+    '<p>' + escapeHtml(_LOAD_FAILURE_TEXT[kind] || _LOAD_FAILURE_TEXT.service) + '</p>' +
+    (retryExpr ? '<button class="btn btn-sm" type="button" onclick="' + retryExpr + '">重新加载</button>' : '') +
+    '</div>';
+}
+
+function loadLoadingHtml(text) {
+  return '<div class="empty-state" data-state="loading" role="status"><p>' + escapeHtml(text || '正在加载…') + '</p></div>';
+}
+
 // ========== Badge Helpers ==========
 function levelBadge(level) {
   var cls = { 'A': 'badge-level-a', 'B': 'badge-level-b', 'C': 'badge-level-c', 'C+': 'badge-level-cp', 'D': 'badge-level-d' };
@@ -1883,7 +1931,7 @@ function scheduleGlobalSync() {
     else if (currentPage === 'dashboard') loadDashboard();
     else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else if (currentPage === 'overview') loadOverview();
-    else if (currentPage === 'calendar') { loadCalendar(); }
+    else if (currentPage === 'calendar') { loadCalendar({ background: true }); }
   }, 180);
 }
 
@@ -11245,28 +11293,76 @@ async function submitBatchAdd() {
 }
 
 // ========== CALENDAR ==========
-async function loadCalendar() {
+var _calendarLoadFailed = false;
+var _calendarLastError = null;
+
+// 后台刷新失败时保留已显示的日历，只在网格上方留一条“上一次读取的结果”提示。
+function calendarRefreshNotice(message) {
+  var grid = document.getElementById('calendarGrid');
+  if (!grid || !grid.parentNode) return;
+  var el = document.getElementById('calendarRefreshNotice');
+  if (!message) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'calendarRefreshNotice';
+    el.className = 'empty-state';
+    el.setAttribute('data-state', 'stale');
+    el.setAttribute('role', 'status');
+    grid.parentNode.insertBefore(el, grid);
+  }
+  el.textContent = message;
+}
+
+async function loadCalendar(options) {
   _pageDataLoadedAt = Date.now();
+  options = options || {};
+  var background = !!options.background;
+  var grid = document.getElementById('calendarGrid');
+  var hasData = Object.keys(calendarData).length > 0;
+  if (grid && !hasData && !background) grid.innerHTML = loadLoadingHtml('正在加载跟进日历…');
   try {
     var results = await Promise.all([api('/api/reminders/today'), api('/api/reminders/upcoming')]);
-    var reminders = results[0];
-    var upcoming = results[1];
+    // GET 命中 401 时 apiOnce 返回 null；那是登录过期，不是“这个月没有安排”。
+    if (results[0] === null || results[1] === null) throw loadAuthError();
+    var reminders = results[0] || [];
+    var upcoming = results[1] || [];
     calendarData = {};
-    var all = reminders.concat(upcoming);
-    all.forEach(function(r) {
+    reminders.concat(upcoming).forEach(function(r) {
       var d = r.remind_date ? r.remind_date.substring(0, 10) : '';
       if (!d) return;
       if (!calendarData[d]) calendarData[d] = [];
       calendarData[d].push(r);
     });
+    _calendarLoadFailed = false;
+    _calendarLastError = null;
+    calendarRefreshNotice('');
     renderCalendar();
-  } catch(e) { calendarData = {}; renderCalendar(); }
+  } catch(e) {
+    var detail = document.getElementById('calendarDetail');
+    if (detail) detail.innerHTML = '';
+    if (background && hasData) {
+      // 后台刷新失败不能把已显示的日历替换成错误页：保留旧数据，只提示刷新失败。
+      calendarRefreshNotice('刷新失败，显示的是上一次读取的结果。');
+      return;
+    }
+    _calendarLoadFailed = true;
+    _calendarLastError = e;
+    renderCalendar();
+  }
 }
 
 function renderCalendar() {
   var grid = document.getElementById('calendarGrid');
   var title = document.getElementById('calendarTitle');
   title.textContent = calendarYear + '年' + (calendarMonth + 1) + '月';
+  if (_calendarLoadFailed) {
+    // 记住最近一次加载失败：翻月 / 局部刷新重画时不能被空月历覆盖。
+    grid.setAttribute('data-state', 'error');
+    grid.innerHTML = loadFailureHtml(_calendarLastError, '跟进日历', 'loadCalendar()');
+    document.getElementById('calendarDetail').innerHTML = '';
+    return;
+  }
+  grid.removeAttribute('data-state');
   var dayNames = ['日','一','二','三','四','五','六'];
   var html = '';
   dayNames.forEach(function(d) { html += '<div class="calendar-day-header">' + d + '</div>'; });
@@ -11353,11 +11449,18 @@ function showCustomModal(title, bodyHtml) {
 }
 
 // ========== FOLLOW-UP HISTORY ==========
+var _historyLoadToken = 0;
 async function loadHistory() {
   _pageDataLoadedAt = Date.now();
+  var token = ++_historyLoadToken;
+  var el = document.getElementById('historyTimeline');
+  if (el) el.innerHTML = loadLoadingHtml('正在加载沟通记录…');
   try {
     var history = await api('/api/follow-history');
-    var el = document.getElementById('historyTimeline');
+    // 快速切换 / 重复进入页面时，先发后到的响应不能覆盖新结果。
+    if (token !== _historyLoadToken) return;
+    // GET 命中 401 时 apiOnce 返回 null：那是登录过期，不是“暂无沟通记录”。
+    if (history === null) throw loadAuthError();
     if (!history || history.length === 0) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + uiIcon('list') + '</div><p>暂无沟通记录</p></div>'; return; }
     _followTimelineCache = {};
     var html = '<div class="timeline">';
@@ -11373,7 +11476,10 @@ async function loadHistory() {
     });
     html += '</div>';
     el.innerHTML = html;
-  } catch(e) {}
+  } catch(e) {
+    if (token !== _historyLoadToken) return;
+    if (el) el.innerHTML = loadFailureHtml(e, '沟通记录', 'loadHistory()');
+  }
 }
 
 // Follow-up history: edit & delete (stored in memory for modal use)
@@ -11656,24 +11762,32 @@ function showFollowUndoToast(logId, removed) {
 }
 
 // ========== ACTIVITY LOGS ==========
+var _logsLoadToken = 0;
 async function loadLogs(action) {
+  _pageDataLoadedAt = Date.now();
+  var token = ++_logsLoadToken;
+  var currentAction = action || 'all';
+  var el = document.getElementById('logsList');
+
+  // 筛选按钮栏始终保留：失败后用户仍能切换筛选或重试。
+  var actions_list = ['all', 'CREATE', 'UPDATE', 'DELETE', 'COMPLETE', 'SYNC'];
+  var labels = ['全部', '创建', '更新', '删除', '完成', '同步'];
+  var filterHtml = '<div style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap;">';
+  actions_list.forEach(function(a, i) {
+    var isActive = a === currentAction;
+    filterHtml += '<button class="btn btn-sm' + (isActive ? ' btn-primary' : '') + '" onclick="loadLogs(\'' + a + '\')" style="font-size:0.72rem;">' + labels[i] + '</button>';
+  });
+  filterHtml += '</div>';
+  if (el) el.innerHTML = filterHtml + loadLoadingHtml('正在加载操作日志…');
   try {
     var url = '/api/logs?limit=100';
-    if (action && action !== 'all') url += '&action=' + encodeURIComponent(action);
+    if (currentAction !== 'all') url += '&action=' + encodeURIComponent(currentAction);
     var logs = await api(url);
-    var el = document.getElementById('logsList');
-    
-    // Always show filter buttons first
-    var actions_list = ['all', 'CREATE', 'UPDATE', 'DELETE', 'COMPLETE', 'SYNC'];
-    var labels = ['全部', '创建', '更新', '删除', '完成', '同步'];
-    var html = '<div style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap;">';
-    actions_list.forEach(function(a, i) {
-      var isActive = a === (action || 'all');
-      html += '<button class="btn btn-sm' + (isActive ? ' btn-primary' : '') + '" onclick="loadLogs(\'' + a + '\')" style="font-size:0.72rem;">' + labels[i] + '</button>';
-    });
-    html += '</div>';
-    
-    // Then show log entries (or empty state)
+    // 快速切换筛选时，先发后到的响应不能覆盖新结果。
+    if (token !== _logsLoadToken) return;
+    // GET 命中 401 时 apiOnce 返回 null：那是登录过期，不是“暂无操作日志”。
+    if (logs === null) throw loadAuthError();
+    var html = filterHtml;
     if (!logs || logs.length === 0) {
       html += '<div class="empty-state"><div class="empty-icon">' + uiIcon('settings') + '</div><p>暂无操作日志</p></div>';
       el.innerHTML = html;
@@ -11688,7 +11802,12 @@ async function loadLogs(action) {
       html += '<div class="log-item"><span class="log-time">' + (l.created_at || '') + '</span><span class="badge' + (badgeClass ? ' ' + badgeClass : '') + '" style="font-size:0.68rem;">' + (l.action || '') + '</span><span class="log-detail">' + escapeHtml(l.details || '') + '</span></div>';
     });
     el.innerHTML = html;
-  } catch(e) {}
+  } catch(e) {
+    if (token !== _logsLoadToken) return;
+    // 重试要带当前筛选值；action 只来自固定白名单，仍做一次净化避免引号注入。
+    var safeAction = String(currentAction).replace(/[^A-Za-z_]/g, '') || 'all';
+    if (el) el.innerHTML = filterHtml + loadFailureHtml(e, '操作日志', "loadLogs('" + safeAction + "')");
+  }
 }
 
 // ========== SETTINGS ==========
