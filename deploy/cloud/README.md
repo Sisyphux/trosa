@@ -90,6 +90,7 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 - `GET /api/integrations/sela/exclusions`：带 ETag 的排除索引，不传输整张客户表；
 - `GET/POST /api/integrations/sela/prospects`：读取或幂等写入已确认的候选及其来源证据；读取由业务事实派生的 `lifecycle_stage` 与 `customer_linked`，不把 `trosa_id`/`customer_type` 当身份；
 - `POST /api/integrations/sela/reply`：记录 sela 检测到的客户回信/退信事实；
+- `POST /api/integrations/sela/prospects/<source_id>/contact-block`：sela 把仍处于 `cold_prospect` 的 Prospect 设为停止联系（竞品 / 非目标买家）。只能加锁、不能解锁：body 为 `{"reason": "<必填，至少 2 字，写明原因与来源>", "idempotency_key": "..."}`（`X-Idempotency-Key` 同值）；已有回复、已转人工或成交的 Prospect 返回 409，已停止联系的幂等返回当前视图；解禁仍只能由人在 Trosa 操作；
 
 当前 `sela-v2` 写入接口会在一个 PostgreSQL 事务内完成精确身份匹配、联系人、来源备注和真实外联时间线，并保存 `X-Idempotency-Key` 回执。sela 在网络超时后可以安全重放同一事件，不会重复创建客户或开发信；官网身份按完整规范化域名比较，不使用子串匹配。多重命中、外部身份冲突和邮箱属于另一客户时会返回 `REVIEW`，由人工处理。
 

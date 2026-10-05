@@ -1,3 +1,13 @@
+## 2026-10-05 — sela 可直接把冷 Prospect 设为停止联系，不再把「这是竞品 / 非目标买家」变成人工 Inbox 问题
+
+- 现象：sela 判断某公司是竞品或不是买家时，只能在 Inbox 抛一个「是否加入排除」的 DECISION；服务端没有任何入口让 sela 自己落这个结论（`exclusion-decision` 只处理身份复核的 accept/reject，`contact-permission` 是人工专用），所以 4 条这类 Inbox 请求（`trosa-agent-265`–`268`）永远无法被答成排除。
+- 变更：新增服务可用的 `POST /api/integrations/sela/prospects/<source_id>/contact-block`（加入 sela 服务身份白名单）。body `{"reason": "<必填，≥2 字，说明为何不是目标买家并带来源>", "idempotency_key": "..."}`，返回 `{success, status:'SYNCED', prospect, already_blocked, resolved_inbox_ids}`。只能加锁，不能解锁：解禁路由 `/api/customers/<id>/agent-prospect/contact-permission` 仍对服务令牌返回 401/403。
+- 规则：Prospect 必须存在（否则 404）；仍是冷 Prospect 才执行，`engaged_lead` / `qualified_opportunity` / `customer`、已有回复或已转人工、或已被拒绝的一律 409，交还 Trosa 的销售流程；已是 do-not-contact 时幂等成功并返回当前视图。复用 `_sela_mark_prospect_excluded`：写入 `contact_permission=do_not_contact`、停止原因/时间和硬匹配业务排除记录。
+- 审计：`agent_state.contact_permission_changes` 追加 `actor='sela'` 与原因；`exclusion_resolution='AGENT_BLOCKED_NON_FIT'`（区别于人工的 `HUMAN_CONFIRMED_EXCLUDE`），操作日志记 BLOCK。该 Prospect 的未处理排除问题（`sela:decision:exclusion:<source_id>`、`sela:exclusion-review:<source_id>`，以及同一 source_id 且 `resume_action=resolve_exclusion` 的 sela 请求）以 `resolution_source=agent`、`resolved_by=sela` 关闭并写明是 sela 的判断，不写客户时间线；其它 Prospect 的问题不受影响。
+- 幂等：沿用 sela 回执机制（`sela-v2:contact-block`），重放返回首次结果；同一幂等键换了原因返回 409。
+- 影响范围：`app.py`（白名单、路由、`_sela_mark_prospect_excluded` 增加 `resolution`/`actor` 参数，人工路径默认值不变）、`tests/test_sela_contact_block.py`、`deploy/cloud/README.md`、本文件。不需要数据迁移。
+- 验证：新增 `tests/test_sela_contact_block.py`（服务令牌放行、人工解禁路由对服务令牌仍不可达、冷 Prospect 加锁并关闭 Inbox 决定、engaged/成交 409、原因必填、未知 Prospect 404、重放幂等、他人排除问题不受影响、已停止联系幂等）；全量 `unittest` 763 项通过。
+
 ## 2026-10-05 — Today 与 sela 共用真实入站互动事实
 
 - 人工记录的客户入站沟通现在同时影响 Today 归属和 sela prospect 生命周期投影；已有真实回复的线索不再以 `cold_prospect` 进入自动开发判断。

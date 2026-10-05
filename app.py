@@ -368,6 +368,10 @@ def _sela_integration_path_allowed():
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
+            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/contact-block',
+            request.path,
+        ))
+        or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/needs/\d+/resolve',
             request.path,
         ))
@@ -6234,6 +6238,145 @@ def customer_agent_prospect_contact_permission(customer_id):
         conn.close()
     schedule_safety_backup('contact_permission_change')
     return jsonify({'success': True, 'status': 'SYNCED', 'prospect': prospect})
+
+
+_SELA_CONTACT_BLOCK_ACTOR = 'sela'
+_SELA_CONTACT_BLOCK_RESOLUTION = 'AGENT_BLOCKED_NON_FIT'
+
+
+def _sela_resolve_exclusion_inbox_items(conn, source_id, note, now):
+    """Close the open exclusion questions for one prospect after Sela blocked it.
+
+    Only items of this ``source_id`` are touched: the two exclusion dedupe keys
+    plus any open Sela agent request that asks to resolve this prospect's
+    exclusion.  The close is stamped as an agent decision, not a human answer,
+    and writes no customer timeline record.
+    """
+    item_ids = []
+    for key in (f'sela:decision:exclusion:{source_id}', f'sela:exclusion-review:{source_id}'):
+        if postgres_mode():
+            rows = _modern_inbox_rows(conn, status='open', dedupe_key=key)
+        else:
+            rows = conn.execute(
+                "SELECT id FROM inbox_items WHERE dedupe_key=? AND status='open'", (key,),
+            ).fetchall()
+        item_ids.extend(int(row['id']) for row in rows)
+    for raw_row in _sela_agent_request_rows(conn, 'open'):
+        row = dict(raw_row)
+        request = _sela_agent_request_structured(row)
+        if (str(request.get('source_id') or '') == source_id
+                and _sela_prospect_text(request.get('resume_action'), 40).lower()
+                == _continuation.ACTION_RESOLVE_EXCLUSION):
+            item_ids.append(int(row['id']))
+    resolved = []
+    for item_id in dict.fromkeys(item_ids):
+        _resolve_inbox_item(
+            conn, inbox_item_id=item_id, resolved_at=now, resolution_reason='agent_excluded',
+            resolution_note=note, resolution_source='agent', resolved_by=_SELA_CONTACT_BLOCK_ACTOR,
+        )
+        resolved.append(item_id)
+    return resolved
+
+
+@app.route('/api/integrations/sela/prospects/<source_id>/contact-block', methods=['POST'])
+@login_required
+def sela_integration_prospect_contact_block(source_id):
+    """Let Sela stop contact with a COLD prospect that is not a target buyer.
+
+    Block direction only: this route can set ``do_not_contact`` but can never
+    clear it (unblocking stays human-only on the customer contact-permission
+    route).  Anything past a cold prospect belongs to Trosa's sales process.
+    """
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id or ''):
+        return jsonify({'success': False, 'error': 'Prospect source_id 无效'}), 400
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'success': False, 'error': '停止联系请求必须是 JSON 对象'}), 400
+    if set(payload) - {'reason', 'idempotency_key'}:
+        return jsonify({'success': False, 'error': '停止联系请求超出允许字段（只接受 reason、idempotency_key）'}), 400
+    reason = _sela_prospect_text(payload.get('reason'), 2000)
+    if len(reason.strip()) < 2:
+        return jsonify({'success': False, 'error': '请填写停止联系的原因（至少 2 个字），说明为什么不是目标买家及来源'}), 400
+    idempotency_key = str(request.headers.get('X-Idempotency-Key') or payload.get('idempotency_key') or '').strip()
+    body_key = str(payload.get('idempotency_key') or '').strip()
+    if body_key and idempotency_key != body_key:
+        return jsonify({'success': False, 'error': '幂等键不一致'}), 400
+    if not idempotency_key or len(idempotency_key) > 200:
+        return jsonify({'success': False, 'error': '幂等键不能为空'}), 400
+    request_hash = _sela_hash({'source_id': source_id, 'reason': reason})
+    integration = _SELA_PROSPECT_INTEGRATION + ':contact-block'
+    conn = get_db()
+    changed = False
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        receipt = _sela_receipt_read(conn, integration, idempotency_key)
+        if receipt:
+            if receipt['request_sha256'] != request_hash:
+                conn.rollback()
+                return jsonify({'success': False, 'error': '幂等键已对应另一份请求'}), 409
+            response_body = json.loads(receipt['response_json'])
+            conn.commit()
+            return jsonify(response_body)
+        profile = _sela_profile_by_source(conn, source_id)
+        if not profile:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'Prospect 不存在'}), 404
+        profile = dict(profile)
+        now = _sela_now()
+        note = f'Sela 判定非目标买家并停止联系：{reason.strip()}'
+        if str(profile.get('contact_permission') or '') != 'do_not_contact':
+            view = _sela_prospect_view(conn, profile)
+            if not view:
+                conn.rollback()
+                return jsonify({'success': False, 'error': 'Prospect 不存在'}), 404
+            if (view.get('lifecycle_stage') != 'cold_prospect'
+                    or view.get('customer_linked') or view.get('lifecycle_rejected')):
+                conn.rollback()
+                stage = str(view.get('lifecycle_stage') or '未知阶段')
+                return jsonify({
+                    'success': False,
+                    'error': f'该 Prospect 已进入 Trosa 的 {stage} 阶段（有回复或已转人工），'
+                             'Sela 不能直接停止联系，请由人工在 Trosa 处理',
+                }), 409
+            _sela_mark_prospect_excluded(
+                conn, profile, note, now, resolution=_SELA_CONTACT_BLOCK_RESOLUTION,
+                actor=_SELA_CONTACT_BLOCK_ACTOR,
+            )
+            _record_operation_log(
+                conn, 'BLOCK', 'sela_prospect', int(profile['customer_id']),
+                f'Sela 服务身份将冷 Prospect {source_id} 设为停止联系：{reason.strip()[:500]}', now,
+            )
+            changed = True
+        # Already blocked (by a human or an earlier call) still answers the open
+        # exclusion questions: the fact they ask about is already settled.
+        resolved_inbox = _sela_resolve_exclusion_inbox_items(conn, source_id, note, now)
+        prospect = _sela_prospect_view(conn, _sela_profile_by_source(conn, source_id))
+        response_body = {
+            'success': True, 'status': 'SYNCED', 'prospect_api': 'sela-v2',
+            'already_blocked': not changed, 'resolved_inbox_ids': resolved_inbox,
+            'prospect': prospect,
+        }
+        _sela_receipt_write(
+            conn, integration, idempotency_key, request_hash,
+            candidate_id=source_id, customer_id=int(profile['customer_id']),
+            response=response_body, now=now,
+        )
+        conn.commit()
+    except CrmWriteError as error:
+        conn.rollback()
+        return jsonify({'success': False, 'error': error.message}), error.status
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception('sela prospect contact block failed for %s', source_id)
+        return jsonify({'success': False, 'error': '停止联系写入失败，请稍后重试'}), 500
+    finally:
+        conn.close()
+    if changed:
+        schedule_safety_backup('sela_prospect_contact_block')
+    return jsonify(response_body)
 
 
 @app.route('/api/integrations/sela/exclusions', methods=['GET'])
@@ -12865,16 +13008,34 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
             'undo': ('CREATE_CONTACT', contact_id, None, after)}
 
 
-def _sela_mark_prospect_excluded(conn, profile, reason, now):
-    """Set the real do-not-contact business state for a human-confirmed exclusion."""
+def _sela_mark_prospect_excluded(conn, profile, reason, now, *, resolution='HUMAN_CONFIRMED_EXCLUDE',
+                                 actor=None, default_reason='人工确认加入排除 / DNC'):
+    """Set the real do-not-contact business state for a confirmed exclusion.
+
+    ``resolution`` records who decided (a human answer by default, or Sela's own
+    non-fit block).  When ``actor`` is given the change is also appended to the
+    prospect's ``contact_permission_changes`` audit trail.
+    """
     profile = dict(profile)
     research = _sela_json_value(profile.get('research_json'), {})
     state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
     state.pop('exclusion_review', None)
-    state['exclusion_resolution'] = 'HUMAN_CONFIRMED_EXCLUDE'
+    state['exclusion_resolution'] = resolution
     state['exclusion_resolved_at'] = now
     if reason:
         state['exclusion_resolution_note'] = _sela_prospect_text(reason, 4000)
+    if actor:
+        changes = state.get('contact_permission_changes')
+        if not isinstance(changes, list):
+            changes = []
+        changes.append({
+            'at': now,
+            'actor': str(actor),
+            'from': str(profile.get('contact_permission') or 'allowed'),
+            'to': 'do_not_contact',
+            'note': _sela_prospect_text(reason, 2000),
+        })
+        state['contact_permission_changes'] = changes[-20:]
     research['agent_state'] = state
     relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
     scope = ('organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user() AND '
@@ -12884,7 +13045,7 @@ def _sela_mark_prospect_excluded(conn, profile, reason, now):
               SET research_json=?, contact_permission='do_not_contact',
                   suppression_reason=?, suppression_at=?, updated_at=?
             WHERE {scope}id=?''',
-        (json.dumps(research, ensure_ascii=False), _sela_prospect_text(reason, 2000) or '人工确认加入排除 / DNC',
+        (json.dumps(research, ensure_ascii=False), _sela_prospect_text(reason, 2000) or default_reason,
          now, now, profile['id']),
     )
     customer = _sela_profile_customer(conn, int(profile['customer_id']))
@@ -12896,7 +13057,7 @@ def _sela_mark_prospect_excluded(conn, profile, reason, now):
             'canonical_name': customer.get('company') or customer.get('name') or str(profile['source_id']),
             'status': 'confirmed_exclude',
             'match_policy': 'hard',
-            'reason': _sela_prospect_text(reason, 2000) or '人工确认加入排除 / DNC',
+            'reason': _sela_prospect_text(reason, 2000) or default_reason,
         }, now)
     except Exception:
         logger.warning('Sela exclusion record write failed for %s', profile.get('source_id'), exc_info=True)
