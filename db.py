@@ -1654,6 +1654,109 @@ USER_TABLE_SQL = [
         FOREIGN KEY (file_id) REFERENCES customer_files(id) ON DELETE CASCADE
     )
     ''',
+    # Inbox dialogue (see sela docs/proposals/inbox-dialogue-contract.md and
+    # migrations/0114_inbox_dialogue.sql).  PostgreSQL is the production store;
+    # these SQLite mirrors keep the default test suite able to exercise the
+    # whole contract without a live database.  ``id`` values are UUID strings
+    # and jsonb columns are JSON text.
+    '''
+    CREATE TABLE IF NOT EXISTS inbox_threads (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT '',
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        subject TEXT,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+        awaiting TEXT NOT NULL DEFAULT 'human' CHECK(awaiting IN ('human', 'sela', 'none')),
+        revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+        opened_at TEXT,
+        updated_at TEXT,
+        closed_at TEXT,
+        closed_by TEXT CHECK(closed_by IN ('human', 'sela', 'system')),
+        closed_summary TEXT
+    )
+    ''',
+    '''
+    CREATE UNIQUE INDEX IF NOT EXISTS inbox_threads_open_subject_idx
+        ON inbox_threads (organization_id, legacy_user_id, subject)
+        WHERE status = 'open' AND subject IS NOT NULL
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS inbox_threads_awaiting_idx
+        ON inbox_threads (organization_id, legacy_user_id, awaiting, updated_at DESC)
+        WHERE status = 'open'
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS inbox_messages (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        seq INTEGER NOT NULL CHECK(seq >= 1),
+        role TEXT NOT NULL CHECK(role IN ('sela', 'human', 'system')),
+        actor TEXT,
+        text TEXT NOT NULL,
+        suggested_replies TEXT NOT NULL DEFAULT '[]',
+        refs TEXT NOT NULL DEFAULT '[]',
+        hints TEXT,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        awaiting_after TEXT CHECK(awaiting_after IN ('human', 'sela', 'none')),
+        idempotency_key TEXT,
+        created_at TEXT,
+        UNIQUE(thread_id, seq),
+        FOREIGN KEY (thread_id) REFERENCES inbox_threads(id) ON DELETE CASCADE
+    )
+    ''',
+    '''
+    CREATE UNIQUE INDEX IF NOT EXISTS inbox_messages_idem_idx
+        ON inbox_messages (thread_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS inbox_action_receipts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT '',
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        thread_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        response TEXT NOT NULL DEFAULT '{}',
+        message_id TEXT,
+        consumed_message_id TEXT,
+        created_at TEXT,
+        UNIQUE(organization_id, legacy_user_id, operation, idempotency_key),
+        FOREIGN KEY (thread_id) REFERENCES inbox_threads(id) ON DELETE CASCADE
+    )
+    ''',
+    '''
+    CREATE UNIQUE INDEX IF NOT EXISTS inbox_receipts_consumed_idx
+        ON inbox_action_receipts (organization_id, legacy_user_id, consumed_message_id)
+        WHERE consumed_message_id IS NOT NULL
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS inbox_legacy_route_hits (
+        organization_id TEXT NOT NULL DEFAULT '',
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        route TEXT NOT NULL,
+        day TEXT NOT NULL,
+        hits INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (organization_id, legacy_user_id, route, day)
+    )
+    ''',
+    '''
+    CREATE TABLE IF NOT EXISTS legacy_row_refs (
+        organization_id TEXT NOT NULL DEFAULT '',
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        table_name TEXT NOT NULL,
+        legacy_id INTEGER NOT NULL,
+        target_id TEXT NOT NULL,
+        created_at TEXT,
+        PRIMARY KEY (organization_id, legacy_user_id, table_name, legacy_id)
+    )
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS legacy_row_refs_target_idx
+        ON legacy_row_refs (target_id, table_name)
+    ''',
 ]
 
 # 用户数据库迁移：为旧库加新列
