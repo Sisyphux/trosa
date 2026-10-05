@@ -1,0 +1,14 @@
+{
+  "schema": "sela-capability",
+  "value": {
+    "capability": "thread_post",
+    "arguments": {
+      "subject": "prospect:northwind-demo",
+      "text": "Northwind Trading 已经在排除名单里吗？如果是，我就把这家竞品从本轮开发名单里去掉。",
+      "suggested_replies": ["是，排除这家竞品", "不是，保留它"],
+      "refs": [{ "type": "prospect", "id": "northwind-demo" }],
+      "awaiting": "human",
+      "idempotency_key": "sela:thread:northwind-1"
+    }
+  }
+}

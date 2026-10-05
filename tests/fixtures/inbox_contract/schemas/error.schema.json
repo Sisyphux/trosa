@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/error.schema.json",
+  "title": "Error envelope",
+  "description": "Every non 2xx response from a thread endpoint uses this envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,63}$",
+          "description": "Stable machine readable code, see the contract error table."
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "details": {
+          "type": ["object", "null"],
+          "description": "Optional structured context such as the current revision on a conflict."
+        }
+      }
+    }
+  }
+}

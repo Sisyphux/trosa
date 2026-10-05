@@ -1,0 +1,28 @@
+{
+  "schema": "replay-sample",
+  "value": {
+    "id": "replay-exclude-competitor-01",
+    "note": "清晰同意排除一家竞品，期望直接执行而不是再问一轮。",
+    "subject": "prospect:northwind-demo",
+    "turns": [
+      {
+        "role": "sela",
+        "text": "Northwind Trading 已经在排除名单里吗？如果是，我就把这家竞品从本轮开发名单里去掉。",
+        "suggested_replies": ["是，排除这家竞品", "不是，保留它"],
+        "refs": [{ "type": "prospect", "id": "northwind-demo" }]
+      }
+    ],
+    "human_reply": "是，排除这家竞品",
+    "expected": {
+      "awaiting_after": "sela",
+      "actions": [
+        {
+          "capability": "resolve_exclusion",
+          "params": { "source_id": "northwind-demo", "decision": "exclude" },
+          "guardrail": null
+        }
+      ],
+      "must_not": ["send_email", "ask_again_same_question"]
+    }
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema": "threads-list-response",
+  "value": {
+    "success": true,
+    "next_cursor": null,
+    "counts": {
+      "awaiting_human": 1,
+      "awaiting_sela": 0,
+      "open": 1
+    },
+    "threads": [
+      {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "subject": "prospect:contoso-demo",
+        "title": "Contoso 的采购历史缺失，需要你确认",
+        "status": "open",
+        "awaiting": "human",
+        "revision": 1,
+        "opened_at": "2026-10-05T10:00:00Z",
+        "updated_at": "2026-10-05T10:00:00Z",
+        "closed_at": null,
+        "closed_by": null,
+        "closed_summary": null,
+        "last_message_preview": {
+          "role": "sela",
+          "text": "Contoso 的进口/采购历史我在公开资料里找不到。你能提供最近的采购记录吗？",
+          "created_at": "2026-10-05T10:00:00Z"
+        }
+      },
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "subject": "prospect:northwind-demo",
+        "title": "排除 Northwind Trading？",
+        "status": "closed",
+        "awaiting": "none",
+        "revision": 3,
+        "opened_at": "2026-10-05T09:00:00Z",
+        "updated_at": "2026-10-05T09:05:00Z",
+        "closed_at": "2026-10-05T09:05:00Z",
+        "closed_by": "sela",
+        "closed_summary": "按你的回复把 Northwind Trading 从本轮名单排除，已完成，无需再确认。",
+        "last_message_preview": {
+          "role": "sela",
+          "text": "已按你的回复把 Northwind Trading 从本轮开发名单排除，名单已更新。",
+          "created_at": "2026-10-05T09:04:00Z"
+        }
+      }
+    ]
+  }
+}

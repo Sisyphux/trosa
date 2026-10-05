@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-user-close-request.schema.json",
+  "title": "POST /api/inbox/threads/{id}/close request",
+  "description": "The human says the topic is no longer needed. The thread is closed with closed_by human.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seen_revision"],
+  "properties": {
+    "seen_revision": { "type": "integer", "minimum": 0 },
+    "note": { "type": ["string", "null"], "maxLength": 2000 },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

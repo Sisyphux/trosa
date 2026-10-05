@@ -1,0 +1,12 @@
+{
+  "schema": "threads-append-request",
+  "value": {
+    "text": "已按你的回复把 Northwind Trading 从本轮开发名单排除，名单已更新。",
+    "suggested_replies": [],
+    "refs": [{ "type": "action_receipt", "id": "receipt-northwind-exclude-1" }],
+    "attachments": [],
+    "awaiting": "human",
+    "seen_revision": 2,
+    "idempotency_key": "sela:thread:northwind-result-1"
+  }
+}

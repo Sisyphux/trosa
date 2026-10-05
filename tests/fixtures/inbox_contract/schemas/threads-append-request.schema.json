@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-append-request.schema.json",
+  "title": "POST /api/integrations/sela/threads/{id}/messages request",
+  "description": "sela appends a message to an existing thread and may set the next awaiting value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text"],
+  "properties": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "suggested_replies": {
+      "type": "array",
+      "maxItems": 3,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+    },
+    "refs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "message.schema.json#/$defs/ref" }
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "$ref": "message.schema.json#/$defs/attachment" }
+    },
+    "awaiting": {
+      "enum": ["human", "sela"],
+      "description": "Defaults to human: sela normally posts and then waits for the human. Using sela makes the thread immediately available again to the inbox runner."
+    },
+    "seen_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional optimistic concurrency token. When present and not equal to the current revision the write is rejected with 409."
+    },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

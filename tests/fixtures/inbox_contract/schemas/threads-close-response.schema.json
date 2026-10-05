@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-close-response.schema.json",
+  "title": "POST /api/integrations/sela/threads/{id}/close response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["success", "thread"],
+  "properties": {
+    "success": { "const": true },
+    "thread": { "$ref": "thread.schema.json" }
+  }
+}

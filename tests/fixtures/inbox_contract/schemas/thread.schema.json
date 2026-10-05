@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/thread.schema.json",
+  "title": "Inbox thread",
+  "description": "A subject scoped conversation between the human and sela. awaiting is derived from the last message plus an explicit close, never pre-classified.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "status",
+    "awaiting",
+    "revision",
+    "opened_at",
+    "messages"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200,
+      "description": "Namespaced object key such as prospect:<source_id> or customer:<id>. Null means a standalone thread."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "status": {
+      "enum": [
+        "open",
+        "closed"
+      ]
+    },
+    "awaiting": {
+      "enum": [
+        "human",
+        "sela",
+        "none"
+      ],
+      "description": "Equal to the awaiting_after of the highest seq message, overridden to none by an explicit close."
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Highest message seq currently stored. Clients pass it back as the optimistic concurrency token."
+    },
+    "opened_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "closed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "closed_by": {
+      "enum": [
+        "human",
+        "sela",
+        "system",
+        null
+      ]
+    },
+    "closed_summary": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "$ref": "message.schema.json"
+      }
+    },
+    "legacy_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "Read-only compatibility id of the legacy inbox item (the integer exposed by legacy_row_refs); null for threads created natively. Removed when legacy routes are retired."
+    }
+  }
+}

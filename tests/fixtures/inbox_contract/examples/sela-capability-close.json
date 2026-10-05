@@ -1,0 +1,11 @@
+{
+  "schema": "sela-capability",
+  "value": {
+    "capability": "thread_close",
+    "arguments": {
+      "thread_id": "11111111-1111-4111-8111-111111111111",
+      "summary": "已按你的回复把 Northwind Trading 从本轮名单排除，无需再确认。",
+      "idempotency_key": "sela:thread:northwind-close-1"
+    }
+  }
+}

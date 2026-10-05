@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-create-response.schema.json",
+  "title": "POST /api/integrations/sela/threads response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["success", "created", "thread"],
+  "properties": {
+    "success": { "const": true },
+    "created": {
+      "type": "boolean",
+      "description": "true when a new thread was created, false when the existing open thread for the subject was returned."
+    },
+    "thread": { "$ref": "thread.schema.json" }
+  }
+}

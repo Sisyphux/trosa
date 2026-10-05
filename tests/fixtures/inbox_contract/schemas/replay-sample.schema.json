@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/replay-sample.schema.json",
+  "title": "Replay sample",
+  "description": "One row of the evaluation replay set: a dialogue, the human reply, and the action the agent is expected to take. Used in S5, kept read only for the evaluating agent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "turns", "human_reply", "expected"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "note": { "type": "string", "maxLength": 500 },
+    "subject": { "type": ["string", "null"], "maxLength": 200 },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/turn" }
+    },
+    "human_reply": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["awaiting_after", "actions"],
+      "properties": {
+        "awaiting_after": { "enum": ["human", "sela", "none"] },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/expected_action" }
+        },
+        "must_not": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 200 },
+          "description": "Actions or behaviours that would count as a wrong execution for this sample."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text"],
+      "properties": {
+        "role": { "enum": ["sela", "human", "system"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "suggested_replies": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+        },
+        "refs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "message.schema.json#/$defs/ref" }
+        }
+      }
+    },
+    "expected_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability"],
+      "properties": {
+        "capability": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "params": { "type": "object" },
+        "guardrail": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "Name of the guardrail the action must satisfy, for example confirmed_by_message_id."
+        }
+      }
+    }
+  }
+}

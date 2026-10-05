@@ -1,0 +1,8 @@
+{
+  "schema": "threads-close-request",
+  "value": {
+    "summary": "按你的回复把 Northwind Trading 从本轮名单排除，已完成，无需再确认。",
+    "seen_revision": 3,
+    "idempotency_key": "sela:thread:northwind-close-1"
+  }
+}

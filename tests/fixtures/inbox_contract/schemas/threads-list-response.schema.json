@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-list-response.schema.json",
+  "title": "GET /api/integrations/sela/threads response",
+  "description": "Paginated thread summaries, optionally filtered by awaiting or status.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["success", "threads", "next_cursor"],
+  "properties": {
+    "success": { "const": true },
+    "threads": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/summary" }
+    },
+    "next_cursor": {
+      "type": ["string", "null"],
+      "description": "Pass back as ?cursor= to fetch the next page. Null means no more results."
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "awaiting_human": { "type": "integer", "minimum": 0 },
+        "awaiting_sela": { "type": "integer", "minimum": 0 },
+        "open": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "status", "awaiting", "revision", "opened_at"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "subject": { "type": ["string", "null"], "maxLength": 200 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "status": { "enum": ["open", "closed"] },
+        "awaiting": { "enum": ["human", "sela", "none"] },
+        "revision": { "type": "integer", "minimum": 0 },
+        "opened_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "closed_at": { "type": ["string", "null"] },
+        "closed_by": { "enum": ["human", "sela", "system", null] },
+        "closed_summary": { "type": ["string", "null"], "maxLength": 2000 },
+        "last_message_preview": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "role": { "enum": ["sela", "human", "system"] },
+            "text": { "type": "string", "maxLength": 500 },
+            "created_at": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    }
+  }
+}

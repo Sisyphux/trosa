@@ -1,0 +1,9 @@
+{
+  "schema": "threads-reply-request",
+  "value": {
+    "text": "我稍后补一份采购表给你",
+    "seen_revision": 1,
+    "attachment_ids": [],
+    "idempotency_key": "human:reply:contoso-1"
+  }
+}

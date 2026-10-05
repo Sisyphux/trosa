@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/sela-capability.schema.json",
+  "title": "sela thread capability call",
+  "description": "The three sela side capabilities replace needs_human and report_continuation. thread_post creates or appends, thread_read reads, thread_close finishes.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "arguments"],
+      "properties": {
+        "capability": { "const": "thread_post" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "subject": { "type": ["string", "null"], "maxLength": 200 },
+            "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+            "suggested_replies": {
+              "type": "array",
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+            },
+            "refs": {
+              "type": "array",
+              "maxItems": 50,
+              "items": { "$ref": "message.schema.json#/$defs/ref" }
+            },
+            "attachments": {
+              "type": "array",
+              "maxItems": 5,
+              "items": { "$ref": "message.schema.json#/$defs/attachment" }
+            },
+            "awaiting": { "enum": ["human", "sela"] },
+            "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "arguments"],
+      "properties": {
+        "capability": { "const": "thread_read" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["thread_id"],
+          "properties": {
+            "thread_id": { "type": "string", "format": "uuid" }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "arguments"],
+      "properties": {
+        "capability": { "const": "thread_close" },
+        "arguments": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["thread_id", "summary"],
+          "properties": {
+            "thread_id": { "type": "string", "format": "uuid" },
+            "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      }
+    }
+  ]
+}

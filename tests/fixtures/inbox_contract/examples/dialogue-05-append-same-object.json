@@ -1,0 +1,39 @@
+{
+  "schema": "dialogue-example",
+  "value": {
+    "slug": "dialogue-05-append-same-object",
+    "title": "同一对象有新信息：追加到已有 thread",
+    "subject": "prospect:northwind-demo",
+    "events": [
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "Northwind Trading 有了新进展：官网显示他们刚开了国际采购线。我把这条追加到同一个对话，不新开一个。要继续跟进吗？",
+          "suggested_replies": ["继续跟进", "先不用"],
+          "refs": [
+            { "type": "prospect", "id": "northwind-demo" },
+            { "type": "thread", "id": "11111111-1111-4111-8111-111111111111" }
+          ]
+        }
+      },
+      { "op": "human_reply", "human_reply": "继续跟进，下周一提醒我", "seen_revision": 3 },
+      {
+        "op": "action",
+        "capability": "thread_post",
+        "params": {
+          "text": "好，我会把这条新进展并入 Northwind Trading 的跟进，下周一提醒你。",
+          "awaiting": "none"
+        },
+        "guardrail": null
+      }
+    ],
+    "outcome": {
+      "final_status": "open",
+      "final_awaiting": "none",
+      "closed_by": null,
+      "closed_summary": null,
+      "executed_actions": []
+    }
+  }
+}

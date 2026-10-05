@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-close-request.schema.json",
+  "title": "POST /api/integrations/sela/threads/{id}/close request",
+  "description": "The agent closes a thread and must explain in one line why it is finished.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary"],
+  "properties": {
+    "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "seen_revision": { "type": "integer", "minimum": 0 },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

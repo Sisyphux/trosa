@@ -1,0 +1,77 @@
+{
+  "schema": "dialogue-example",
+  "value": {
+    "slug": "dialogue-03-ambiguous-reply",
+    "title": "用户回复含糊：agent 先确认，再执行",
+    "subject": "prospect:northwind-demo",
+    "events": [
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "Northwind Trading 疑似已经和我们的既有客户合并。要把它合并到既有客户记录里吗？这一步不容易撤销。",
+          "suggested_replies": ["先别合并，我再确认", "是，合并"],
+          "refs": [{ "type": "prospect", "id": "northwind-demo" }]
+        }
+      },
+      {
+        "op": "human_reply",
+        "human_reply": "嗯，看着像是一家的",
+        "seen_revision": 1
+      },
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "收到。合并会改动既有客户记录且不好撤销，我想先跟你确认一句：确定把 Northwind Trading 合并到既有客户吗？回复『确定合并』我就执行。",
+          "suggested_replies": ["确定合并", "不用了"],
+          "refs": [{ "type": "message", "id": "22222222-2222-4222-8222-222222222222" }]
+        }
+      },
+      { "op": "human_reply", "human_reply": "确定合并", "seen_revision": 2 },
+      {
+        "op": "action",
+        "capability": "merge_identity",
+        "params": {
+          "source_id": "northwind-demo",
+          "target_customer_id": "customer-northwind-existing",
+          "proposal_message_id": "22222222-2222-4222-8222-222222222222",
+          "confirmed_by_message_id": "22222222-2222-4222-8222-222222222223"
+        },
+        "guardrail": "confirmed_by_message_id"
+      },
+      {
+        "op": "action",
+        "capability": "thread_post",
+        "params": {
+          "text": "已按你的确认把 Northwind Trading 合并到既有客户记录，合并不可撤销。",
+          "awaiting": "none"
+        },
+        "guardrail": null
+      },
+      {
+        "op": "action",
+        "capability": "thread_close",
+        "params": { "summary": "经你确认后把 Northwind Trading 合并到既有客户，已完成。" },
+        "guardrail": null
+      }
+    ],
+    "outcome": {
+      "final_status": "closed",
+      "final_awaiting": "none",
+      "closed_by": "sela",
+      "closed_summary": "经你确认后把 Northwind Trading 合并到既有客户，已完成。",
+      "executed_actions": [
+        {
+          "capability": "merge_identity",
+          "params": {
+            "source_id": "northwind-demo",
+            "target_customer_id": "customer-northwind-existing",
+            "proposal_message_id": "22222222-2222-4222-8222-222222222222",
+            "confirmed_by_message_id": "22222222-2222-4222-8222-222222222223"
+          }
+        }
+      ]
+    }
+  }
+}

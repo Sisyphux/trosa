@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-get-response.schema.json",
+  "title": "GET /api/integrations/sela/threads/{id} response",
+  "description": "The full conversation plus optional related records, passed to the agent as context.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["success", "thread"],
+  "properties": {
+    "success": { "const": true },
+    "thread": { "$ref": "thread.schema.json" },
+    "related": {
+      "type": ["object", "null"],
+      "description": "Read only snapshot of related records the agent may consult, never a substitute for Trosa reads.",
+      "additionalProperties": true
+    }
+  }
+}

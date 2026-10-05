@@ -1,0 +1,8 @@
+{
+  "schema": "threads-user-close-request",
+  "value": {
+    "seen_revision": 2,
+    "note": "这件事不用管了",
+    "idempotency_key": "human:close:contoso-1"
+  }
+}

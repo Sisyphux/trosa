@@ -1,0 +1,18 @@
+{
+  "schema": "message",
+  "value": {
+    "id": "22222222-2222-4222-8222-222222222223",
+    "thread_id": "11111111-1111-4111-8111-111111111111",
+    "seq": 3,
+    "role": "system",
+    "actor": "runtime",
+    "text": "处理失败，原因：agent 运行超时。会再试一次，若仍失败会在这里向你说明。",
+    "suggested_replies": [],
+    "refs": [],
+    "hints": null,
+    "attachments": [],
+    "awaiting_after": "sela",
+    "idempotency_key": "runtime:retry:northwind-1",
+    "created_at": "2026-10-05T09:20:00Z"
+  }
+}

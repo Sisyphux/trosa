@@ -1,0 +1,50 @@
+{
+  "schema": "dialogue-example",
+  "value": {
+    "slug": "dialogue-01-exclude-competitor",
+    "title": "提议排除一个竞品：用户同意，执行，收尾",
+    "subject": "prospect:northwind-demo",
+    "events": [
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "Northwind Trading 已经在排除名单里吗？如果是，我就把这家竞品从本轮开发名单里去掉。",
+          "suggested_replies": ["是，排除这家竞品", "不是，保留它"],
+          "refs": [{ "type": "prospect", "id": "northwind-demo" }]
+        }
+      },
+      { "op": "human_reply", "human_reply": "是，排除这家竞品", "seen_revision": 1 },
+      {
+        "op": "action",
+        "capability": "resolve_exclusion",
+        "params": { "source_id": "northwind-demo", "decision": "exclude" },
+        "guardrail": null
+      },
+      {
+        "op": "action",
+        "capability": "thread_post",
+        "params": {
+          "text": "已按你的回复把 Northwind Trading 从本轮开发名单排除，名单已更新。",
+          "awaiting": "human"
+        },
+        "guardrail": null
+      },
+      {
+        "op": "action",
+        "capability": "thread_close",
+        "params": { "summary": "按你的回复把 Northwind Trading 从本轮名单排除，已完成。" },
+        "guardrail": null
+      }
+    ],
+    "outcome": {
+      "final_status": "closed",
+      "final_awaiting": "none",
+      "closed_by": "sela",
+      "closed_summary": "按你的回复把 Northwind Trading 从本轮名单排除，已完成。",
+      "executed_actions": [
+        { "capability": "resolve_exclusion", "params": { "source_id": "northwind-demo", "decision": "exclude" } }
+      ]
+    }
+  }
+}

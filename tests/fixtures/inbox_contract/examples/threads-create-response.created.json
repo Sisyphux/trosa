@@ -1,0 +1,37 @@
+{
+  "schema": "threads-create-response",
+  "value": {
+    "success": true,
+    "created": true,
+    "thread": {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "subject": "prospect:contoso-demo",
+      "title": "Contoso 的采购历史缺失，需要你确认",
+      "status": "open",
+      "awaiting": "human",
+      "revision": 1,
+      "opened_at": "2026-10-05T10:00:00Z",
+      "updated_at": "2026-10-05T10:00:00Z",
+      "closed_at": null,
+      "closed_by": null,
+      "closed_summary": null,
+      "messages": [
+        {
+          "id": "55555555-5555-4555-8555-555555555551",
+          "thread_id": "44444444-4444-4444-8444-444444444444",
+          "seq": 1,
+          "role": "sela",
+          "actor": "sela",
+          "text": "Contoso 的进口/采购历史我在公开资料里找不到。你能提供最近的采购记录吗？没有的话我先按现有信息继续。",
+          "suggested_replies": ["我稍后补一份采购表", "先按现有信息继续"],
+          "refs": [{ "type": "prospect", "id": "contoso-demo" }],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "human",
+          "idempotency_key": "sela:need:contoso-1",
+          "created_at": "2026-10-05T10:00:00Z"
+        }
+      ]
+    }
+  }
+}

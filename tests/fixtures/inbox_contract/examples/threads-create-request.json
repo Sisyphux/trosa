@@ -1,0 +1,13 @@
+{
+  "schema": "threads-create-request",
+  "value": {
+    "subject": "prospect:contoso-demo",
+    "title": "Contoso 的采购历史缺失，需要你确认",
+    "text": "Contoso 的进口/采购历史我在公开资料里找不到。你能提供最近的采购记录吗？没有的话我先按现有信息继续。",
+    "suggested_replies": ["我稍后补一份采购表", "先按现有信息继续"],
+    "refs": [{ "type": "prospect", "id": "contoso-demo" }],
+    "attachments": [],
+    "awaiting": "human",
+    "idempotency_key": "sela:need:contoso-1"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "dialogue-example",
+  "value": {
+    "slug": "dialogue-04-expired-self-close",
+    "title": "问题已过期：agent 自己收尾",
+    "subject": "prospect:contoso-demo",
+    "events": [
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "Contoso 这个线索已经两周没有推进了。还要继续跟吗？",
+          "suggested_replies": ["继续", "先放着"],
+          "refs": [{ "type": "prospect", "id": "contoso-demo" }]
+        }
+      },
+      {
+        "op": "turn",
+        "turn": {
+          "role": "system",
+          "text": "该问题已超过等待时限（30 天），且期间没有新信息；sela 将自行判断并收尾。"
+        }
+      },
+      {
+        "op": "action",
+        "capability": "thread_close",
+        "params": {
+          "summary": "Contoso 线索已过期，期间无新信息，sela 自行关闭该对话。"
+        },
+        "guardrail": null
+      }
+    ],
+    "outcome": {
+      "final_status": "closed",
+      "final_awaiting": "none",
+      "closed_by": "sela",
+      "closed_summary": "Contoso 线索已过期，期间无新信息，sela 自行关闭该对话。",
+      "executed_actions": []
+    }
+  }
+}

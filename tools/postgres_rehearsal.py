@@ -465,8 +465,9 @@ def run_integration_tests() -> int:
         "TROSA_REHEARSAL_DB": _database(),
     })
     result = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests",
-         "-p", "test_postgres_rehearsal.py", "-v"],
+        [sys.executable, "-m", "unittest",
+         "tests.test_inbox_dialogue_postgres",
+         "tests.test_postgres_rehearsal", "-v"],
         cwd=ROOT,
         env=env,
     )

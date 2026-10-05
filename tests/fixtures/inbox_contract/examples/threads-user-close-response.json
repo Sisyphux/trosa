@@ -1,0 +1,51 @@
+{
+  "schema": "threads-user-close-response",
+  "value": {
+    "success": true,
+    "thread": {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "subject": "prospect:contoso-demo",
+      "title": "Contoso 的采购历史缺失，需要你确认",
+      "status": "closed",
+      "awaiting": "none",
+      "revision": 2,
+      "opened_at": "2026-10-05T10:00:00Z",
+      "updated_at": "2026-10-05T10:06:00Z",
+      "closed_at": "2026-10-05T10:06:00Z",
+      "closed_by": "human",
+      "closed_summary": "用户关闭：这件事不用管了",
+      "messages": [
+        {
+          "id": "55555555-5555-4555-8555-555555555551",
+          "thread_id": "44444444-4444-4444-8444-444444444444",
+          "seq": 1,
+          "role": "sela",
+          "actor": "sela",
+          "text": "Contoso 的进口/采购历史我在公开资料里找不到。你能提供最近的采购记录吗？没有的话我先按现有信息继续。",
+          "suggested_replies": ["我稍后补一份采购表", "先按现有信息继续"],
+          "refs": [{ "type": "prospect", "id": "contoso-demo" }],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "human",
+          "idempotency_key": "sela:need:contoso-1",
+          "created_at": "2026-10-05T10:00:00Z"
+        },
+        {
+          "id": "55555555-5555-4555-8555-555555555552",
+          "thread_id": "44444444-4444-4444-8444-444444444444",
+          "seq": 2,
+          "role": "human",
+          "actor": "luoxin",
+          "text": "我稍后补一份采购表给你",
+          "suggested_replies": [],
+          "refs": [],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "sela",
+          "idempotency_key": "human:reply:contoso-1",
+          "created_at": "2026-10-05T10:03:00Z"
+        }
+      ]
+    }
+  }
+}

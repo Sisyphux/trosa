@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-reply-request.schema.json",
+  "title": "POST /api/inbox/threads/{id}/reply request",
+  "description": "The human replies with verbatim text and the revision they last saw. The server never overwrites silently.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text", "seen_revision"],
+  "properties": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "seen_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Value of thread.revision the human saw. If it differs from the stored revision the server rejects with 409 and returns the current thread."
+    },
+    "attachment_ids": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "type": "string", "format": "uuid" },
+      "description": "Ids of already uploaded core.file_objects."
+    },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

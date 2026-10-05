@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-create-request.schema.json",
+  "title": "POST /api/integrations/sela/threads request",
+  "description": "sela opens a thread with its first message. If the subject already has an open thread the server returns that thread instead and does not create a new one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["text"],
+  "properties": {
+    "subject": { "type": ["string", "null"], "maxLength": 200 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "suggested_replies": {
+      "type": "array",
+      "maxItems": 3,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+    },
+    "refs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "message.schema.json#/$defs/ref" }
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "$ref": "message.schema.json#/$defs/attachment" }
+    },
+    "awaiting": {
+      "enum": ["human", "sela"],
+      "description": "Defaults to human. A thread may not be created already finished."
+    },
+    "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

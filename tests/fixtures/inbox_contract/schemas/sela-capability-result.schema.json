@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/sela-capability-result.schema.json",
+  "title": "sela thread capability result",
+  "description": "Uniform result returned by thread_post, thread_read and thread_close.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["capability", "ok", "thread"],
+  "properties": {
+    "capability": { "enum": ["thread_post", "thread_read", "thread_close"] },
+    "ok": { "type": "boolean" },
+    "created": {
+      "type": "boolean",
+      "description": "Only meaningful for thread_post: true when a new thread was opened, false when the existing open thread was reused."
+    },
+    "thread": { "$ref": "thread.schema.json" }
+  }
+}

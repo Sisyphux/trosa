@@ -1,0 +1,66 @@
+{
+  "schema": "threads-close-response",
+  "value": {
+    "success": true,
+    "thread": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "subject": "prospect:northwind-demo",
+      "title": "排除 Northwind Trading？",
+      "status": "closed",
+      "awaiting": "none",
+      "revision": 3,
+      "opened_at": "2026-10-05T09:00:00Z",
+      "updated_at": "2026-10-05T09:05:00Z",
+      "closed_at": "2026-10-05T09:05:00Z",
+      "closed_by": "sela",
+      "closed_summary": "按你的回复把 Northwind Trading 从本轮名单排除，已完成，无需再确认。",
+      "messages": [
+        {
+          "id": "22222222-2222-4222-8222-222222222221",
+          "thread_id": "11111111-1111-4111-8111-111111111111",
+          "seq": 1,
+          "role": "sela",
+          "actor": "sela",
+          "text": "Northwind Trading 已经在排除名单里吗？如果是，我就把这家竞品从本轮开发名单里去掉。",
+          "suggested_replies": ["是，排除这家竞品", "不是，保留它"],
+          "refs": [{ "type": "prospect", "id": "northwind-demo" }],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "human",
+          "idempotency_key": "sela:thread:northwind-1",
+          "created_at": "2026-10-05T09:00:00Z"
+        },
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "thread_id": "11111111-1111-4111-8111-111111111111",
+          "seq": 2,
+          "role": "human",
+          "actor": "luoxin",
+          "text": "是，排除这家竞品",
+          "suggested_replies": [],
+          "refs": [],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "sela",
+          "idempotency_key": "human:reply:northwind-1",
+          "created_at": "2026-10-05T09:02:00Z"
+        },
+        {
+          "id": "22222222-2222-4222-8222-222222222224",
+          "thread_id": "11111111-1111-4111-8111-111111111111",
+          "seq": 3,
+          "role": "sela",
+          "actor": "sela",
+          "text": "已按你的回复把 Northwind Trading 从本轮开发名单排除，名单已更新。",
+          "suggested_replies": [],
+          "refs": [{ "type": "action_receipt", "id": "receipt-northwind-exclude-1" }],
+          "hints": null,
+          "attachments": [],
+          "awaiting_after": "human",
+          "idempotency_key": "sela:thread:northwind-result-1",
+          "created_at": "2026-10-05T09:04:00Z"
+        }
+      ]
+    }
+  }
+}

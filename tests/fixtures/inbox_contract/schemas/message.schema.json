@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/message.schema.json",
+  "title": "Inbox message",
+  "description": "One append-only message inside an inbox thread. Structure lives only on the action boundary; a message carries free text plus optional typed annotations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "thread_id", "seq", "role", "text", "created_at"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "thread_id": { "type": "string", "format": "uuid" },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic position inside the thread, starting at 1."
+    },
+    "role": {
+      "enum": ["sela", "human", "system"],
+      "description": "Who authored the message. system messages are written by the runtime, never by the agent."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000,
+      "description": "The verbatim message text. Never rewritten or classified."
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Concrete author identity: the service user for sela, the login user id for human, 'runtime' for system."
+    },
+    "suggested_replies": {
+      "type": "array",
+      "maxItems": 3,
+      "items": { "type": "string", "minLength": 1, "maxLength": 120 },
+      "description": "Only sela messages may carry these. Clicking one only fills the reply box; it never sends by itself."
+    },
+    "refs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/ref" },
+      "description": "Links from the message to Trosa objects such as the prospect, an action receipt, a quoted message or a file."
+    },
+    "hints": {
+      "type": ["object", "null"],
+      "description": "Optional preprocessing annotation. It is a hint only and never a gate: the agent always reads text verbatim."
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/attachment" },
+      "description": "File objects referenced by this message. Bytes live in core.file_objects, not here."
+    },
+    "awaiting_after": {
+      "enum": ["human", "sela", "none"],
+      "description": "Thread awaiting value derived from this message."
+    },
+    "idempotency_key": {
+      "type": ["string", "null"],
+      "maxLength": 200,
+      "description": "Client supplied key. Replaying the same key in the same thread returns the stored message."
+    },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "enum": ["prospect", "customer", "message", "action_receipt", "file", "thread"]
+        },
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file_object_id", "name"],
+      "properties": {
+        "file_object_id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "mime_type": { "type": "string", "maxLength": 120 },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

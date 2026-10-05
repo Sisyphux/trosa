@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/dialogue-example.schema.json",
+  "title": "Dialogue example",
+  "description": "A complete working example: an ordered sequence of conversation turns and action events, plus the expected final state. Examples use fictional companies only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["slug", "title", "subject", "events", "outcome"],
+  "properties": {
+    "slug": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+    "subject": { "type": ["string", "null"], "maxLength": 200 },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["final_status", "final_awaiting"],
+      "properties": {
+        "final_status": { "enum": ["open", "closed"] },
+        "final_awaiting": { "enum": ["human", "sela", "none"] },
+        "closed_by": { "enum": ["human", "sela", "system", null] },
+        "closed_summary": { "type": ["string", "null"], "maxLength": 2000 },
+        "executed_actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/executed_action" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "turn"],
+          "properties": {
+            "op": { "const": "turn" },
+            "turn": { "$ref": "#/$defs/turn" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "human_reply"],
+          "properties": {
+            "op": { "const": "human_reply" },
+            "human_reply": { "type": "string", "minLength": 1, "maxLength": 8000 },
+            "seen_revision": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "capability", "params"],
+          "properties": {
+            "op": { "const": "action" },
+            "capability": { "type": "string", "minLength": 1, "maxLength": 100 },
+            "params": { "type": "object" },
+            "guardrail": { "type": ["string", "null"], "maxLength": 200 }
+          }
+        }
+      ]
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "text"],
+      "properties": {
+        "role": { "enum": ["sela", "human", "system"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "suggested_replies": {
+          "type": "array",
+          "maxItems": 3,
+          "items": { "type": "string", "minLength": 1, "maxLength": 120 }
+        },
+        "refs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "message.schema.json#/$defs/ref" }
+        }
+      }
+    },
+    "executed_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability", "params"],
+      "properties": {
+        "capability": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "params": { "type": "object" },
+        "guardrail": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    }
+  }
+}

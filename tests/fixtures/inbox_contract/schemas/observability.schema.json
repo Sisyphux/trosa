@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/observability.schema.json",
+  "title": "Inbox dialogue observability",
+  "description": "Fields the health endpoint and the Inbox page read. Mirrors the existing continuations health block so the supervisor can be retargeted without changing shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "waiting_human",
+    "waiting_sela",
+    "last_poll_at",
+    "last_ok_at"
+  ],
+  "properties": {
+    "waiting_human": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Open threads with awaiting=human. This is the number shown on the Today entry."
+    },
+    "waiting_sela": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Open threads with awaiting=sela, the former continuation queue depth."
+    },
+    "oldest_wait_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Age of the oldest open thread waiting for sela, null when there is none."
+    },
+    "last_poll_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_ok_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_poll_error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 500
+    },
+    "waiting_session": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200,
+      "description": "Id of the single [inbox] waiting session, or null."
+    },
+    "blocked_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "last_agent_run": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "result": {
+          "enum": [
+            "completed",
+            "failed",
+            "timeout"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "legacy_route_hits_30d": {
+      "type": "object",
+      "description": "Calls to each legacy route in the last 30 days (route -> count).",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "error",
+  "value": {
+    "error": {
+      "code": "thread_changed",
+      "message": "对话在你提交前有新消息，请基于最新内容重新回复。",
+      "details": {
+        "current_revision": 3,
+        "current_awaiting": "human"
+      }
+    }
+  }
+}

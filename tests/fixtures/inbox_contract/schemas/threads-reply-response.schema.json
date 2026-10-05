@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "inbox-dialogue-schemas/threads-reply-response.schema.json",
+  "title": "POST /api/inbox/threads/{id}/reply response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["success", "thread", "message"],
+  "properties": {
+    "success": { "const": true },
+    "thread": { "$ref": "thread.schema.json" },
+    "message": { "$ref": "message.schema.json" },
+    "undo_token": {
+      "type": ["string", "null"],
+      "description": "Token that removes the just written reply and restores the previous awaiting value. Reuses the Trosa undo_actions view."
+    }
+  }
+}

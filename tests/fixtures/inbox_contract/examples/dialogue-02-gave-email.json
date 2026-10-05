@@ -1,0 +1,65 @@
+{
+  "schema": "dialogue-example",
+  "value": {
+    "slug": "dialogue-02-gave-email",
+    "title": "用户给了邮箱：写入，回复",
+    "subject": "prospect:contoso-demo",
+    "events": [
+      {
+        "op": "turn",
+        "turn": {
+          "role": "sela",
+          "text": "Contoso 还缺一个能发开发信的邮箱。你知道该发给谁、发到哪个地址吗？",
+          "suggested_replies": ["我稍后补一份", "用官网上的 info@"],
+          "refs": [{ "type": "prospect", "id": "contoso-demo" }]
+        }
+      },
+      {
+        "op": "human_reply",
+        "human_reply": "发给他们采购负责人 Ada Lin，邮箱 ada.lin@contoso-demo.test",
+        "seen_revision": 1
+      },
+      {
+        "op": "action",
+        "capability": "resolve_need",
+        "params": {
+          "source_id": "contoso-demo",
+          "field": "contact_email",
+          "value": "ada.lin@contoso-demo.test"
+        },
+        "guardrail": null
+      },
+      {
+        "op": "action",
+        "capability": "thread_post",
+        "params": {
+          "text": "已记下 Contoso 的联系人 Ada Lin 和邮箱 ada.lin@contoso-demo.test，后续开发信会发到这里。",
+          "awaiting": "none"
+        },
+        "guardrail": null
+      },
+      {
+        "op": "action",
+        "capability": "thread_close",
+        "params": { "summary": "已写入 Contoso 联系人 Ada Lin 与邮箱，需求已满足。" },
+        "guardrail": null
+      }
+    ],
+    "outcome": {
+      "final_status": "closed",
+      "final_awaiting": "none",
+      "closed_by": "sela",
+      "closed_summary": "已写入 Contoso 联系人 Ada Lin 与邮箱，需求已满足。",
+      "executed_actions": [
+        {
+          "capability": "resolve_need",
+          "params": {
+            "source_id": "contoso-demo",
+            "field": "contact_email",
+            "value": "ada.lin@contoso-demo.test"
+          }
+        }
+      ]
+    }
+  }
+}
