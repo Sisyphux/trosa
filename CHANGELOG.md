@@ -1,3 +1,11 @@
+## 2026-10-05 — 手机端（iPhone）布局修复：统一左右边距、去掉顶栏下方空白、时间轴与底部操作不再被裁
+
+- 现象（390 宽 iPhone）：顶栏下方有一大块空白；标题「今天」比正文多缩进约 16px，各区块左右边距不一致；时间轴左端「00:00」被裁掉一半；卡片底部「记录沟通」浮动操作在个别机型上被底栏/工具栏截断；顶栏与「批量记录」在 iOS 上可能被横向挤出屏幕。
+- 根因：`visual-v3.css` 在 ≤620px 给每个 `.page-section` 加了 66px 的 `padding-top`（`visual-v2.css` 在其它断点还有 72/84px），而顶栏是 sticky 且已占位，这段就是纯空白；`visual-v4.css` 在 ≤720px 给 `.page-header` 统一加 16px 左右内边距，其选择器特异性高于 `visual-v5.css`，把 Today 标题顶到 37px，而正文仍是 21px 的房间边距；时间轴首个整点标签是 `left:0% + translateX(-50%)`，左半超出图表被裁；≤820px 时 `.tide-grid` 仍沿用桌面三列模板而 `--c1/--c3` 变 `auto`，图表列宽塌成 0，SVG 按 1440 单位溢出并被 `overflow-x:clip` 裁掉；应用未设置 `text-size-adjust`，iOS 可能自动放大文字导致横向溢出。
+- 变更（只改 `app/static/visual-v5.css`，新增第 14 节「手机端布局修复」）：≤820px 把 `#roomMain > .page-section` 的 `padding-top` 归零；统一 `.page-header` / `.page-body` 的左右内边距到 `--room-gut`，Today 标题回到同一基线；时间轴在窄屏改为单列满宽、首尾整点标签不再半裁；Today 底部预留 `room-bar + 3rem` 让「记录沟通」浮动卡片不被底栏遮住；顶栏品牌/搜索/身份做 `flex:0 0 auto` 与溢出省略；全局加 `text-size-adjust:100%` 关闭 iOS 文字自动放大。同时把客户账页在窄屏的左内边距也对齐到同一房间边距。
+- 影响范围：`app/static/visual-v5.css`、本文件。不改 Today 的业务结构、数据逻辑与接口，不动 `app.js`、`index.html`、`style.css`。
+- 验证：390 / 320 / 768 / 820 宽度下（Chromium 与 WebKit）逐页量测——无横向溢出、顶栏与「批量记录」完整、各区块左边距统一为 `--room-gut`、时间轴首尾标签不被裁、「记录沟通」不被底栏遮住；全量 `unittest` 751 项通过。
+
 ## 2026-10-03 — 历史 Sela 反馈信封不再出现在沟通记录：读取时确定性清洗
 
 - 现象：早期 Sela 历史导入在 `follow_up_logs` 写入了一条「原始信封」——`[Sela Feedback ID: …]` + `历史客户回复` + `事件：…` + `时间：…` + `Gmail 同步（RULES_V1 / SYSTEM_FALLBACK / CODEX_REVIEW）：主题：… 发件人：… Gmail message_id：… 规则意图：… 路由：… 正文：…`。写入代码已在业务核心收敛时移除，但线上仍残留 17 条（event_id 34623–34639，2026-09-09 导入，客户含 Hideout Signs、GrenGraphics、Stilform 等），客户工作区「最近沟通」因此显示整段内部同步文本。

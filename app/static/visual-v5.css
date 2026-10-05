@@ -2953,3 +2953,100 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 }
 /* 「接下来」的日期还没选时，把日期 chip 的下划线染成危险色 */
 #trosa .complete-sheet .complete-seg.is-invalid { border-bottom-color: var(--dl-danger) !important; }
+
+/* ============================================================================
+   14 手机端布局修复（iPhone / ≤820px，U-09 2026-10）
+   ----------------------------------------------------------------------------
+   目标：390 宽度下统一左右栏距、去掉顶栏下的大块死白、修正 Today 时间轴左端
+   被裁与底部「记录沟通」被顶截；不改任何业务结构或数据逻辑。
+   历史规则（style.css / visual-v2 / visual-v3 / visual-v4）里给 .page-section
+   补了 66px（v3 ≤620）/ 72-84px（v2）的 padding-top，那是「顶栏固定定位」时代
+   的占位补偿；现在顶栏是 sticky、本来就在文档流里，这段就是纯死白。v5 在
+   style 里最后加载，故用同源顺序 + 更高特异性覆盖。
+   ========================================================================== */
+
+/* 14.1 iOS 文字自动放大（text autosizing）：关掉，避免被吹大的字号撑破版心、
+   造成顶栏与工具按钮横向被裁。 */
+#trosa,
+#trosa .main-content,
+#trosa .room-top {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+@media (max-width: 820px) {
+  /* 14.2 顶栏下方的大块空白：去掉历史 padding-top 补偿（顶栏已 sticky 在流内）。 */
+  #trosa #roomMain > .page-section {
+    padding-top: 0 !important;
+  }
+
+  /* 14.3 左右栏距统一：正文区块对齐顶栏的 --room-gut（390 下约 21px）。
+     页头 / 页体接管栏距，页节本身不再负责横向内边距。 */
+  #trosa #roomMain .page-header.page-header,
+  #trosa #roomMain .page-body.page-body {
+    padding-left: var(--room-gut) !important;
+    padding-right: var(--room-gut) !important;
+  }
+  /* Today 房间 .today-tide 已统一提供栏距，页头贴齐该栏距（不再多缩进 16px），
+     这样「今天」标题、摘要、命令架和下方时间轴/清单左边缘完全对齐。 */
+  #trosa #roomMain #page-dashboard .page-header.today-page-header,
+  #trosa #roomMain #page-dashboard .page-header.today-page-header .today-masthead.today-masthead {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* 14.4 顶栏在极窄宽度 / 大字号下不被横向切掉：左侧品牌固定，右侧姓名可收缩省略。 */
+  #trosa .room-top .room-brand,
+  #trosa .room-top .room-key {
+    flex: 0 0 auto;
+  }
+  #trosa .room-top .room-who {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* 14.5 Today 时间轴：窄屏下网格退化成单列，图表单元格拿到整行宽度。
+     此前 ≤820 把 --c1/--c3 设为 auto，三列模板算成 0/348/0，而 .tide-chart-cell
+     落在 0 宽的第 1 列，SVG（viewBox 1440）溢出后被 #page-dashboard 的
+     overflow:clip 裁掉，看起来就是时间轴左端被裁。 */
+  #trosa .today-tide .tide-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #trosa .today-tide .tide-chart-cell {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+  /* 首尾小时刻度：00:00 居中会让半个字飘出图表左缘被裁，改成贴边对齐。 */
+  #trosa .today-tide .tide-hrs span:first-child {
+    transform: none;
+  }
+  #trosa .today-tide .tide-hrs span:last-child {
+    transform: translateX(-100%);
+  }
+  /* 图表标题与「批量记录」等工具换行时留出呼吸，避免贴在一起或被裁。 */
+  #trosa .today-tide .tide-chart-head {
+    gap: .45rem .9rem;
+  }
+
+  /* 14.6 底部「记录沟通」：正文留出顶栏 + 底栏高度，滚到底时浮动卡片及其操作
+     按钮不会被底栏或 iOS 浏览器工具条顶掉。 */
+  #trosa .today-tide {
+    padding-bottom: calc(var(--room-bar) + 3rem) !important;
+  }
+
+  /* 14.7 客户账本（ledger）房间：窄屏是全出血列表（border 0），内部内容缩进 1rem，
+     与页头栏距（--room-gut）不一致。这里把左侧内容对齐页头，保持列表仍是
+     通栏房间（右侧标尺列 --ld-rw 不动）。 */
+  #trosa #page-customers[data-customer-mode="ledger"] .ld-head,
+  #trosa #page-customers[data-customer-mode="ledger"] .ld-ent {
+    padding-left: var(--room-gut) !important;
+  }
+  #trosa #page-customers[data-customer-mode="ledger"] .ld-grp {
+    padding-left: var(--room-gut) !important;
+  }
+  #trosa #page-customers[data-customer-mode="ledger"] .ld-grp::after {
+    left: var(--room-gut) !important;
+  }
+}
