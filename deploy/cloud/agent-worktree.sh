@@ -359,7 +359,13 @@ write_lease() {
   tmp="$file.$$.tmp"
   {
     printf 'session=%s\n' "$sid"
-    printf 'pid=%s\n' "${CLAUDE_PID:-${PPID:-}}"
+    # 只有真正拿到会话进程号（CLAUDE_PID）时才记录 pid。否则 ${PPID} 会指向
+    # 短命的助手进程（钩子脚本 / git），它一退出 pid 行就让租约被误判过期；
+    # 没有 pid 行时 lease_is_live 走 LEASE_TTL 心跳，由每次 guard / pre-commit /
+    # Edit/Write 前钩子的 lease check 刷新。
+    if [[ -n "${CLAUDE_PID:-}" ]]; then
+      printf 'pid=%s\n' "$CLAUDE_PID"
+    fi
     printf 'ts=%s\n' "$(date +%s)"
     printf 'path=%s\n' "$wt"
     printf 'role=%s\n' "$(trosa_agent_role)"
@@ -2037,7 +2043,8 @@ command=$1
 shift
 # 入口隔离护栏只在“会改动仓库状态的写命令”里刷新，保证 dev/review 角色在集成分支
 # 提交时会遇到 pre-commit/commit-msg 兜底。只读命令（status/guard/preflight/list/
-# evidence/flakes/gate/--help）绝不写共享 .git/hooks，避免只读调用的副作用。
+# evidence/flakes/gate/lease/--help）绝不写共享 .git/hooks，避免只读调用的副作用：
+# lease check 会在每次 Edit/Write 前被钩子调用，不能每次都重写共享 hooks。
 case "$command" in
   create|adopt|start|reserve-migration|reconcile|hooks|sync|test|ship|publish|remove)
     install_git_hooks

@@ -113,6 +113,31 @@ class WorktreeLeaseTests(unittest.TestCase):
         self.assertEqual(
             self._run("B", "guard", TRADE_OS_ALLOW_SHARED_WORKTREE="1").returncode, 0)
 
+    def test_lease_survives_without_claude_pid(self):
+        # Without CLAUDE_PID the lease must not record a short-lived helper pid
+        # (hook/git): that pid exits immediately and the lease would look expired.
+        # It falls back to the TTL heartbeat, so a second session is still refused.
+        self.assertEqual(self._run("A", "guard", _no_pid=True).returncode, 0)
+        lease = self.repo / ".git" / "trosa-tasks" / "t1.lease"
+        self.assertNotIn("pid=", lease.read_text(encoding="utf-8"))
+        blocked = self._run("B", "guard", _no_pid=True)
+        self.assertEqual(blocked.returncode, HELD, blocked.stdout + blocked.stderr)
+        self.assertIn("create --task t1-b", blocked.stderr)
+
+    def test_lease_check_is_read_only_for_shared_hooks(self):
+        # lease check runs before every Edit/Write; it must not (re)install the
+        # shared git hooks each time.  Remove them, run lease check, and require
+        # they stay removed.
+        hooks_dir = self.repo / ".git" / "hooks"
+        self.assertTrue((hooks_dir / "pre-commit").exists())
+        for name in ("pre-commit", "commit-msg"):
+            (hooks_dir / name).unlink()
+        self.assertEqual(self._run("A", "lease", "check", "--quiet").returncode, 0)
+        self.assertFalse((hooks_dir / "pre-commit").exists(),
+                         "只读 lease check 不应写共享 pre-commit")
+        self.assertFalse((hooks_dir / "commit-msg").exists(),
+                         "只读 lease check 不应写共享 commit-msg")
+
     def _settings_hook_command(self):
         """Parse the hook command exactly as Claude Code would from settings.json."""
         import json
