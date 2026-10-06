@@ -107,8 +107,11 @@
           <div class="nav-item lit-row" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
             <span class="nav-index tnum">02</span><span class="nav-name">Inbox</span><span class="nav-count" id="inboxNavCount"></span>
           </div>
+          <div class="nav-item lit-row" data-page="dialogue" data-nav-page="dialogue" onclick="switchPage('dialogue')" role="button" tabindex="0" aria-label="对话" title="与 sela 的对话">
+            <span class="nav-index tnum">03</span><span class="nav-name">对话</span><span class="nav-count" id="dialogueNavCount"></span>
+          </div>
           <div class="nav-item lit-row" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
-            <span class="nav-index tnum">03</span><span class="nav-name">客户</span>
+            <span class="nav-index tnum">04</span><span class="nav-name">客户</span>
           </div>
         </div>
         <div class="nav-overview" style="display:none;">
@@ -143,6 +146,11 @@
             <div class="today-eyebrow" id="dashDate"></div>
             <h2>今天</h2>
             <p class="today-summary today-lede"><strong id="statPending">-</strong> 个客户需要跟进，其中 <strong id="statOverdue">-</strong> 项已逾期。</p>
+            <button type="button" class="today-dialogue-entry" id="todayDialogueEntry" onclick="openTodayDialogueEntry()" hidden>
+              <span class="today-dialogue-count tnum" id="todayDialogueCount">0</span>
+              <span class="today-dialogue-label" id="todayDialogueLabel">条 sela 对话等你回复</span>
+              <span class="today-dialogue-go" aria-hidden="true">→</span>
+            </button>
           </div>
           <div class="command-shelf is-collapsible" aria-label="快捷操作">
             <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
@@ -256,6 +264,27 @@
           <div class="inbox-list" id="inboxList"><div class="inbox-skeleton" role="status"><p class="inbox-skeleton-label">正在加载 Inbox</p><span class="inbox-skeleton-line"></span><span class="inbox-skeleton-line"></span><span class="inbox-skeleton-line"></span></div></div>
         </div>
         <div class="inbox-lower" id="inboxLower" hidden></div>
+      </div>
+    </div>
+
+    <!-- ==================== DIALOGUE (S3: sela ↔ human) ==================== -->
+    <div class="page-section" id="page-dialogue">
+      <div class="page-header dialogue-page-header">
+        <div class="page-heading">
+          <div class="page-eyebrow">对话</div>
+          <h2>与 sela 对话</h2>
+          <p class="page-lede dialogue-overview" id="dialogueOverview">sela 用一句话说明要你决定什么，你回一句话即可；你的回复原样交给 sela。</p>
+        </div>
+      </div>
+      <div class="page-body dialogue-page-body">
+        <div class="dialogue-workspace" id="dialogueWorkspace">
+          <aside class="dialogue-list-pane" aria-label="对话列表">
+            <div class="dialogue-list" id="dialogueList"><div class="dialogue-loading" data-state="loading" role="status">正在加载对话…</div></div>
+          </aside>
+          <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容">
+            <div class="dialogue-empty" data-state="empty" role="status"><p>从左边的列表选一条对话。</p></div>
+          </section>
+        </div>
       </div>
     </div>
 

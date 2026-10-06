@@ -1314,6 +1314,7 @@ function switchPage(page) {
   switch(nextPage) {
     case 'dashboard': loadDashboard(); break;
     case 'inbox': loadInbox(); break;
+    case 'dialogue': loadDialogue(); break;
     case 'customers': loadCustomers(); break;
     case 'calendar': loadCalendar(); break;
     case 'history': loadHistory(); break;
@@ -1333,7 +1334,7 @@ function switchPage(page) {
 // There is no resident navigation. Pages, the global search and account actions
 // live in one full-screen index layer that the user summons and dismisses.
 var ROOM_PAGE_NAMES = {
-  dashboard: '今天', inbox: 'Inbox', customers: '客户', overview: '本周工作',
+  dashboard: '今天', inbox: 'Inbox', dialogue: '对话', customers: '客户', overview: '本周工作',
   calendar: '跟进日历', history: '沟通记录', logs: '操作日志', settings: '设置'
 };
 var _roomIndexReturnFocus = null;
@@ -1924,6 +1925,7 @@ function scheduleGlobalSync() {
   clearTimeout(_globalSyncTimer);
   _globalSyncTimer = setTimeout(function() {
     refreshInboxBadge();
+    refreshDialogueBadge();
     // A mutation handler that already reloaded the active page makes this
     // refetch redundant; only resync when the visible page predates the change.
     if (_pageDataLoadedAt >= _lastMutationAt) return;
@@ -4394,6 +4396,7 @@ async function loadDashboard() {
   _pageDataLoadedAt = Date.now();
   _todayFactsCache = {};
   initTodayTide();
+  loadDialogueTodayEntry();
   var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
@@ -13141,6 +13144,18 @@ function resetUserScopedState() {
   inboxState.tray = [];
   inboxState.questionIndex = null;
   inboxState.loadError = '';
+  dialogueThreads = [];
+  dialogueCounts = { awaiting_human: 0, awaiting_sela: 0, open: 0 };
+  dialogueSelectedId = null;
+  dialogueThread = null;
+  dialogueListError = null;
+  dialogueThreadError = null;
+  dialogueDraft = '';
+  dialogueAttachments = [];
+  dialogueConflictNote = null;
+  dialogueMobileView = 'list';
+  dialogueListToken++;
+  dialogueThreadToken++;
   dashboardReminders = [];
   todayScheduleData = {};
   calendarData = {};
@@ -13384,6 +13399,7 @@ async function showApp() {
   }).catch(function(error) { console.warn('偏好设置稍后重试', error); });
   refreshInboxBadge();
   startInboxAutoRefresh();
+  refreshDialogueBadge();
 }
 
 // ========== OVERVIEW（全新设计：周报为主体 + 可展开客户表）==========
@@ -13686,3 +13702,531 @@ function overviewCloseCustDetail() {
 
 function overviewPrevWeek() { overviewWeekOffset--; loadOverview(); }
 function overviewNextWeek() { overviewWeekOffset++; loadOverview(); }
+
+// ==================== DIALOGUE (S3: sela ↔ human) ====================
+// One text window between the user and sela: a conversation list on the left and
+// one conversation on the right with a single reply box. There are deliberately
+// no per-question-type forms — every thread has the same shape — because sela
+// decides what to ask and the human answers in one sentence. The reply goes
+// verbatim to the agent; the UI never re-interprets it.
+var dialogueThreads = [];
+var dialogueCounts = { awaiting_human: 0, awaiting_sela: 0, open: 0 };
+var dialogueSelectedId = null;
+var dialogueThread = null;
+var dialogueListError = null;
+var dialogueThreadError = null;
+var dialogueListToken = 0;
+var dialogueThreadToken = 0;
+var dialogueSending = false;
+var dialogueDraft = '';
+var dialogueAttachments = [];
+var dialogueUploading = false;
+var dialogueConflictNote = null;
+var dialogueMobileView = 'list';
+
+var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: 'sela 处理中', done: '已完成' };
+
+function dialogueElapsed(value) {
+  if (!value) return '';
+  var then = new Date(value);
+  if (isNaN(then.getTime())) return '';
+  var seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
+  if (seconds < 60) return '刚刚';
+  var minutes = Math.round(seconds / 60);
+  if (minutes < 60) return minutes + ' 分钟前';
+  var hours = Math.round(minutes / 60);
+  if (hours < 24) return hours + ' 小时前';
+  return Math.round(hours / 24) + ' 天前';
+}
+
+function dialogueGroup(thread) {
+  if (!thread || thread.status === 'closed') return 'done';
+  if (thread.awaiting === 'human') return 'awaiting';
+  if (thread.awaiting === 'sela') return 'sela';
+  return 'done';
+}
+
+function orderedDialogueThreads() {
+  var buckets = { awaiting: [], sela: [], done: [] };
+  (dialogueThreads || []).forEach(function(thread) { buckets[dialogueGroup(thread)].push(thread); });
+  return buckets.awaiting.concat(buckets.sela, buckets.done);
+}
+
+function dialogueNextAwaitingId(excludeId) {
+  var list = orderedDialogueThreads();
+  for (var i = 0; i < list.length; i++) {
+    if (dialogueGroup(list[i]) === 'awaiting' && list[i].id !== excludeId) return list[i].id;
+  }
+  return null;
+}
+
+function dialogueAwaitingCount() { return Number(dialogueCounts.awaiting_human || 0); }
+
+function dialogueNavBadge() {
+  var nav = document.getElementById('dialogueNavCount');
+  if (nav) nav.textContent = dialogueAwaitingCount() || '';
+}
+
+function renderDialogueOverview() {
+  var overview = document.getElementById('dialogueOverview');
+  if (!overview) return;
+  overview.innerHTML = '<strong>' + dialogueAwaitingCount() + '</strong> 条等你回复，' +
+    Number(dialogueCounts.awaiting_sela || 0) + ' 条等 sela。';
+}
+
+function refreshDialogueBadge() {
+  return api('/api/inbox/threads?limit=1').then(function(data) {
+    if (!data || !data.counts) return;
+    dialogueCounts = data.counts;
+    dialogueNavBadge();
+    renderDialogueOverview();
+    updateTodayDialogueEntry();
+  }).catch(function() {});
+}
+
+async function loadDialogue(options) {
+  options = options || {};
+  var token = ++dialogueListToken;
+  var listEl = document.getElementById('dialogueList');
+  if (listEl && !dialogueThreads.length && !dialogueListError) listEl.innerHTML = loadLoadingHtml('正在加载对话…');
+  var data;
+  try {
+    data = await api('/api/inbox/threads?status=all&limit=200');
+  } catch (error) {
+    if (token !== dialogueListToken) return;
+    dialogueListError = error; renderDialogueList(); return;
+  }
+  if (token !== dialogueListToken) return;
+  if (data === null) { dialogueListError = loadAuthError(); renderDialogueList(); return; }
+  dialogueListError = null;
+  dialogueThreads = Array.isArray(data.threads) ? data.threads : [];
+  dialogueCounts = data.counts || dialogueCounts;
+  dialogueNavBadge();
+  renderDialogueOverview();
+  var stillPresent = dialogueSelectedId && dialogueThreads.some(function(t) { return t.id === dialogueSelectedId; });
+  if (options.afterReply) dialogueSelectedId = dialogueNextAwaitingId(options.sentId);
+  else if (stillPresent) dialogueSelectedId = dialogueSelectedId;
+  else dialogueSelectedId = dialogueNextAwaitingId(null) || (orderedDialogueThreads()[0] || {}).id || null;
+  renderDialogueList();
+  if (dialogueSelectedId) await selectDialogueThread(dialogueSelectedId, { keepList: true });
+  else { dialogueThread = null; dialogueThreadError = null; renderDialogueThread(); }
+}
+
+function renderDialogueList() {
+  var listEl = document.getElementById('dialogueList');
+  if (!listEl) return;
+  if (dialogueListError) { listEl.innerHTML = loadFailureHtml(dialogueListError, '对话列表', 'loadDialogue()'); return; }
+  if (!dialogueThreads.length) {
+    listEl.innerHTML = '<div class="dialogue-list-empty" data-state="empty" role="status"><p>现在没有对话。</p></div>';
+    return;
+  }
+  var ordered = orderedDialogueThreads();
+  var html = '';
+  ['awaiting', 'sela', 'done'].forEach(function(group) {
+    var rows = ordered.filter(function(thread) { return dialogueGroup(thread) === group; });
+    if (!rows.length) return;
+    html += '<section class="dialogue-group" data-group="' + group + '">' +
+        '<div class="dialogue-group-label"><span>' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
+          '<span class="tnum">' + rows.length + '</span></div>' +
+        '<div class="dialogue-rows" role="list">' + rows.map(dialogueRowHtml).join('') + '</div>' +
+      '</section>';
+  });
+  listEl.innerHTML = html;
+}
+
+function dialogueRowHtml(thread) {
+  var group = dialogueGroup(thread);
+  var preview = (thread.last_message_preview && thread.last_message_preview.text) || '（还没有消息）';
+  var elapsed = dialogueElapsed(thread.updated_at);
+  var selected = thread.id === dialogueSelectedId;
+  var meta = [];
+  if (thread.subject) meta.push(thread.subject);
+  if (elapsed) meta.push(elapsed);
+  return '<div class="dialogue-row' + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
+      ' data-dialogue-id="' + escapeHtml(thread.id) + '" aria-current="' + (selected ? 'true' : 'false') + '"' +
+      ' onclick="selectDialogueThread(\'' + thread.id + '\')">' +
+      '<div class="dialogue-row-top"><span class="dialogue-row-title">' + escapeHtml(thread.title || thread.subject || '对话') + '</span>' +
+        '<span class="dialogue-row-turn dialogue-row-turn--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span></div>' +
+      '<div class="dialogue-row-summary">' + escapeHtml(preview) + '</div>' +
+      (meta.length ? '<div class="dialogue-row-meta">' + escapeHtml(meta.join(' · ')) + '</div>' : '') +
+    '</div>';
+}
+
+async function selectDialogueThread(id, options) {
+  options = options || {};
+  if (!id) return;
+  if (id !== dialogueSelectedId) dialogueConflictNote = null;
+  dialogueSelectedId = id;
+  dialogueMobileView = 'thread';
+  var page = document.getElementById('page-dialogue');
+  if (page) page.classList.add('dialogue-thread-open');
+  renderDialogueList();
+  var token = ++dialogueThreadToken;
+  dialogueThreadError = null;
+  if (!dialogueThread || dialogueThread.id !== id) { dialogueThread = null; dialogueDraft = ''; dialogueAttachments = []; }
+  renderDialogueThread();
+  var data;
+  try {
+    data = await api('/api/inbox/threads/' + encodeURIComponent(id));
+  } catch (error) {
+    if (token !== dialogueThreadToken) return;
+    dialogueThreadError = error; renderDialogueThread(); return;
+  }
+  if (token !== dialogueThreadToken) return;
+  if (data === null) { dialogueThreadError = loadAuthError(); renderDialogueThread(); return; }
+  dialogueThread = data.thread || null;
+  dialogueConflictNote = null;
+  renderDialogueThread();
+  if (options.focusList) focusDialogueRow(id);
+  else if (!options.keepList) focusDialogueReply();
+}
+
+function renderDialogueThread() {
+  var pane = document.getElementById('dialogueThreadPane');
+  if (!pane) return;
+  if (dialogueThreadError) {
+    pane.innerHTML = loadFailureHtml(dialogueThreadError, '对话', "selectDialogueThread('" + String(dialogueSelectedId || '') + "')");
+    return;
+  }
+  if (!dialogueSelectedId) {
+    pane.innerHTML = '<div class="dialogue-empty" data-state="empty" role="status"><p>现在没有等你回复的对话。</p></div>';
+    return;
+  }
+  if (!dialogueThread) { pane.innerHTML = loadLoadingHtml('正在打开对话…'); return; }
+  pane.innerHTML = renderDialogueThreadHtml();
+}
+
+function renderDialogueThreadHtml() {
+  var thread = dialogueThread;
+  var messages = Array.isArray(thread.messages) ? thread.messages : [];
+  var closed = thread.status === 'closed';
+  var group = dialogueGroup(thread);
+  var header = '<header class="dialogue-thread-head">' +
+      '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
+      '<div class="dialogue-thread-titles">' +
+        '<div class="dialogue-thread-title">' + escapeHtml(thread.title || '对话') + '</div>' +
+        '<div class="dialogue-thread-sub">' +
+          (thread.subject ? '<span>' + escapeHtml(thread.subject) + '</span>' : '') +
+          '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</header>';
+  var conflict = dialogueConflictNote
+    ? '<div class="dialogue-conflict" role="alert"><span>有新消息，请先看</span>' +
+        '<button type="button" class="btn btn-sm" onclick="reloadDialogueThread()">刷新</button></div>'
+    : '';
+  var body = '<div class="dialogue-messages" id="dialogueMessages" role="log" aria-live="polite" aria-relevant="additions">' +
+      (messages.length ? messages.map(renderDialogueMessageHtml).join('')
+        : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
+    '</div>';
+  var composer = closed
+    ? '<div class="dialogue-closed-note" role="status">这条对话已结束。</div>'
+    : dialogueComposerHtml();
+  return '<article class="dialogue-thread" data-thread-id="' + escapeHtml(thread.id) + '">' +
+    header + conflict + body + composer + '</article>';
+}
+
+function dialogueSuggestions() {
+  if (!dialogueThread || !Array.isArray(dialogueThread.messages)) return [];
+  for (var i = dialogueThread.messages.length - 1; i >= 0; i--) {
+    var message = dialogueThread.messages[i];
+    if (Array.isArray(message.suggested_replies) && message.suggested_replies.length) return message.suggested_replies;
+  }
+  return [];
+}
+
+function dialogueCustomerId() {
+  if (!dialogueThread || !Array.isArray(dialogueThread.messages)) return null;
+  for (var i = dialogueThread.messages.length - 1; i >= 0; i--) {
+    var refs = dialogueThread.messages[i].refs;
+    if (!Array.isArray(refs)) continue;
+    for (var j = 0; j < refs.length; j++) {
+      if (refs[j] && refs[j].type === 'customer' && /^\d+$/.test(String(refs[j].id))) return String(refs[j].id);
+    }
+  }
+  return null;
+}
+
+function dialogueComposerHtml() {
+  var suggestions = dialogueSuggestions();
+  var chips = suggestions.length
+    ? '<div class="dialogue-suggestions" role="group" aria-label="sela 的建议回复">' +
+        suggestions.map(function(text, index) {
+          return '<button type="button" class="dialogue-suggestion" data-suggestion-index="' + index + '"' +
+            ' onclick="fillDialogueSuggestion(this)">' + escapeHtml(String(text)) + '</button>';
+        }).join('') + '</div>'
+    : '';
+  var attachable = !!dialogueCustomerId();
+  var attachments = dialogueAttachments.length
+    ? '<div class="dialogue-composer-attachments">' + dialogueAttachments.map(function(attachment, index) {
+        return '<span class="dialogue-attachment">' + escapeHtml(attachment.name || '附件') +
+          '<button type="button" class="dialogue-attachment-remove" aria-label="移除附件"' +
+            ' onclick="removeDialogueAttachment(' + index + ')">×</button></span>';
+      }).join('') + '</div>'
+    : '';
+  return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
+    chips + attachments +
+    '<label class="sr-only" for="dialogueReplyInput">回复 sela</label>' +
+    '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="3"' +
+      ' placeholder="用一句话回复 sela…（回车发送，Shift+回车换行）"' +
+      ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)">' +
+      escapeHtml(dialogueDraft) + '</textarea>' +
+    '<div class="dialogue-composer-actions">' +
+      '<label class="dialogue-attach-btn' + (attachable ? '' : ' is-disabled') + '">附件' +
+        '<input type="file" id="dialogueAttachInput" onchange="uploadDialogueAttachment(this)"' + (attachable ? '' : ' disabled') + '></label>' +
+      '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending ? ' disabled' : '') + '>发送</button>' +
+      '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()">结束对话</button>' +
+    '</div>' +
+    '<div class="dialogue-composer-error" role="alert" hidden></div>' +
+  '</form>';
+}
+
+function renderDialogueMessageHtml(message) {
+  var role = String(message.role || 'system');
+  var who = role === 'human' ? '你' : (role === 'system' ? '系统' : 'sela');
+  var refs = renderDialogueRefsHtml(message.refs);
+  var attachments = renderDialogueAttachmentsHtml(message.attachments);
+  return '<div class="dialogue-msg dialogue-msg--' + escapeHtml(role) + '" data-role="' + escapeHtml(role) + '">' +
+      '<div class="dialogue-msg-head"><span class="dialogue-msg-who">' + escapeHtml(who) + '</span>' +
+        '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(message.created_at)) + '</time></div>' +
+      '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
+      (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
+      (attachments ? '<div class="dialogue-msg-attachments">' + attachments + '</div>' : '') +
+    '</div>';
+}
+
+function renderDialogueRefsHtml(refs) {
+  if (!Array.isArray(refs) || !refs.length) return '';
+  var labels = { prospect: '线索', customer: '客户', message: '消息', action_receipt: '动作回执', file: '文件', thread: '对话' };
+  return refs.map(function(ref) {
+    if (!ref || !ref.type) return '';
+    var id = ref.id == null ? '' : String(ref.id);
+    return '<span class="dialogue-ref" title="' + escapeHtml(ref.type + ' · ' + id) + '">' +
+      escapeHtml(labels[ref.type] || ref.type) + ' ' + escapeHtml(id) + '</span>';
+  }).join('');
+}
+
+function renderDialogueAttachmentsHtml(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  return list.map(function(attachment) {
+    var size = attachment && attachment.size_bytes ? ' · ' + Math.max(1, Math.round(attachment.size_bytes / 1024)) + ' KB' : '';
+    return '<span class="dialogue-attachment">' + escapeHtml((attachment && attachment.name) || '附件') + escapeHtml(size) + '</span>';
+  }).join('');
+}
+
+function fillDialogueReply(text) {
+  var input = document.getElementById('dialogueReplyInput');
+  if (!input) return;
+  input.value = String(text == null ? '' : text);
+  dialogueDraft = input.value;
+  input.focus();
+}
+
+function fillDialogueSuggestion(button) {
+  if (!button) return;
+  var index = Number(button.getAttribute('data-suggestion-index'));
+  var suggestions = dialogueSuggestions();
+  if (suggestions[index] != null) fillDialogueReply(suggestions[index]);
+}
+
+function dialogueReplyKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    submitDialogueReply(event);
+    return false;
+  }
+  return true;
+}
+
+function setDialogueComposerBusy(busy) {
+  var form = document.getElementById('dialogueComposer');
+  if (!form) return;
+  form.querySelectorAll('button, textarea, input').forEach(function(el) { el.disabled = busy; });
+  form.classList.toggle('is-busy', busy);
+}
+
+function showDialogueComposerError(error) {
+  var form = document.getElementById('dialogueComposer');
+  if (!form) return;
+  var box = form.querySelector('.dialogue-composer-error');
+  if (!box) return;
+  box.hidden = false;
+  box.textContent = (error && error.error && error.error.message) || (error && error.message) || '发送失败，请重试';
+}
+
+async function submitDialogueReply(event) {
+  if (event && event.preventDefault) event.preventDefault();
+  if (dialogueSending || !dialogueThread) return false;
+  var input = document.getElementById('dialogueReplyInput');
+  var text = (input ? input.value : dialogueDraft || '').trim();
+  if (!text) { if (input) input.focus(); return false; }
+  var threadId = dialogueThread.id;
+  dialogueSending = true;
+  setDialogueComposerBusy(true);
+  var body = { text: text, seen_revision: dialogueThread.revision };
+  var attachmentIds = dialogueAttachments.map(function(a) { return a.file_object_id; }).filter(Boolean);
+  if (attachmentIds.length) body.attachment_ids = attachmentIds;
+  try {
+    await api('/api/inbox/threads/' + encodeURIComponent(threadId) + '/reply', { method: 'POST', body: JSON.stringify(body) });
+  } catch (error) {
+    dialogueSending = false;
+    setDialogueComposerBusy(false);
+    if (error && error.error && error.error.code === 'thread_changed') {
+      dialogueConflictNote = true;
+      await selectDialogueThread(threadId, { keepList: true });
+      showDialogueComposerError({ error: { message: '有新消息，请先看' } });
+      return false;
+    }
+    showDialogueComposerError(error);
+    return false;
+  }
+  dialogueSending = false;
+  dialogueDraft = '';
+  dialogueAttachments = [];
+  showToast('sela 已收到', 'success');
+  await loadDialogue({ afterReply: true, sentId: threadId });
+  return false;
+}
+
+async function closeDialogueThread() {
+  if (!dialogueThread) return;
+  var confirmed = await showAppConfirm({
+    title: '结束这条对话？',
+    message: '结束后这条对话会移到「已完成」。',
+    submitLabel: '结束对话'
+  });
+  if (!confirmed) return;
+  var threadId = dialogueThread.id;
+  try {
+    await api('/api/inbox/threads/' + encodeURIComponent(threadId) + '/close', {
+      method: 'POST',
+      body: JSON.stringify({ seen_revision: dialogueThread.revision, note: '' })
+    });
+  } catch (error) {
+    if (error && error.error && error.error.code === 'thread_changed') {
+      dialogueConflictNote = true;
+      await selectDialogueThread(threadId, { keepList: true });
+      showToast('有新消息，请先看', 'error');
+      return;
+    }
+    showToast('结束失败：' + ((error && error.error && error.error.message) || (error && error.message) || '请重试'), 'error');
+    return;
+  }
+  showToast('已结束对话', 'success');
+  await loadDialogue({ afterReply: true, sentId: threadId });
+}
+
+async function uploadDialogueAttachment(input) {
+  var file = input && input.files && input.files[0];
+  if (!file) return;
+  var customerId = dialogueCustomerId();
+  if (!customerId) { showToast('这条对话没有关联客户，暂时不能上传附件。', 'error'); input.value = ''; return; }
+  dialogueUploading = true;
+  var form = new FormData();
+  form.append('files', file);
+  form.append('category', 'inbox_dialogue');
+  try {
+    var response = await fetch('/api/customers/' + encodeURIComponent(customerId) + '/files', {
+      method: 'POST', body: form, credentials: 'same-origin'
+    });
+    var uploaded = await response.json().catch(function() { return {}; });
+    if (!response.ok) throw new Error((uploaded && (uploaded.error || uploaded.message)) || '上传失败');
+    var created = (uploaded.created || [])[0];
+    if (created && created.file_object_id) {
+      dialogueAttachments.push({ file_object_id: created.file_object_id, name: created.original_name || file.name });
+      showToast('附件已添加', 'success');
+    } else {
+      showToast('上传成功但未返回可用的附件编号。', 'error');
+    }
+  } catch (error) {
+    showToast('附件上传失败：' + ((error && error.message) || '请重试'), 'error');
+  } finally {
+    dialogueUploading = false;
+    if (input) input.value = '';
+    if (dialogueThread) { renderDialogueThread(); focusDialogueReply(); }
+  }
+}
+
+function removeDialogueAttachment(index) {
+  dialogueAttachments.splice(index, 1);
+  if (dialogueThread) renderDialogueThread();
+  focusDialogueReply();
+}
+
+function focusDialogueReply() { var input = document.getElementById('dialogueReplyInput'); if (input) input.focus(); }
+function focusDialogueRow(id) {
+  var row = document.querySelector('.dialogue-row[data-dialogue-id="' + id + '"]');
+  if (row) row.focus();
+}
+function focusDialogueList() {
+  var row = document.querySelector('.dialogue-row.is-selected') || document.querySelector('.dialogue-row');
+  if (row) row.focus();
+}
+function showDialogueList() {
+  dialogueMobileView = 'list';
+  var page = document.getElementById('page-dialogue');
+  if (page) page.classList.remove('dialogue-thread-open');
+  focusDialogueList();
+}
+async function reloadDialogueThread() {
+  if (!dialogueSelectedId) return;
+  dialogueConflictNote = null;
+  await selectDialogueThread(dialogueSelectedId, { keepList: true });
+}
+
+function moveDialogueSelection(delta) {
+  var list = orderedDialogueThreads();
+  if (!list.length) return;
+  var index = -1;
+  for (var i = 0; i < list.length; i++) { if (list[i].id === dialogueSelectedId) { index = i; break; } }
+  var next = index < 0 ? 0 : index + delta;
+  if (next < 0) next = 0;
+  if (next > list.length - 1) next = list.length - 1;
+  if (index >= 0 && next === index) { focusDialogueList(); return; }
+  selectDialogueThread(list[next].id, { focusList: true });
+}
+
+function dialogueKeydown(event) {
+  var page = document.getElementById('page-dialogue');
+  if (!page || !page.classList.contains('active')) return;
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (document.querySelector('.modal-overlay.show')) return;
+  if (event.key === 'Escape') {
+    if (isTypingTarget(event.target)) { event.target.blur(); event.preventDefault(); return; }
+    if (page.classList.contains('dialogue-thread-open')) { event.preventDefault(); showDialogueList(); }
+    return;
+  }
+  if (isTypingTarget(event.target)) return;
+  if (event.key === 'j' || event.key === 'J') { event.preventDefault(); moveDialogueSelection(1); return; }
+  if (event.key === 'k' || event.key === 'K') { event.preventDefault(); moveDialogueSelection(-1); return; }
+  if (event.key === 'Enter') { event.preventDefault(); focusDialogueReply(); }
+}
+document.addEventListener('keydown', dialogueKeydown);
+
+function updateTodayDialogueEntry() {
+  var entry = document.getElementById('todayDialogueEntry');
+  if (!entry) return;
+  var count = dialogueAwaitingCount();
+  var countEl = document.getElementById('todayDialogueCount');
+  var labelEl = document.getElementById('todayDialogueLabel');
+  if (countEl) countEl.textContent = count;
+  if (labelEl) labelEl.textContent = count ? '条 sela 对话等你回复' : '目前没有等你回复的对话';
+  entry.hidden = false;
+  entry.classList.toggle('is-empty', !count);
+  entry.setAttribute('aria-label', count ? (count + ' 条 sela 对话等你回复') : '目前没有等你回复的对话');
+}
+
+async function loadDialogueTodayEntry() {
+  var entry = document.getElementById('todayDialogueEntry');
+  try {
+    var data = await api('/api/inbox/threads?limit=1');
+    if (!data || !data.counts) { if (entry) entry.hidden = true; return; }
+    dialogueCounts = data.counts;
+    dialogueNavBadge();
+    updateTodayDialogueEntry();
+  } catch (error) {
+    if (entry) entry.hidden = true;
+  }
+}
+
+function openTodayDialogueEntry() { switchPage('dialogue'); }
