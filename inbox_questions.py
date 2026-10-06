@@ -30,8 +30,8 @@ QUESTION_LABELS = {
     QUESTION_IDENTITY_REVIEW: '身份待确认',
     QUESTION_FACT_REQUEST: '补充资料',
     QUESTION_INVESTIGATION: '提交调查',
-    QUESTION_SELA_REQUEST: 'Sela 请求',
-    QUESTION_EXCLUSION_REVIEW: '排除身份',
+    QUESTION_SELA_REQUEST: '补充 / 判断',
+    QUESTION_EXCLUSION_REVIEW: '排除项',
 }
 
 QUESTION_QUESTIONS = {
@@ -42,7 +42,7 @@ QUESTION_QUESTIONS = {
     QUESTION_FACT_REQUEST: '请补充系统无法安全推断的事实。',
     QUESTION_INVESTIGATION: '请提交调查结论或支持性证据。',
     QUESTION_SELA_REQUEST: '请补充事实或作出业务判断。',
-    QUESTION_EXCLUSION_REVIEW: '这条 prospect 是否属于已经排除的主体？',
+    QUESTION_EXCLUSION_REVIEW: '这条潜在客户是否属于已经排除的主体？',
 }
 
 ITEM_TYPE_QUESTION = {
@@ -68,7 +68,7 @@ SOURCE_LABELS = {
     'gmail': 'Gmail',
     'browser': '浏览器采集',
     'inbox': 'Inbox',
-    'sela': 'Sela',
+    'sela': '自动开发',
     'system': '系统',
 }
 

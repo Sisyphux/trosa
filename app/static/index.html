@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="app-version" content="{{VERSION}}">
-<title>Trosa</title>
+<title>操作台</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
 <link rel="stylesheet" href="/style.css?v={{VERSION}}-daylight-20260930">
@@ -55,7 +55,7 @@
 <div class="login-overlay" id="invitationOverlay" hidden>
   <div class="login-card">
     <div class="login-logo" aria-hidden="true"><span class="ui-icon ui-icon-sparkle"></span></div>
-    <div class="login-title">加入 Trosa</div>
+    <div class="login-title">加入团队</div>
     <div class="login-desc" id="invitationDesc">正在验证邀请链接…</div>
     <form class="login-pin-form" id="invitationForm" hidden>
       <label class="form-label" for="invitationName">姓名（登录账号）</label>
@@ -67,7 +67,7 @@
       <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号并进入</button>
       <div class="login-error" id="invitationError" role="alert"></div>
     </form>
-    <button class="btn btn-sm" id="invitationBackToLogin" type="button" onclick="returnToStandardLogin()" style="margin:16px auto 0; display:block;">返回正常登录</button>
+    <button class="btn btn-sm" id="invitationBackToLogin" type="button" onclick="returnToStandardLogin()" style="margin:16px auto 0; display:block;">返回登录</button>
   </div>
 </div>
 
@@ -81,18 +81,18 @@
      layer (brand click, Ctrl/Cmd-K or "/"), which also holds the global search. -->
 <div class="app-layout app-room" id="appLayout">
   <header class="room-top" id="roomTop">
-    <button type="button" class="room-brand" id="roomBrand" onclick="openRoomIndex()" aria-haspopup="dialog" aria-expanded="false" aria-controls="roomIndex" aria-label="打开导航与搜索" title="导航与搜索">Trosa</button>
+    <button type="button" class="room-brand" id="roomBrand" onclick="openRoomIndex()" aria-haspopup="dialog" aria-expanded="false" aria-controls="roomIndex" aria-label="打开导航与搜索" title="导航与搜索"></button>
     <span class="room-page" id="roomPageName" aria-live="polite">今天</span>
     <span class="room-top-spacer"></span>
     <button type="button" class="room-key" onclick="openRoomIndex()" aria-label="搜索与导航" title="搜索与导航"><span class="room-key-label">搜索与导航</span><kbd id="roomKeyHint">Ctrl K</kbd></button>
-    <span class="room-who" id="sidebarIdentity"><i aria-hidden="true"></i><span id="sidebarUserName">Trosa</span></span>
+    <span class="room-who" id="sidebarIdentity"><i aria-hidden="true"></i><span id="sidebarUserName">当前用户</span></span>
   </header>
 
   <!-- Index layer: summoned, full screen, closed with Esc. -->
   <div class="room-index" id="roomIndex" role="dialog" aria-modal="true" aria-labelledby="roomIndexTitle" hidden>
     <div class="room-index-inner">
       <div class="room-index-head">
-        <span class="micro" id="roomIndexTitle">Trosa · 导航与搜索</span>
+        <span class="micro" id="roomIndexTitle">导航与搜索</span>
         <button type="button" class="room-index-close" onclick="closeRoomIndex()" aria-label="关闭导航"><kbd>Esc</kbd></button>
       </div>
       <form class="global-page-search" role="search" onsubmit="submitGlobalPageSearch(event)">
@@ -221,7 +221,7 @@
             <details class="today-more">
               <summary>本周记录与工作概览</summary>
               <div class="today-more-grid">
-                <div><h3>本周记录</h3><div id="weeklyFollowList"><div class="empty-state"><p>本周暂无跟进记录</p></div></div></div>
+                <div><h3>本周记录</h3><div id="weeklyFollowList"><div class="empty-state"><p>本周暂无沟通记录</p></div></div></div>
                 <div><h3>最近动态</h3><div id="recentActivity"><div class="empty-state"><p>暂无最近动态</p></div></div></div>
               </div>
             </details>
@@ -250,7 +250,7 @@
         </div>
       </div>
       <div class="page-body inbox-page-body">
-        <section class="inbox-sela-runs" id="inboxSelaRuns" aria-live="polite" aria-label="Sela 执行回执"></section>
+        <section class="inbox-sela-runs" id="inboxSelaRuns" aria-live="polite" aria-label="执行回执"></section>
         <div class="inbox-triage">
           <div class="inbox-filters" id="inboxFilters"><div class="empty-state"><p>正在加载</p></div></div>
           <div class="inbox-list" id="inboxList"><div class="inbox-skeleton" role="status"><p class="inbox-skeleton-label">正在加载 Inbox</p><span class="inbox-skeleton-line"></span><span class="inbox-skeleton-line"></span><span class="inbox-skeleton-line"></span></div></div>
@@ -265,7 +265,7 @@
         <div class="page-heading">
           <div class="page-eyebrow">关系索引</div>
           <h2>客户</h2>
-          <p class="page-lede">搜索框是找客户的第一入口；下面的视图按真实沟通自动计算，无需手工维护。</p>
+          <p class="page-lede">搜索框是找客户的第一入口。</p>
         </div>
         <div class="command-shelf is-collapsible customer-command-shelf" aria-label="快捷操作">
           <button class="command-icon" type="button" onclick="openGlobalSearch()" aria-label="搜索客户" title="搜索客户">
@@ -356,7 +356,7 @@
             <label>联系日期从<input type="date" id="filterLastFrom"></label>
             <label>联系日期到<input type="date" id="filterLastTo"></label>
             <label>标签<input type="text" id="filterTag"></label>
-            <label>客户来源<select id="filterSource"><option value="">全部</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></label>
+            <label>客户来源<select id="filterSource"><option value="">全部</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option value="Sela">自动开发</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></label>
           </div>
           <div class="advanced-filter-actions"><button class="btn btn-sm" onclick="clearCustomerFilters()">清空</button><button class="btn btn-sm btn-primary" onclick="applyCustomerFilters()">应用筛选</button></div>
         </div>
@@ -512,7 +512,7 @@
         <div class="page-heading">
           <div class="page-eyebrow">审计</div>
           <h2>操作日志</h2>
-          <p class="page-lede">系统内的写入与改动轨迹，用于核对来源。</p>
+          <p class="page-lede">系统内的改动轨迹，用于核对来源。</p>
         </div>
       </div>
       <div class="page-body">
@@ -525,8 +525,8 @@
       <div class="page-header ov-header">
         <div class="page-heading">
           <div class="page-eyebrow">团队工作台</div>
-          <h2>本周沟通</h2>
-          <p class="page-lede">团队成员各自确认过的沟通事实，按客户排开；颜色只表达内容层级，不评价个人。</p>
+          <h2>本周工作</h2>
+          <p class="page-lede">团队成员各自确认过的沟通事实，按客户排开。</p>
         </div>
         <div class="ov-header-meta">
           <div class="ov-header-date" id="overviewDateLabel"></div>
@@ -548,7 +548,7 @@
         <div class="page-heading">
           <div class="page-eyebrow">配置</div>
           <h2>设置</h2>
-          <p class="page-lede">按主题分组。日常设置即时生效；维护类操作放在最后，技术细节默认收起。</p>
+          <p class="page-lede">日常设置会立即生效。维护类操作放在最后。</p>
         </div>
       </div>
       <div class="page-body">
@@ -580,12 +580,12 @@
             <div class="settings-group"><h4>主导航顺序</h4><div class="nav-order-settings" id="navOrderSettings"></div><label class="settings-inline-field">默认打开<select id="preferenceDefaultPage"><option value="dashboard">今天</option><option value="inbox">Inbox</option><option value="customers">客户</option><option value="overview">本周工作</option></select></label></div>
             <div class="settings-group"><h4>客户列表字段</h4><div class="column-settings" id="customerColumnSettings"></div></div>
             <div class="settings-group"><h4>界面字号</h4><div class="settings-inline-field"><span>字号</span><select id="preferenceFontSize" onchange="applyFontSize(this.value)"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option><option value="xl">超大</option></select><span class="settings-font-preview">Aa 文字预览</span></div></div>
-            <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式参考设备状态与本地帧率，不上传页面或客户数据。</p></div>
+            <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动</option><option value="performance">性能优先</option><option value="full">完整视觉</option></select></div><p class="settings-help" id="performanceProbeStatus">自动模式会在本机做一次流畅度测试。测试不会上传你的页面内容或客户数据。</p></div>
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
         </div>
         <div class="card ai-integration-card" id="aiIntegrationSettingsCard" data-settings-section="ai" aria-labelledby="aiIntegrationTitle">
-          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI API 快速接入</h3><p>AI 功能共用此接口。截图识别需使用支持图片的模型；连接测试不发送客户资料。</p></div></div>
+          <div class="card-header"><div><h3 id="aiIntegrationTitle">AI 接口</h3><p>AI 功能共用此接口。截图识别需使用支持图片的模型；连接测试不发送客户资料。</p></div></div>
           <div class="card-body">
             <div class="ai-config-status" id="aiConfigStatus" aria-live="polite">正在读取 AI 配置…</div>
             <div class="ai-config-form" id="aiConfigForm" hidden>
@@ -612,7 +612,7 @@
                   <span class="ai-config-model-status" id="aiConfigModelStatus" aria-live="polite"></span>
                 </label>
               </div>
-              <p class="settings-help" id="aiConfigHelp">API Key 只保存在服务端的独立权限文件中，页面不会回显明文；修改后立即对新的 AI 请求生效。</p>
+              <p class="settings-help" id="aiConfigHelp">API Key 只存在系统后台，不会显示在页面上。改完后，新的 AI 操作会用新 Key，已经在进行的不受影响。</p>
               <div class="ai-config-actions">
                 <button class="btn btn-sm" type="button" onclick="testAiConfig()">测试连接</button>
                 <button class="btn btn-sm btn-primary" type="button" onclick="saveAiConfig()">保存并立即生效</button>
@@ -633,11 +633,11 @@
           </div>
         </div>
         <div class="card gmail-integration-card" data-settings-section="gmail" id="settings-section-gmail" aria-labelledby="gmailIntegrationTitle">
-          <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>同步收发邮件；唯一邮箱匹配自动关联客户，其余进入 Inbox 确认。</p></div></div>
+          <div class="card-header"><div><h3 id="gmailIntegrationTitle">Gmail 沟通同步</h3><p>邮箱能唯一对应到客户的，会自动关联；对应不上的，进入 Inbox 等你确认。</p></div></div>
           <div class="card-body" id="gmailIntegrationStatus" aria-live="polite"><div class="settings-help">正在检查 Gmail 连接状态…</div></div>
         </div>
         <div class="card" id="excelImportSettingsCard" data-settings-section="excel" data-module="excel_import">
-          <div class="card-header"><h3>Excel 导入</h3></div>
+          <div class="card-header"><h3>导入 Excel</h3></div>
           <div class="card-body">
             <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">支持 .xlsx、.xls，上传后自动识别列名。</p>
             <form id="excelUploadForm" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -652,7 +652,7 @@
           </div>
         </div>
         <div class="card" data-settings-section="health" id="settings-section-health">
-          <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">一键诊断</button></div>
+          <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">诊断</button></div>
           <div class="card-body" id="healthCheckPanel"><div class="empty-state"><p style="color:var(--fg-muted);">尚未检测</p></div></div>
         </div>
         <div class="card" data-settings-section="system" id="settings-section-system">
@@ -683,8 +683,8 @@
 <div class="modal-overlay cw-overlay" id="customerEditModal" role="dialog" aria-modal="true" aria-labelledby="customerEditTitle">
   <div class="cw-app" tabindex="-1">
     <header class="cw-top">
-      <button type="button" class="cw-brand" onclick="closeModal('customerEditModal')" title="返回">Trosa</button>
-      <span class="cw-meta tnum" id="cwMeta">客户工作台</span>
+      <button type="button" class="cw-brand" onclick="closeModal('customerEditModal')" title="返回">返回</button>
+      <span class="cw-meta tnum" id="cwMeta">客户详情</span>
       <nav class="cw-nav" role="tablist" aria-label="客户分区">
         <button type="button" class="tab-btn cw-tab active" role="tab" aria-selected="true" aria-controls="editTabOutreach" data-customer-tab="editTabOutreach" data-key="1" onclick="switchTab(this, 'editTabOutreach')">最近沟通</button>
         <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabBasic" tabindex="-1" data-customer-tab="editTabBasic" data-key="2" onclick="switchTab(this, 'editTabBasic')">资料</button>
@@ -693,7 +693,7 @@
         <button type="button" class="tab-btn cw-tab" role="tab" aria-selected="false" aria-controls="editTabTasks" tabindex="-1" data-customer-tab="editTabTasks" data-key="5" onclick="switchTab(this, 'editTabTasks')">待办</button>
       </nav>
       <span class="cw-who"><i aria-hidden="true"></i><span id="cwWho"></span></span>
-      <span class="cw-tools" id="cwExportTools" aria-label="一键导出">
+      <span class="cw-tools" id="cwExportTools" aria-label="导出">
         <button type="button" class="cw-link" onclick="exportCurrentCustomerEmails()" title="复制该客户全部去重联系人邮箱">导出邮箱</button>
         <button type="button" class="cw-link" onclick="copyCustomerContext('timeline')" title="导出客户资料、需求备注与完整沟通记录">导出全部沟通</button>
       </span>
@@ -774,7 +774,7 @@
             <div class="form-group"><label class="form-label">国家 / 地区</label><input type="text" class="form-control" id="editCountry" placeholder="自由填写，例如：美国、阿联酋、加拿大"></div>
             <div class="form-row"><div class="form-group legacy-classification"><label class="form-label">等级（旧数据，可选）</label><select class="form-control" id="editLevel"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option><option value="D">D</option><option value="A+">A+</option><option value="A-">A-</option><option value="B+">B+</option><option value="B-">B-</option><option value="C+">C+</option><option value="C-">C-</option><option value="D+">D+</option><option value="D-">D-</option></select></div><div class="form-group"><label class="form-label">业务角色</label><select class="form-control" id="editBusinessRole"><option value="">--</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div></div>
             <div class="form-row"><div class="form-group"><label class="form-label">行业领域</label><input type="text" class="form-control" id="editField" list="industryFieldOptions" placeholder="选择建议或自由填写"></div><div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="editBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div></div>
-            <div class="form-row"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="editSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="editSourceDetail" placeholder="可选，例如：SIGN CHINA 2026 / ImportGenius"></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="editSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option value="Sela">自动开发</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="editSourceDetail" placeholder="可选，例如：SIGN CHINA 2026 / ImportGenius"></div></div>
             <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="editWebsite"></div>
             <div class="form-group"><label class="form-label">标签</label><input type="text" class="form-control" id="editTags" placeholder="自由填写，用逗号分隔，例如：中东, 展会客户, 亚克力"></div>
             <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
@@ -924,7 +924,7 @@
           <input type="checkbox" id="completeIsReported" onchange="onCompleteReportedChange()">
           <div>
             <div class="report-opt-title">同步到周报</div>
-            <div class="report-opt-hint">勾选后，本次跟进自动汇总到本周周报的重点事项</div>
+            <div class="report-opt-hint">勾选后，本次跟进会汇总到周报的重点事项</div>
           </div>
         </label>
         <div class="report-cat-section" id="reportCatSection">
@@ -978,7 +978,7 @@
 <div class="modal-overlay" id="addNewCustomerModal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addNewCustomerModalTitle" style="max-width:560px;">
     <div class="modal-header">
-      <h3 id="addNewCustomerModalTitle">添加新客户</h3>
+      <h3 id="addNewCustomerModalTitle">添加客户</h3>
       <button class="modal-close" onclick="closeModal('addNewCustomerModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -988,14 +988,14 @@
         <div class="form-group"><label class="form-label">类型</label><select class="form-control" id="newCustomerType"><option value="">待识别</option><option value="中间商">中间商</option><option value="终端">终端</option></select></div>
       </div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">行业领域</label><input type="text" class="form-control" id="newCustomerField" list="industryFieldOptions" placeholder="选择建议或自由填写更细的行业"></div>
-      <div class="form-row add-customer-advanced new-customer-advanced"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="newCustomerSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="newCustomerSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div></div>
+      <div class="form-row add-customer-advanced new-customer-advanced"><div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="newCustomerSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option value="Sela">自动开发</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div><div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="newCustomerSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div></div>
       <div class="form-group"><label class="form-label">网站</label><input type="text" class="form-control" id="newCustomerWebsite" placeholder="https://example.com"><button type="button" class="btn" id="newSmartFillButton" style="margin-top:8px;" onclick="smartFillCustomer('new')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button><button type="button" class="text-action add-more-toggle" onclick="toggleAddCustomerAdvanced('new')">更多公司资料</button><div class="smart-fill-review" id="newSmartFillReview" hidden></div></div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加联系人</button></div>
         <div id="newDraftContacts"></div>
         <details class="draft-email-import"><summary>批量导入邮箱</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="每行一个邮箱，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、路由与重复邮箱。</small></div></details>
       </section>
-      <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站智能填充，也可以手动填写"></textarea></div>
+      <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站自动填入，也可以手动填写"></textarea></div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
@@ -1016,7 +1016,7 @@
       <div class="add-customer-basics">
         <div class="form-group">
           <label class="form-label">客户官网 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
-          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button type="button" class="btn" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>自动识别</button></div>
+          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button type="button" class="btn" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button></div>
         </div>
         <div class="form-group">
           <label class="form-label">公司 / 客户名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
@@ -1043,7 +1043,7 @@
         <div class="form-group"><label class="form-label">业务阶段</label><select class="form-control" id="addExistBusinessStage"><option value="">未标记</option><option value="成交">成交</option><option value="流失">流失</option></select></div>
       </div>
       <div class="form-row add-customer-advanced exist-customer-advanced">
-        <div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="addExistSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option>Sela</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div>
+        <div class="form-group"><label class="form-label">客户来源</label><select class="form-control" id="addExistSource"><option value="">未记录</option><option>展会</option><option>海关数据</option><option>LinkedIn</option><option>Google / 官网搜索</option><option value="Sela">自动开发</option><option>客户转介绍</option><option>老客户 / 已有资源</option><option>Excel / 历史导入</option><option>其他</option></select></div>
         <div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="addExistSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div>
       </div>
       <section class="draft-contacts-section">
@@ -1086,7 +1086,7 @@
 <div class="modal-overlay" id="batchAddModal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="batchAddModalTitle" style="max-width:600px;">
     <div class="modal-header">
-      <h3 id="batchAddModalTitle">批量添加新客户</h3>
+      <h3 id="batchAddModalTitle">批量添加</h3>
       <button class="modal-close" onclick="closeModal('batchAddModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">
@@ -1184,7 +1184,7 @@
   <div class="modal modal-app-dialog" role="dialog" aria-modal="true" aria-labelledby="appDialogTitle">
     <div class="modal-header">
       <div>
-        <p class="app-dialog-eyebrow" id="appDialogEyebrow">TRADE OS</p>
+        <p class="app-dialog-eyebrow" id="appDialogEyebrow"></p>
         <h3 id="appDialogTitle">输入信息</h3>
       </div>
       <button class="modal-close" type="button" onclick="dismissAppDialog()" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
@@ -1222,8 +1222,8 @@
       </div>
       <div class="form-group"><label class="form-label">下次跟进日期</label><input type="date" class="form-control" id="todayQuickEditNextFollowUp"></div>
       <div class="modal-subhead">
-        <div class="modal-subhead-title">批量填写跟进记录（可选）</div>
-        <div class="modal-note-hint">填写后会为每个选中客户创建同一条跟进记录，并完成今日待办</div>
+        <div class="modal-subhead-title">批量填写沟通记录（可选）</div>
+        <div class="modal-note-hint">会为每个选中客户创建同一条沟通记录，并完成今日待办</div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">沟通方式</label><select class="form-control" id="todayQuickEditActivityType"><option value="follow_up">其他跟进</option><option value="whatsapp">WhatsApp</option><option value="email">邮件</option><option value="phone">电话</option><option value="meeting">会议</option><option value="quote">报价</option><option value="sample">寄样</option></select></div>
@@ -1243,7 +1243,7 @@
 <div class="modal-overlay" id="followEditModal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="followEditModalTitle" style="max-width:550px;">
     <div class="modal-header">
-      <h3 id="followEditModalTitle">编辑跟进记录</h3>
+      <h3 id="followEditModalTitle">编辑沟通记录</h3>
       <button class="modal-close" onclick="closeModal('followEditModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button>
     </div>
     <div class="modal-body">

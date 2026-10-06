@@ -239,6 +239,15 @@ CUSTOMER_SOURCE_ALIASES = {
     'other': '其他',
 }
 _MAX_CUSTOMER_SOURCE_DETAIL = 200
+# The stored option stays canonical ('Sela'); screens and copied context show
+# the plain business wording instead.
+CUSTOMER_SOURCE_DISPLAY_LABELS = {'Sela': '自动开发'}
+
+
+def customer_source_display(value):
+    raw = str(value or '').strip()
+    return CUSTOMER_SOURCE_DISPLAY_LABELS.get(raw, raw)
+
 _AGENT_GATEWAY_TOKEN_PREFIX = 'agent_gateway_token:'
 _AGENT_GATEWAY_SCOPES = frozenset(('crm:read', 'crm:propose', 'crm:write'))
 
@@ -4359,7 +4368,7 @@ def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now, candidat
         'research': _sela_prospect_research(prospect),
     }, ensure_ascii=False)[:20000]
     _create_inbox_item(
-        conn, item_type='sela_identity_review', title='sela Prospect 身份待确认', content=content,
+        conn, item_type='sela_identity_review', title='潜在客户身份待确认', content=content,
         dedupe_key=f'sela:prospect-review:{source_id}', status='open', created_at=now,
         **_inbox_question_meta('sela_identity_review', f'sela:prospect-review:{source_id}', source_id),
     )
@@ -4378,7 +4387,7 @@ def _sela_exclusion_review_inbox(conn, customer_id, source_id, review, now):
     }, ensure_ascii=False)
     _create_inbox_item(
         conn, item_type='sela_exclusion_review', customer_id=customer_id,
-        title='sela 排除身份待确认', content=content,
+        title='排除项待确认', content=content,
         dedupe_key=f'sela:exclusion-review:{source_id}', status='open', created_at=now,
         **_inbox_question_meta('sela_exclusion_review', f'sela:exclusion-review:{source_id}', source_id),
     )
@@ -4481,7 +4490,7 @@ def _sela_agent_request_payload(value):
     if not title:
         raise CrmWriteError('Agent 请求缺少 need/title')
     if not context and not proposal:
-        context = 'sela 需要人工判断这一项业务问题。'
+        context = '需要人工判断这一项业务问题。'
     metadata = [
         f'公司：{company}' if company else '',
         f'类型：{kind}',
@@ -4673,7 +4682,7 @@ def _inbox_sela_resume_runs(conn, limit=8):
         display = _sela_request_display(row)
         runs.append({
             'inbox_id': int(row.get('id') or 0),
-            'company': str(request.get('company') or display.get('company') or 'Sela prospect')[:500],
+            'company': str(request.get('company') or display.get('company') or '潜在客户')[:500],
             'status': status,
             'action': _continuation.normalize_action(resume_run.get('action')),
             'summary': str(resume_run.get('summary') or '')[:500],
@@ -4729,7 +4738,7 @@ def _sela_resolve_agent_request(conn, item_id, action, resolution, now):
         if not already_recorded:
             content = '\n'.join((
                 marker,
-                '人工处理 Agent 请求',
+                '人工处理 AI 建议',
                 f'请求：{row["title"]}',
                 f'决定：{action}',
                 f'结果：{final_resolution}',
@@ -4762,7 +4771,7 @@ def _sela_resolve_exclusion_review(conn, profile, decision, note, now, *, resolv
     if not review:
         if prior_resolution == wanted_resolution:
             return _sela_prospect_view(conn, profile)
-        raise CrmWriteError('该 Prospect 没有待确认的排除身份')
+        raise CrmWriteError('该潜在客户没有待确认的排除项')
     state.pop('exclusion_review', None)
     state['exclusion_resolution'] = wanted_resolution
     state['exclusion_resolved_at'] = now
@@ -5410,7 +5419,7 @@ def _sela_upsert_prospect(conn, prospect):
     revision = _sela_prospect_revision(conn, profile, customer)
     _record_operation_log(
         conn, 'UPSERT', 'sela_prospect', customer_id,
-        f'sela Prospect {source_id}', now,
+        f'Sela Prospect {source_id}', now,
     )
     return {
         'success': True, 'status': 'SYNCED', 'source_id': source_id,
@@ -5965,7 +5974,7 @@ def sela_integration_auto_resume_result(source_id):
                 'email': recipient_email, 'contact': {},
             }, now)
         _record_operation_log(conn, 'UPDATE', 'sela_auto_resume', int(customer['id']),
-                              f'sela auto resume {source_id}', now)
+                              f'Sela auto resume {source_id}', now)
         response = {'success': True, 'status': 'SYNCED', 'action': action, 'source_id': source_id,
                     'trosa_inbox_id': inbox_id, 'answer_sha256': answer_sha256,
                     'summary': '研究已更新。' if action == 'research' else '未发送草稿已保存。'}
@@ -6133,7 +6142,7 @@ def customer_agent_prospect_exclusion_decision(customer_id):
     finally:
         conn.close()
     if not source_id:
-        return jsonify({'error': '该客户没有 sela Prospect 排除待确认'}), 404
+        return jsonify({'error': '该客户没有需要确认的排除项'}), 404
     return _sela_exclusion_decision_response(source_id, request.get_json(silent=True))
 
 
@@ -6207,7 +6216,7 @@ def customer_agent_prospect_contact_permission(customer_id):
         profile = _sela_profile_for_customer(conn, customer_id)
         if not profile:
             conn.rollback()
-            return jsonify({'success': False, 'error': '该客户没有 sela Prospect 档案'}), 404
+            return jsonify({'success': False, 'error': '该客户没有潜在客户资料'}), 404
         try:
             updated = _sela_set_contact_permission(
                 conn, profile, payload.get('permission'),
@@ -6323,7 +6332,7 @@ def sela_integration_prospect_contact_block(source_id):
             return jsonify({'success': False, 'error': 'Prospect 不存在'}), 404
         profile = dict(profile)
         now = _sela_now()
-        note = f'Sela 判定非目标买家并停止联系：{reason.strip()}'
+        note = f'系统判定非目标买家并停止联系：{reason.strip()}'
         if str(profile.get('contact_permission') or '') != 'do_not_contact':
             view = _sela_prospect_view(conn, profile)
             if not view:
@@ -7137,7 +7146,7 @@ def _sela_record_outbound_reply(cursor, customer_id, outbound, action_name, now)
     thread_id = str(outbound.get('thread_id') or '').strip()[:1000]
     in_reply_to = str(outbound.get('in_reply_to') or '').strip()[:1000]
     sent_at = str(outbound.get('sent_at') or '').strip()[:200]
-    lines = [marker, 'sela 自动邮件回复']
+    lines = [marker, '自动邮件回复']
     if subject:
         lines.append(f'主题：{subject}')
     lines.append(f'消息 ID：{message_id}')
@@ -7295,7 +7304,7 @@ def sela_integration_reply():
         f'正文：\n{body}'
     )[:30000]
     activity_result = (
-        f'sela 自动路由：{action_name or route or "REPLY"}；'
+        f'自动处理：{action_name or route or "REPLY"}；'
         f'事件：{reply_event}；意图：{intent or "UNKNOWN"}'
     )
     if reason:
@@ -8251,7 +8260,7 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
     if next_state:
         interpreted_filters.append({'scheduled': '已有下一步', 'none': '尚无下一步', 'overdue': '下一步已逾期'}.get(next_state, next_state))
     if source_filter:
-        interpreted_filters.append('来源：' + source_filter)
+        interpreted_filters.append('来源：' + customer_source_display(source_filter))
 
     if cleaned_search:
         ranks = _customer_search_rank_data(conn, customers, search_tokens, contexts=contexts)
@@ -8465,7 +8474,7 @@ def _customer_list_payload(args, only_ids=None):
     if source_filter:
         query += " AND trim(COALESCE(source, '')) = ?"
         params.append(source_filter)
-        interpreted_filters.append('来源：' + source_filter)
+        interpreted_filters.append('来源：' + customer_source_display(source_filter))
 
     if view == 'priority':
         query += ' AND COALESCE(is_pinned, 0) = 1'
@@ -8985,7 +8994,7 @@ def get_customer_summary(customer_id):
         judgment = (customer.get('customer_judgment') or '').strip()
         customer['current_judgment'] = {'label': judgment or '未记录人工判断', 'source': '用户记录' if judgment else '待确认'}
         customer['current_next_step'] = {
-            'label': business_facts['next_task_title'] or '没有明确下一步',
+            'label': business_facts['next_task_title'] or '尚无下一步',
             'date': business_facts['next_task_date'],
             'source': '待办记录' if business_facts['next_task'] else '系统事实',
         }
@@ -9053,7 +9062,7 @@ def get_customer_summary(customer_id):
         'source': '用户记录' if judgment else '待确认',
     }
     customer['current_next_step'] = {
-        'label': business_facts['next_task_title'] or '没有明确下一步',
+        'label': business_facts['next_task_title'] or '尚无下一步',
         'date': business_facts['next_task_date'],
         'source': '待办记录' if business_facts['next_task'] else '系统事实',
     }
@@ -9143,7 +9152,7 @@ def _customer_context_markdown(customer, contacts, follow_history, outreach_emai
              f'- 国家：{customer.get("country") or "待确认"}',
              f'- 官网：{customer.get("website") or "待确认"}',
              f'- 业务/简介：{customer.get("profile") or customer.get("field") or "待确认"}']
-    source_text = ' / '.join(part for part in (str(customer.get('source') or '').strip(),
+    source_text = ' / '.join(part for part in (customer_source_display(customer.get('source')),
                                                str(customer.get('source_detail') or '').strip()) if part)
     if source_text:
         lines.append(f'- 来源：{source_text}')
@@ -9156,7 +9165,7 @@ def _customer_context_markdown(customer, contacts, follow_history, outreach_emai
     else:
         lines.append('- 联系人：待确认')
     if agent_prospect:
-        lines.extend(['', '## sela Agent 研究资料（仅作研究依据，未自动视为已确认客户事实）'])
+        lines.extend(['', '## Sela 研究资料（仅作研究依据，未自动视为已确认客户事实）'])
         research_labels = (
             ('资格状态', 'qualification_status'), ('研究状态', 'research_status'),
             ('置信度', 'confidence'), ('沟通角度', 'angle'),
@@ -10548,7 +10557,7 @@ def batch_add_follow_history():
     names = [row['name'] for row in rows]
     log_operation('BATCH_FOLLOW_UP', 'customer', None,
                   f'批量添加跟进记录: {", ".join(names[:5])}{"..." if len(names) > 5 else ""}')
-    return jsonify({'message': f'已为 {len(rows)} 个客户添加跟进记录'})
+    return jsonify({'message': f'已为 {len(rows)} 个客户添加沟通记录'})
 
 
 @app.route('/api/customers/batch/delete', methods=['POST'])
@@ -11315,7 +11324,7 @@ def _question_evidence(member, sela_review=None):
         detail = review.get('explanation') or review.get('reason_label') or ''
         if item_type == 'sela_exclusion_review':
             structured = {
-                'kind': review.get('reason_label') or '排除身份核对',
+                'kind': review.get('reason_label') or '排除项核对',
                 'company': review.get('canonical_name') or '',
                 'fields': [
                     {'label': '历史排除主体', 'value': review.get('canonical_name') or ''},
@@ -11468,7 +11477,7 @@ def _question_headline(kind, primary, suggested, customer):
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return primary.get('title') or '确认是否属于已排除主体'
     if kind == _inbox_questions.QUESTION_SELA_REQUEST:
-        return primary.get('title') or 'Sela 需要补充事实或业务判断'
+        return primary.get('title') or '需要补充事实或业务判断'
     return primary.get('title') or '需要你作出判断'
 
 
@@ -11476,23 +11485,23 @@ def _question_why(kind, primary):
     if kind == _inbox_questions.QUESTION_IDENTITY:
         return '系统无法从发件邮箱唯一确定客户，也不会自动把沟通写到错误客户名下。'
     if kind == _inbox_questions.QUESTION_REPLY:
-        return '沟通事实与下一步需要人工确认后才写入客户时间线和待办。'
+        return '沟通事实和下一步要经你确认后，才会记到客户时间线和待办。'
     if kind == _inbox_questions.QUESTION_APPROVAL:
         return ('批准只表示记录你的判断并关闭这组证据；系统不会自动修改客户或联系人资料，'
                 '也不会发送邮件、报价或作出价格、交期承诺。要更正资料请在右侧直接填写。')
     if kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
         return '仅凭名称或来源无法安全判定是否为同一主体，需要你的业务判断。'
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
-        return 'Sela 发现这条 prospect 可能属于历史排除主体；你的决定会更新 Trosa 中的排除状态。'
+        return '这条潜在客户可能就是你以前排除过的那个主体。你的决定会更新排除状态。'
     if kind == _inbox_questions.QUESTION_SELA_REQUEST:
         request = _sela_agent_request_structured(primary or {})
         request_kind = str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper()
         if request_kind == 'SEND_APPROVAL':
-            return '这是旧版发送审批请求；回答只会关闭请求，不会发送邮件或启动 Sela。'
+            return '这是旧版发送审批请求。回答只会关闭请求，不会发送邮件，也不会自动处理。'
         if not str(request.get('source_id') or '').strip():
-            return '此请求没有唯一 Prospect 来源；回答会保存在 Trosa，但无法自动续跑，请人工处理。'
-        return ('Sela 请求了补充事实或业务判断。回答会先保存在 Trosa；只有目标仍是未互动冷线索、'
-                '未被排除或停止联系，且没有发送记录或现有草稿时，才会排入公开研究/未发送草稿续跑。'
+            return '这条请求没有唯一对应的潜在客户。回答会保存，但无法自动继续，需要你人工处理。'
+        return ('这是补充事实或业务判断的请求。回答会先保存；只有目标仍是未互动冷线索、'
+                '未被排除或停止联系，且没有发送记录或现有草稿时，才会排入公开研究或未发送草稿的自动处理。'
                 '其他情况会标记为需人工复核。')
     return '系统缺少作出安全判断所需的信息。'
 
@@ -11540,15 +11549,15 @@ def _question_completion_effects(kind, primary=None):
         if request_kind == 'SEND_APPROVAL':
             return ['关闭这条旧发送审批请求；不会触发邮件发送。']
         if not str(request.get('source_id') or '').strip():
-            return ['记录结构化回答并关闭请求；此请求未关联 prospect，不会自动续跑。']
-        effects = ['记录结构化回答并关闭请求。符合续跑条件时排入 Sela 公开研究或未发送草稿。']
+            return ['会记下你的回答并关闭请求。这条请求没有关联的潜在客户，不会自动继续。']
+        effects = ['会记下你的回答并关闭请求。符合条件时，会排入公开研究或准备未发送的草稿。']
         missing = request.get('missing_facts') if isinstance(request.get('missing_facts'), list) else []
         if any(str(fact.get('field') or '').lower() == 'contact_email'
                for fact in missing if isinstance(fact, dict)):
-            effects.append('补充邮箱会写入该 prospect 的 Trosa 联系人，并由 Sela 按现有规则验证后继续。')
+            effects.append('补充的邮箱会加到该潜在客户的联系人里，并按现有规则验证后继续。')
         return effects
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
-        return ['保存主体判断并更新 Trosa 中的 Sela 排除状态。']
+        return ['保存主体判断并更新排除状态。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
         return ['记录你的判断并关闭这组证据。']
     if kind == _inbox_questions.QUESTION_FACT_REQUEST:
@@ -11566,7 +11575,7 @@ def _question_will_not_do(kind, primary=None):
         request = _sela_agent_request_structured(primary or {})
         if str(request.get('kind') or _sela_request_display(primary or {}).get('kind') or '').upper() == 'SEND_APPROVAL':
             return ['不会发送邮件，也不会创建客户、联系人或待办。']
-        return ['不会发送邮件、创建客户或待办，也不会修改业务阶段；邮箱会写入该 prospect 的联系人。']
+        return ['不会发邮件，也不会创建客户或待办，不会改动业务阶段。邮箱会加到该潜在客户的联系人里。']
     if kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
         return ['不会新建客户或联系人；不会发送邮件。']
     if kind == _inbox_questions.QUESTION_APPROVAL:
@@ -11583,10 +11592,10 @@ def _sela_missing_fact_response_fields(missing):
         label = _sela_prospect_text(fact.get('label') or fact_name, 120) or '需要补充的事实'
         help_text = _sela_prospect_text(fact.get('why'), 500) or '不知道时可留空并在说明中注明。'
         if fact_name == 'contact_email':
-            help_text += (' 该邮箱会写入该 prospect 的 Trosa 联系人，并由 Sela 按现有规则继续验证。'
-                          '目标不明确时不会写入，也不会自动发送邮件。')
+            help_text += (' 这个邮箱会加到该潜在客户的联系人里，并按现有规则继续验证。'
+                          '目标不明确时不会保存，也不会自动发送邮件。')
         fields.append({'key': f'fact_{index}', 'fact_field': fact_name,
-                       'label': '联系邮箱（将写入 Trosa 联系人）' if fact_name == 'contact_email' else label,
+                       'label': '联系邮箱（将保存为联系人）' if fact_name == 'contact_email' else label,
                        'input_type': 'email' if fact_name == 'contact_email' else 'textarea',
                        'required': False, 'validation': {}, 'help': help_text})
     return fields
@@ -11615,7 +11624,7 @@ def _inbox_response_schema(kind, primary, suggested=None, sela_review=None):
         return {'fields': [{'key': 'decision', 'label': '主体判断', 'input_type': 'choice', 'required': True,
                             'validation': {'options': ['accept', 'reject']},
                             'choices': [{'value': 'reject', 'label': '与历史排除主体相同，停止联系'},
-                                        {'value': 'accept', 'label': '不是同一主体，可保留 prospect'}],
+                                        {'value': 'accept', 'label': '不是同一主体，可保留潜在客户'}],
                             'help': ''},
                            {'key': 'note', 'label': '判断依据', 'input_type': 'textarea', 'required': False,
                             'validation': {}, 'help': '可补充核对依据。'}], 'attachments': attachments}
@@ -11818,8 +11827,8 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
         sela_request = _sela_request_display(primary) if kind == _inbox_questions.QUESTION_SELA_REQUEST else {}
         sela_prospect = None
         sela_contact_save = None
-        sela_subject_label = 'Trosa 档案'
-        sela_relationship_label = '关系阶段：Trosa 档案'
+        sela_subject_label = '客户档案'
+        sela_relationship_label = '关系阶段：客户档案'
         if kind == _inbox_questions.QUESTION_SELA_REQUEST and conn is not None:
             request_payload = _sela_agent_request_structured(primary)
             source_id = str(request_payload.get('source_id') or '').strip()
@@ -11831,19 +11840,19 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
             if sela_prospect:
                 stage = sela_prospect.get('lifecycle_stage')
                 if sela_prospect.get('lifecycle_rejected'):
-                    sela_subject_label, sela_relationship_label = 'Trosa 已标记不联系', '关系阶段：已标记不联系'
+                    sela_subject_label, sela_relationship_label = '已标记不联系', '关系阶段：已标记不联系'
                 elif sela_prospect.get('do_not_contact'):
-                    sela_subject_label, sela_relationship_label = 'Trosa 已停止联系', '关系阶段：已停止联系'
+                    sela_subject_label, sela_relationship_label = '已停止联系', '关系阶段：已停止联系'
                 elif sela_prospect.get('exclusion_review'):
-                    sela_subject_label, sela_relationship_label = 'Trosa 待排除复核', '关系阶段：待排除复核'
+                    sela_subject_label, sela_relationship_label = '待排除复核', '关系阶段：待排除复核'
                 elif stage == 'cold_prospect' and not sela_prospect.get('customer_linked'):
-                    sela_subject_label, sela_relationship_label = 'Trosa 冷线索', '关系阶段：未互动冷线索'
+                    sela_subject_label, sela_relationship_label = '冷线索', '关系阶段：未互动冷线索'
                 elif stage == 'engaged_lead':
-                    sela_subject_label, sela_relationship_label = 'Trosa 已互动线索', '关系阶段：已有客户互动'
+                    sela_subject_label, sela_relationship_label = '已互动线索', '关系阶段：已有客户互动'
                 elif stage == 'qualified_opportunity':
-                    sela_subject_label, sela_relationship_label = 'Trosa 商机', '关系阶段：已进入商机阶段'
+                    sela_subject_label, sela_relationship_label = '商机', '关系阶段：已进入商机阶段'
                 elif stage == 'customer':
-                    sela_subject_label, sela_relationship_label = 'Trosa 客户', '关系阶段：已成交客户'
+                    sela_subject_label, sela_relationship_label = '客户', '关系阶段：已成交客户'
         known = []
         if customer:
             facts = [value for value in (customer.get('company'), customer.get('country'),
@@ -11857,8 +11866,8 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
                 known.append('资料：' + ' · '.join(facts))
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
             if sela_request.get('company'):
-                known.append('Sela prospect：' + sela_request['company'])
-            known.append('尚未关联 Trosa 档案')
+                known.append('潜在客户：' + sela_request['company'])
+            known.append('尚未关联客户档案')
         else:
             identity = primary.get('capture_identity') or ''
             if identity:
@@ -11891,8 +11900,8 @@ def _build_inbox_questions(items, matches_by_item, conn=None):
                 'label': (
                     sela_subject_label
                     if customer and kind == _inbox_questions.QUESTION_SELA_REQUEST
-                    else 'Trosa 客户' if customer
-                    else 'Sela prospect' if kind == _inbox_questions.QUESTION_SELA_REQUEST
+                    else '客户' if customer
+                    else '潜在客户' if kind == _inbox_questions.QUESTION_SELA_REQUEST
                     else ''
                 ),
             },
@@ -12876,32 +12885,32 @@ def _sela_resume_eligibility(conn, request_payload):
     source_id = str(request_payload.get('source_id') or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
         return {'eligible': False, 'reason': 'missing_source',
-                'summary': '这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。'}
+                'summary': '这条请求没有唯一对应的潜在客户。回答已保存，但不会自动继续。'}
     profile = _sela_profile_by_source(conn, source_id)
     if not profile:
         return {'eligible': False, 'reason': 'prospect_missing',
-                'summary': 'Trosa 找不到对应 Prospect；回答已保存，但 Sela 不会自动续跑。'}
+                'summary': '找不到对应的潜在客户。回答已保存，但不会自动继续。'}
     prospect = _sela_prospect_view(conn, profile)
     if not prospect:
         return {'eligible': False, 'reason': 'prospect_missing',
-                'summary': 'Trosa 找不到对应 Prospect；回答已保存，但 Sela 不会自动续跑。'}
+                'summary': '找不到对应的潜在客户。回答已保存，但不会自动继续。'}
     if (prospect.get('lifecycle_stage') != 'cold_prospect'
             or prospect.get('customer_linked') or prospect.get('lifecycle_rejected')):
         stage = str(prospect.get('lifecycle_stage') or '未知阶段')
         return {'eligible': False, 'reason': 'prospect_not_cold',
-                'summary': f'目标当前属于 Trosa 的 {stage} 阶段；Sela 未自动续跑，请人工处理。'}
+                'summary': f'目标当前属于 {stage} 阶段。未自动继续，请人工处理。'}
     if prospect.get('exclusion_review'):
         return {'eligible': False, 'reason': 'exclusion_review',
-                'summary': '目标存在待确认的排除判断；Sela 未自动续跑，请先人工复核。'}
+                'summary': '目标存在待确认的排除判断。未自动继续，请先人工复核。'}
     if prospect.get('do_not_contact'):
         return {'eligible': False, 'reason': 'contact_paused',
-                'summary': '目标已停止联系；Sela 未自动续跑，请人工处理。'}
+                'summary': '目标已停止联系。未自动继续，请人工处理。'}
     if (str(prospect.get('outreach_status') or '').upper() in {
             'SENT', 'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'PAUSED',
             'DRAFT_READY', 'GMAIL_DRAFTED',
     } or str(prospect.get('sent_at') or '').strip()):
         return {'eligible': False, 'reason': 'existing_outreach',
-                'summary': '目标已有发送记录或草稿；Sela 未自动续跑，请人工检查后继续。'}
+                'summary': '目标已有发送记录或草稿。未自动继续，请人工检查后继续。'}
     return {'eligible': True, 'reason': '', 'summary': ''}
 
 
@@ -12999,7 +13008,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
     contact_id = int(_create_contact(conn, customer_id=customer_id, values={
         'name': '', 'email': email, 'preferred_channel': 'email',
         'contact_type': 'person', 'is_primary': 0,
-        'notes': '由 Sela Inbox 人工回答确认；邮箱尚未验证。',
+        'notes': '由 Inbox 人工回答确认；邮箱尚未验证。',
     }, created_at=now))
     after = _snapshot_entity(conn, 'contacts', contact_id)
     _record_operation_log(conn, 'CREATE', 'contact', contact_id,
@@ -13009,7 +13018,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
 
 
 def _sela_mark_prospect_excluded(conn, profile, reason, now, *, resolution='HUMAN_CONFIRMED_EXCLUDE',
-                                 actor=None, default_reason='人工确认加入排除 / DNC'):
+                                 actor=None, default_reason='人工确认加入排除 / 停止联系'):
     """Set the real do-not-contact business state for a confirmed exclusion.
 
     ``resolution`` records who decided (a human answer by default, or Sela's own
@@ -13210,7 +13219,7 @@ def _sela_apply_answer_facts(conn, row, kind, answer, structured, *, now, actor)
     email = _sela_answer_email(answer, structured)
     if email:
         if not prospect:
-            raise CrmWriteError('这条 Sela 请求没有可写入的联系人目标，未保存邮箱', 409)
+            raise CrmWriteError('这条请求没有可用的联系人目标，邮箱没有保存', 409)
         saved = _sela_resolve_contact_email(
             conn, int(prospect['trosa_id']), email, now, actor=actor)
         applied.append({
@@ -13225,7 +13234,7 @@ def _sela_apply_answer_facts(conn, row, kind, answer, structured, *, now, actor)
     if action == _continuation.ACTION_RESOLVE_EXCLUSION or \
             _sela_prospect_text(structured.get('resume_decision'), 40).lower() in ('exclude', 'clear'):
         if not profile:
-            raise CrmWriteError('找不到对应的 Sela prospect，未保存排除决定', 409)
+            raise CrmWriteError('找不到对应的潜在客户，排除决定没有保存。请刷新后重试。', 409)
         if _sela_answer_excludes(structured, answer):
             reason = _sela_prospect_text(answer.get('note') or answer.get('answer'), 2000)
             _sela_mark_prospect_excluded(conn, profile, reason, now)
@@ -13260,7 +13269,7 @@ def _sela_apply_answer_facts(conn, row, kind, answer, structured, *, now, actor)
     summary_parts = []
     for fact in applied:
         if fact.get('field') == 'contact_email':
-            summary_parts.append('联系人邮箱已写入 Trosa 联系人：' + str(fact.get('value')))
+            summary_parts.append('联系人邮箱已保存到联系人：' + str(fact.get('value')))
         elif fact.get('field') == 'exclusion':
             summary_parts.append('排除状态已更新为：' + str(fact.get('value')))
         elif fact.get('field') == 'identity':
@@ -13294,7 +13303,7 @@ def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
     options = [_sela_prospect_text(option, 500) for option in raw_options]
     selected_option = _sela_prospect_text(answer.get('selected_option'), 500)
     if options and selected_option not in options:
-        raise CrmWriteError('请选择 Sela 请求中列出的一个处理方向')
+        raise CrmWriteError('请选择请求中列出的一个处理方向')
 
     raw_missing = payload.get('missing_facts') if isinstance(payload.get('missing_facts'), list) else []
     facts = []
@@ -13347,7 +13356,7 @@ def _sela_human_response(conn, row, answer, *, responded_at, responded_by):
     resume_summary = '；'.join(part for part in (
         answer_facts.get('summary'), eligibility.get('summary')) if part)
     if not resume_summary:
-        resume_summary = '业务事实已写入 Trosa；等待 Sela 从原阻塞点继续。'
+        resume_summary = '业务事实已保存；等待从原阻塞点继续。'
     updated = dict(payload)
     updated['human_response'] = human_response
     updated['resume_run'] = _continuation.build_resume_run(
@@ -13428,7 +13437,7 @@ def respond_to_inbox_question(item_id):
             review = _inbox_sela_review_payload(row)
             profile = _sela_profile_by_source(conn, review.get('source_id')) if review.get('source_id') else None
             if not profile:
-                return jsonify({'error': '找不到对应的 Sela prospect，未保存决定'}), 404
+                return jsonify({'error': '找不到对应的潜在客户，决定没有保存。请刷新后重试。'}), 404
             note = _sela_prospect_text(answer.get('note'), 4000)
             now_review, actor_review = _calendar_now_text(), getattr(g, 'current_user', '')
             _sela_resolve_exclusion_review(conn, profile, decision, note, now_review, resolve_inbox=False)
@@ -13453,7 +13462,7 @@ def respond_to_inbox_question(item_id):
                     status=_continuation.QUEUED, inbox_item_id=row.get('id'),
                     answer_sha256=_sela_hash({'item_id': row.get('id'), 'decision': decision, 'note': note}),
                     action=action, source_id=review.get('source_id'),
-                    summary='排除身份已确认：' + decision, facts_applied=applied,
+                    summary='排除项已确认：' + decision, facts_applied=applied,
                     updated_at=now_review),
             }
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
@@ -13559,21 +13568,21 @@ def respond_to_inbox_question(item_id):
         continuation_action = str(continuation.get('action') or '')
         auto_resume = continuation_status == _continuation.QUEUED
         if sela_response and sela_response.get('reason') == 'retired_send_approval':
-            next_system_step = '已关闭过期发送请求；没有发送邮件，也不会自动启动 Sela。'
+            next_system_step = '已关闭过期发送请求。没有发送邮件，也不会自动处理。'
         elif continuation_action == _continuation.ACTION_VERIFY_EMAIL and auto_resume:
-            next_system_step = '补充邮箱已写入 Trosa 联系人；Sela 将按现有规则验证该邮箱后继续。'
+            next_system_step = '补充的邮箱已保存到联系人。会按现有规则验证该邮箱后继续。'
         elif continuation_action == _continuation.ACTION_RESOLVE_EXCLUSION and auto_resume:
-            next_system_step = '排除决定已写入 Trosa；Sela 会看到该 prospect 已停止联系，不会重复询问。'
+            next_system_step = '排除决定已保存。该潜在客户已停止联系，不会再重复询问。'
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST and continuation_status == _continuation.NEEDS_REVIEW:
             next_system_step = str(continuation.get('summary') or '当前条件不支持自动续跑，请人工处理。')
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST and auto_resume:
-            next_system_step = '回答已保存并排入 Sela 续跑；Sela 会从原阻塞点继续，不会发送邮件或修改客户、联系人、待办。'
+            next_system_step = '回答已保存并排入自动处理。会从原阻塞点继续，不会发送邮件，也不会修改客户、联系人、待办。'
         elif kind == _inbox_questions.QUESTION_SELA_REQUEST:
-            next_system_step = '回答已保存；Sela 不会自动续跑，请在 Trosa 人工处理。'
+            next_system_step = '回答已保存；不会自动继续，请人工处理。'
         elif kind == _inbox_questions.QUESTION_EXCLUSION_REVIEW:
-            next_system_step = '主体判断已写入 Trosa；Sela 下次读取该 prospect 时会看到更新。'
+            next_system_step = '主体判断已保存。下次用到该潜在客户时会看到更新。'
         elif kind == _inbox_questions.QUESTION_IDENTITY_REVIEW:
-            next_system_step = '身份判断已沉淀为可复用事实；Trosa 与 Sela 后续都会复用该判断。'
+            next_system_step = '身份判断已保存。以后遇到同一个潜在客户，会直接用这个判断。'
         else:
             next_system_step = '回答已记录，问题已关闭。'
         response = {'success': True, 'resolved_question_id': str(item_id), 'status': 'resolved',
@@ -13644,7 +13653,7 @@ def save_sela_inbox_contact_email(item_id):
 
         row = next(iter(_sela_agent_request_rows(conn, status='open', item_id=item_id)), None)
         if not row:
-            raise CrmWriteError('这条 Sela Inbox 请求已处理或不存在', 409)
+            raise CrmWriteError('这条 Inbox 请求已处理或不存在', 409)
         row = dict(row)
         _, item_ids = _inbox_group_item_ids(conn, item_id)
         open_items = _load_open_inbox_items(conn)
@@ -13655,16 +13664,16 @@ def save_sela_inbox_contact_email(item_id):
         _apply_question_metadata(row)
         kind = row.get('question_kind') or _inbox_questions.question_kind_for(row.get('item_type'))
         if kind != _inbox_questions.QUESTION_SELA_REQUEST:
-            raise CrmWriteError('该 Inbox 问题不支持保存 Sela 联系人', 400)
+            raise CrmWriteError('该 Inbox 问题不支持保存联系人', 400)
         target = _sela_inbox_contact_save_target(conn, row)
         if not target:
-            raise CrmWriteError('该请求没有安全、明确的 Trosa 联系人目标', 409)
+            raise CrmWriteError('该请求没有安全、明确的联系人目标', 409)
         customer_id = int(target['customer_id'])
         customer = _customer_record(conn, customer_id) if postgres_mode() else cursor.execute(
             'SELECT id, name, company, is_deleted FROM customers WHERE id=?', (customer_id,)
         ).fetchone()
         if not customer:
-            raise CrmWriteError('对应的 Trosa 客户不存在', 404)
+            raise CrmWriteError('对应的客户不存在', 404)
 
         duplicate = None
         if postgres_mode():
@@ -13699,7 +13708,7 @@ def save_sela_inbox_contact_email(item_id):
             contact_id = _create_contact(conn, customer_id=customer_id, values={
                 'name': '', 'email': email, 'preferred_channel': 'email',
                 'contact_type': 'person', 'is_primary': 0,
-                'notes': '由 Sela Inbox 人工确认保存；邮箱尚未验证。',
+                'notes': '由 Inbox 人工确认保存；邮箱尚未验证。',
             }, created_at=now)
             after = _snapshot_entity(conn, 'contacts', contact_id)
             undo_token = _create_undo_action(
@@ -16931,7 +16940,7 @@ def extension_save_communications():
     new_messages = [item for item, _ in new_pairs]
     if not new_messages:
         conn.close()
-        return jsonify({'success': True, 'duplicate': True, 'new_message_count': 0, 'message': '这些消息已经存入 Trade OS'})
+        return jsonify({'success': True, 'duplicate': True, 'new_message_count': 0, 'message': '这些消息已经保存'})
     conn.close()
     now = _calendar_now_text()
     try:

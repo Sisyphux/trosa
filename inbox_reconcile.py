@@ -73,11 +73,11 @@ _NOISE_TITLE_HINTS = (
 _SELF_RESOLVING_REVIEW_REASONS = {
     'TROSA_REVISION_CONFLICT': (
         'technical_conflict',
-        '这是技术性版本冲突，由 Sela 重新读取最新状态处理，不需要人工判断。'),
+        '这是技术性版本冲突，由系统重新读取最新状态处理，不需要人工判断。'),
     'CUSTOMER_ALREADY_LINKED': (
         'already_linked', '来源已经关联到现有客户，系统已有答案。'),
     'CUSTOMER_ALREADY_HAS_SELA_PROSPECT': (
-        'already_linked', '来源已经存在 Sela 线索，系统已有答案。'),
+        'already_linked', '来源已经存在自动开发线索，系统已有答案。'),
 }
 
 
