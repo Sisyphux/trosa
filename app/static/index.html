@@ -64,7 +64,7 @@
       <input class="form-control" id="invitationPassword" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password">
       <label class="form-label" for="invitationPasswordConfirm" style="margin-top:12px;">确认 6 位数字密码</label>
       <input class="form-control" id="invitationPasswordConfirm" type="password" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="new-password">
-      <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号并进入</button>
+      <button class="btn btn-primary" type="submit" style="margin-top:16px; width:100%;">创建账号</button>
       <div class="login-error" id="invitationError" role="alert"></div>
     </form>
     <button class="btn btn-sm" id="invitationBackToLogin" type="button" onclick="returnToStandardLogin()" style="margin:16px auto 0; display:block;">返回登录</button>
@@ -81,7 +81,7 @@
      layer (brand click, Ctrl/Cmd-K or "/"), which also holds the global search. -->
 <div class="app-layout app-room" id="appLayout">
   <header class="room-top" id="roomTop">
-    <button type="button" class="room-brand" id="roomBrand" onclick="openRoomIndex()" aria-haspopup="dialog" aria-expanded="false" aria-controls="roomIndex" aria-label="打开导航与搜索" title="导航与搜索"></button>
+    <button type="button" class="room-brand" id="roomBrand" onclick="openRoomIndex()" aria-haspopup="dialog" aria-expanded="false" aria-controls="roomIndex" aria-label="打开导航与搜索" title="导航与搜索">操作台</button>
     <span class="room-page" id="roomPageName" aria-live="polite">今天</span>
     <span class="room-top-spacer"></span>
     <button type="button" class="room-key" onclick="openRoomIndex()" aria-label="搜索与导航" title="搜索与导航"><span class="room-key-label">搜索与导航</span><kbd id="roomKeyHint">Ctrl K</kbd></button>
@@ -615,8 +615,8 @@
               <p class="settings-help" id="aiConfigHelp">API Key 只存在系统后台，不会显示在页面上。改完后，新的 AI 操作会用新 Key，已经在进行的不受影响。</p>
               <div class="ai-config-actions">
                 <button class="btn btn-sm" type="button" onclick="testAiConfig()">测试连接</button>
-                <button class="btn btn-sm btn-primary" type="button" onclick="saveAiConfig()">保存并立即生效</button>
-                <button class="text-action" type="button" onclick="clearAiConfig()">清除快速接入配置</button>
+                <button class="btn btn-sm btn-primary" type="button" onclick="saveAiConfig()">保存</button>
+                <button class="text-action" type="button" onclick="clearAiConfig()">清除 AI 接口配置</button>
               </div>
               <div class="ai-config-feedback" id="aiConfigFeedback" aria-live="polite"></div>
             </div>
@@ -642,7 +642,7 @@
             <p style="font-size:0.85rem;color:var(--text-500);margin:0 0 12px;">支持 .xlsx、.xls，上传后自动识别列名。</p>
             <form id="excelUploadForm" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
               <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="font-size:0.85rem;">
-              <button type="button" class="btn btn-primary btn-sm" onclick="uploadExcel()">上传并导入</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="uploadExcel()">导入</button>
             </form>
             <div id="excelUploadResult" style="margin-top:10px;font-size:0.82rem;color:var(--text-500);"></div>
             <div class="excel-recovery-action">
@@ -683,7 +683,7 @@
 <div class="modal-overlay cw-overlay" id="customerEditModal" role="dialog" aria-modal="true" aria-labelledby="customerEditTitle">
   <div class="cw-app" tabindex="-1">
     <header class="cw-top">
-      <button type="button" class="cw-brand" onclick="closeModal('customerEditModal')" title="返回">返回</button>
+      <button type="button" class="cw-brand" onclick="closeModal('customerEditModal')" title="返回客户列表">返回客户列表</button>
       <span class="cw-meta tnum" id="cwMeta">客户详情</span>
       <nav class="cw-nav" role="tablist" aria-label="客户分区">
         <button type="button" class="tab-btn cw-tab active" role="tab" aria-selected="true" aria-controls="editTabOutreach" data-customer-tab="editTabOutreach" data-key="1" onclick="switchTab(this, 'editTabOutreach')">最近沟通</button>
@@ -780,7 +780,7 @@
             <div class="form-group"><label class="form-label">简介</label><textarea class="form-control" id="editProfile" rows="3"></textarea></div>
             <div class="form-group"><label class="form-label">备注</label><textarea class="form-control" id="editNotes" rows="3"></textarea></div>
               <div class="cw-form-actions">
-                <button class="btn btn-primary cw-act cw-primary btn-sm" id="saveCustomerFooterBtn" type="button" onclick="saveCustomerProfile()">保存资料修改</button>
+                <button class="btn btn-primary cw-act cw-primary btn-sm" id="saveCustomerFooterBtn" type="button" onclick="saveCustomerProfile()">保存修改</button>
                 <button class="cw-link" type="button" onclick="cancelCustomerProfileEdit()">取消</button>
               </div>
             </div>
@@ -801,7 +801,7 @@
             </div>
             <div class="cw-form" id="cwBulkContactForm" data-module="email_validation" hidden>
               <button type="button" class="cw-link cw-back" onclick="setCwForm('cwBulkContactForm', false)">← 返回</button>
-              <div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary cw-act cw-primary btn-sm" onclick="addBulkContacts()">检查并导入</button>
+              <div class="form-group"><label class="form-label">粘贴邮箱后自动检查</label><textarea class="form-control" id="bulkContactEmails" rows="3" onpaste="scheduleEmailImport('bulk')" placeholder="pete@gloryetp.com.au&#10;info@example.com"></textarea><small class="email-import-hint">自动检查格式、路由与重复邮箱。</small></div><div class="email-validation-result" id="bulkContactEmailValidation" hidden></div><button class="btn btn-primary cw-act cw-primary btn-sm" onclick="addBulkContacts()">导入联系人</button>
             </div>
           </div>
 
@@ -969,7 +969,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('batchCompleteModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" id="batchCompleteSubmit" onclick="submitBatchComplete()">确认完成</button>
+      <button class="btn btn-primary cw-act cw-primary" id="batchCompleteSubmit" onclick="submitBatchComplete()">完成这批跟进</button>
     </div>
   </div>
 </div>
@@ -993,7 +993,7 @@
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>联系人</strong><span>可选；第一位将作为主要联系人</span></div><button type="button" class="text-action" onclick="addDraftContact('new')">＋ 添加联系人</button></div>
         <div id="newDraftContacts"></div>
-        <details class="draft-email-import"><summary>批量导入邮箱</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="每行一个邮箱，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('new')">检查并导入</button><small>检查格式、路由与重复邮箱。</small></div></details>
+        <details class="draft-email-import"><summary>批量导入邮箱</summary><div><textarea class="form-control" id="newDraftEmailImport" rows="3" onpaste="scheduleEmailImport('new')" placeholder="每行一个邮箱，也支持逗号或分号"></textarea><div class="email-validation-result" id="newEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('new')">导入邮箱</button><small>检查格式、路由与重复邮箱。</small></div></details>
       </section>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">公司简介</label><textarea class="form-control" id="newCustomerProfile" rows="2" placeholder="可由网站自动填入，也可以手动填写"></textarea></div>
       <div class="form-group add-customer-advanced new-customer-advanced"><label class="form-label">备注</label><textarea class="form-control" id="newCustomerNotes" rows="2"></textarea></div>
@@ -1048,7 +1048,7 @@
       </div>
       <section class="draft-contacts-section">
         <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong></div></div>
-        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('exist')">检查并添加</button></div></details>
+        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('exist')">添加邮箱</button></div></details>
         <details class="manual-contact-entry"><summary>手动填写联系人（可选）</summary><div id="existDraftContacts"></div><button type="button" class="text-action" onclick="addDraftContact('exist')">＋ 再添加一位联系人</button></details>
       </section>
       <button type="button" class="text-action add-more-toggle" onclick="toggleAddCustomerAdvanced('exist')">更多公司资料</button>
@@ -1069,7 +1069,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="smartFillPreviewModalTitle" style="max-width:620px;">
     <div class="modal-header"><div><h3 id="smartFillPreviewModalTitle">确认识别结果</h3><p class="modal-subtitle">尚未保存；确认后填入客户表单。</p></div><button class="modal-close" onclick="closeModal('smartFillPreviewModal')" aria-label="关闭"><span class="ui-icon ui-icon-close" aria-hidden="true"></span></button></div>
     <div class="modal-body" id="smartFillPreviewContent"></div>
-    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary cw-act cw-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">确认并应用</button></div>
+    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('smartFillPreviewModal')">返回修改</button><button class="btn btn-primary cw-act cw-primary" id="smartFillApplyButton" onclick="confirmSmartFillResult()">填入表单</button></div>
   </div>
 </div>
 
@@ -1156,7 +1156,7 @@
         <div class="form-group"><label class="form-label" for="inboxReplyDate">沟通日期</label><input type="date" class="form-control" id="inboxReplyDate"></div>
       </div>
     </div>
-    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary cw-act cw-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">确认并记录</button></div>
+    <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary cw-act cw-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">保存沟通记录</button></div>
   </div>
 </div>
 
@@ -1174,7 +1174,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('batchSetModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" id="batchSetSubmit" type="button" onclick="submitBatchSet()">应用</button>
+      <button class="btn btn-primary cw-act cw-primary" id="batchSetSubmit" type="button" onclick="submitBatchSet()">更新选中客户</button>
     </div>
   </div>
 </div>
@@ -1234,7 +1234,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn cw-act" onclick="closeModal('todayQuickEditModal')">取消</button>
-      <button class="btn btn-primary cw-act cw-primary" id="todayQuickEditSubmit" onclick="submitTodayQuickEdit()">应用</button>
+      <button class="btn btn-primary cw-act cw-primary" id="todayQuickEditSubmit" onclick="submitTodayQuickEdit()">保存到所选客户</button>
     </div>
   </div>
 </div>

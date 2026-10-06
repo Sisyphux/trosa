@@ -1020,6 +1020,31 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(match['email'], 'undo-target@example.test')
         self.assertEqual(match['name'], 'Undo Target Buyer')
 
+    def test_customer_search_matches_display_source_label(self):
+        """客户列表把来源显示成“自动开发”，搜索这个显示词也要能命中。"""
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(
+            client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200
+        )
+        created = client.post('/api/customers', json={
+            'name': 'Display Source Buyer',
+            'company': 'Display Source Co',
+            'source': 'Sela',
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+        try:
+            # 存储值仍是规范值 'Sela'，界面显示成“自动开发”。
+            self.assertEqual(module.customer_source_display('Sela'), '自动开发')
+            listed = client.get('/api/customers', query_string={'search': '自动开发'})
+            self.assertEqual(listed.status_code, 200, listed.get_json())
+            payload = listed.get_json()
+            self.assertIn(customer_id, [row['id'] for row in payload['customers']])
+        finally:
+            client.delete(f'/api/customers/{customer_id}')
+
     def test_flask_acceptance_routes_use_canonical_postgres(self):
         """Exercise the normal HTTP workflow against real PostgreSQL."""
         module = self._app_module()
@@ -1798,7 +1823,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         inbox_id = int(created_need.get_json()['item']['trosa_inbox_id'])
         question = next(row for row in client.get('/api/inbox').get_json()['questions']
                         if int(row['id']) == inbox_id)
-        self.assertEqual(question['subject']['label'], 'Trosa 冷线索')
+        self.assertEqual(question['subject']['label'], '冷线索')
         answer = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@auto-resume.example'},
             'idempotency_key': 'pg-auto-resume-answer',
@@ -2009,11 +2034,11 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         question = next(item for item in client.get('/api/inbox').get_json()['questions']
                         if int(item['id']) == inbox_id)
         self.assertEqual(question['kind'], 'sela_request')
-        self.assertEqual(question['subject']['label'], 'Trosa 客户')
+        self.assertEqual(question['subject']['label'], '客户')
         self.assertIn('未互动冷线索', question['why'])
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
-        self.assertEqual(email_field['label'], '联系邮箱（将写入 Trosa 联系人）')
-        self.assertIn('会写入该 prospect 的 Trosa 联系人', email_field['help'])
+        self.assertEqual(email_field['label'], '联系邮箱（将保存为联系人）')
+        self.assertIn('这个邮箱会加到该潜在客户的联系人里', email_field['help'])
 
         answered = client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@review-plastics.example'},
@@ -2023,8 +2048,8 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(answered.get_json()['sela_handoff']['status'], 'needs_review')
         self.assertFalse(answered.get_json()['sela_handoff']['automatic_run'])
         self.assertEqual(answered.get_json()['sela_handoff']['action'], 'verify_email')
-        self.assertIn('Sela 未自动续跑', answered.get_json()['next_system_step'])
-        self.assertIn('联系人邮箱已写入', answered.get_json()['next_system_step'])
+        self.assertIn('未自动继续，请人工处理', answered.get_json()['next_system_step'])
+        self.assertIn('联系人邮箱已保存到联系人', answered.get_json()['next_system_step'])
 
         need_view = client.get(
             f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}'

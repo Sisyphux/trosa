@@ -8136,6 +8136,7 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                 customer.get('field'), customer.get('industry'), customer.get('type'),
                 customer.get('tags'), customer.get('notes'), customer.get('profile'),
                 customer.get('source'), customer.get('source_detail'),
+                customer_source_display(customer.get('source')),
             )
             field_hit = any(token and token in ' '.join(str(value or '') for value in values).casefold()
                             for token in normalized_tokens)

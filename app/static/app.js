@@ -2549,7 +2549,7 @@ function renderInboxQuestionCard(q) {
     ? '<section class="inbox-contact-save"><h5>保存到联系人</h5><p>目标：<strong>' + escapeHtml(contactSave.company || '对应的客户') + '</strong>。保存邮箱是独立操作，不会提交回答、关闭 Inbox，也不会自动处理。</p>' +
       (candidate ? '<p class="inbox-contact-candidate"><span>公开证据候选（未验证）</span><strong>' + escapeHtml(candidate.email) + '</strong>' + (sourceLinks ? '<span>' + sourceLinks + '</span>' : '') + '</p>' : '<p>可先在上方填写邮箱；只从公开证据里的唯一地址预填候选。</p>') +
       (savedContactEmail ? '<p class="inbox-contact-save-status" role="status">' + escapeHtml(savedContactEmail.already_present ? '该邮箱已在此客户联系人中。' : '联系人邮箱已保存；Inbox 回答仍未提交。') + '</p>' :
-        '<button id="inbox-contact-save-' + escapeHtml(q.id) + '" class="btn btn-sm" type="button" onclick="saveInboxContactEmail(\'' + escapeHtml(q.id) + '\')"' + (!contactEmailReady ? ' disabled' : '') + '>确认并保存邮箱</button>') +
+        '<button id="inbox-contact-save-' + escapeHtml(q.id) + '" class="btn btn-sm" type="button" onclick="saveInboxContactEmail(\'' + escapeHtml(q.id) + '\')"' + (!contactEmailReady ? ' disabled' : '') + '>保存邮箱</button>') +
       '</section>' : '';
   var transactional = q.kind === 'identity' || q.kind === 'reply';
   var optionsHtml = (q.options || []).map(function(option) {
@@ -3060,7 +3060,7 @@ async function decideInboxQuestion(questionId, decision) {
     var ok = await showAppConfirm({
       title: decision === 'archive' ? '确认不处理这条信息' : '确认这一步',
       message: '会发生什么：' + will + ' ｜ 不会发生什么：' + wont + ' ｜ 这一步在本版本不可撤销。',
-      submitLabel: '确认'
+      submitLabel: '保存决定'
     });
     if (!ok) return;
   }
@@ -3633,7 +3633,7 @@ async function analyzeCommunication(context) {
   panel.hidden = false;
   panel.innerHTML = '<div class="quick-analysis-loading">AI 正在后台整理沟通内容，你可以继续填写其他内容…</div>';
   // 整理结果写到共享槽位并渲染进当前表单，必须在响应回来时确认还是同一个
-  // 上下文：客户工作区用 scope 校验，记录跟进弹窗用 fillToken 校验。
+  // 上下文：客户工作区用 scope 校验，记录沟通弹窗用 fillToken 校验。
   var workspaceScope = context === 'history' ? beginCustomerScope() : null;
   var completeFillToken = _completeModalFillToken;
   try {
@@ -3744,7 +3744,7 @@ function setInboxReplyBusy(button, busy) {
     button.setAttribute('aria-busy', 'true');
   } else {
     button.removeAttribute('aria-busy');
-    button.textContent = '确认并记录';
+    button.textContent = '保存沟通记录';
   }
 }
 
@@ -8544,7 +8544,7 @@ async function setCustomerContactPermission(permission) {
   })) return;
   var note = await showAppPrompt({
     title: '填写原因（必填）', message: '解禁或停止联系的原因会记录下来，供以后核对。',
-    label: '原因', value: '', submitLabel: '保存',
+    label: '原因', value: '', submitLabel: unblocking ? '恢复联系' : '停止联系',
   });
   if (note === null) return;
   if (String(note).trim().length < 2) { showToast('请填写至少 2 个字的原因', 'error'); return; }
@@ -9588,7 +9588,7 @@ function communicationTypeLabel(type) {
 // raw key ("manual") next to a business label reads like a bug to the user, so
 // only known import channels get named and everything else stays generic.
 function interactionSourceLabel(source) {
-  var labels = { manual:'手动记录', quick_reply:'快速回复', gmail:'Gmail', gmail_delivery:'Gmail', gmail_reply:'Gmail 回复', excel:'导入 Excel', excel_recovery:'Excel 恢复', import:'导入', sync:'自动同步', agent_confirmed:'AI 建议已确认', sela_agent:'自动处理建议已确认' };
+  var labels = { manual:'手动记录', quick_reply:'快速回复', gmail:'Gmail', gmail_delivery:'Gmail', gmail_reply:'Gmail 回复', excel:'导入 Excel', excel_recovery:'Excel 恢复', import:'导入', sync:'自动同步', agent_confirmed:'AI 建议已确认', sela_agent:'Inbox 建议已处理' };
   return (source && labels[source]) || '';
 }
 function customerFactLabel(type, sourceDetail) {
@@ -10449,7 +10449,7 @@ function showCompleteUndoToast(saved, message) {
   showToastAction(message, 'success', '撤销', function() { undoCompletedTasks([token]); });
 }
 
-// 连续打开两次“记录跟进”时（比如快速点两条今日待办），先打开的那次读取返回
+// 连续打开两次“记录沟通”时（比如快速点两条今日待办），先打开的那次读取返回
 // 较慢会重新 fillCompleteModal，把用户已经在第二次弹窗里输入的内容整个清掉。
 // fillToken 保证只有最后一次 openCompleteModal 的响应才能填充表单。
 var _completeModalFillToken = 0;
@@ -11071,8 +11071,8 @@ function renderSmartFillPreview(type, result) {
     (facts ? '<section class="smart-preview-contacts smart-preview-facts"><span>官网直接提取的事实</span><ul>' + facts + '</ul></section>' : '') +
     (contacts ? '<section class="smart-preview-contacts"><span>识别到的联系方式</span><ul>' + contacts + '</ul></section>' : '') +
     (sourceLinks ? '<section class="smart-preview-contacts smart-preview-sources"><span>外部来源（只读）</span><ul>' + sourceLinks + '</ul></section>' : '') +
-    '<p class="smart-preview-note">' + escapeHtml(methodNote) + '.这些内容还没有存进客户资料。点“确认并应用”后会先填进表单，要真正保存还要再点一次保存。</p>';
-  document.getElementById('smartFillApplyButton').textContent = statusOk ? '确认并应用' : '应用可用信息';
+    '<p class="smart-preview-note">' + escapeHtml(methodNote) + '.这些内容还没有存进客户资料。点“填入表单”后会先填进表单，要真正保存还要再点一次保存。</p>';
+  document.getElementById('smartFillApplyButton').textContent = statusOk ? '填入表单' : '填入可用信息';
   openModal('smartFillPreviewModal');
 }
 
@@ -11419,7 +11419,7 @@ function showCalendarDetail(dateStr) {
     var lastContactHtml = r.last_contact ? '<div style="font-size:0.75rem;color:var(--fg-light);margin-top:4px;">上次联系：<span style="color:var(--fg-muted);">' + formatDate(r.last_contact) + '</span></div>' : '';
     html += '<div class="reminder-item"><div class="reminder-info"><div>' + basicInfo + '</div>' + profileHtml + lastContactHtml + '<div style="margin-top:6px;"><span class="reminder-content">' + escapeHtml(r.content || '') + '</span></div></div>' +
       '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">' +
-      (overdue ? '<span class="badge badge-overdue">逾期</span>' : '') + (r.level ? levelBadge(r.level) : '') + '<button class="btn btn-sm" onclick="openCompleteModal(' + r.id + ')">记录跟进</button></div></div>';
+      (overdue ? '<span class="badge badge-overdue">逾期</span>' : '') + (r.level ? levelBadge(r.level) : '') + '<button class="btn btn-sm" onclick="openCompleteModal(' + r.id + ')">记录沟通</button></div></div>';
   });
   html += '</div></div>';
   el.innerHTML = html;
@@ -11985,7 +11985,7 @@ async function copyTeamInvitationUrl() {
 }
 
 async function revokeTeamInvitation(invitationId) {
-  if (!await showAppConfirm({title: '撤销邀请', message: '撤销后，这个链接将不能再用于创建账号。', submitLabel: '确认撤销'})) return;
+  if (!await showAppConfirm({title: '撤销邀请', message: '撤销后，这个链接将不能再用于创建账号。', submitLabel: '撤销邀请'})) return;
   try {
     await api('/api/team/invitations/' + encodeURIComponent(invitationId) + '/revoke', {method: 'POST'});
     showToast('邀请已撤销', 'success');
@@ -11994,7 +11994,7 @@ async function revokeTeamInvitation(invitationId) {
 }
 
 async function disableTeamMember(username) {
-  if (!await showAppConfirm({title: '禁用成员账号', message: '禁用后该成员将无法登录，但历史工作记录会保留。', submitLabel: '确认禁用'})) return;
+  if (!await showAppConfirm({title: '禁用成员账号', message: '禁用后该成员将无法登录，但历史工作记录会保留。', submitLabel: '禁用成员'})) return;
   try {
     await api('/api/team/members/' + encodeURIComponent(username) + '/disable', {method: 'POST'});
     showToast('成员账号已禁用', 'success');

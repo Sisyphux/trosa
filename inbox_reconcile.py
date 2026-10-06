@@ -77,7 +77,7 @@ _SELF_RESOLVING_REVIEW_REASONS = {
     'CUSTOMER_ALREADY_LINKED': (
         'already_linked', '来源已经关联到现有客户，系统已有答案。'),
     'CUSTOMER_ALREADY_HAS_SELA_PROSPECT': (
-        'already_linked', '来源已经存在自动开发线索，系统已有答案。'),
+        'already_linked', '来源已经存在潜在客户记录，系统已有答案。'),
 }
 
 

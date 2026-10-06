@@ -184,7 +184,7 @@ await calendarToday.click();
 const calendarRow = page.locator('#calendarDetail .reminder-item')
   .filter({hasText: taskTitle}).first();
 await calendarRow.waitFor({state: 'visible', timeout: 15000});
-await calendarRow.getByRole('button', {name: '记录跟进'}).click();
+await calendarRow.getByRole('button', {name: '记录沟通'}).click();
 const completeModal = page.locator('#completeModal.show:visible');
 await completeModal.waitFor({state: 'visible', timeout: 15000});
 // The modal schedules its focus one animation frame after it is shown

@@ -566,7 +566,7 @@ class SelaProspectApiTest(unittest.TestCase):
             self.assertEqual(json.loads(profile['research_json'])['agent_state']['exclusion_resolution'], 'REJECTED_SAME_ENTITY')
         finally:
             conn.close()
-        self.assertIn('更新 Trosa 中的 Sela 排除状态', response.get_json()['effects'][0])
+        self.assertIn('保存主体判断并更新排除状态。', response.get_json()['effects'][0])
 
     def test_agent_requests_use_trosa_inbox_and_timeline_idempotently(self):
         created = self.post_prospect(prospect())
@@ -676,13 +676,13 @@ class SelaProspectApiTest(unittest.TestCase):
         question = next(item for item in self.client.get('/api/inbox').get_json()['questions']
                         if int(item['id']) == inbox_id)
         self.assertEqual(question['kind'], 'sela_request')
-        self.assertEqual(question['subject']['label'], 'Trosa 客户')
+        self.assertEqual(question['subject']['label'], '客户')
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
-        self.assertEqual(email_field['label'], '联系邮箱（将写入 Trosa 联系人）')
-        self.assertIn('会写入该 prospect 的 Trosa 联系人', email_field['help'])
-        self.assertTrue(any('会写入该 prospect 的 Trosa 联系人' in effect
+        self.assertEqual(email_field['label'], '联系邮箱（将保存为联系人）')
+        self.assertIn('这个邮箱会加到该潜在客户的联系人里', email_field['help'])
+        self.assertTrue(any('补充的邮箱会加到该潜在客户的联系人里' in effect
                             for effect in question['completion_effects']))
-        self.assertTrue(any('不会发送邮件' in effect for effect in question['will_not_do']))
+        self.assertTrue(any('不会发邮件' in effect for effect in question['will_not_do']))
 
         answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},
@@ -695,8 +695,8 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertFalse(result['sela_handoff']['automatic_run'])
         self.assertEqual(result['sela_handoff']['status'], 'needs_review')
         self.assertEqual(result['sela_handoff']['action'], 'verify_email')
-        self.assertIn('Sela 未自动续跑', result['next_system_step'])
-        self.assertIn('联系人邮箱已写入', result['next_system_step'])
+        self.assertIn('未自动继续，请人工处理', result['next_system_step'])
+        self.assertIn('联系人邮箱已保存到联系人', result['next_system_step'])
 
         resolved = self.client.get(
             f'/api/integrations/sela/needs?status=resolved&item_id={inbox_id}', headers=self.headers(),
@@ -830,7 +830,7 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
         question = next(row for row in self.client.get('/api/inbox').get_json()['questions']
                         if int(row['id']) == inbox_id)
-        self.assertEqual(question['subject']['label'], 'Trosa 冷线索')
+        self.assertEqual(question['subject']['label'], '冷线索')
         self.assertTrue(any('未互动冷线索' in item for item in question['known_facts']))
         answered = self.client.post(f'/api/inbox/questions/{inbox_id}/respond', json={
             'revision': question['revision'], 'answer': {'fact_0': 'buyer@acrilicos.example'},

@@ -147,7 +147,7 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(!genericReasonDetail.textContent.includes('系统缺少作出安全判断所需的信息。'));
   // 人工判断“是否同一主体”前必须看到具体匹配到哪些客户及依据。
   const reviewEvidence = doc.querySelector('.inbox-question-active .inbox-question-evidence').textContent;
-  assert.ok(reviewEvidence.includes('匹配到的 Trosa 客户'), reviewEvidence);
+  assert.ok(reviewEvidence.includes('匹配到的客户'), reviewEvidence);
   assert.ok(reviewEvidence.includes('Existing A') && reviewEvidence.includes('Existing B'), reviewEvidence);
   assert.ok(reviewEvidence.includes('匹配依据：邮箱完全一致'), reviewEvidence);
   assert.ok(reviewEvidence.includes('匹配依据：官网域名一致'), reviewEvidence);
@@ -195,7 +195,7 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   assert.ok(selaRow.includes('Sela prospect') && selaRow.includes('Audit Plastics Co'), selaRow);
   win.openInboxQuestion('13');
   const selaDetail = doc.querySelector('.inbox-question-active');
-  assert.ok(selaDetail.querySelector('.inbox-question-subject').textContent.includes('尚未关联 Trosa 客户'));
+  assert.ok(selaDetail.querySelector('.inbox-question-subject').textContent.includes('尚未关联客户'));
   assert.equal(selaDetail.querySelector('.inbox-question-queue').textContent.match(/补充产品方向/g).length, 1,
     '相同标题和摘要不应在展开区重复');
   win.closeInboxQuestion();
@@ -223,7 +223,7 @@ const setInboxPayload = (payload) => { inboxPayload = payload; };
   await win.loadInbox();
   assert.equal(doc.querySelectorAll('#inboxList > .inbox-workspace .inbox-question-row').length, 1);
   assert.equal(doc.querySelectorAll('#inboxList .inbox-retired-requests .inbox-question-row').length, 1);
-  assert.ok(doc.querySelector('#inboxList .inbox-retired-requests').textContent.includes('关闭后不会发送邮件或启动 Sela'));
+  assert.ok(doc.querySelector('#inboxList .inbox-retired-requests').textContent.includes('关闭后不会发送邮件，也不会自动处理'));
   assert.equal(doc.querySelector('#inboxOverview strong').textContent, '1');
   assert.equal(doc.getElementById('inboxNavCount').textContent, '1');
   assert.equal(doc.querySelector('[data-inbox-filter="sela_request"] .inbox-filter-count').textContent, '1');

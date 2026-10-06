@@ -2853,7 +2853,7 @@ class CommunicationAssistTest(unittest.TestCase):
         html = (ROOT / 'app' / 'static' / 'index.html').read_text(encoding='utf-8')
         self.assertIn("/api/ai/config/test", javascript)
         self.assertIn('id="aiConfigApiKey"', html)
-        self.assertIn('AI API 快速接入', html)
+        self.assertIn('AI 接口', html)
 
 
 class AiEngineConfigTest(unittest.TestCase):

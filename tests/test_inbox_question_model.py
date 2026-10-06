@@ -337,7 +337,7 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual([choice['value'] for choice in decision['choices']], ['板材', '展示架'])
         email = next(field for field in question['response_schema']['fields'] if field.get('fact_field') == 'contact_email')
         self.assertEqual(email['key'], 'fact_0')
-        self.assertIn('会写入该 prospect 的 Trosa 联系人', email['help'])
+        self.assertIn('这个邮箱会加到该潜在客户的联系人里', email['help'])
 
     def test_sela_agent_request_evidence_is_structured(self):
         self._insert_question(
@@ -365,9 +365,9 @@ class InboxQuestionModelTest(unittest.TestCase):
         )
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         self.assertEqual(question['subject']['company'], 'Audit Plastics Co')
-        self.assertEqual(question['subject']['label'], 'Sela prospect')
+        self.assertEqual(question['subject']['label'], '潜在客户')
         self.assertEqual(question['known_facts'], [
-            'Sela prospect：Audit Plastics Co', '尚未关联 Trosa 档案',
+            '潜在客户：Audit Plastics Co', '尚未关联客户档案',
         ])
 
     def test_sela_json_context_becomes_labeled_fields(self):
@@ -405,9 +405,9 @@ class InboxQuestionModelTest(unittest.TestCase):
         self._insert_question('sela_agent_request', 'approval', '类型：FACT_GAP')
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         self.assertEqual(question['kind'], 'sela_request')
-        self.assertIn('未关联 prospect，不会自动续跑', question['completion_effects'][0])
-        self.assertIn('无法自动续跑', question['why_human'])
-        self.assertTrue(any('不会发送邮件' in entry for entry in question['will_not_do']))
+        self.assertIn('这条请求没有关联的潜在客户，不会自动继续', question['completion_effects'][0])
+        self.assertIn('无法自动继续，需要你人工处理', question['why_human'])
+        self.assertTrue(any('不会发邮件' in entry for entry in question['will_not_do']))
 
     def test_sela_decision_only_accepts_the_options_it_requested(self):
         request = {'kind': 'DECISION', 'decision': {
@@ -487,8 +487,8 @@ class InboxQuestionModelTest(unittest.TestCase):
         question = self.client.get('/api/inbox').get_json()['questions'][0]
         email_field = next(field for field in question['response_schema']['fields'] if field['key'] == 'fact_0')
         self.assertEqual(email_field['input_type'], 'email')
-        self.assertIn('才会排入公开研究/未发送草稿续跑', question['why_human'])
-        self.assertIn('符合续跑条件时排入 Sela', question['completion_effects'][0])
+        self.assertIn('才会排入公开研究或未发送草稿的自动处理', question['why_human'])
+        self.assertIn('符合条件时，会排入公开研究或准备未发送的草稿', question['completion_effects'][0])
         response = self.client.post('/api/inbox/questions/%d/respond' % item_id, json={
             'revision': question['revision'],
             'answer': {'fact_0': 'fixed@example.com'},

@@ -121,7 +121,7 @@ await backToQueue();
 await list.locator('.inbox-question-open').filter({hasText:'Sela 需要确认 prospect 的下一步'}).click();
 const selaCard = page.locator('.inbox-question-active');
 const selaCardText = await selaCard.innerText();
-if (!selaCardText.includes('下一步先做什么？') || !selaCardText.includes('回答后 Sela 的计划') || !selaCardText.includes('公开来源')) throw new Error('structured Sela context is incomplete: ' + selaCardText);
+if (!selaCardText.includes('下一步先做什么？') || !selaCardText.includes('回答后的计划') || !selaCardText.includes('公开来源')) throw new Error('structured Sela context is incomplete: ' + selaCardText);
 if (!selaCardText.includes('公开证据候选（未验证）') || !selaCardText.includes('buyer@inbox-browser-prospect.example')) throw new Error('unverified contact candidate is missing: ' + selaCardText);
 await selaCard.getByRole('link', {name:'查看证据 1', exact:true}).waitFor({timeout:15000});
 const beforeContactSaveCount = await inboxCount();
@@ -131,7 +131,7 @@ const contactSaveTarget = await page.evaluate(async () => {
   return q && q.sela_contact_save;
 });
 if (!contactSaveTarget || !contactSaveTarget.candidate || !contactSaveTarget.customer_id) throw new Error('Sela contact save target missing: ' + JSON.stringify(contactSaveTarget));
-await selaCard.getByRole('button', {name:'确认并保存邮箱', exact:true}).click();
+await selaCard.getByRole('button', {name:'保存邮箱', exact:true}).click();
 await page.getByRole('heading', {name:'确认保存联系人邮箱', exact:true}).waitFor({timeout:10000});
 await page.getByRole('button', {name:'保存联系人邮箱', exact:true}).click();
 const contactSaveToast = page.locator('#toastContainer .toast.success').filter({hasText:'邮箱尚未验证，Inbox 回答仍未提交。'});
@@ -162,7 +162,7 @@ await selaCard.getByRole('button', {name:'继续整理公开来源', exact:true}
 const selaCardId = await selaCard.getAttribute('id');
 await selaCard.getByRole('button', {name:'保存回答', exact:true}).click();
 await page.locator('#' + selaCardId).waitFor({state:'detached', timeout:15000});
-await page.getByText('回答已保存并排入 Sela 续跑；Sela 会从原阻塞点继续，不会发送邮件或修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
+await page.getByText('回答已保存并排入自动处理。会从原阻塞点继续，不会发送邮件，也不会修改客户、联系人、待办。', {exact:true}).waitFor({timeout:15000});
 if (await page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Inbox Browser Prospect'}).count()) {
   throw new Error('newly queued Sela run is occupying the Inbox');
 }
@@ -182,7 +182,7 @@ await page.locator('#' + unlinkedCardId).waitFor({state:'detached', timeout:1500
 // Scope to the Sela receipt panel: the same sentence is also rendered as a
 // transient toast in #toastContainer, so an unscoped exact-text wait races
 // with the toast when both are mounted at once.
-await page.locator('#inboxSelaRuns').getByText('这条请求没有唯一 Prospect 来源；回答已保存，但 Sela 不会自动续跑。', {exact:true}).waitFor({timeout:15000});
+await page.locator('#inboxSelaRuns').getByText('这条请求没有唯一对应的潜在客户。回答已保存，但不会自动继续。', {exact:true}).waitFor({timeout:15000});
 const unlinkedResume = page.locator('#inboxSelaRuns .inbox-sela-run').filter({hasText:'Unlinked Inbox Prospect'});
 await unlinkedResume.waitFor({timeout:15000});
 if (await unlinkedResume.getAttribute('data-status') !== 'needs_review') throw new Error('unlinked Sela answer did not stay in review: ' + await unlinkedResume.innerText());
