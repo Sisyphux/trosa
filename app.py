@@ -385,10 +385,6 @@ def _sela_integration_path_allowed():
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
-            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/exclusion-decision',
-            request.path,
-        ))
-        or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/needs/\d+/resolve',
             request.path,
         ))

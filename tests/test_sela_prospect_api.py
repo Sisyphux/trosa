@@ -516,9 +516,25 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
-        response = self.client.post(
+        # S8b: the service token must NOT reach the identity-decision route --
+        # it can set do_not_contact without a dialogue confirmation.  The human,
+        # logged into Trosa, still records the same decision.
+        denied = self.client.post(
             '/api/integrations/sela/prospects/prospect-1/exclusion-decision',
             json={'decision': 'reject', 'note': '同一主体，停止联系。'}, headers=self.headers(),
+        )
+        self.assertEqual(denied.status_code, 401, denied.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT contact_permission FROM agent_prospect_profiles'
+            ).fetchone()['contact_permission'], 'allowed')
+        finally:
+            conn.close()
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        response = self.client.post(
+            f"/api/customers/{created.get_json()['trosa_id']}/agent-prospect/exclusion-decision",
+            json={'decision': 'reject', 'note': '同一主体，停止联系。'},
         )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()['prospect']['do_not_contact'], True)
@@ -1188,9 +1204,19 @@ class SelaProspectApiTest(unittest.TestCase):
         created = self.post_prospect(body)
         self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
         customer_id = created.get_json()['trosa_id']
-        blocked = self.client.post(
+        # S8b: the service token cannot reach the identity-decision route; the
+        # human login can (via the customer-facing route).  Use a separate
+        # client so the service-token checks never carry the human session.
+        denied = self.client.post(
             '/api/integrations/sela/prospects/prospect-1/exclusion-decision',
             json={'decision': 'reject', 'note': '同一主体，停止联系。'}, headers=self.headers(),
+        )
+        self.assertIn(denied.status_code, (401, 403), denied.get_data(as_text=True))
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        blocked = human.post(
+            f'/api/customers/{customer_id}/agent-prospect/exclusion-decision',
+            json={'decision': 'reject', 'note': '同一主体，停止联系。'},
         )
         self.assertEqual(blocked.status_code, 200, blocked.get_data(as_text=True))
         self.assertTrue(blocked.get_json()['prospect']['do_not_contact'])
@@ -1207,14 +1233,12 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertIn(denied.status_code, (401, 403), denied.get_data(as_text=True))
 
         # Human login can unblock with an audit note.
-        login = self.client.post('/api/auth/login', json={'user': 'hamid'})
-        self.assertEqual(login.status_code, 200, login.get_data(as_text=True))
-        missing_note = self.client.post(
+        missing_note = human.post(
             f'/api/customers/{customer_id}/agent-prospect/contact-permission',
             json={'permission': 'allowed', 'note': ''},
         )
         self.assertEqual(missing_note.status_code, 400, missing_note.get_data(as_text=True))
-        unblocked = self.client.post(
+        unblocked = human.post(
             f'/api/customers/{customer_id}/agent-prospect/contact-permission',
             json={'permission': 'allowed', 'note': '批量误标，人工核实后恢复'},
         )
