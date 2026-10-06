@@ -4396,7 +4396,6 @@ async function loadDashboard() {
   _pageDataLoadedAt = Date.now();
   _todayFactsCache = {};
   initTodayTide();
-  loadDialogueTodayEntry();
   var loadToken = ++_dashboardLoadToken;
   var errorEl = document.getElementById('todayDashboardError');
   var showError = function(message) {
@@ -14214,19 +14213,6 @@ function updateTodayDialogueEntry() {
   entry.hidden = false;
   entry.classList.toggle('is-empty', !count);
   entry.setAttribute('aria-label', count ? (count + ' 条 sela 对话等你回复') : '目前没有等你回复的对话');
-}
-
-async function loadDialogueTodayEntry() {
-  var entry = document.getElementById('todayDialogueEntry');
-  try {
-    var data = await api('/api/inbox/threads?limit=1');
-    if (!data || !data.counts) { if (entry) entry.hidden = true; return; }
-    dialogueCounts = data.counts;
-    dialogueNavBadge();
-    updateTodayDialogueEntry();
-  } catch (error) {
-    if (entry) entry.hidden = true;
-  }
 }
 
 function openTodayDialogueEntry() { switchPage('dialogue'); }
