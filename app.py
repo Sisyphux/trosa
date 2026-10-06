@@ -6791,6 +6791,49 @@ def inbox_thread_user_close(thread_id):
         conn.close()
 
 
+@app.route('/api/inbox/threads', methods=['GET'])
+@login_required
+def inbox_threads_list():
+    """Human read of the Inbox dialogue list (S3 dialogue window).
+
+    Mirrors the sela list body so the UI can group 等你 / sela 处理中 / 已完成
+    without a second contract. Scope is enforced inside ``list_threads``.
+    """
+    conn = get_db()
+    try:
+        body = _dialogue.list_threads(
+            conn,
+            awaiting=request.args.get('awaiting'),
+            status=request.args.get('status') or 'open',
+            subject=request.args.get('subject'),
+            updated_after=request.args.get('updated_after'),
+            limit=request.args.get('limit') or 50,
+            cursor=request.args.get('cursor'),
+        )
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        return _dialogue_error_response(error)
+    except Exception:
+        return _dialogue_write_failure('inbox_list')
+    finally:
+        conn.close()
+
+
+@app.route('/api/inbox/threads/<thread_id>', methods=['GET'])
+@login_required
+def inbox_thread_get(thread_id):
+    """Human read of one Inbox conversation (S3 dialogue window)."""
+    conn = get_db()
+    try:
+        return jsonify(_dialogue.get_thread(conn, thread_id=thread_id))
+    except _dialogue.DialogueError as error:
+        return _dialogue_error_response(error)
+    except Exception:
+        return _dialogue_write_failure('inbox_get')
+    finally:
+        conn.close()
+
+
 @app.route('/api/integrations/sela/exclusions', methods=['GET'])
 @login_required
 def sela_integration_exclusions():

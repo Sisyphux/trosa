@@ -194,6 +194,47 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertIn('waiting_human', body)
         self.assertIn('legacy_route_hits_30d', body)
 
+    def test_human_thread_list_and_get(self):
+        thread_id = self._create_thread(text='人可读的对话')
+        anon = self.module.app.test_client()
+        self.assertEqual(anon.get('/api/inbox/threads').status_code, 401)
+        self.assertEqual(anon.get(f'/api/inbox/threads/{thread_id}').status_code, 401)
+        gateway = self.module.app.test_client()
+        self.assertIn(
+            gateway.get('/api/inbox/threads',
+                        headers={'Authorization': 'Bearer trosa_pat_deadbeef'}).status_code,
+            (401, 403))
+
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        listing = human.get('/api/inbox/threads?status=open')
+        self.assertEqual(listing.status_code, 200, listing.get_data(as_text=True))
+        body = listing.get_json()
+        self.assertIn('threads', body)
+        self.assertIn('counts', body)
+        self.assertEqual(body['counts']['awaiting_human'], 1)
+        self.assertEqual(body['threads'][0]['id'], thread_id)
+        self.assertIn('last_message_preview', body['threads'][0])
+
+        fetched = human.get(f'/api/inbox/threads/{thread_id}')
+        self.assertEqual(fetched.status_code, 200, fetched.get_data(as_text=True))
+        self.assertEqual(fetched.get_json()['thread']['id'], thread_id)
+
+    def test_human_thread_get_unknown_not_found(self):
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        missing = '00000000-0000-0000-0000-000000000000'
+        response = human.get(f'/api/inbox/threads/{missing}')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()['error']['code'], 'not_found')
+
+    def test_human_thread_list_invalid_filter(self):
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        response = human.get('/api/inbox/threads?awaiting=nonsense')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error']['code'], 'invalid_request')
+
 
 if __name__ == '__main__':
     unittest.main()
