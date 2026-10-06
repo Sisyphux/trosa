@@ -742,7 +742,7 @@ def user_close(conn, *, thread_id, payload, idempotency_key=None, actor=''):
 
 
 def reply_human(conn, *, thread_id, payload, idempotency_key=None, actor='',
-                undo_factory=None, attachment_lookup=None):
+                attachment_lookup=None):
     text = _text(payload.get('text'), field='text')
     seen = _seen_revision(payload.get('seen_revision'), required=True)
     attachment_ids = _attachment_ids(payload.get('attachment_ids'))
@@ -773,14 +773,13 @@ def reply_human(conn, *, thread_id, payload, idempotency_key=None, actor='',
     )
     _touch_thread(conn, thread_id, revision=seq, awaiting='sela', updated_at=now)
     message = _message_row(conn, message_id)
-    undo_token = None
-    if undo_factory is not None:
-        undo_token = undo_factory(conn, thread_id, message)
+    # v1.3: the undo feature is not enabled, so the human reply response always
+    # carries ``undo_token: null`` (the field is retained for forward
+    # compatibility with the original design in the contract).
     body = {'success': True,
             'thread': _thread_dict(conn, _thread_row(conn, thread_id)),
-            'message': _msg_dict(message)}
-    if undo_token:
-        body['undo_token'] = undo_token
+            'message': _msg_dict(message),
+            'undo_token': None}
     _receipt_write(conn, thread_id=thread_id, operation='reply', key=idempotency_key,
                    request_hash=request_hash, response=body, message_id=message_id)
     return body

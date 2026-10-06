@@ -377,9 +377,9 @@ class InboxDialogueContractConsistencyTest(DialogueTestCase):
 
         replied = dialogue.reply_human(
             self.conn, thread_id=thread_id,
-            payload={'text': '人回复', 'seen_revision': 2},
-            undo_factory=lambda conn, tid, message: 'undo-token')
+            payload={'text': '人回复', 'seen_revision': 2})
         self.assert_valid('threads-reply-response', replied)
+        self.assertIsNone(replied['undo_token'])
 
         closed = dialogue.close_thread(
             self.conn, thread_id=thread_id, payload={'summary': '完成'})

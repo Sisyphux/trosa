@@ -1,8 +1,11 @@
-"""Sela may block a COLD prospect directly; only a human may ever unblock it.
+"""Sela may stop contact with a COLD prospect only through the §4.4A entry.
 
-``POST /api/integrations/sela/prospects/<source_id>/contact-block`` is the
-block-direction-only service route behind "this company is a competitor / not a
-buyer", so that conclusion no longer has to become a human Inbox question.
+Since contract v1.3 the block-direction write is reachable only through
+``POST /api/integrations/sela/threads/<id>/irreversible-actions`` with a real
+human confirmation message, and the legacy
+``POST /api/integrations/sela/prospects/<source_id>/contact-block`` route is no
+longer on the sela service-token allowlist.  The business function itself
+(cold-only, add-only, audited) is retained for the new entry.
 """
 import hashlib
 import importlib.util
@@ -20,6 +23,8 @@ import db  # noqa: E402
 
 
 TOKEN = 'test-sela-contact-block-service-token'
+DEFAULT_REASON = 'Competitor: sells acrylic sheet itself (https://x.example/about)'
+PROPOSAL_TEXT = 'Sela 建议停止联系这家公司，并说明了判断依据与来源。'
 
 
 def load_app():
@@ -90,6 +95,11 @@ class SelaContactBlockTest(unittest.TestCase):
         db.set_db_user('hamid')
         return db.get_db()
 
+    def human(self):
+        client = self.module.app.test_client()
+        client.post('/api/auth/login', json={'user': 'hamid'})
+        return client
+
     def create_prospect(self, source_id, **overrides):
         key = f'block:{source_id}:create'
         response = self.client.post(
@@ -116,14 +126,56 @@ class SelaContactBlockTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return int(response.get_json()['item']['trosa_inbox_id'])
 
-    def block(self, source_id, reason='Competitor: sells acrylic sheet itself (https://x.example/about)',
-              key='block:one', **extra):
-        body = {'reason': reason, 'idempotency_key': key}
-        body.update(extra)
-        return self.client.post(
-            f'/api/integrations/sela/prospects/{source_id}/contact-block',
-            json=body, headers=self.headers(key),
+    def prepare(self, source_id, key):
+        """Open a thread with a sela proposal plus a human confirmation.
+
+        Returns ``(thread_id, proposal_message_id, confirmed_by_message_id)``.
+        The confirmation is a genuine human message with a greater seq, exactly
+        as contract §4.4 requires.
+        """
+        create_key = f'{key}:create'
+        create = self.client.post(
+            '/api/integrations/sela/threads',
+            json={'title': f'停止联系 {source_id}', 'text': PROPOSAL_TEXT,
+                  'subject': f'prospect:{source_id}', 'idempotency_key': create_key},
+            headers=self.headers(create_key),
         )
+        self.assertEqual(create.status_code, 200, create.get_data(as_text=True))
+        thread = create.get_json()['thread']
+        thread_id = thread['id']
+        if not create.get_json()['created']:
+            append_key = f'{key}:proposal'
+            append = self.client.post(
+                f'/api/integrations/sela/threads/{thread_id}/messages',
+                json={'text': PROPOSAL_TEXT, 'seen_revision': thread['revision'],
+                      'idempotency_key': append_key},
+                headers=self.headers(append_key),
+            )
+            self.assertEqual(append.status_code, 200, append.get_data(as_text=True))
+            thread = append.get_json()['thread']
+        proposal_id = thread['messages'][-1]['id']
+        reply = self.human().post(
+            f'/api/inbox/threads/{thread_id}/reply',
+            json={'text': '确认停止联系', 'seen_revision': thread['revision']},
+        )
+        self.assertEqual(reply.status_code, 200, reply.get_data(as_text=True))
+        return thread_id, proposal_id, reply.get_json()['message']['id']
+
+    def stop(self, thread_id, source_id, key, proposal_id, confirm_id,
+             reason=DEFAULT_REASON):
+        return self.client.post(
+            f'/api/integrations/sela/threads/{thread_id}/irreversible-actions',
+            json={'action': 'stop_contact',
+                  'arguments': {'source_id': source_id, 'reason': reason},
+                  'proposal_message_id': proposal_id,
+                  'confirmed_by_message_id': confirm_id,
+                  'idempotency_key': key},
+            headers=self.headers(key),
+        )
+
+    def block(self, source_id, reason=DEFAULT_REASON, key='block:one'):
+        thread_id, proposal_id, confirm_id = self.prepare(source_id, key)
+        return self.stop(thread_id, source_id, key, proposal_id, confirm_id, reason)
 
     def view(self, source_id):
         payload = self.client.get('/api/integrations/sela/prospects?limit=100', headers=self.headers()).get_json()
@@ -142,24 +194,43 @@ class SelaContactBlockTest(unittest.TestCase):
     def open_needs(self):
         return self.client.get('/api/integrations/sela/needs?status=open', headers=self.headers()).get_json()['needs']
 
+    def consumed_confirmation(self, message_id):
+        conn = self.hamid_db()
+        try:
+            row = conn.execute(
+                'SELECT 1 FROM inbox_action_receipts WHERE consumed_message_id=? LIMIT 1',
+                (message_id,),
+            ).fetchone()
+            return bool(row)
+        finally:
+            conn.close()
+
     # -- tests -------------------------------------------------------------
-    def test_service_token_can_reach_block_but_not_the_human_unblock(self):
-        source_id = 'block-auth-1'
-        customer_id = self.create_prospect(source_id)
-        # Bearer token reaches the new block route...
-        self.assertEqual(self.block(source_id, key='block:auth').status_code, 200)
-        # ...but a bad token does not, and the human-only unblock route stays
-        # unreachable for the service identity.
+    def test_service_token_cannot_reach_legacy_contact_block(self):
+        source_id = 'block-legacy-auth-1'
+        self.create_prospect(source_id)
+        legacy = self.client.post(
+            f'/api/integrations/sela/prospects/{source_id}/contact-block',
+            json={'reason': DEFAULT_REASON, 'idempotency_key': 'block:legacy-auth'},
+            headers=self.headers('block:legacy-auth'),
+        )
+        self.assertEqual(legacy.status_code, 401, legacy.get_data(as_text=True))
         anonymous = self.module.app.test_client().post(
             f'/api/integrations/sela/prospects/{source_id}/contact-block',
-            json={'reason': 'whatever it is', 'idempotency_key': 'block:anon'},
-            headers={'X-Idempotency-Key': 'block:anon'},
+            json={'reason': DEFAULT_REASON, 'idempotency_key': 'block:legacy-anon'},
+            headers={'X-Idempotency-Key': 'block:legacy-anon'},
         )
         self.assertEqual(anonymous.status_code, 401)
+        self.assertFalse(self.view(source_id)['do_not_contact'])
+
+    def test_service_identity_still_cannot_unblock(self):
+        source_id = 'block-unblock-1'
+        customer_id = self.create_prospect(source_id)
+        self.assertEqual(self.block(source_id, key='block:unblock').status_code, 200)
         unblock = self.client.post(
             f'/api/customers/{customer_id}/agent-prospect/contact-permission',
             json={'permission': 'allowed', 'note': 'sela wants to unblock'},
-            headers=self.headers('block:unblock'),
+            headers=self.headers('block:unblock-permission'),
         )
         self.assertIn(unblock.status_code, (401, 403), unblock.get_data(as_text=True))
         self.assertTrue(self.view(source_id)['do_not_contact'])
@@ -174,12 +245,14 @@ class SelaContactBlockTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
         self.assertTrue(body['success'])
-        self.assertEqual(body['status'], 'SYNCED')
-        self.assertFalse(body['already_blocked'])
-        self.assertTrue(body['prospect']['do_not_contact'])
-        self.assertEqual(body['prospect']['exclusion_resolution'], 'AGENT_BLOCKED_NON_FIT')
-        self.assertIn('Competitor', body['prospect']['do_not_contact_reason'])
-        self.assertEqual(body['resolved_inbox_ids'], [decision_id])
+        self.assertEqual(body['action'], 'stop_contact')
+        result = body['result']
+        self.assertEqual(result['status'], 'SYNCED')
+        self.assertFalse(result['already_blocked'])
+        self.assertTrue(result['prospect']['do_not_contact'])
+        self.assertEqual(result['prospect']['exclusion_resolution'], 'AGENT_BLOCKED_NON_FIT')
+        self.assertIn('Competitor', result['prospect']['do_not_contact_reason'])
+        self.assertEqual(result['resolved_inbox_ids'], [decision_id])
 
         conn = self.hamid_db()
         try:
@@ -212,10 +285,10 @@ class SelaContactBlockTest(unittest.TestCase):
         self.create_prospect(source_id)
         decision_id = self.create_exclusion_decision(source_id, key='sela:legacy-exclusion-ask-1')
         response = self.block(source_id)
-        self.assertEqual(response.get_json()['resolved_inbox_ids'], [decision_id])
+        self.assertEqual(response.get_json()['result']['resolved_inbox_ids'], [decision_id])
         self.assertEqual(self.inbox_status(decision_id)['status'], 'resolved')
 
-    def test_engaged_and_customer_prospects_are_refused_with_409(self):
+    def test_engaged_and_customer_prospects_are_refused_with_guardrail(self):
         engaged_id = 'block-engaged-1'
         self.create_prospect(engaged_id)
         reply = self.client.post(
@@ -245,49 +318,114 @@ class SelaContactBlockTest(unittest.TestCase):
         for source_id, key in ((engaged_id, 'block:engaged'), (won_source, 'block:won')):
             response = self.block(source_id, key=key)
             self.assertEqual(response.status_code, 409, response.get_data(as_text=True))
-            self.assertIn('Trosa', response.get_json()['error'])
+            self.assertEqual(response.get_json()['error']['code'], 'guardrail_rejected')
+            self.assertIn('Trosa', response.get_json()['error']['message'])
             self.assertFalse(self.view(source_id)['do_not_contact'])
         # The refused request leaves the human's question open.
         self.assertEqual(self.inbox_status(decision_id)['status'], 'open')
 
-    def test_reason_is_required_and_unknown_fields_rejected(self):
+    def test_guardrail_rejection_does_not_consume_confirmation(self):
+        source_id = 'block-notcold-consumed-1'
+        self.create_prospect(source_id)
+        # Make it non-cold so the guardrail refuses the write.
+        self.client.post(
+            '/api/integrations/sela/reply',
+            json={'candidate_id': source_id,
+                  'reply': {'from': 'Ana <ana@x.example>', 'subject': 'Re: hi',
+                            'body': 'Interested.', 'received_at': 'Mon, 17 Aug 2026 09:00:00 +0800',
+                            'message_id': 'block-notcold-msg-1'},
+                  'action': {'event': 'REPLIED'},
+                  'idempotency_key': 'block:notcold:reply'},
+            headers=self.headers('block:notcold:reply'),
+        )
+        thread_id, proposal_id, confirm_id = self.prepare(source_id, 'block:notcold')
+        refused = self.stop(thread_id, source_id, 'block:notcold', proposal_id, confirm_id)
+        self.assertEqual(refused.status_code, 409, refused.get_data(as_text=True))
+        self.assertEqual(refused.get_json()['error']['code'], 'guardrail_rejected')
+        # The confirmation was NOT consumed, so the same ids can be retried.
+        self.assertFalse(self.consumed_confirmation(confirm_id))
+
+    def test_missing_confirmation_ids_are_refused(self):
+        source_id = 'block-missing-conf-1'
+        self.create_prospect(source_id)
+        thread_id, _, _ = self.prepare(source_id, 'block:missing-conf')
+        response = self.client.post(
+            f'/api/integrations/sela/threads/{thread_id}/irreversible-actions',
+            json={'action': 'stop_contact', 'arguments': {'source_id': source_id, 'reason': DEFAULT_REASON},
+                  'idempotency_key': 'block:missing-conf'},
+            headers=self.headers('block:missing-conf'),
+        )
+        self.assertEqual(response.status_code, 409, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['error']['code'], 'confirmation_required')
+        self.assertEqual(response.get_json()['error']['details']['reason'], 'missing_confirmation_ids')
+
+    def test_confirmation_earlier_than_proposal_is_refused(self):
+        source_id = 'block-early-1'
+        self.create_prospect(source_id)
+        create_key = 'block:early:create'
+        create = self.client.post(
+            '/api/integrations/sela/threads',
+            json={'title': 'x', 'text': PROPOSAL_TEXT, 'subject': f'prospect:{source_id}',
+                  'idempotency_key': create_key},
+            headers=self.headers(create_key),
+        )
+        thread = create.get_json()['thread']
+        thread_id = thread['id']
+        human_reply = self.human().post(
+            f'/api/inbox/threads/{thread_id}/reply',
+            json={'text': '先回复', 'seen_revision': thread['revision']},
+        )
+        self.assertEqual(human_reply.status_code, 200)
+        early_confirm = human_reply.get_json()['message']['id']
+        append_key = 'block:early:proposal'
+        appended = self.client.post(
+            f'/api/integrations/sela/threads/{thread_id}/messages',
+            json={'text': PROPOSAL_TEXT, 'seen_revision': 2, 'idempotency_key': append_key},
+            headers=self.headers(append_key),
+        )
+        proposal_id = appended.get_json()['thread']['messages'][-1]['id']
+        response = self.stop(thread_id, source_id, 'block:early', proposal_id, early_confirm)
+        self.assertEqual(response.status_code, 409, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['error']['details']['reason'],
+                         'confirmation_not_later_than_proposal')
+        self.assertFalse(self.view(source_id)['do_not_contact'])
+
+    def test_reason_is_required(self):
         source_id = 'block-reason-1'
         self.create_prospect(source_id)
-        for reason in ('', ' ', 'x', None):
-            response = self.client.post(
-                f'/api/integrations/sela/prospects/{source_id}/contact-block',
-                json={'reason': reason, 'idempotency_key': 'block:noreason'},
-                headers=self.headers('block:noreason'),
-            )
+        for reason in ('', '   '):
+            thread_id, proposal_id, confirm_id = self.prepare(source_id, f'block:noreason:{len(reason)}')
+            response = self.stop(thread_id, source_id, f'block:noreason:{len(reason)}',
+                                 proposal_id, confirm_id, reason=reason)
             self.assertEqual(response.status_code, 400, (reason, response.get_data(as_text=True)))
-        self.assertEqual(self.block(source_id, key='block:extra', permission='allowed').status_code, 400)
-        missing_key = self.client.post(
-            f'/api/integrations/sela/prospects/{source_id}/contact-block',
-            json={'reason': 'Competitor with source'},
-            headers={'Authorization': f'Bearer {TOKEN}'},
-        )
-        self.assertEqual(missing_key.status_code, 400)
+            self.assertEqual(response.get_json()['error']['code'], 'invalid_request')
         self.assertFalse(self.view(source_id)['do_not_contact'])
 
     def test_unknown_prospect_is_404(self):
         response = self.block('block-does-not-exist')
         self.assertEqual(response.status_code, 404, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['error']['code'], 'not_found')
 
     def test_repeat_call_is_idempotent_and_conflicting_key_reuse_is_rejected(self):
         source_id = 'block-repeat-1'
         self.create_prospect(source_id)
-        first = self.block(source_id, key='block:repeat')
-        second = self.block(source_id, key='block:repeat')
+        thread_id, proposal_id, confirm_id = self.prepare(source_id, 'block:repeat')
+        first = self.stop(thread_id, source_id, 'block:repeat', proposal_id, confirm_id)
+        replay = self.stop(thread_id, source_id, 'block:repeat', proposal_id, confirm_id)
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(first.get_json(), second.get_json())
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(first.get_json(), replay.get_json())
         # Same key with a different reason is a different request.
-        clash = self.block(source_id, reason='A completely different reason', key='block:repeat')
+        clash = self.stop(thread_id, source_id, 'block:repeat', proposal_id, confirm_id,
+                          reason='A completely different reason')
         self.assertEqual(clash.status_code, 409)
-        # A fresh key on an already-blocked prospect succeeds without a second audit row.
-        again = self.block(source_id, key='block:repeat-new-key')
-        self.assertEqual(again.status_code, 200)
-        self.assertTrue(again.get_json()['already_blocked'])
+        self.assertEqual(clash.get_json()['error']['code'], 'idempotency_conflict')
+        # A fresh confirmation + key on an already-blocked prospect succeeds with
+        # no second audit row.
+        thread2, proposal2, confirm2 = self.prepare(source_id, 'block:repeat-new-key')
+        again = self.stop(thread2, source_id, 'block:repeat-new-key', proposal2, confirm2)
+        self.assertEqual(again.status_code, 200, again.get_data(as_text=True))
+        self.assertTrue(again.get_json()['result']['already_blocked'])
         conn = self.hamid_db()
         try:
             research = json.loads(conn.execute(
@@ -304,7 +442,7 @@ class SelaContactBlockTest(unittest.TestCase):
         other_decision = self.create_exclusion_decision(other)
         blocked_decision = self.create_exclusion_decision(blocked)
         response = self.block(blocked)
-        self.assertEqual(response.get_json()['resolved_inbox_ids'], [blocked_decision])
+        self.assertEqual(response.get_json()['result']['resolved_inbox_ids'], [blocked_decision])
         self.assertEqual(self.inbox_status(blocked_decision)['status'], 'resolved')
         self.assertEqual(self.inbox_status(other_decision)['status'], 'open')
         self.assertFalse(self.view(other)['do_not_contact'])
@@ -316,11 +454,29 @@ class SelaContactBlockTest(unittest.TestCase):
         stale = self.create_exclusion_decision(source_id, key='sela:decision:exclusion:' + source_id + ':again')
         # Different dedupe key but same source and resume_action: still its question.
         response = self.block(source_id, key='block:second')
-        body = response.get_json()
+        body = response.get_json()['result']
         self.assertEqual(response.status_code, 200)
         self.assertTrue(body['already_blocked'])
         self.assertTrue(body['prospect']['do_not_contact'])
         self.assertEqual(body['resolved_inbox_ids'], [stale])
+
+    def test_human_reply_returns_null_undo_token(self):
+        source_id = 'block-undo-1'
+        self.create_prospect(source_id)
+        create_key = 'block:undo:create'
+        create = self.client.post(
+            '/api/integrations/sela/threads',
+            json={'title': 'x', 'text': PROPOSAL_TEXT, 'subject': f'prospect:{source_id}',
+                  'idempotency_key': create_key},
+            headers=self.headers(create_key),
+        )
+        thread_id = create.get_json()['thread']['id']
+        reply = self.human().post(
+            f'/api/inbox/threads/{thread_id}/reply',
+            json={'text': '人回复', 'seen_revision': 1},
+        )
+        self.assertEqual(reply.status_code, 200)
+        self.assertIsNone(reply.get_json()['undo_token'])
 
 
 if __name__ == '__main__':

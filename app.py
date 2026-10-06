@@ -389,10 +389,6 @@ def _sela_integration_path_allowed():
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
-            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/contact-block',
-            request.path,
-        ))
-        or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/needs/\d+/resolve',
             request.path,
         ))
@@ -6519,18 +6515,6 @@ def _dialogue_legacy_answer_dual(conn, row, item_id, answer):
         logger.exception('legacy answer dual-write failed: %s', item_id)
 
 
-def _dialogue_reply_undo(conn, thread_id, message):
-    """A thread-level undo marker; reverting the thread lands with the S3 UI."""
-    seq = int((message or {}).get('seq') or 0)
-    description = (f'撤销对话回复：thread={thread_id} message={message.get("id")} seq={seq}')
-    try:
-        return _create_undo_action(
-            conn, 'THREAD_REPLY', 'inbox_thread', str(thread_id), [], description)
-    except Exception:
-        logger.exception('dialogue reply undo token failed')
-        return None
-
-
 def _dialogue_attachments(conn, attachment_ids):
     """Resolve human attachment ids to message attachments (PG only for now)."""
     if not postgres_mode():
@@ -6772,7 +6756,6 @@ def inbox_thread_reply(thread_id):
         body = _dialogue.reply_human(
             conn, thread_id=thread_id, payload=payload, idempotency_key=key,
             actor=str(getattr(g, 'current_user', '') or ''),
-            undo_factory=_dialogue_reply_undo,
             attachment_lookup=_dialogue_attachments,
         )
         conn.commit()
