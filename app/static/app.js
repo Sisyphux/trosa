@@ -13875,7 +13875,7 @@ async function selectDialogueThread(id, options) {
   if (token !== dialogueThreadToken) return;
   if (data === null) { dialogueThreadError = loadAuthError(); renderDialogueThread(); return; }
   dialogueThread = data.thread || null;
-  dialogueConflictNote = null;
+  if (!options.keepConflict) dialogueConflictNote = null;
   renderDialogueThread();
   if (options.focusList) focusDialogueRow(id);
   else if (!options.keepList) focusDialogueReply();
@@ -14073,7 +14073,7 @@ async function submitDialogueReply(event) {
     setDialogueComposerBusy(false);
     if (error && error.error && error.error.code === 'thread_changed') {
       dialogueConflictNote = true;
-      await selectDialogueThread(threadId, { keepList: true });
+      await selectDialogueThread(threadId, { keepList: true, keepConflict: true });
       showDialogueComposerError({ error: { message: '有新消息，请先看' } });
       return false;
     }
@@ -14105,7 +14105,7 @@ async function closeDialogueThread() {
   } catch (error) {
     if (error && error.error && error.error.code === 'thread_changed') {
       dialogueConflictNote = true;
-      await selectDialogueThread(threadId, { keepList: true });
+      await selectDialogueThread(threadId, { keepList: true, keepConflict: true });
       showToast('有新消息，请先看', 'error');
       return;
     }

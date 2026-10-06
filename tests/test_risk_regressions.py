@@ -3956,6 +3956,37 @@ class InboxRenderRegressionTest(unittest.TestCase):
         self.assertIn('inbox render regression: OK', result.stdout)
 
 
+class DialogueRenderRegressionTest(unittest.TestCase):
+    """Sela 对话窗口渲染回归：分组列表、消息、建议回复只填入、冲突提示、空/错误态。"""
+
+    def test_dialogue_render_invariants(self):
+        harness = ROOT / 'tests' / 'support' / 'dialogue_render_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        if not (ROOT / 'browser-extension' / 'node_modules' / 'jsdom').exists():
+            self.skipTest('jsdom is not installed (run npm install in browser-extension)')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('dialogue render regression: OK', result.stdout)
+
+    def test_dialogue_module_has_no_per_question_type_forms(self):
+        """对话界面按 S3 要求只有一种形状：不得按问题类型生成表单分支。"""
+        source = (ROOT / 'app' / 'static' / 'app.js').read_text(encoding='utf-8')
+        marker = 'DIALOGUE (S3: sela'
+        self.assertIn(marker, source)
+        module = source[source.index(marker):]
+        for banned in ('response_schema', 'responseSchema', 'input_type', 'customer_picker',
+                       'investigation_conclusion', 'data-inbox-field', 'kind_label'):
+            self.assertNotIn(banned, module, f'对话模块不应出现按类型分支：{banned}')
+
+
 class LoadFailureStateRegressionTest(unittest.TestCase):
     """加载失败态回归：日历/沟通记录/操作日志失败不再显示成空数据，退役新客户池不可达。"""
 
