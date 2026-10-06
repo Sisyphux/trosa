@@ -33,6 +33,7 @@ const RUN_ID = (process.env.TROSA_BROWSER_ACCEPTANCE_RUN_ID || '')
 const SCRIPTS = {
   core: 'browser_acceptance.js',
   inbox: 'inbox_browser_acceptance.js',
+  dialogue: 'dialogue_browser_acceptance.js',
 };
 
 // Only unambiguous transport/launch/runtime failures count as infrastructure.
@@ -103,6 +104,27 @@ function readProgramSource(kind) {
       source = source.replaceAll(`'${placeholder}'`, JSON.stringify(value));
     }
   }
+  if (kind === 'dialogue') {
+    // The dialogue program carries placeholders instead of importing shell
+    // state; the launcher passes the concrete isolated values through the
+    // environment (the URL, the seeded customer id, a sample upload path, the
+    // screenshot directory, and a JSON map of sample slug -> seeded thread id).
+    const values = {
+      __TROSA_DIALOGUE_BROWSER_URL__: process.env.TROSA_DIALOGUE_BROWSER_URL,
+      __TROSA_DIALOGUE_BROWSER_CUSTOMER_ID__: process.env.TROSA_DIALOGUE_BROWSER_CUSTOMER_ID,
+      __TROSA_DIALOGUE_BROWSER_SAMPLES__: process.env.TROSA_DIALOGUE_BROWSER_SAMPLES,
+      __TROSA_DIALOGUE_BROWSER_SHOTS__: process.env.TROSA_DIALOGUE_BROWSER_SHOTS,
+      __TROSA_DIALOGUE_BROWSER_THREADS__: process.env.TROSA_DIALOGUE_BROWSER_THREADS,
+    };
+    for (const [placeholder, value] of Object.entries(values)) {
+      if (!value) {
+        const error = new Error(`缺少 ${placeholder}：对话验收启动器未提供环境`);
+        error.acceptanceClass = 'infra';
+        throw error;
+      }
+      source = source.replaceAll(`'${placeholder}'`, JSON.stringify(value));
+    }
+  }
   return source;
 }
 
@@ -161,7 +183,7 @@ async function captureArtifacts(error) {
 
 async function main() {
   if (!Object.hasOwn(SCRIPTS, KIND)) {
-    const error = new Error(`未知的浏览器验收类型：${KIND}（期望 core|inbox）`);
+    const error = new Error(`未知的浏览器验收类型：${KIND}（期望 core|inbox|dialogue）`);
     error.acceptanceClass = 'assertion';
     throw error;
   }

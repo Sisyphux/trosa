@@ -133,8 +133,14 @@ def _create_payload(value, customer_id=None, slug=None):
 
 def _wipe(conn):
     where, params = inbox_dialogue._scope()
-    for table in ('inbox_action_receipts', 'inbox_messages', 'inbox_threads'):
-        conn.execute(f"DELETE FROM {inbox_dialogue._t(table)} WHERE {where}", params)
+    threads = inbox_dialogue._t('inbox_threads')
+    for table in ('inbox_action_receipts', 'inbox_messages'):
+        conn.execute(
+            f"DELETE FROM {inbox_dialogue._t(table)} "
+            f"WHERE thread_id IN (SELECT id FROM {threads} WHERE {where})",
+            params,
+        )
+    conn.execute(f"DELETE FROM {threads} WHERE {where}", params)
 
 
 def _thread_revision(conn, thread_id):
