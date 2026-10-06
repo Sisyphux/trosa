@@ -1,3 +1,13 @@
+## 2026-10-07 — Inbox 的 sela 对话窗口：对话列表、对话内容、回复与「今天」入口（S3）
+
+- 背景：sela↔人 的这一半在 Inbox 里一直以「按问题类型生成的回答表单」（`response_schema.fields` → `renderInboxQuestionCard` / `inboxResponseFieldHtml`）呈现，与对话设计（`docs/proposals/inbox-dialogue-design.md` §4.3）不一致。S3 只改这一半，非 sela 条目（记录客户回复、待归属等）与旧灯箱界面保持原样，留待 S6 删除。
+- 变更（前端，`app/static/app.js` 末尾新增「DIALOGUE (S3: sela ↔ human)」模块 + `index.html` + `visual-v5.css`）：新增 `#page-dialogue`「对话」页与 room-index「对话」入口（带计数徽标）；「今天」页 masthead 增加「N 条 sela 对话等你回复」直达按钮，数字只统计「等你」。左侧对话列表按「等你 / sela 处理中 / 已完成」分组，每行显示标题、最后一句摘要、轮到谁、多久前；右侧是对话内容：sela 消息在前，开头一句说明要决定什么，其后是依据/线索引用；底部文本框，sela 的建议回复是可点击文字（只填入文本框、不发送），回车发送。发送后立即提示「sela 已收到」，随后自动跳到下一条「等你」，没有则显示干净空态。system 消息、附件（上传走既有 `POST /api/customers/<id>/files`，回复带 `attachment_ids`）均渲染。
+- 变更（后端只读路由）：新增两条人工只读路由 `GET /api/inbox/threads` 与 `GET /api/inbox/threads/<thread_id>`（`@login_required`），把既有 sela 只读查询（`_dialogue.list_threads` / `get_thread`）暴露给登录会话；不改契约、不改任何写路径。
+- 规则/边界：不出现按问题类型生成的表单、固定「会发生什么 / 不会发生什么」套话、空灯箱；不可逆动作（如合并身份）走对话里的确认消息，由 sela 侧调用 `irreversible-actions`，界面不直接调用 `contact-block`；契约 v1.3 下 `undo_token` 恒为 `null`，界面不提供撤销入口。旧 Inbox 灯箱代码保留（S6 再删），未做 `app.js` 拆分，未引入前端框架。
+- 状态覆盖：加载 = `role=status`；空 = 明确空态；失败 = `data-state="error"` + `data-state-kind` + 原因 + 重试（绝不显示成「没有数据」）；`thread_changed` 冲突显示「有新消息，请先看」并提供刷新。手机端列表与对话分开、回复框固定在底部。
+- 影响范围：`app.py`、`app/static/app.js`、`app/static/index.html`、`app/static/visual-v5.css`、`tests/support/dialogue_render_check.cjs`、`tests/test_inbox_dialogue_routes.py`、`tests/test_risk_regressions.py`、`tools/inbox_dialogue_fixture.py`、`tools/dialogue_browser_acceptance.js`、`tools/dialogue_browser_acceptance.sh`、`tools/run_browser_acceptance.cjs`、本文件。不需要数据迁移。
+- 验证：见交付报告（真实浏览器 1280/768/390 宽度、200% 缩放、键盘全流程、冲突/错误/空态截图；`dialogue_render_check.cjs` jsdom 回归；契约样例 `dialogue-01…07` 经 S2 写入路径灌入隔离 rehearsal 库后逐条走通；全量 `unittest` 通过）。
+
 ## 2026-10-05 — sela 可直接把冷 Prospect 设为停止联系，不再把「这是竞品 / 非目标买家」变成人工 Inbox 问题
 
 - 现象：sela 判断某公司是竞品或不是买家时，只能在 Inbox 抛一个「是否加入排除」的 DECISION；服务端没有任何入口让 sela 自己落这个结论（`exclusion-decision` 只处理身份复核的 accept/reject，`contact-permission` 是人工专用），所以 4 条这类 Inbox 请求（`trosa-agent-265`–`268`）永远无法被答成排除。
