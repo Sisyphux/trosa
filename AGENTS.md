@@ -58,6 +58,7 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 - 不恢复冻结功能，除非用户明确要求。
 - 任何功能改动都不得破坏客户、联系人、沟通记录、Today、Inbox、Search、备份恢复或 Sela 的幂等同步契约。
 - 涉及 UI 时先读 `design/DESIGN_WORLD.md`、`design/inspiration/DESIGN_PROFILE.md` 和相关 `CATALOG.md`；房间级规范在 `design/rooms/` 下，探索原型在 `design/visual-exploration/`；真实浏览器验收宽屏、iPad、iPhone、旧 Win10、键盘、200% 缩放与性能模式。
+- 界面文案遵循「说人话」与术语表，见 [`PRODUCT_DESIGN_STANDARD.md`](PRODUCT_DESIGN_STANDARD.md) §13 交互与语言 和 [`design/UI_QUALITY_BASELINE.md`](design/UI_QUALITY_BASELINE.md) §4 按钮与文案；新页面按此写。
 - 写入、导入、附件、备份、恢复必须保留来源、校验与审计；删除必须有明确目标、确认与可恢复快照。
 
 ## 开发与验证
