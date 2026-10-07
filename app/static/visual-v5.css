@@ -3239,3 +3239,58 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-composer { position: sticky; bottom: 0; }
 }
 
+
+/* ============================================================================
+   15 同事账号验收修复（2026-10-08）
+   ----------------------------------------------------------------------------
+   用 Amy（260 位西语长公司名客户）、Kelley（多文字客户名、今天无待办）和新成员
+   （零数据）在 1440 / 1366×768 / 1280@150% / iPad / iPhone 下逐页验收后的修正。
+   只改呈现，不改业务结构与数据逻辑。
+   ========================================================================== */
+
+/* 15.1 Today 客户名：长公司名（如 “Grupo Publicitario Andino S.A.S.”）原本
+   一行省略成 “Grupo Publicitari…”，同一公司多条待办看起来一模一样。
+   名称列稍放宽，名称最多两行，完整名称见悬停提示。 */
+#trosa .today-tide { --c1: clamp(190px, 19vw, 290px); }
+#trosa .today-tide .tide-c1-top { align-items: flex-start; }
+#trosa .today-tide .tide-overdue { padding-top: .2rem; }
+#trosa .today-tide .tide-name button {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+/* 15.2 今天没有要跟进的客户（含零客户的新成员）：空白的时间轴、图例和时间
+   控制没有意义，收起，只留“今天已经处理完了”。 */
+#trosa .today-tide.is-clear .tide-grid-head,
+#trosa .today-tide.is-clear .tide-chart-cell,
+#trosa .today-tide.is-clear .tide-chart-tools,
+#trosa .today-tide.is-clear .tide-nowline,
+#trosa .today-tide.is-clear .tide-previewline,
+#trosa .today-tide.is-clear .tide-ghostline,
+#trosa .today-tide.is-clear .tide-dock { display: none !important; }
+#trosa .today-tide.is-clear .today-clear { padding-left: 0; }
+
+/* 15.3 没有等你回复的对话时，入口降为一行安静文字，不再是带大号 0 的胶囊。 */
+#trosa .today-dialogue-entry.is-empty {
+  padding: 4px 0;
+  border-color: transparent;
+  background: none;
+  color: var(--dl-mut);
+  font-size: .82rem;
+}
+#trosa .today-dialogue-entry.is-empty .today-dialogue-count { display: none; }
+
+/* 15.4 常见 Windows 笔记本（1366×768、1920×1080@150%）高度只有 ~650-770px：
+   页节顶部历史遗留的 72px 占位（顶栏早已 sticky 在文档流内）把 Today 的待办
+   清单整个挤到首屏以下。矮屏桌面也去掉这段死白，并收紧 Today 页头间距。 */
+@media (min-width: 821px) and (max-height: 860px) {
+  #trosa #roomMain > .page-section { padding-top: 12px !important; }
+  #trosa .today-tide { padding-top: .6rem; }
+  #trosa .today-tide .page-header.today-page-header { padding-bottom: .6rem !important; }
+  #trosa .today-tide .command-shelf.command-shelf.command-shelf { margin-top: .4rem !important; }
+  #trosa .today-tide .tide-chart { height: 128px; }
+}

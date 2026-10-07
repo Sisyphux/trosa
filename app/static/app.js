@@ -4286,7 +4286,9 @@ function updateTideCaption() {
   var t = tideActiveMin();
   var w = tideWorkingCount(t);
   var label = _tidePreview == null ? ('现在 ' + tideClock(t)) : ('预演 ' + tideClock(t));
-  var text = w.total ? (label + ' · ' + w.working + ' / ' + w.total + ' 位对方在工作时间') : (label + ' · 还没有客户设置时区');
+  var tideRoom = document.getElementById('todayRoom');
+  var text = w.total ? (label + ' · ' + w.working + ' / ' + w.total + ' 位对方在工作时间')
+    : (tideRoom && tideRoom.classList.contains('is-clear') ? (label + ' · 今天没有要跟进的客户') : (label + ' · 还没有客户设置时区'));
   var el = document.getElementById('todayTideCaption');
   if (el) el.textContent = text;
   var chart = document.getElementById('todayTideChart');
@@ -4560,6 +4562,10 @@ function renderTodayTasks(reminders) {
   _tideWindowsCache = {};
   var isEmpty = !reminders || reminders.length === 0;
   setTodayWorkspaceEmpty(isEmpty);
+  // Nothing due: the empty day chart and its time controls carry no meaning
+  // (a brand-new member has no customers at all), so the room drops them.
+  var tideRoom = document.getElementById('todayRoom');
+  if (tideRoom) tideRoom.classList.toggle('is-clear', isEmpty);
   updateTodayQueueLabel(reminders);
   if (isEmpty) {
     toggleTodayQueue(false);
@@ -4634,7 +4640,7 @@ function buildTodayTaskRow(r, index, selected) {
           '<span class="today-task-index">' + (index + 1) + '</span>' +
           '<input type="checkbox" class="table-checkbox today-task-checkbox" data-id="' + customerId + '" onclick="event.stopPropagation()" onchange="updateTodaySelection()"' + (isMultiSelected ? ' checked' : '') + ' aria-label="选择 ' + escapeHtml(name) + '">' +
         '</span>' +
-        '<span class="tide-name"><button type="button" onclick="event.stopPropagation();openEditModal(' + customerId + ')">' + escapeHtml(name) + '</button></span>' +
+        '<span class="tide-name"><button type="button" title="' + escapeHtml(name) + '" onclick="event.stopPropagation();openEditModal(' + customerId + ')">' + escapeHtml(name) + '</button></span>' +
         (overdueLabel ? '<span class="tide-overdue">' + escapeHtml(overdueLabel) + '</span>' : '') +
       '</div>' +
       '<div class="tide-c1-bot"><span class="tide-action">' + escapeHtml(action) + '</span></div>' +
@@ -12942,7 +12948,9 @@ function entryOpen(field, commit) {
   window.setTimeout(function() {
     if (!_entryLaunch.entered) return;
     if (typeof commit === 'function') { commit(); return; }
-    if (requiresPin) {
+    // Outside production only built-in accounts skip the gate; an invited
+    // member still signs in with the password they chose.
+    if (requiresPin || user.password_login) {
       // The gate lives inside the grown block; the quiet back control only has a
       // job to do while that gate is open.
       launch.classList.add('is-gated');
@@ -13443,7 +13451,10 @@ function weeklyMemberIds() {
 
 function defaultWeeklyMember() {
   var memberIds = weeklyMemberIds();
-  if (typeof currentUser !== 'undefined' && currentUser && OV.labels[currentUser]) return currentUser;
+  // currentUser is the signed-in user object; the board is keyed by its id.
+  var me = typeof currentUser !== 'undefined' && currentUser
+    ? (typeof currentUser === 'object' ? currentUser.id : currentUser) : '';
+  if (me && OV.labels[me]) return me;
   return memberIds[0] || '';
 }
 

@@ -3907,6 +3907,21 @@ class CustomerContextRaceRegressionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('today tide time check: OK', result.stdout)
 
+    def test_weekly_board_opens_on_signed_in_member(self):
+        harness = ROOT / 'tests' / 'support' / 'weekly_default_member_check.cjs'
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not available')
+        result = subprocess.run(
+            [node, str(harness)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('weekly default member check: OK', result.stdout)
+
 
 class FrontendArchitectureInvariantTest(unittest.TestCase):
     """机制级不变量：异步写入必须绑定实体身份，防重复提交必须有传输层兜底。
