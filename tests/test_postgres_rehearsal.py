@@ -2459,6 +2459,81 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             )
             self.connection.commit()
 
+    def test_today_shows_callers_own_customer_name_on_shared_account(self):
+        """Aura/KPS regression: the canonical name is another member's customer."""
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        ids = load_fixture()
+        customer_id = ids['customer_id']
+        task_id = ids['task_id']
+        ref = self.connection.execute(
+            '''SELECT account_id, legacy_payload::text AS payload
+                 FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()
+        account = self.connection.execute(
+            '''SELECT a.display_name, c.id AS company_id, c.canonical_name
+                 FROM trosa.accounts a JOIN core.companies c ON c.id=a.company_id
+                WHERE a.id=?''',
+            (ref['account_id'],),
+        ).fetchone()
+        try:
+            self.connection.execute(
+                '''UPDATE trosa.accounts SET display_name='KPS Global Solutions' WHERE id=?''',
+                (ref['account_id'],),
+            )
+            self.connection.execute(
+                '''UPDATE core.companies SET canonical_name='KPS Global Solutions' WHERE id=?''',
+                (account['company_id'],),
+            )
+            self.connection.execute(
+                '''UPDATE trosa.account_legacy_refs
+                      SET legacy_payload = legacy_payload || ?::jsonb
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+                ('{"name":"Aura Trading Company","company":"Aura Trading Company"}',
+                 customer_id),
+            )
+            self.connection.commit()
+
+            row = self.connection.execute(
+                '''SELECT customer_name, customer_company FROM trosa.today_tasks WHERE id=?''',
+                (task_id,),
+            ).fetchone()
+            self.assertEqual(row['customer_name'], 'Aura Trading Company')
+            self.assertEqual(row['customer_company'], 'Aura Trading Company')
+            customer = self.connection.execute(
+                '''SELECT name, company FROM trosa.customers WHERE id=?''', (customer_id,),
+            ).fetchone()
+            projected = [
+                item for item in trosa_domain.today_tasks(
+                    self.connection, due_on_or_before='2031-12-31')
+                if item['id'] == task_id
+            ]
+            self.assertEqual(
+                [(item['customer_name'], item['customer_company']) for item in projected],
+                [(customer['name'], customer['company'])],
+            )
+        finally:
+            self.connection.execute(
+                '''UPDATE trosa.accounts SET display_name=? WHERE id=?''',
+                (account['display_name'], ref['account_id']),
+            )
+            self.connection.execute(
+                '''UPDATE core.companies SET canonical_name=? WHERE id=?''',
+                (account['canonical_name'], account['company_id']),
+            )
+            self.connection.execute(
+                '''UPDATE trosa.account_legacy_refs SET legacy_payload=?::jsonb
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id='hamid' AND legacy_customer_id=?''',
+                (ref['payload'], customer_id),
+            )
+            self.connection.commit()
+
     def test_archiving_customer_removes_its_task_from_today(self):
         """An archived Customer's open Task must leave 今日跟进 immediately.
 

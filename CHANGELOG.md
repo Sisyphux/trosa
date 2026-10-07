@@ -1,3 +1,9 @@
+## 2026-10-07 — 修复：「今天」列表把自己的客户显示成同事的客户名（Aura Trading 显示为 KPS Global Solutions）
+
+- 现象：早期导入把 Hamid 的 Aura Trading Company 与 Amy 的 KPS Global Solutions 误连到同一个主档（两者的网站都填了 linkedin.com 个人页）。客户详情、时间线、待办一直按各自成员读取，但「今天」列表的客户名取的是主档上的名字，于是 Hamid 的「今天」里出现「KPS Global Solutions」，点进去又是 Aura Trading Company。
+- 变更：迁移 `0115_today_task_user_scoped_customer_name.sql` 让「今天」视图与客户列表/详情一样，优先读取当前成员自己的客户名与公司名；行集、排序和归属判断不变。不改、不合并、不删除任何客户、沟通或待办数据。
+- 验证：`tools/postgres_rehearsal.py test` 新增「共用主档时今天显示本人客户名」回归（修复前复现为 KPS，修复后为 Aura），全部 50 项通过。
+
 ## 2026-10-07 — Inbox 的 sela 对话窗口：对话列表、对话内容、回复与「今天」入口（S3）
 
 - 背景：sela↔人 的这一半在 Inbox 里一直以「按问题类型生成的回答表单」（`response_schema.fields` → `renderInboxQuestionCard` / `inboxResponseFieldHtml`）呈现，与对话设计（`docs/proposals/inbox-dialogue-design.md` §4.3）不一致。S3 只改这一半，非 sela 条目（记录客户回复、待归属等）与旧灯箱界面保持原样，留待 S6 删除。
