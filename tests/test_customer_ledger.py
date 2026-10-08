@@ -193,6 +193,38 @@ class CustomerLedgerTest(unittest.TestCase):
         self.assertEqual(payload['counts']['communicated'], 1)
         self.assertEqual(self._ledger('?search=没有这个客户')['total'], 0)
 
+    def test_search_ranks_by_relevance_as_one_flat_list(self):
+        # The best name match is the oldest customer: recency must not bury it.
+        buried = self._add('hamid', 'Asta Graphics')
+        word = self._add('hamid', 'Bright Asta Signs', reply_days=2)
+        inside = self._add('hamid', 'Pasta Packaging', reply_days=0)
+        note = self._add('hamid', 'Quiet Co', reply_days=1, snippet='确认付款方式 asta')
+        payload = self._ledger('?search=asta')
+        self.assertTrue(payload['ranked'])
+        self.assertEqual([entry[0] for entry in payload['index']], [buried, word, inside, note])
+        self.assertEqual([(s['key'], s['label'], s['count']) for s in payload['segments']],
+                         [('search', '最相关', 4)])
+        self.assertEqual(payload['total'], 4)
+
+    def test_search_ties_fall_back_to_most_recent_activity(self):
+        old = self._add('hamid', 'Orbit Alpha', reply_days=30)
+        new = self._add('hamid', 'Orbit Beta', reply_days=1)
+        payload = self._ledger('?search=orbit')
+        self.assertEqual([entry[0] for entry in payload['index']], [new, old])
+
+    def test_browsing_without_search_keeps_recency_segments(self):
+        self._seed_spread()
+        payload = self._ledger()
+        self.assertFalse(payload['ranked'])
+        self.assertEqual(len(payload['segments']), 7)
+
+    def test_search_score_never_leaks_into_rows_or_legacy_list(self):
+        customer_id = self._add('hamid', 'Orbit Alpha', reply_days=3)
+        row = self.client.get(f'/api/customers/ledger/rows?ids={customer_id}&search=orbit').get_json()['rows'][0]
+        self.assertEqual(set(row), ROW_KEYS)
+        legacy = self.client.get('/api/customers?search=orbit').get_json()['customers'][0]
+        self.assertNotIn('_search_score', legacy)
+
     def test_rows_return_only_whitelisted_fields_in_requested_order(self):
         ids = self._seed_spread()
         wanted = [ids['older'], ids['today'], ids['none']]

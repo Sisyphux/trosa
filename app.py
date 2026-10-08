@@ -8389,8 +8389,9 @@ _CUSTOMER_SEARCH_CONTEXT_WEIGHTS = {
     'inbox': 38,
     'task': 20,
 }
-_CUSTOMER_SEARCH_MATCH_BONUS = {1: 0, 2: 15, 3: 32}
-_CUSTOMER_SEARCH_CONTEXT_BONUS = {1: 0, 2: 8, 3: 15}
+# Levels: 1 inside the text, 1.5 at the start of a word, 2 at the start, 3 exact.
+_CUSTOMER_SEARCH_MATCH_BONUS = {1: 0, 1.5: 8, 2: 15, 3: 32}
+_CUSTOMER_SEARCH_CONTEXT_BONUS = {1: 0, 1.5: 4, 2: 8, 3: 15}
 
 
 def _search_normalize(value):
@@ -8408,6 +8409,10 @@ def _search_match_level(value, token):
     if normalized_value.startswith(normalized_token):
         return 2
     if normalized_token in normalized_value:
+        # "ocean" in "Middle Ocean Sign" starts a word, which is a better hit
+        # than "asta" buried inside "Pasta".
+        if any(word.startswith(normalized_token) for word in re.split(r'[\s\-_/.,()&]+', normalized_value)):
+            return 1.5
         return 1
     return 0
 
@@ -8531,7 +8536,7 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                             source_filter,
                             last_from, last_to, tag_filter, days_min, days_max,
                             page_value, page, per_page, interpreted_filters,
-                            silent_days, regular_days, only_ids=None):
+                            silent_days, regular_days, only_ids=None, keep_search_score=False):
     """Build the Customer list from canonical Customer/Contact/Interaction/Task facts."""
     include_all = include_deleted == 'all'
     archived_only = view == 'archived' or include_deleted == '1'
@@ -8728,8 +8733,9 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                                          item.get('pinned_order') or 0,
                                          str(item.get(sort_key) or ''), item['id']))
         customers = _deduplicate_customer_search_results(customers)
-        for item in customers:
-            item.pop('_search_score', None)
+        if not keep_search_score:
+            for item in customers:
+                item.pop('_search_score', None)
     else:
         # Marked customers always lead the list in pinned_order.  The requested
         # sort (and its direction) applies inside each group, so ``desc`` may
@@ -8781,6 +8787,8 @@ def _customer_list_payload(args, only_ids=None):
     last_from = args.get('last_from', '').strip()[:10]
     last_to = args.get('last_to', '').strip()[:10]
     tag_filter = args.get('tag', '').strip()
+    # Read-only callers (the ledger) re-rank by relevance themselves and need the score.
+    keep_search_score = bool(args.get('_keep_search_score'))
     try:
         days_min = max(0, int(args.get('days_min', '') or 0))
     except ValueError:
@@ -8861,7 +8869,7 @@ def _customer_list_payload(args, only_ids=None):
             days_min=days_min, days_max=days_max, page_value=page_value,
             page=page, per_page=per_page, interpreted_filters=interpreted_filters,
             silent_days=customer_priority_silent_days, regular_days=customer_regular_silent_days,
-            only_ids=only_ids,
+            only_ids=only_ids, keep_search_score=keep_search_score,
         )
         conn.close()
         return payload
@@ -9085,8 +9093,9 @@ def _customer_list_payload(args, only_ids=None):
             # then the requested date/name order) when relevance is equal.
             customers.sort(key=lambda item: -item.get('_search_score', 0))
             customers = _deduplicate_customer_search_results(customers)
-            for cust in customers:
-                cust.pop('_search_score', None)
+            if not keep_search_score:
+                for cust in customers:
+                    cust.pop('_search_score', None)
         else:
             for cust in customers:
                 reasons = []
@@ -9138,6 +9147,9 @@ def _ledger_event_date(customer):
     dates = [str(customer.get(key) or '')[:10] for key in ('last_contact', 'latest_outreach_date')]
     dates = [item for item in dates if re.fullmatch(r'\d{4}-\d{2}-\d{2}', item)]
     return max(dates) if dates else ''
+
+
+_LEDGER_SEARCH_SEGMENT = ('search', '最相关')
 
 
 def _ledger_segment_for(days):
@@ -9203,27 +9215,31 @@ def get_customer_ledger():
     view = (request.args.get('view') or 'all').strip() or 'all'
     if view not in _LEDGER_VIEWS:
         return jsonify({'error': '无效的客户视图'}), 400
-    payload = _customer_list_payload(_ledger_arguments(request.args, view='all'))
+    payload = _customer_list_payload(_ledger_arguments(request.args, view='all', _keep_search_score=1))
     today = _calendar_today()
+    # A real search ranks by relevance (recent activity only breaks ties) and is
+    # shown as one flat list; browsing without a search keeps the recency segments.
+    searching = any('_search_score' in customer for customer in payload['customers'])
     entries = []
     for customer in payload['customers']:
         facts = _ledger_facts(customer, today)
         company = str(customer.get('company') or customer.get('name') or '').casefold()
-        entries.append((facts['days'] is None, facts['days'] or 0, company, int(customer['id']), facts))
+        score = -int(customer.get('_search_score') or 0) if searching else 0
+        entries.append((score, facts['days'] is None, facts['days'] or 0, company, int(customer['id']), facts))
 
     counts = {name: 0 for name in _LEDGER_VIEWS}
     for entry in entries:
         for name in _LEDGER_VIEWS:
-            if _ledger_view_matches(name, entry[4]['flags']):
+            if _ledger_view_matches(name, entry[5]['flags']):
                 counts[name] += 1
 
-    visible = sorted((entry for entry in entries if _ledger_view_matches(view, entry[4]['flags'])),
-                     key=lambda entry: entry[:4])
+    visible = sorted((entry for entry in entries if _ledger_view_matches(view, entry[5]['flags'])),
+                     key=lambda entry: entry[:5])
     index, segments, current = [], [], None
     for position, entry in enumerate(visible):
-        facts = entry[4]
-        index.append([entry[3], facts['days'], facts['flags']])
-        key, label = _ledger_segment_for(facts['days'])
+        facts = entry[5]
+        index.append([entry[4], facts['days'], facts['flags']])
+        key, label = _LEDGER_SEARCH_SEGMENT if searching else _ledger_segment_for(facts['days'])
         if current is None or current['key'] != key:
             current = {'key': key, 'label': label, 'start': position, 'count': 0,
                        'overdue': 0, 'waiting': 0, 'no_next': 0, 'silent': 0}
@@ -9235,7 +9251,7 @@ def get_customer_ledger():
         current['silent'] += 1 if facts['flags'] & LEDGER_FLAG_SILENT else 0
     return jsonify({
         'view': view, 'today': today.isoformat(), 'total': len(index), 'counts': counts,
-        'segments': segments, 'index': index,
+        'segments': segments, 'index': index, 'ranked': searching,
         'interpreted_filters': payload.get('interpreted_filters', []),
     })
 

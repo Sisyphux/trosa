@@ -3556,8 +3556,10 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         order = [entry[0] for entry in payload['index']]
         self.assertEqual(order, [replied, waiting, quiet])
         self.assertEqual([entry[1] for entry in payload['index']], [1, 20, None])
+        # A search is one flat relevance list; equal scores fall back to recent activity.
+        self.assertTrue(payload['ranked'])
         self.assertEqual([(s['key'], s['start'], s['count']) for s in payload['segments']],
-                         [('yesterday', 0, 1), ('month', 1, 1), ('none', 2, 1)])
+                         [('search', 0, 3)])
         self.assertEqual(payload['counts'], {
             'all': 3, 'communicated': 1, 'uncontacted': 2, 'waiting': 1, 'silent': payload['counts']['silent'],
             'no_next': 2,

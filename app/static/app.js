@@ -1050,8 +1050,11 @@ function escapeSearchRegExp(value) {
 
 function highlightSearchText(value, query) {
   var text = String(value || '');
-  var tokens = Array.from(new Set(String(query || '').trim().split(/\s+/).filter(Boolean)))
-    .sort(function(a, b) { return b.length - a.length; });
+  var tokens = Array.from(new Set(String(query || '').trim().split(/\s+/).filter(Boolean)));
+  // A lone letter ("a", "s") lights up half of every name; only mark it when it is the whole query.
+  var meaningful = tokens.filter(function(token) { return !/^[A-Za-z0-9]$/.test(token); });
+  if (meaningful.length) tokens = meaningful;
+  tokens.sort(function(a, b) { return b.length - a.length; });
   if (!text || !tokens.length) return escapeHtml(text);
   var matcher;
   try {
@@ -1174,6 +1177,8 @@ function scheduleGlobalSearchPreview() {
   _globalSearchTotal = 0;
   _globalSearchActiveIndex = 0;
   clearTimeout(_globalSearchPreviewTimer);
+  // Half-typed IME syllables ("a si ta") are not a query yet; wait for compositionend.
+  if (input && input.dataset.composing === '1') return;
   _globalSearchPreviewTimer = setTimeout(function() { loadGlobalSearchPreview(query); }, 180);
 }
 
@@ -1251,6 +1256,8 @@ function initGlobalPageTools() {
   });
   if (searchInput) {
     searchInput.addEventListener('input', scheduleGlobalSearchPreview);
+    searchInput.addEventListener('compositionstart', function() { searchInput.dataset.composing = '1'; });
+    searchInput.addEventListener('compositionend', function() { delete searchInput.dataset.composing; scheduleGlobalSearchPreview(); });
     searchInput.addEventListener('focus', function() {
       if (searchInput.value.trim()) scheduleGlobalSearchPreview();
     });
@@ -6382,20 +6389,41 @@ function ledgerInit() {
   });
   var input = ledgerEl('ledgerSearch');
   var timer = 0;
-  input.addEventListener('input', function() {
+  var composing = false;
+  // Run the search for whatever is in the box right now; resolves once the list is current.
+  var searchNow = function() {
+    clearTimeout(timer);
+    var global = ledgerEl('globalPageSearch');
+    if (global) global.value = input.value;
+    customerPage = 1;
+    return loadLedger();
+  };
+  var schedule = function() {
     ledgerEl('ledgerSearchBox').classList.toggle('has-text', !!input.value);
     clearTimeout(timer);
-    timer = setTimeout(function() {
-      var global = ledgerEl('globalPageSearch');
-      if (global) global.value = input.value;
-      customerPage = 1;
-      loadLedger();
-    }, 220);
+    // While a pinyin/kana IME is composing, the box holds half-typed syllables
+    // ("a si ta"); searching them makes the list flicker through wrong results.
+    if (composing) return;
+    timer = setTimeout(searchNow, 220);
+  };
+  input.addEventListener('compositionstart', function() { composing = true; clearTimeout(timer); });
+  input.addEventListener('compositionend', function() { composing = false; schedule(); });
+  input.addEventListener('input', function(event) {
+    if (event.isComposing) composing = true;
+    schedule();
   });
   input.addEventListener('keydown', function(event) {
-    if (event.key === 'ArrowDown' || event.key === 'Enter') {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === 'ArrowDown') {
       event.preventDefault();
       scroll.focus({ preventScroll: true });
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      // Searching for a name and pressing Enter opens the best match; with an empty box it just enters the list.
+      if (!input.value.trim()) { scroll.focus({ preventScroll: true }); return; }
+      searchNow().then(function() {
+        if (ledgerEl('ledgerSearch').value.trim() === LD.query && ledgerEl('ledgerNotice').hidden && LD.state === 'ok' && LD.order.length) ledgerOpen(LD.order[0]);
+      });
     } else if (event.key === 'Escape') {
       event.preventDefault();
       if (input.value) { input.value = ''; input.dispatchEvent(new Event('input')); }
@@ -6635,7 +6663,8 @@ function ledgerRowHtml(row) {
   var what = row.days === null ? '' : (row.waiting_reply ? '等待回复' : (row.has_contact ? '已有联系' : '未获回复'));
   var cf = [row.country, row.field].filter(Boolean).join(' · ') || '—';
   var snippet;
-  if (row.match && query) snippet = '命中 · ' + highlightSearchText(row.match, query);
+  // A company-name hit is already shown (and marked) on the line above; say where else it matched.
+  if (row.match && query && row.match.indexOf('公司名称 · ') !== 0) snippet = '命中 · ' + highlightSearchText(row.match, query);
   else if (row.activity_snippet || row.activity_kind) snippet = escapeHtml([row.activity_kind, row.activity_snippet].filter(Boolean).join(' · '));
   else snippet = '尚无沟通记录';
   var next = row.next_task_date

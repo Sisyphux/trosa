@@ -3987,7 +3987,7 @@ tbody td { color: var(--v2-ink-soft); }
 }
 
 mark.search-hit {
-  padding: 0 2px;
+  padding: 0;
   border-radius: 3px;
   background: rgba(255, 220, 135, .78);
   color: inherit;
