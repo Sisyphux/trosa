@@ -1364,7 +1364,6 @@ function updateRoomChrome(page) {
 }
 
 // Inbox is one room with two tabs: sela's dialogue and everything else.
-var _inboxTab = null;
 var _inboxOtherCount = 0;
 
 function syncInboxTabs(page) {
@@ -1373,7 +1372,6 @@ function syncInboxTabs(page) {
   var inInbox = page === 'inbox' || page === 'dialogue';
   strip.hidden = !inInbox;
   if (!inInbox) return;
-  _inboxTab = page;
   strip.querySelectorAll('[data-inbox-tab]').forEach(function(tab) {
     var on = tab.dataset.inboxTab === page;
     tab.classList.toggle('active', on);
@@ -1394,12 +1392,10 @@ function updateInboxNavCount() {
   if (nav) nav.textContent = total || '';
 }
 
-// The index's "Inbox" opens the tab you were last on; the first time, the dialogue,
-// unless nothing is waiting there but something is waiting in the other tab.
+// The index's "Inbox" opens the tab with something waiting for you: the dialogue
+// when sela is waiting on a reply, otherwise the other items.
 function openInboxRoom() {
-  var target = _inboxTab;
-  if (!target) target = (!dialogueAwaitingCount() && _inboxOtherCount) ? 'inbox' : 'dialogue';
-  switchPage(target);
+  switchPage(dialogueAwaitingCount() ? 'dialogue' : 'inbox');
 }
 
 function isRoomIndexOpen() {
