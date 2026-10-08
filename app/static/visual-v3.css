@@ -362,11 +362,11 @@ html {
   text-transform: uppercase;
   color: var(--dl-mut) !important;
 }/* Numbers should align in columns wherever they carry meaning. */
-.today-date:is(#trosa, #trosa *),.today-summary strong:is(#trosa, #trosa *),.stat-value:is(#trosa, #trosa *),.today-task-index:is(#trosa, #trosa *),.customer-updated:is(#trosa, #trosa *),.customer-next:is(#trosa, #trosa *),.dash-wl-date:is(#trosa, #trosa *),.schedule-count:is(#trosa, #trosa *),.nav-count:is(#trosa, #trosa *),.today-focus-context:is(#trosa, #trosa *),.inbox-overview strong:is(#trosa, #trosa *),.ov-week-nav:is(#trosa, #trosa *),input[type="date"]:is(#trosa, #trosa *),input[type="number"]:is(#trosa, #trosa *),.log-time:is(#trosa, #trosa *),.dl-nums:is(#trosa, #trosa *){
+.today-date:is(#trosa, #trosa *), .today-summary strong:is(#trosa, #trosa *), .stat-value:is(#trosa, #trosa *), .today-task-index:is(#trosa, #trosa *), .customer-updated:is(#trosa, #trosa *), .customer-next:is(#trosa, #trosa *), .dash-wl-date:is(#trosa, #trosa *), .schedule-count:is(#trosa, #trosa *), .nav-count:is(#trosa, #trosa *), .today-focus-context:is(#trosa, #trosa *), .inbox-overview strong:is(#trosa, #trosa *), input[type="date"]:is(#trosa, #trosa *), input[type="number"]:is(#trosa, #trosa *), .log-time:is(#trosa, #trosa *), .dl-nums:is(#trosa, #trosa *){
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }/* Headings: editorial serif identity, tight optical tracking. */
-.page-header h2:is(#trosa, #trosa *),.page-header h1:is(#trosa, #trosa *),.login-title:is(#trosa, #trosa *),.sidebar-brand h1:is(#trosa, #trosa *),.today-focus-task:is(#trosa, #trosa *),.today-focus-card h3:is(#trosa, #trosa *),.customer-company-heading:is(#trosa, #trosa *),.modal-header h3:is(#trosa, #trosa *),.workspace-title:is(#trosa, #trosa *),.ov-hero-title:is(#trosa, #trosa *),h2:not(.cw-h2):is(#trosa, #trosa *),h3:is(#trosa, #trosa *){
+.page-header h2:is(#trosa, #trosa *), .page-header h1:is(#trosa, #trosa *), .login-title:is(#trosa, #trosa *), .sidebar-brand h1:is(#trosa, #trosa *), .today-focus-task:is(#trosa, #trosa *), .today-focus-card h3:is(#trosa, #trosa *), .customer-company-heading:is(#trosa, #trosa *), .modal-header h3:is(#trosa, #trosa *), .workspace-title:is(#trosa, #trosa *), h2:not(.cw-h2):is(#trosa, #trosa *), h3:is(#trosa, #trosa *){
   font-family: var(--dl-display) !important;
   font-weight: 500 !important;
   letter-spacing: -.015em !important;
@@ -2147,62 +2147,11 @@ table:is(#trosa, #trosa *){
   padding: 3px 7px !important;
   font-size: var(--dl-fs-micro) !important;
   color: var(--dl-ink-2) !important;
-}/* Weekly overview */
-.ov-hero:is(#trosa, #trosa *),.ov-body:is(#trosa, #trosa *){
-  background: transparent !important;
-}.ov-hero-title:is(#trosa, #trosa *){
-  font-family: var(--dl-display) !important;
-  font-weight: 500 !important;
-  letter-spacing: -.03em !important;
-  color: var(--dl-ink) !important;
-}.ov-kpi-row > *:is(#trosa, #trosa *){
+}/* Weekly overview */.ov-customer-card:is(#trosa, #trosa *){
   border: 1px solid var(--dl-hair) !important;
   border-radius: var(--dl-r-md) !important;
   background: var(--dl-paper) !important;
   box-shadow: none !important;
-}.weekly-board:is(#trosa, #trosa *){
-  gap: 24px !important;
-}.weekly-work-card:is(#trosa, #trosa *),.ov-customer-card:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-md) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-}.ov-week-nav:is(#trosa, #trosa *){
-  color: var(--dl-ink-3) !important;
-  font-size: var(--dl-fs-caption) !important;
-}#page-overview .ov-week-current:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  background: var(--dl-gold-soft) !important;
-  color: var(--dl-gold-ink) !important;
-  font-weight: 600 !important;
-}#page-overview .weekly-member-filter:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-sm) !important;
-  background: var(--dl-paper) !important;
-  color: var(--dl-ink-2) !important;
-  box-shadow: none !important;
-}#page-overview .weekly-member-filter.is-active:is(#trosa, #trosa *){
-  border-color: var(--dl-hair-strong) !important;
-  background: var(--dl-gold-soft) !important;
-  color: var(--dl-gold-ink) !important;
-  box-shadow: none !important;
-}#page-overview .weekly-member-filter:focus-visible:is(#trosa, #trosa *){
-  outline: 2px solid var(--dl-focus) !important;
-  outline-offset: 2px;
-  box-shadow: none !important;
-}#page-overview .ov-hero-week:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-md) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}#page-overview .ov-hero-week button:is(#trosa, #trosa *){
-  background: transparent !important;
-  color: var(--dl-ink-2) !important;
-}#page-overview .ov-hero-week button:hover:is(#trosa, #trosa *){
-  background: var(--dl-gold-soft) !important;
-  color: var(--dl-ink) !important;
 }.ov-customer-facts:is(#trosa, #trosa *),.ov-customer-columns:is(#trosa, #trosa *){
   border-color: var(--dl-hair) !important;
 }/* ============================================================================

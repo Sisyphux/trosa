@@ -734,164 +734,6 @@
    7. OVERVIEW — the week report as an editorial page
    ============================================================================ */
 
-#trosa .page-header.ov-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px;
-  flex-wrap: wrap;
-}
-#trosa .ov-header-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 12px;
-}
-#trosa .ov-header-date {
-  font-size: 12.5px;
-  color: var(--dl-ink-2);
-  font-variant-numeric: tabular-nums;
-}
-#trosa .ov-week-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 13px !important;
-  background: var(--dl-paper-2) !important;
-  box-shadow: none !important;
-}
-#trosa .ov-week-nav,
-#trosa .ov-week-current {
-  height: 32px !important;
-  padding: 0 12px !important;
-  border: 0 !important;
-  border-radius: 9px !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  font-size: 12.5px !important;
-  color: var(--dl-ink-2) !important;
-}
-#trosa .ov-week-nav:hover,
-#trosa .ov-week-current:hover { background: var(--dl-paper) !important; color: var(--dl-ink) !important; }
-#trosa .ov-week-current { font-weight: 600; color: var(--dl-ink) !important; }
-#trosa .ov-body { margin-top: 34px; }
-#trosa .weekly-team-overview {
-  display: flex !important;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--dl-hair);
-  margin-bottom: 30px !important;
-  background: transparent !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-#trosa .weekly-team-summary {
-  font-size: 10.5px !important;
-  font-weight: 600;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: var(--dl-mut) !important;
-}
-#trosa .weekly-team-index { display: flex; gap: 4px; }
-#trosa .weekly-member-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px !important;
-  padding: 0 12px 0 6px !important;
-  border: 1px solid transparent !important;
-  border-radius: 10px !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  color: var(--dl-ink-2) !important;
-  font-size: 13px !important;
-}
-#trosa .weekly-member-filter i {
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 600;
-  background: var(--dl-paper-3);
-  color: var(--dl-ink-2);
-}
-#trosa .weekly-member-filter:hover { background: rgba(36, 34, 29, .05) !important; }
-#trosa .weekly-member-filter.is-active {
-  background: var(--dl-paper) !important;
-  border-color: var(--dl-hair) !important;
-  color: var(--dl-ink) !important;
-  font-weight: 600;
-  box-shadow: var(--v4-shadow-row) !important;
-}
-#trosa .weekly-board {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: var(--v4-gap);
-  align-items: start;
-}
-#trosa .weekly-person {
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: 18px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-  padding: 24px !important;
-  min-width: 0;
-}
-#trosa .weekly-person-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--dl-hair);
-}
-#trosa .weekly-person-avatar {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--dl-ink);
-  color: var(--dl-paper);
-  font-size: 12px;
-  font-weight: 600;
-}
-#trosa .weekly-person-header h2 {
-  font-family: var(--dl-display) !important;
-  font-size: 20px !important;
-  font-weight: 500 !important;
-  letter-spacing: -.02em;
-  margin: 0 !important;
-}
-#trosa .weekly-work-card {
-  display: block !important;
-  border: 0 !important;
-  border-top: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  padding: 18px 0 0 !important;
-  margin-top: 18px !important;
-}
-#trosa .weekly-work-title h3 {
-  font-family: var(--dl-display) !important;
-  font-size: 17px !important;
-  font-weight: 500 !important;
-  color: var(--dl-ink) !important;
-  margin: 0 !important;
-}
-#trosa .weekly-work-top { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
-#trosa .weekly-work-top time { font-size: 12px; color: var(--dl-mut); font-variant-numeric: tabular-nums; }
-#trosa .weekly-customer-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-#trosa .weekly-customer-meta span { font-size: 12px !important; color: var(--dl-mut) !important; }
-#trosa .weekly-entry-count { font-size: 12px !important; color: var(--dl-mut) !important; }
-
 /* ============================================================================
    8. SETTINGS — a themed section rail beside hairline sections
    ============================================================================ */
@@ -1495,12 +1337,6 @@
 #trosa .card.card > .card-header.card-header { padding: 0 0 14px !important; border-bottom: 1px solid var(--dl-hair) !important; background: none !important; }
 #trosa .settings-sections.settings-sections > .card.card { padding: 30px 0 0 !important; border-top: 1px solid var(--dl-hair) !important; }
 #trosa .record-sheet.record-sheet { display: block !important; margin: 0 !important; }
-#trosa .weekly-person.weekly-person { min-width: 0 !important; padding: 22px !important; border: 1px solid var(--dl-hair) !important; border-radius: 18px !important; background: var(--dl-paper) !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-#trosa .weekly-board.weekly-board { display: grid !important; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important; align-items: start !important; gap: 22px !important; row-gap: 22px !important; column-gap: 22px !important; }
-#trosa .weekly-work-card.weekly-work-card { margin: 0 !important; padding: 18px 0 !important; border: 0 !important; border-top: 1px solid var(--dl-hair-2) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; overflow: visible !important; }
-#trosa .weekly-person.weekly-person .weekly-person-header.weekly-person-header { margin: 0 !important; padding: 0 0 12px !important; border: 0 !important; border-bottom: 1px solid var(--dl-hair-2) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }
-#trosa .weekly-person.weekly-person .weekly-person-empty.weekly-person-empty { margin: 16px 0 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; color: var(--dl-mut) !important; font-size: 13.5px !important; }
-#trosa .weekly-person.weekly-person .weekly-person-empty.weekly-person-empty strong { color: var(--dl-ink-2) !important; font-size: 14px !important; font-weight: 500 !important; }
 
 /* ---- command shelf icons: v2 hides them until hover via opacity/pointer-events ---- */
 #trosa .command-shelf.command-shelf .command-icon.command-icon {
@@ -1699,17 +1535,6 @@
   color: var(--dl-mut) !important;
   font-size: 11.5px !important;
 }
-
-#trosa .ov-body.ov-body,
-#trosa .ov-reports-wrap.ov-reports-wrap,
-#trosa #ovReports.ov-reports-wrap {
-  width: min(var(--dl-maxw), calc(100% - 88px)) !important;
-  max-width: min(var(--dl-maxw), calc(100% - 88px)) !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
-}
 /* member columns come from the auto-fill rule above: four people today, room for more */
 
 /* ============================================================================
@@ -1862,8 +1687,6 @@
   #trosa #page-history .page-body.page-body,
   #trosa #page-logs .page-header.page-header,
   #trosa #page-logs .page-body.page-body,
-  #trosa #page-overview .page-header.page-header,
-  #trosa #page-overview .page-body.page-body,
   #trosa #page-settings .page-header.page-header,
   #trosa #page-settings .page-body.page-body {
     width: 100% !important;
@@ -1871,7 +1694,6 @@
     padding-left: 20px !important;
     padding-right: 20px !important;
   }
-  #trosa .weekly-board.weekly-board { grid-template-columns: minmax(0, 1fr) !important; }
 }
 
 @media (max-width: 720px) {
@@ -1905,8 +1727,6 @@
   #trosa #page-history .page-body.page-body,
   #trosa #page-logs .page-header.page-header,
   #trosa #page-logs .page-body.page-body,
-  #trosa #page-overview .page-header.page-header,
-  #trosa #page-overview .page-body.page-body,
   #trosa #page-settings .page-header.page-header,
   #trosa #page-settings .page-body.page-body {
     width: 100% !important;

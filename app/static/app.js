@@ -13424,25 +13424,31 @@ var OV = {
 
 function getWeekStart(offset) {
   var d = new Date();
+  d.setHours(12, 0, 0, 0);
   d.setDate(d.getDate() + offset * 7);
   var day = d.getDay();
-  var diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  d.setDate(diff);
-  return d.toISOString().split('T')[0];
+  d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
+  return localDateString(d);
 }
 
 function formatWeekLabel(ws) {
-  var d = new Date(ws), e = new Date(d);
+  var parts = String(ws).split('-');
+  var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
+  var e = new Date(d);
   e.setDate(e.getDate() + 6);
-  var m=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  return m[d.getMonth()]+d.getDate()+'日—'+m[e.getMonth()]+e.getDate()+'日';
+  return (d.getMonth() + 1) + '月' + d.getDate() + '日—' + (e.getMonth() + 1) + '月' + e.getDate() + '日';
+}
+
+function weeklyPersonHead(uid, statusText) {
+  var color = OV.colors[uid] || '#8B7355';
+  var label = OV.labels[uid] || uid;
+  return '<header class="wk-person-head"><span class="wk-avatar" style="--member-color:' + escapeHtml(color) + '" aria-hidden="true">' + escapeHtml(label.slice(0, 1)) + '</span><h2>' + escapeHtml(label) + '</h2>' +
+    (statusText ? '<em class="wk-person-status">' + statusText + '</em>' : '') + '</header>';
 }
 
 function weeklyMemberShell(uid) {
-  var color = OV.colors[uid];
-  return '<section class="weekly-person is-loading" data-weekly-member="' + uid + '" style="--person-color:' + color + '">' +
-    '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div></header>' +
-    '<div class="weekly-member-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>正在读取已选择内容</span></div></section>';
+  return '<section class="wk-person is-loading" data-weekly-member="' + escapeHtml(uid) + '" style="--person-color:' + escapeHtml(OV.colors[uid] || '#8B7355') + '">' + weeklyPersonHead(uid) +
+    '<div class="wk-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>正在读取已选择内容</span></div></section>';
 }
 
 function weeklyMemberIds() {
@@ -13469,9 +13475,9 @@ function renderWeeklyMemberNavigator() {
     var isActive = activeFilter === uid;
     var filterValue = escapeHtml(JSON.stringify(String(uid)));
     var color = OV.colors[uid] || '#8B7355';
-    filters += '<button type="button" class="weekly-member-filter' + (isActive ? ' is-active' : '') + '" data-weekly-filter="' + escapeHtml(uid) + '" aria-pressed="' + isActive + '" style="--member-color:' + color + '" onclick="setWeeklyMemberFilter(' + filterValue + ')"><i aria-hidden="true">' + escapeHtml((OV.labels[uid] || uid).slice(0, 1)) + '</i><span>' + escapeHtml(OV.labels[uid]) + '</span></button>';
+    filters += '<button type="button" class="wk-member' + (isActive ? ' is-active' : '') + '" data-weekly-filter="' + escapeHtml(uid) + '" aria-pressed="' + isActive + '" style="--member-color:' + color + '" onclick="setWeeklyMemberFilter(' + filterValue + ')"><i aria-hidden="true">' + escapeHtml((OV.labels[uid] || uid).slice(0, 1)) + '</i><span>' + escapeHtml(OV.labels[uid]) + '</span></button>';
   });
-  root.innerHTML = '<div class="weekly-team-summary"><span>负责人</span></div><div class="weekly-team-index" aria-label="选择负责人的周报">' + filters + '</div>';
+  root.innerHTML = '<span class="wk-members-label" id="weeklyMembersLabel">负责人</span><div class="wk-members-list" role="group" aria-labelledby="weeklyMembersLabel">' + filters + '</div>';
 }
 
 function setWeeklyMemberFilter(uid) {
@@ -13480,7 +13486,7 @@ function setWeeklyMemberFilter(uid) {
   var board = document.getElementById('weeklyMemberContent');
   if (board) board.innerHTML = weeklyMemberShell(uid);
   renderWeeklyMemberNavigator();
-  Array.from(document.querySelectorAll('.weekly-member-filter')).some(function(button) {
+  Array.from(document.querySelectorAll('.wk-member')).some(function(button) {
     if (button.dataset.weeklyFilter !== OV._weeklyFilter) return false;
     button.focus({ preventScroll: true });
     return true;
@@ -13511,50 +13517,53 @@ function weeklyCustomerText(customer, field) {
   return customer && customer[field] || '';
 }
 
-function weeklyRichTextBlock(source, className, label) {
+// One labelled fact. Several same-week activities arrive joined by line breaks;
+// show each on its own line so a busy week reads as a list, not a wall of text.
+function weeklyFactBlock(source, className, label) {
   if (!source) return '';
-  return '<div class="weekly-work-block ' + (className || '') + '"><span>' + label + '</span><p>' + renderRichText(source) + '</p></div>';
+  var lines = String(source).split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean);
+  var body = lines.length > 1
+    ? '<ul>' + lines.map(function(line) { return '<li>' + renderRichText(line) + '</li>'; }).join('') + '</ul>'
+    : '<p>' + renderRichText(lines[0] || '') + '</p>';
+  return '<section class="wk-fact ' + (className || '') + '"><h4>' + label + '</h4>' + body + '</section>';
 }
 
 function renderWeeklyMember(uid, data, error, options) {
   options = options || {};
   var section = document.querySelector('[data-weekly-member="' + uid + '"]');
   if (!section) return;
-  var color = OV.colors[uid];
   if (error || !data || data.error) {
     if (options.staleData) {
       renderWeeklyMember(uid, data, null, { staleError: true });
       return;
     }
     section.classList.remove('is-loading');
-    section.innerHTML = '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div></header><div class="weekly-member-error" role="alert"><strong>这位成员的周报加载失败</strong><button type="button" onclick="loadWeeklyMember(\'' + uid + '\')">重试</button></div>';
+    section.innerHTML = weeklyPersonHead(uid) + '<div class="wk-error" role="alert"><strong>这位成员的周报加载失败</strong><p>不是这周没有沟通，只是这次没读到。</p><button type="button" onclick="loadWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
     renderWeeklyMemberNavigator();
     return;
   }
   var reps = data.reported_customers || [];
   var reportPagination = data.reported_customer_pagination || {};
   var statusText = options.staleError ? '更新失败' : (options.fromCache ? '更新中' : '');
-  var html = '<header class="weekly-person-header"><div class="weekly-person-avatar" style="background:' + color + '">' + OV.labels[uid][0] + '</div><div><h2>' + OV.labels[uid] + '</h2></div>' + (statusText ? '<div class="weekly-person-header-meta"><em>' + statusText + '</em></div>' : '') + '</header>';
-  if (options.staleError) html += '<div class="weekly-member-refresh-error" role="alert">更新失败，已保留最近一次内容。<button type="button" onclick="loadWeeklyMember(\'' + uid + '\')">重试</button></div>';
-  if (!reps.length) html += '<div class="weekly-person-empty"><strong>本周没有已确认的沟通</strong></div>';
+  var html = weeklyPersonHead(uid, statusText);
+  if (options.staleError) html += '<div class="wk-error wk-error-inline" role="alert"><span>更新失败，已保留最近一次内容。</span><button type="button" onclick="loadWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
+  if (!reps.length) html += '<div class="wk-empty"><strong>本周没有已确认的沟通</strong><p>在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。</p></div>';
   reps.forEach(function(r) {
     var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-    html += '<article class="weekly-work-card">';
-    html += '<div class="weekly-work-top"><div class="weekly-work-title"><h3>' + escapeHtml(nm) + '</h3></div><time>' + escapeHtml(formatDate(r.date || '')) + '</time></div>';
     var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean);
-    if (meta.length) html += '<div class="weekly-customer-meta">' + meta.map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('') + '</div>';
     var count = Number(r.activity_count || 0);
-    html += '<div class="weekly-entry-count">本周 ' + count + ' 次活动</div>';
-    var actualWork = weeklyCustomerText(r, 'actual_work');
-    var result = weeklyCustomerText(r, 'result');
-    var nextStep = r.next_step || '';
-    html += weeklyRichTextBlock(actualWork, '', '实际工作');
-    html += weeklyRichTextBlock(result, 'result', '结果');
-    html += weeklyRichTextBlock(nextStep, 'next', '下一步');
-    if (canOpen) html += '<button type="button" class="weekly-card-link" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + uid + '\')">查看详情 ' + uiIcon('right') + '</button>';
-    html += '</article>';
+    html += '<article class="wk-row">';
+    html += '<header class="wk-who"><h3 title="' + escapeHtml(nm) + '">' + escapeHtml(nm) + '</h3>';
+    if (meta.length) html += '<p class="wk-meta">' + escapeHtml(meta.join(' · ')) + '</p>';
+    html += '<p class="wk-when"><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(formatChineseDate(r.date || '')) + '</time><span>本周 ' + count + ' 次活动</span></p></header>';
+    html += '<div class="wk-facts">';
+    html += weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), '', '实际工作');
+    html += weeklyFactBlock(weeklyCustomerText(r, 'result'), 'is-result', '结果');
+    html += weeklyFactBlock(r.next_step || '', 'is-next', '下一步');
+    if (canOpen) html += '<button type="button" class="wk-open" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">查看详情 ' + uiIcon('right') + '</button>';
+    html += '</div></article>';
   });
-  if (reportPagination.has_next) html += '<button class="btn btn-sm weekly-load-more" type="button" onclick="loadMoreWeeklyMembers(\'' + uid + '\')">显示更多客户</button>';
+  if (reportPagination.has_next) html += '<button class="wk-more" type="button" onclick="loadMoreWeeklyMembers(\'' + escapeHtml(uid) + '\')">显示更多客户</button>';
   section.classList.remove('is-loading'); section.innerHTML = html;
   renderWeeklyMemberNavigator();
 }
@@ -13604,6 +13613,12 @@ async function loadOverview() {
   OV._weeklyFilter = '';
   var ws = getWeekStart(overviewWeekOffset);
   document.getElementById('overviewDateLabel').textContent = formatWeekLabel(ws);
+  var currentWeekButton = document.querySelector('.wk-week-current');
+  if (currentWeekButton) {
+    currentWeekButton.classList.toggle('is-current', overviewWeekOffset === 0);
+    if (overviewWeekOffset === 0) currentWeekButton.setAttribute('aria-current', 'date');
+    else currentWeekButton.removeAttribute('aria-current');
+  }
   try {
     var userData = await api('/api/auth/users');
     var activeUsers = (userData.users || []).filter(function(user) { return user.id; });
@@ -13619,7 +13634,7 @@ async function loadOverview() {
   } catch (error) { /* keep the current three-member fallback when auth is unavailable */ }
   if (loadToken !== OV._weeklyLoadToken) return;
   OV._weeklyFilter = defaultWeeklyMember();
-  document.getElementById('ovReports').innerHTML = '<div class="weekly-team-overview" id="weeklyTeamOverview"></div><div class="weekly-board" id="weeklyMemberContent">' + (OV._weeklyFilter ? weeklyMemberShell(OV._weeklyFilter) : '') + '</div>';
+  document.getElementById('ovReports').innerHTML = '<div class="wk-members" id="weeklyTeamOverview"></div><div class="wk-board" id="weeklyMemberContent">' + (OV._weeklyFilter ? weeklyMemberShell(OV._weeklyFilter) : '') + '</div>';
   renderWeeklyMemberNavigator();
   if (OV._weeklyFilter) loadWeeklyMember(OV._weeklyFilter, loadToken);
 }

@@ -569,73 +569,12 @@ tbody tr:hover { background: rgba(255,253,249,.43); }
 #logsList .card, #historyList .card { border-color: rgba(255,255,255,.72); background: rgba(255,253,249,.48); box-shadow: inset 0 1px 0 rgba(255,255,255,.62); }
 .settings-group { border-bottom-color: var(--v2-line); }
 .nav-order-item { border-color: var(--v2-line); border-radius: 10px; background: rgba(255,253,249,.45); }
-#page-overview {
-  background:
-    linear-gradient(rgba(250,247,240,.56), rgba(247,243,235,.62)),
-    url("assets/workspace-tree-lines-v2.webp") center top / cover no-repeat;
-}
-#page-overview .ov-hero { width: min(1240px, calc(100% - 72px)); margin: 0 auto; padding: 42px 0 20px; background: transparent; color: var(--v2-ink); }
-#page-overview .ov-hero-title { font-family: var(--font-display); font-size: 2.45rem; font-weight: 400; }
-#page-overview .ov-hero-sub { color: var(--v2-ink-muted); }
-#page-overview .ov-body { width: min(1240px, calc(100% - 72px)); max-width: none; padding: 14px 0 64px; }
-.weekly-person, .weekly-work-card { border-color: var(--v2-line); background: rgba(255,253,249,.58); box-shadow: none; }
-.weekly-member-state, .weekly-member-error { display: flex; align-items: center; gap: 10px; min-height: 96px; padding: 18px 4px; color: var(--v2-ink-muted); font-size: var(--fs-body-s); }
-.weekly-member-error { display: block; color: var(--v2-danger, #A94E45); line-height: 1.6; }
-.weekly-member-error strong { display: block; margin-bottom: 8px; font-weight: 600; }
-.weekly-member-error button { padding: 0; border: 0; background: transparent; color: var(--v2-clay); cursor: pointer; font: inherit; text-decoration: underline; }
-.weekly-person.is-loading { min-height: 190px; }
-.weekly-person.is-loading .weekly-person-header { opacity: .76; }
 .loading-spinner { width: 14px; height: 14px; border: 2px solid var(--v2-line); border-top-color: var(--v2-clay); border-radius: 50%; animation: customer-workspace-spin .8s linear infinite; }
 
 /* Weekly review shares the primary workspace's timber-line canvas, with light glass cards for each discussion item. */
-#page-overview .ov-hero { padding-top: 54px; padding-bottom: 28px; border-bottom: 1px solid rgba(255,255,255,.44); }
-#page-overview .ov-hero-inner { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 24px; }
-#page-overview .ov-hero-title { font-size: 2.7rem; }
-#page-overview .ov-hero-week { margin: 0; }
-#page-overview .ov-body { padding-top: 32px; }
-.weekly-board { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-.weekly-person { padding: 18px; border: 1px solid rgba(255,255,255,.68); border-radius: 20px; background: rgba(250,248,242,.42); box-shadow: inset 0 1px 0 rgba(255,255,255,.62), 0 14px 34px rgba(66,56,43,.06); backdrop-filter: blur(16px) saturate(120%); -webkit-backdrop-filter: blur(16px) saturate(120%); }
-.weekly-person-header { gap: 10px; padding: 0 0 14px; border-bottom: 1px solid color-mix(in srgb, var(--person-color) 52%, white); }
-.weekly-person-avatar { width: 30px; height: 30px; border-radius: 50%; font-size: .75rem; }
-.weekly-person-header h2 { font-size: 1rem; font-weight: 650; }
-.weekly-person-header p { font-size: .75rem; }
-.weekly-work-card { padding: 16px; margin: 0 0 10px; border: 1px solid rgba(255,255,255,.76); border-radius: 16px; background: rgba(255,253,249,.72); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 7px 18px rgba(66,56,43,.045); }
-.weekly-work-card.is-clickable { transition: background-color .16s ease, border-color .16s ease; }
-.weekly-work-card.is-clickable:hover, .weekly-work-card.is-clickable:focus-visible { border-color: color-mix(in srgb, var(--person-color) 38%, white); background: rgba(255,253,249,.92); box-shadow: inset 0 1px 0 rgba(255,255,255,.96), 0 8px 20px rgba(66,56,43,.07); transform: none; outline: 2px solid transparent; }
-.weekly-work-card:last-child { margin-bottom: 0; }
-.weekly-more-entries { margin-top: 10px; border-top: 1px solid var(--v2-line); }
-.weekly-more-entries summary { padding: 10px 0 2px; color: var(--v2-ink-muted); cursor: pointer; font-size: var(--fs-caption); }
-.weekly-more-entries .weekly-week-entries { margin-top: 6px; }
-.ov-week-current { min-width: 72px; padding: 6px 10px; border: 1px solid var(--v2-line); border-radius: 10px; background: rgba(255,253,249,.54); color: var(--v2-ink-soft); font-size: var(--fs-caption); cursor: pointer; }
-.ov-week-current:hover { background: var(--v2-clay-soft); color: var(--v2-ink); }
-.weekly-work-title { display: flex; align-items: center; min-width: 0; gap: 8px; }
-.weekly-work-top h3 { font-size: 1.05rem; color: var(--v2-ink); }
-.weekly-work-top time, .weekly-customer-meta, .weekly-entry-count { color: var(--v2-ink-muted); }
-.weekly-customer-badges span { border-radius: 10px; background: var(--v2-paper-strong); }
-.weekly-week-entries { border-left-color: var(--v2-line); }
-.weekly-week-entry + .weekly-week-entry, .weekly-work-block + .weekly-work-block, .weekly-history { border-top-color: var(--v2-line); }
-.weekly-work-block p { color: var(--v2-ink-soft); }
-.weekly-card-link { color: var(--person-color); }
-.weekly-person-empty { border: 1px dashed var(--v2-line); border-radius: 12px; background: rgba(255,253,249,.38); }
 
 /* Weekly board type scale and controls: keep labels explicit and avoid empty
    icon-only circles that read like decorative dots. */
-#page-overview .ov-hero-inner { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
-#page-overview .ov-hero-top { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
-#page-overview .ov-hero-bottom { display: flex; justify-content: flex-end; margin-top: 18px; }
-#page-overview .ov-hero-date { color: var(--v2-ink-soft); font-size: 15px; font-variant-numeric: tabular-nums; }
-#page-overview .ov-hero-title { font-size: 2.25rem; line-height: 1.15; }
-#page-overview .ov-hero-week { display: inline-flex; align-items: center; gap: 8px; padding: 4px; border: 1px solid var(--v2-line); border-radius: 12px; background: rgba(255,253,249,.78); }
-#page-overview .ov-hero-week > span { min-width: 136px; color: var(--v2-ink); font-size: 15px; font-variant-numeric: tabular-nums; text-align: center; }
-#page-overview .ov-hero-week button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; width: auto; padding: 0 10px; border: 0; border-radius: 9px; background: transparent; color: var(--v2-ink-soft); font-size: 14px; font-weight: 600; }
-#page-overview .ov-hero-week button:hover { background: var(--v2-clay-soft); color: var(--v2-ink); }
-#page-overview .ov-hero-week .ov-week-current { min-width: 88px; border: 1px solid var(--v2-line); background: var(--v2-paper-strong); color: var(--v2-clay); }
-#page-overview .ov-hero-week .ui-icon { width: 16px; height: 16px; }
-.weekly-person-header h2 { font-size: 1.08rem; line-height: 1.35; }
-.weekly-work-top h3 { font-size: 1.05rem; line-height: 1.4; }
-.weekly-customer-meta, .weekly-entry-count { font-size: 14px; line-height: 1.5; }
-.weekly-work-block span { font-size: 13px; }
-.weekly-work-block p { font-size: 15px; line-height: 1.65; }
 
 /* Read-only customer workspace opened from the weekly board. */
 .ov-customer-workspace { width: min(1080px, calc(100vw - 48px)); max-width: none !important; background: linear-gradient(rgba(250,247,240,.54), rgba(247,243,235,.66)), url("assets/workspace-tree-lines-v2.webp") right top / cover no-repeat !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.82), 0 30px 90px rgba(47,40,32,.24) !important; backdrop-filter: blur(24px) saturate(135%); -webkit-backdrop-filter: blur(24px) saturate(135%); }
@@ -681,51 +620,11 @@ tbody tr:hover { background: rgba(255,253,249,.43); }
 .ov-customer-facts { background: rgba(255,253,249,.96); }
 .ov-customer-main, .ov-customer-side { background: rgba(255,253,249,.94); }
 .ov-customer-timeline mark { padding: 0 1px; border-radius: 2px; }
-@media (max-width: 1100px) and (min-width: 821px) { .weekly-board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 820px) { #page-overview .ov-hero-inner { grid-template-columns: 1fr; gap: 18px; } .weekly-board { grid-template-columns: 1fr; gap: 28px; } .ov-customer-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-customer-facts > div:nth-child(4n) { border-right: 1px solid var(--v2-line); } .ov-customer-facts > div:nth-child(2n) { border-right: 0; } .ov-customer-columns { grid-template-columns: 1fr; } }
-@media (max-width: 540px) { #page-overview .ov-hero { padding-top: 36px; } #page-overview .ov-hero-title { font-size: 2.2rem; } .ov-customer-workspace { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; } .ov-customer-facts, .ov-customer-columns { margin-left: 14px; margin-right: 14px; } .ov-customer-columns { padding: 14px 0 18px; } .ov-customer-main, .ov-customer-side { padding: 20px 16px; } .ov-customer-timeline article { grid-template-columns: 1fr; gap: 5px; } .ov-week-current { order: 2; } }
+@media (max-width: 820px) { .ov-customer-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ov-customer-facts > div:nth-child(4n) { border-right: 1px solid var(--v2-line); } .ov-customer-facts > div:nth-child(2n) { border-right: 0; } .ov-customer-columns { grid-template-columns: 1fr; } }
+@media (max-width: 540px) { .ov-customer-workspace { width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; } .ov-customer-facts, .ov-customer-columns { margin-left: 14px; margin-right: 14px; } .ov-customer-columns { padding: 14px 0 18px; } .ov-customer-main, .ov-customer-side { padding: 20px 16px; } .ov-customer-timeline article { grid-template-columns: 1fr; gap: 5px; } }
 
 /* Weekly review uses the same canvas and translucency cadence as Today.
    It is a shared work surface, not a separate illustrated landing page. */
-#page-overview {
-  background:
-    linear-gradient(rgba(250,247,240,.22), rgba(247,243,235,.30)),
-    url("assets/workspace-tree-lines-v2.webp") center top / cover no-repeat;
-}
-#page-overview .ov-hero,
-#page-overview .ov-body { width: min(1240px, calc(100% - 72px)); }
-#page-overview .ov-hero { padding-top: 42px; padding-bottom: 20px; border-bottom-color: rgba(76,66,55,.12); }
-#page-overview .ov-hero-title { font-size: 2.45rem; }
-#page-overview .ov-body { padding-top: 28px; }
-.weekly-person {
-  border-color: rgba(255,255,255,.62);
-  border-radius: 22px;
-  background: rgba(255,253,248,.22);
-  box-shadow: inset 0 1px rgba(255,255,255,.56), 0 18px 46px rgba(67,56,45,.045);
-  backdrop-filter: blur(16px) saturate(108%);
-  -webkit-backdrop-filter: blur(16px) saturate(108%);
-}
-.weekly-work-card {
-  border-color: rgba(255,255,255,.76);
-  border-radius: 16px;
-  background: rgba(255,253,248,.62);
-  box-shadow: inset 0 1px rgba(255,255,255,.82), 0 8px 22px rgba(67,56,45,.045);
-}
-.weekly-work-card.is-clickable:hover,
-.weekly-work-card.is-clickable:focus-visible { background: rgba(255,253,248,.72); box-shadow: inset 0 1px rgba(255,255,255,.86), 0 13px 30px rgba(67,56,45,.08); }
-@media (min-width: 1181px) {
-  #page-overview .ov-hero,
-  #page-overview .ov-body { width: min(1280px, calc(100% - 96px)); }
-  #page-overview .ov-hero { padding-top: 48px; }
-}
-@media (max-width: 820px) {
-  #page-overview .ov-hero,
-  #page-overview .ov-body { width: calc(100% - 36px); }
-}
-@media (max-width: 520px) {
-  #page-overview .ov-hero,
-  #page-overview .ov-body { width: calc(100% - 36px); }
-}
 
 /* ============================================================================
    Quiet Industrial polish · v3
@@ -783,8 +682,7 @@ body::after,
 .page-section,
 #page-dashboard,
 #page-inbox,
-#page-customers,
-#page-overview {
+#page-customers {
   background-color: transparent !important;
   background-image: none !important;
 }
@@ -1149,8 +1047,7 @@ body::after,
 }
 
 .page-header h2,
-.today-page-header h2,
-#page-overview .ov-hero-title {
+.today-page-header h2 {
   color: var(--ui-ink) !important;
   font-size: 38px !important;
   font-weight: 500 !important;
@@ -2020,30 +1917,6 @@ html.motion-lite .modal {
 }
 
 /* Overview and settings use the same page start as the operational pages. */
-#page-overview .ov-hero {
-  width: min(1240px, calc(100% - 64px)) !important;
-  padding: 86px 0 20px !important;
-  border-bottom: 1px solid var(--ui-line) !important;
-  background: transparent !important;
-}
-
-#page-overview .ov-hero-inner {
-  max-width: none !important;
-}
-
-#page-overview .ov-hero-title {
-  font-size: 38px !important;
-}
-
-#page-overview .ov-hero-desc,
-#page-overview .ov-hero-date {
-  color: var(--ui-ink-muted) !important;
-}
-
-#page-overview .ov-body {
-  width: min(1240px, calc(100% - 64px)) !important;
-  padding-top: 24px !important;
-}
 
 #page-settings .page-body {
   max-width: 960px !important;
@@ -2061,9 +1934,7 @@ html.motion-lite .modal {
   #page-inbox .page-header,
   #page-inbox .page-body,
   #page-customers .customer-page-workbar,
-  #page-customers .page-body,
-  #page-overview .ov-hero,
-  #page-overview .ov-body {
+  #page-customers .page-body {
     width: calc(100% - 40px) !important;
   }
 }
@@ -2082,8 +1953,7 @@ html.motion-lite .modal {
   }
 
   .page-header h2,
-  .today-page-header h2,
-  #page-overview .ov-hero-title {
+  .today-page-header h2 {
     font-size: 32px !important;
   }
 
@@ -2174,9 +2044,7 @@ html.motion-lite .modal {
   .page-body,
   .today-page-header,
   .today-page-body,
-  #page-inbox .inbox-page-body,
-  #page-overview .ov-hero,
-  #page-overview .ov-body {
+  #page-inbox .inbox-page-body {
     width: calc(100% - 24px) !important;
   }
 
@@ -2186,8 +2054,7 @@ html.motion-lite .modal {
   }
 
   .page-header h2,
-  .today-page-header h2,
-  #page-overview .ov-hero-title {
+  .today-page-header h2 {
     font-size: 29px !important;
   }
 
@@ -2446,8 +2313,7 @@ html.motion-lite .modal {
   .sidebar { top: 10px; bottom: 10px; left: 10px; width: min(290px,calc(100vw - 20px)); min-width: 0; }
   .main-content { margin-left: 0; }
   .sidebar-toggle { top: 13px; left: 13px; display: flex; border-color: rgba(255,255,255,.84); background: var(--v2-glass); backdrop-filter: blur(24px); }
-  .page-header, .page-body, .today-page-header, .today-page-body,
-  #page-overview .ov-hero, #page-overview .ov-body { width: calc(100% - 42px); }
+  .page-header, .page-body, .today-page-header, .today-page-body { width: calc(100% - 42px); }
   .page-header { padding-top: 70px; }
   .today-page-header { padding-top: 70px; }
   .today-page-header h2 { font-size: 2.45rem; }
@@ -2509,8 +2375,7 @@ html.motion-lite .modal {
   .account-section { margin: 0 12px; padding: 8px 0 10px; }
   .sidebar-identity { justify-content: center; padding: 10px 0 0; }
   .main-content { margin-left: 76px; }
-  .page-header, .page-body, .today-page-header, .today-page-body,
-  #page-overview .ov-hero, #page-overview .ov-body { width: calc(100% - 48px); }
+  .page-header, .page-body, .today-page-header, .today-page-body { width: calc(100% - 48px); }
   .page-header, .today-page-header { padding-top: 28px; }
   .page-header h2, .today-page-header h2 { font-size: clamp(2rem, 4vw, 2.35rem); }
   .page-body, .today-page-body { padding-top: 22px; padding-bottom: 30px; }
@@ -2537,8 +2402,7 @@ html.motion-lite .modal {
 }
 
 @media (max-width: 620px) {
-  .page-header, .page-body, .today-page-header, .today-page-body,
-  #page-overview .ov-hero, #page-overview .ov-body { width: calc(100% - 30px); }
+  .page-header, .page-body, .today-page-header, .today-page-body { width: calc(100% - 30px); }
   .page-header h2 { font-size: 2.15rem; }
   .today-page-header { flex-direction: column; }
   .today-page-header h2 { font-size: 2.15rem; }
@@ -2631,233 +2495,6 @@ html.motion-lite .modal {
 /* Weekly workspace final composition — calm editorial columns with bounded
    summaries. This block stays last to retire the earlier experimental weekly
    card and control rules without affecting the rest of Trade OS. */
-#page-overview {
-  min-height: 100vh;
-  background:
-    linear-gradient(rgba(247,244,237,.90), rgba(244,240,232,.94)),
-    url("assets/workspace-tree-lines-v2.webp") center top / cover no-repeat;
-}
-#page-overview .ov-hero,
-#page-overview .ov-body {
-  width: min(1360px, calc(100% - 64px));
-  max-width: none;
-  margin-inline: auto;
-}
-#page-overview .ov-hero {
-  padding: 32px 0 22px;
-  border-bottom: 1px solid rgba(73,63,51,.13);
-  background: transparent;
-}
-#page-overview .ov-hero-inner { display: block; max-width: none; }
-#page-overview .ov-hero-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 24px;
-}
-#page-overview .ov-hero-title {
-  color: var(--v2-ink);
-  font-family: var(--font-display);
-  font-size: 2.35rem;
-  font-weight: 500;
-  letter-spacing: -.035em;
-  line-height: 1.12;
-}
-#page-overview .ov-hero-date {
-  color: var(--v2-ink-soft);
-  font-size: 15px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-#page-overview .ov-hero-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-top: 20px;
-}
-#page-overview .ov-hero-week {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0;
-  padding: 4px;
-  border: 1px solid rgba(73,63,51,.13);
-  border-radius: 12px;
-  background: rgba(255,253,248,.84);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.92);
-}
-#page-overview .ov-hero-week button,
-#page-overview .ov-hero-week .ov-week-current {
-  display: inline-flex;
-  width: auto;
-  min-width: 0;
-  min-height: 36px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 0;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--v2-ink-soft);
-  font-size: 13px;
-  font-weight: 600;
-}
-#page-overview .ov-hero-week button:hover { background: var(--v2-clay-soft); color: var(--v2-ink); }
-#page-overview .ov-hero-week .ov-week-current {
-  border: 1px solid rgba(168,95,69,.18);
-  background: rgba(239,225,216,.68);
-  color: var(--v2-clay);
-}
-#page-overview .ov-hero-week .ui-icon { width: 15px; height: 15px; }
-
-#page-overview .ov-body { padding: 28px 0 72px; }
-.weekly-board {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
-  gap: 28px;
-}
-.weekly-person,
-html.motion-lite .weekly-person {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-.weekly-person-header {
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  gap: 10px;
-  padding: 0 2px 13px;
-  border-bottom: 1px solid color-mix(in srgb, var(--person-color) 46%, white);
-}
-.weekly-person-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 13px;
-  font-weight: 650;
-}
-.weekly-person-header h2 {
-  margin: 0;
-  color: var(--v2-ink);
-  font-size: 18px;
-  font-weight: 650;
-  letter-spacing: -.015em;
-  line-height: 1.25;
-}
-.weekly-person-header p { display: none; }
-.weekly-person-header-meta {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-left: auto;
-  color: var(--v2-ink-muted);
-  font-size: 12px;
-}
-.weekly-person-header-meta em { color: var(--v2-clay); font-style: normal; }
-.weekly-work-card,
-html.motion-lite .weekly-work-card {
-  overflow: hidden;
-  margin: 14px 0 0;
-  padding: 19px 20px 16px;
-  border: 1px solid rgba(73,63,51,.11);
-  border-radius: 16px;
-  background: rgba(255,253,248,.96) !important;
-  box-shadow: 0 10px 28px rgba(67,56,45,.055) !important;
-}
-.weekly-work-card.is-clickable:hover,
-.weekly-work-card.is-clickable:focus-visible {
-  border-color: color-mix(in srgb, var(--person-color) 34%, white);
-  background: #fffdf8 !important;
-  box-shadow: 0 13px 32px rgba(67,56,45,.085) !important;
-  transform: none;
-}
-.weekly-work-top { align-items: flex-start; gap: 12px; }
-.weekly-work-top h3 {
-  color: var(--v2-ink);
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -.015em;
-  line-height: 1.38;
-}
-.weekly-work-top time { padding-top: 2px; color: var(--v2-ink-muted); font-size: 12px; }
-.weekly-customer-meta {
-  margin-top: 7px;
-  color: var(--v2-ink-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-.weekly-entry-count {
-  margin-top: 12px;
-  color: var(--v2-ink-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: .01em;
-}
-.weekly-work-block { margin-top: 13px; }
-.weekly-work-block + .weekly-work-block { padding-top: 12px; border-top: 1px solid var(--v2-line); }
-.weekly-work-block span {
-  margin-bottom: 5px;
-  color: var(--v2-ink-muted);
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: .02em;
-}
-.weekly-work-block p {
-  display: -webkit-box;
-  overflow: hidden;
-  margin: 0;
-  color: var(--v2-ink-soft);
-  font-size: 14px;
-  line-height: 1.62;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-}
-.weekly-work-block.result p { color: var(--v2-ink); -webkit-line-clamp: 3; }
-.weekly-work-block.next p { color: var(--v2-moss); font-weight: 550; -webkit-line-clamp: 2; }
-.weekly-card-link {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-  margin-top: 14px;
-  padding-top: 11px;
-  border-top: 1px solid var(--v2-line);
-  color: var(--v2-clay);
-  font-size: 12px;
-  font-weight: 650;
-}
-.weekly-card-link .ui-icon { width: 14px; height: 14px; }
-.weekly-member-state { min-height: 110px; padding-inline: 2px; }
-.weekly-person-empty { min-height: 112px; margin-top: 14px; background: rgba(255,253,248,.58); }
-
-@media (max-width: 1080px) {
-  #page-overview .ov-hero,
-  #page-overview .ov-body { width: min(760px, calc(100% - 48px)); }
-  .weekly-board { grid-template-columns: 1fr; gap: 36px; }
-}
-@media (max-width: 620px) {
-  #page-overview .ov-hero,
-  #page-overview .ov-body { width: calc(100% - 32px); }
-  #page-overview .ov-hero { padding-top: 24px; }
-  #page-overview .ov-hero-top { align-items: flex-start; }
-  #page-overview .ov-hero-title { font-size: 2rem; }
-  #page-overview .ov-hero-bottom { align-items: stretch; flex-direction: column-reverse; }
-  #page-overview .ov-hero-week { width: 100%; justify-content: space-between; }
-  #page-overview .ov-hero-week button { flex: 1; padding-inline: 8px; }
-  .weekly-work-card { padding: 17px 17px 15px; }
-}
 
 .today-page-header.is-condensed .today-date { display: none; }
 .today-page-header.is-condensed .today-summary { margin: 0; font-size: var(--fs-caption); white-space: nowrap; }
@@ -3475,8 +3112,6 @@ html.motion-lite .command-shelf,
 html.motion-lite .modal,
 html.motion-lite .sidebar,
 html.motion-lite .modal-overlay,
-html.motion-lite .weekly-person,
-html.motion-lite .weekly-work-card,
 html.motion-lite .relationship-memory,
 html.motion-lite .ov-customer-workspace,
 html.motion-lite .global-page-search,
@@ -3505,18 +3140,7 @@ html.motion-lite .modal {
 
 /* Keep the active work surface cheap to paint on older Intel Macs and
    Windows machines. The normal palette and layout remain unchanged. */
-html.motion-lite #page-overview {
-  /* Keep the weekly page aligned with Today even when material effects are
-     downgraded.  The canvas is part of the product identity, not decoration. */
-  background-image:
-    linear-gradient(rgba(250,247,240,.22), rgba(247,243,235,.30)),
-    url("assets/workspace-tree-lines-v2.webp") !important;
-  background-position: center top, center top !important;
-  background-size: auto, cover !important;
-}
 html.motion-lite .ov-customer-workspace { background-image: none !important; }
-html.motion-lite .weekly-person,
-html.motion-lite .weekly-work-card,
 html.motion-lite .relationship-memory,
 html.motion-lite .ov-customer-workspace,
 html.motion-lite .global-page-search,
@@ -3524,14 +3148,12 @@ html.motion-lite .liquid-option {
   background-color: rgba(255, 253, 248, .22) !important;
   box-shadow: inset 0 1px rgba(255,255,255,.56), 0 18px 46px rgba(67,56,45,.045) !important;
 }
-html.motion-lite .weekly-work-card { background-color: rgba(255,253,248,.62) !important; }
 html.motion-lite .page-section.active,
 html.motion-lite .motion-list-enter,
 html.motion-lite .motion-list-leave,
 html.motion-lite .motion-updated,
 html.motion-lite .customer-row-card,
 html.motion-lite .today-task-row,
-html.motion-lite .weekly-work-card,
 html.motion-lite .modal-overlay > .modal {
   animation: none !important;
   transition: none !important;
@@ -3684,10 +3306,6 @@ html.motion-lite *::after {
 .smart-preview-profile > span,
 .smart-preview-contacts > span { font-size: var(--fs-caption); }
 .smart-preview-contacts li span { font-size: var(--fs-caption); }
-.ov-mp-idt { font-size: var(--fs-caption); }
-.ov-tl-date { font-size: var(--fs-caption); }
-.ov-cl-table th { font-size: var(--fs-label); }
-.ov-cl-table td { font-size: var(--fs-body-s); }
 .stat-card .stat-label { font-size: var(--fs-caption); }
 .empty-state p { font-size: var(--fs-body); }
 .btn-sm { font-size: var(--fs-label); }
@@ -3696,7 +3314,7 @@ html.motion-lite *::after {
    目标：强化标题与正文的层级对比，改善长文本可读性，统一数字呈现。 ========== */
 
 /* 标题层级：拉大 h2/h3/h4 与正文的对比 */
-.page-header h2, .today-page-header h2, #page-overview .ov-hero-title {
+.page-header h2, .today-page-header h2 {
   letter-spacing: -.035em;
   line-height: 1.1;
 }
@@ -3707,9 +3325,7 @@ html.motion-lite *::after {
 .settings-group h4, .pool-group-title { font-size: var(--fs-title-s); font-weight: 650; }
 
 /* 正文行距与字距：长文本提升可读性 */
-.timeline-desc, .timeline-title, .reminder-content,
-.weekly-work-block p, .weekly-history-item p, .relationship-memory,
-.modal-body, .form-group, .customer-current-status, .customer-next-step {
+.timeline-desc, .timeline-title, .reminder-content, .relationship-memory, .modal-body, .form-group, .customer-current-status, .customer-next-step {
   line-height: 1.65;
   letter-spacing: 0.005em;
 }
@@ -3718,11 +3334,7 @@ html.motion-lite *::after {
 .reminder-content { line-height: 1.6; }
 
 /* 数字与日期：等宽 + tabular-nums，让对齐更整齐 */
-time, .timeline-date, .log-time, .today-date, .today-task-date,
-.weekly-week-entry time, .weekly-history-item time,
-.stat-card .stat-value, .ov-kpi-num, .nav-count, .badge,
-.reminder-meta, .progress-label, .ov-cl-table td, .ov-cl-table th,
-.customer-last-contact {
+time, .timeline-date, .log-time, .today-date, .today-task-date, .stat-card .stat-value, .nav-count, .badge, .reminder-meta, .progress-label, .customer-last-contact {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
@@ -3796,7 +3408,7 @@ html.font-size-xl {
 /* 字号切换的平滑过渡 */
 html { transition: font-size .18s ease; }
 html .sidebar, html .main-content { transition: width .18s ease, min-width .18s ease, margin-left .18s ease; }
-.stat-card .stat-value, .ov-kpi-num {
+.stat-card .stat-value {
   font-family: var(--font-display);
   letter-spacing: -.02em;
 }
@@ -3868,7 +3480,6 @@ body {
 .today-focus-card h3,
 .inbox-page-header h2,
 .modal-header h3,
-.ov-hero-title,
 .relationship-memory-title {
   font-family: var(--font-display);
   font-feature-settings: "liga" 1, "calt" 1;
@@ -3877,8 +3488,7 @@ body {
 /* hero 标题：紧字距 + 轻字重，Claude 标志性编辑感 */
 .page-header h2,
 .today-page-header h2,
-.inbox-page-header h2,
-.ov-hero-title {
+.inbox-page-header h2 {
   letter-spacing: -0.035em;
   font-weight: 500;
 }
@@ -3893,10 +3503,7 @@ body {
 }
 
 /* 正文：略松字距，提升可读性 */
-.timeline-desc, .timeline-title, .reminder-content,
-.weekly-work-block p, .weekly-history-item p, .relationship-memory,
-.modal-body, .form-group, .customer-current-status, .customer-next-step,
-.today-focus-task, .today-focus-context strong {
+.timeline-desc, .timeline-title, .reminder-content, .relationship-memory, .modal-body, .form-group, .customer-current-status, .customer-next-step, .today-focus-task, .today-focus-context strong {
   letter-spacing: 0.003em;
 }
 
@@ -3907,256 +3514,24 @@ body {
 }
 
 /* 数字与日期：等宽对齐 */
-time, .timeline-date, .log-time, .today-date, .today-task-date,
-.weekly-week-entry time, .weekly-history-item time,
-.stat-card .stat-value, .ov-kpi-num, .nav-count, .badge,
-.reminder-meta, .progress-label, .ov-cl-table td, .ov-cl-table th,
-.customer-last-contact, .customer-updated {
+time, .timeline-date, .log-time, .today-date, .today-task-date, .stat-card .stat-value, .nav-count, .badge, .reminder-meta, .progress-label, .customer-last-contact, .customer-updated {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "cv11" 1;
 }
 
 /* 衬线字体下的数字优化：Newsreader 的数字偏细，用 sans 替代 */
-.stat-card .stat-value, .ov-kpi-num, .nav-count {
+.stat-card .stat-value, .nav-count {
   font-family: var(--font-sans);
   font-weight: 650;
 }
 
 /* 大标题光学尺寸：Newsreader opsz 让大字号更优雅 */
-.page-header h2, .today-page-header h2, .ov-hero-title {
+.page-header h2, .today-page-header h2 {
   font-optical-sizing: auto;
   font-variation-settings: "opsz" 48;
 }
 
 /* Weekly review v3: a compact editorial header and continuous member lists. */
-#page-overview .ov-hero {
-  padding-top: 32px;
-  padding-bottom: 20px;
-}
-#page-overview .ov-hero-inner {
-  display: grid;
-  gap: 12px;
-}
-#page-overview .ov-hero-top,
-#page-overview .ov-hero-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-#page-overview .ov-hero-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-  min-width: 0;
-}
-#page-overview .ov-hero-title {
-  font-size: 2rem;
-  line-height: 1.15;
-}
-#page-overview .ov-hero-date {
-  color: var(--v2-ink);
-  font-size: 1rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-#page-overview .ov-hero-sub {
-  color: var(--v2-ink-muted);
-  font-size: 14px;
-  line-height: 1.5;
-}
-#page-overview .ov-hero-week {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-}
-#page-overview .ov-hero-week button {
-  width: auto;
-  height: 32px;
-  padding: 5px 10px;
-  border: 1px solid var(--v2-line);
-  border-radius: 10px;
-  background: rgba(255,253,249,.48);
-  color: var(--v2-ink-soft);
-  font-size: 14px;
-  cursor: pointer;
-}
-#page-overview .ov-hero-week button:hover,
-#page-overview .ov-hero-week button:focus-visible {
-  background: var(--v2-clay-soft);
-  color: var(--v2-ink);
-  outline: none;
-}
-#page-overview .ov-hero-week .ov-week-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-#page-overview .ov-hero-week .ov-week-current {
-  color: var(--v2-clay);
-}
-.weekly-board {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 32px;
-}
-.weekly-person {
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-.weekly-person-header {
-  gap: 10px;
-  padding: 0 0 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--person-color) 42%, var(--v2-line));
-}
-.weekly-person-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 9px;
-  font-size: 12px;
-}
-.weekly-person-header h2 {
-  font-size: 16px;
-  line-height: 1.35;
-}
-.weekly-person-header p {
-  margin-top: 2px;
-  color: var(--v2-ink-muted);
-  font-size: 13px;
-  line-height: 1.4;
-}
-.weekly-work-card {
-  padding: 18px 0 20px;
-  margin: 0;
-  border: 0;
-  border-bottom: 1px solid var(--v2-line);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.weekly-work-card.is-clickable {
-  cursor: pointer;
-  transition: background-color .16s ease;
-}
-.weekly-work-card.is-clickable:hover,
-.weekly-work-card.is-clickable:focus-visible {
-  margin-left: -10px;
-  margin-right: -10px;
-  padding-left: 10px;
-  padding-right: 10px;
-  border-color: var(--v2-line);
-  background: rgba(255,253,249,.34);
-  box-shadow: none;
-  outline: none;
-}
-.weekly-work-top h3 {
-  font-size: 16px;
-  line-height: 1.45;
-}
-.weekly-work-top time {
-  color: var(--v2-ink-muted);
-  font-size: 13px;
-}
-.weekly-customer-meta {
-  margin-top: 5px;
-  color: var(--v2-ink-soft);
-  font-size: 14px;
-  line-height: 1.5;
-}
-.weekly-entry-count {
-  margin-top: 12px;
-  color: var(--v2-ink-muted);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0;
-}
-.weekly-work-block {
-  margin-top: 14px;
-}
-.weekly-work-block + .weekly-work-block {
-  padding-top: 12px;
-}
-.weekly-work-block span {
-  margin-bottom: 4px;
-  color: var(--v2-ink-muted);
-  font-size: 13px;
-  line-height: 1.4;
-  letter-spacing: 0;
-}
-.weekly-work-block p {
-  color: var(--v2-ink-soft);
-  font-size: 15px;
-  line-height: 1.65;
-}
-.weekly-work-block.result p { color: var(--v2-ink); }
-.weekly-work-block.next p { color: var(--v2-moss); font-weight: 500; }
-.weekly-card-link {
-  justify-content: flex-start;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--v2-line);
-  color: var(--v2-clay);
-  font-size: 14px;
-  font-weight: 500;
-}
-.weekly-person-empty {
-  min-height: 72px;
-  align-items: flex-start;
-  justify-content: center;
-  margin-top: 16px;
-  padding: 16px 0;
-  border: 0;
-  border-top: 1px dashed var(--v2-line);
-  border-bottom: 1px dashed var(--v2-line);
-  border-radius: 0;
-  background: transparent;
-  text-align: left;
-}
-.weekly-person-empty strong {
-  color: var(--v2-ink-muted);
-  font-size: 14px;
-  font-weight: 500;
-}
-.weekly-member-state {
-  min-height: 88px;
-  padding: 20px 0;
-  color: var(--v2-ink-muted);
-  font-size: 14px;
-}
-.weekly-person.is-loading { min-height: 0; }
-.weekly-member-error {
-  min-height: 88px;
-  padding: 20px 0;
-  color: var(--v2-danger, #A94E45);
-  font-size: 14px;
-}
-.weekly-member-error strong,
-.weekly-member-error span { display: block; }
-.weekly-member-error strong { margin-bottom: 4px; font-size: 15px; }
-.weekly-member-error button,
-.weekly-member-refresh-error button {
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--v2-clay);
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-}
-.weekly-member-refresh-error {
-  padding: 10px 0 0;
-  color: var(--v2-danger, #A94E45);
-  font-size: 13px;
-  line-height: 1.5;
-}
 .ov-customer-loading {
   display: flex;
   min-height: 260px;
@@ -4171,18 +3546,6 @@ time, .timeline-date, .log-time, .today-date, .today-task-date,
 }
 .ov-customer-loading p { margin: 0; }
 .ov-customer-loading-error strong { color: var(--v2-danger); font-size: 16px; }
-
-@media (max-width: 900px) and (min-width: 681px) {
-  .weekly-board { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
-}
-@media (max-width: 680px) {
-  #page-overview .ov-hero-top,
-  #page-overview .ov-hero-bottom { align-items: flex-start; flex-direction: column; gap: 10px; }
-  #page-overview .ov-hero-meta { align-items: flex-start; flex-direction: column; gap: 8px; }
-  #page-overview .ov-hero-date { font-size: 15px; }
-  #page-overview .ov-hero-week { flex-wrap: wrap; }
-  .weekly-board { grid-template-columns: 1fr; gap: 28px; }
-}
 
 /* ========== 文字色彩语义化（v2-motion22）
    核心：用项目已有暖色 token 区分信息角色，而非全黑
@@ -4885,9 +4248,6 @@ mark.hl-pink {
   border-radius: 1px;
 }
 /* 在深色 hero 区里高亮要换色 */
-.ov-hero mark.hl-yellow { background: linear-gradient(180deg, transparent 55%, rgba(255, 224, 130, .55) 55%); color: #fff; }
-.ov-hero mark.hl-green { background: linear-gradient(180deg, transparent 55%, rgba(174, 213, 142, .5) 55%); color: #fff; }
-.ov-hero mark.hl-pink { background: linear-gradient(180deg, transparent 55%, rgba(255, 175, 192, .5) 55%); color: #fff; }
 
 /* 高亮工具栏：用于 contenteditable 区域 */
 .hl-toolbar {
@@ -6114,140 +5474,9 @@ mark.hl-pink {
 }
 
 /* Weekly workspace final cascade lock. */
-#page-overview { background: linear-gradient(rgba(247,244,237,.90), rgba(244,240,232,.94)), url("assets/workspace-tree-lines-v2.webp") center top / cover no-repeat !important; }
-#page-overview .ov-hero, #page-overview .ov-body { width: min(1360px, calc(100% - 64px)) !important; max-width: none !important; margin-inline: auto !important; }
-#page-overview .ov-hero { padding: 32px 0 22px !important; border-bottom: 1px solid rgba(73,63,51,.13) !important; background: transparent !important; }
-#page-overview .ov-hero-inner { display: block !important; max-width: none !important; }
-#page-overview .ov-hero-top { display: flex !important; align-items: baseline !important; justify-content: space-between !important; gap: 24px !important; }
-#page-overview .ov-hero-bottom { display: flex !important; align-items: center !important; justify-content: flex-end !important; gap: 20px !important; margin-top: 20px !important; }
-#page-overview .ov-hero-title { color: var(--v2-ink) !important; font-family: var(--font-display) !important; font-size: 2.35rem !important; font-weight: 500 !important; line-height: 1.12 !important; }
-#page-overview .ov-hero-date { color: var(--v2-ink-soft) !important; font-size: 15px !important; font-weight: 600 !important; }
-#page-overview .ov-hero-week { display: inline-flex !important; align-items: center !important; gap: 4px !important; margin: 0 !important; padding: 4px !important; border: 1px solid rgba(73,63,51,.13) !important; border-radius: 12px !important; background: rgba(255,253,248,.84) !important; }
-#page-overview .ov-hero-week button, #page-overview .ov-hero-week .ov-week-current { display: inline-flex !important; width: auto !important; min-width: 0 !important; min-height: 36px !important; align-items: center !important; justify-content: center !important; gap: 6px !important; margin: 0 !important; padding: 0 12px !important; border: 0 !important; border-radius: 9px !important; background: transparent !important; color: var(--v2-ink-soft) !important; font-size: 13px !important; font-weight: 600 !important; }
-#page-overview .ov-hero-week .ov-week-current { border: 1px solid rgba(168,95,69,.18) !important; background: rgba(239,225,216,.68) !important; color: var(--v2-clay) !important; }
-#page-overview .ov-body { padding: 28px 0 72px !important; }
-.weekly-board { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)) !important; align-items: start !important; gap: 28px !important; }
-.weekly-person, html.motion-lite .weekly-person { min-width: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-.weekly-person-header { display: flex !important; min-height: 48px !important; align-items: center !important; gap: 10px !important; padding: 0 2px 13px !important; border-bottom: 1px solid color-mix(in srgb, var(--person-color) 46%, white) !important; }
-.weekly-person-avatar { width: 32px !important; height: 32px !important; border-radius: 50% !important; font-size: 13px !important; font-weight: 650 !important; }
-.weekly-person-header h2 { margin: 0 !important; color: var(--v2-ink) !important; font-size: 18px !important; font-weight: 650 !important; line-height: 1.25 !important; }
-.weekly-person-header p { display: none !important; }
-.weekly-person-header-meta { display: flex !important; align-items: center !important; gap: 7px !important; margin-left: auto !important; color: var(--v2-ink-muted) !important; font-size: 12px !important; }
-.weekly-work-card, html.motion-lite .weekly-work-card { overflow: hidden !important; margin: 14px 0 0 !important; padding: 19px 20px 16px !important; border: 1px solid rgba(73,63,51,.11) !important; border-radius: 16px !important; background: rgba(255,253,248,.96) !important; box-shadow: 0 10px 28px rgba(67,56,45,.055) !important; }
-.weekly-work-card.is-clickable:hover, .weekly-work-card.is-clickable:focus-visible { transform: none !important; border-color: color-mix(in srgb, var(--person-color) 34%, white) !important; background: #fffdf8 !important; box-shadow: 0 13px 32px rgba(67,56,45,.085) !important; }
-.weekly-work-top h3 { color: var(--v2-ink) !important; font-size: 17px !important; font-weight: 650 !important; line-height: 1.38 !important; }
-.weekly-work-top time { color: var(--v2-ink-muted) !important; font-size: 12px !important; }
-.weekly-customer-meta { margin-top: 7px !important; color: var(--v2-ink-muted) !important; font-size: 13px !important; line-height: 1.45 !important; }
-.weekly-entry-count { margin-top: 12px !important; color: var(--v2-ink-muted) !important; font-size: 12px !important; font-weight: 600 !important; }
-.weekly-work-block { margin-top: 13px !important; }
-.weekly-work-block + .weekly-work-block { padding-top: 12px !important; border-top: 1px solid var(--v2-line) !important; }
-.weekly-work-block span { margin-bottom: 5px !important; color: var(--v2-ink-muted) !important; font-size: 12px !important; font-weight: 650 !important; }
-.weekly-work-block p { display: block !important; overflow: visible !important; margin: 0 !important; color: var(--v2-ink-soft) !important; font-size: 14px !important; line-height: 1.62 !important; white-space: pre-wrap !important; overflow-wrap: anywhere !important; -webkit-box-orient: initial !important; -webkit-line-clamp: unset !important; }
-.weekly-work-block.result p { color: var(--v2-ink) !important; -webkit-line-clamp: unset !important; }
-.weekly-work-block.next p { color: var(--v2-moss) !important; font-weight: 550 !important; -webkit-line-clamp: unset !important; }
-.weekly-card-link { display: inline-flex !important; align-items: center !important; gap: 4px !important; width: auto !important; margin-top: 14px !important; padding: 11px 0 0 !important; border: 0 !important; border-top: 1px solid var(--v2-line) !important; border-radius: 0 !important; background: transparent !important; color: var(--v2-clay) !important; font-size: 12px !important; cursor: pointer !important; }
-@media (max-width: 1080px) {
-  #page-overview .ov-hero, #page-overview .ov-body { width: min(760px, calc(100% - 48px)) !important; }
-  .weekly-board { grid-template-columns: 1fr !important; gap: 36px !important; }
-}
-@media (max-width: 620px) {
-  #page-overview .ov-hero, #page-overview .ov-body { width: calc(100% - 32px) !important; }
-  #page-overview .ov-hero-bottom { align-items: stretch !important; flex-direction: column-reverse !important; }
-  #page-overview .ov-hero-week { width: 100% !important; justify-content: space-between !important; }
-  #page-overview .ov-hero-week button { flex: 1 !important; }
-}
 
 /* Weekly communication is read one owner at a time. The owner navigator is
    deliberately quiet: it selects a chapter instead of comparing colleagues. */
-#page-overview .weekly-team-overview {
-  display: grid;
-  grid-template-columns: minmax(190px, .42fr) minmax(0, 1fr);
-  align-items: end;
-  gap: 20px 32px;
-  margin-bottom: 32px;
-  padding: 0 2px 18px;
-  border-bottom: 1px solid var(--v2-line);
-}
-.weekly-team-summary { display: grid; gap: 4px; }
-.weekly-team-summary span {
-  color: var(--v2-ink-muted);
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: .04em;
-}
-.weekly-team-summary strong {
-  color: var(--v2-ink);
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1.4;
-}
-.weekly-team-index {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 2px 1px 4px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(98,94,85,.28) transparent;
-}
-.weekly-member-filter {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 0 10px 0 12px;
-  border: 1px solid rgba(73,63,51,.13);
-  border-radius: 10px;
-  background: rgba(255,253,248,.48);
-  color: var(--v2-ink-soft);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background-color .16s ease, border-color .16s ease, color .16s ease;
-}
-.weekly-member-filter i {
-  display: inline-flex;
-  width: 19px;
-  height: 19px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--member-color) 16%, var(--v2-paper-strong));
-  color: color-mix(in srgb, var(--member-color) 82%, var(--v2-ink));
-  font-size: 11px;
-  font-style: normal;
-  font-weight: 700;
-}
-.weekly-member-filter:hover,
-.weekly-member-filter:focus-visible {
-  border-color: rgba(168,95,69,.32);
-  background: rgba(255,253,248,.88);
-  color: var(--v2-ink);
-  outline: none;
-}
-.weekly-member-filter:focus-visible { box-shadow: 0 0 0 3px rgba(168,95,69,.18); }
-.weekly-member-filter.is-active {
-  border-color: rgba(168,95,69,.18);
-  background: rgba(239,225,216,.76);
-  color: var(--v2-clay);
-}
-#page-overview .weekly-board {
-  display: block !important;
-  width: min(920px, 100%) !important;
-  margin-right: auto !important;
-}
-@media (max-width: 1080px) {
-  #page-overview .weekly-team-overview { grid-template-columns: 1fr; gap: 14px; }
-  #page-overview .weekly-board { width: 100% !important; }
-}
-@media (max-width: 620px) {
-  #page-overview .weekly-team-overview { margin-bottom: 26px; padding-bottom: 16px; }
-  .weekly-team-summary strong { font-size: 15px; }
-  .weekly-team-index { margin-inline: -2px; }
-}
 .customer-facts-brief-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--v2-line); }
 .customer-facts-grid { display: grid; gap: 20px; }
 .customer-facts-grid-top { grid-template-columns: minmax(0, 1.2fr) minmax(240px, .8fr); }
@@ -6333,237 +5562,14 @@ mark.hl-pink {
 /* Weekly workspace refinement: a calmer editorial header, compact controls,
    and a bounded reading column that keeps client notes scannable on wide
    screens without changing the existing owner-by-owner workflow. */
-#page-overview .ov-hero {
-  padding-top: 40px !important;
-  padding-bottom: 24px !important;
-}
-#page-overview .ov-hero-top {
-  align-items: flex-end !important;
-}
-#page-overview .ov-hero-kicker {
-  margin-bottom: 8px;
-  color: var(--v2-mist);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  line-height: 1.3;
-}
-#page-overview .ov-hero-desc {
-  max-width: 40rem;
-  margin-top: 8px;
-  color: var(--v2-ink-soft);
-  font-size: 14px;
-  line-height: 1.6;
-}
-#page-overview .ov-hero-date {
-  padding-bottom: 4px;
-}
-#page-overview .ov-hero-bottom {
-  margin-top: 24px !important;
-}
-#page-overview .ov-hero-week {
-  display: inline-grid !important;
-  grid-template-columns: 92px max-content 92px;
-  width: max-content;
-  min-width: 344px;
-  align-items: center;
-}
-#page-overview .ov-hero-week .ov-week-nav {
-  min-width: 92px !important;
-  white-space: nowrap;
-}
-#page-overview .ov-hero-week .ov-week-current {
-  min-width: 92px !important;
-  white-space: nowrap;
-}
-#page-overview .ov-hero-week span {
-  min-width: 0 !important;
-}
-#page-overview .ov-hero-week .ui-icon {
-  width: 15px !important;
-  min-width: 15px !important;
-  height: 15px !important;
-}
-#page-overview .ov-hero-week .ov-week-nav:first-child {
-  grid-column: 1;
-  order: 0 !important;
-}
-#page-overview .ov-hero-week .ov-week-current {
-  grid-column: 2;
-  order: 0 !important;
-}
-#page-overview .ov-hero-week .ov-week-nav:last-child {
-  grid-column: 3;
-  order: 0 !important;
-}
-#page-overview .ov-hero-week button:focus-visible,
-#page-overview .weekly-member-filter:focus-visible,
-#page-overview .weekly-card-link:focus-visible {
-  outline: 2px solid var(--v2-clay);
-  outline-offset: 2px;
-}
-#page-overview .weekly-team-overview {
-  grid-template-columns: minmax(220px, .72fr) minmax(0, 1fr);
-  gap: 24px 40px;
-  margin-bottom: 40px;
-  padding: 0 2px 20px;
-}
-#page-overview .weekly-team-summary span {
-  color: var(--v2-mist);
-  font-size: 11px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-#page-overview .weekly-team-summary strong {
-  font-family: var(--font-display);
-  font-size: 21px;
-  font-weight: 500;
-  letter-spacing: -.02em;
-}
-#page-overview .weekly-team-index {
-  justify-content: flex-end;
-  align-items: center;
-}
-#page-overview .weekly-member-filter {
-  min-height: 38px;
-  border-radius: 10px;
-  background: rgba(255,253,248,.62);
-}
-#page-overview .weekly-member-filter.is-active {
-  border-color: rgba(168,95,69,.26);
-  background: var(--v2-clay-soft);
-  color: var(--v2-clay);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
-}
-#page-overview .weekly-board {
-  width: min(900px, 100%) !important;
-}
-#page-overview .weekly-work-card {
-  max-width: 860px;
-  padding: 22px 24px 18px !important;
-  border-radius: 16px;
-}
-#page-overview .weekly-work-block p {
-  max-width: 68ch;
-  font-size: 15px !important;
-  line-height: 1.68 !important;
-}
-#page-overview .weekly-work-block.result p {
-  color: var(--v2-ink);
-}
-#page-overview .weekly-work-block.next {
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--v2-moss) 52%, white);
-  border-top: 0 !important;
-}
-
-@media (max-width: 1080px) {
-  #page-overview .weekly-work-card {
-    max-width: none;
-  }
-}
 
 @media (max-width: 820px) {
   /* The fixed search shelf occupies the first 66px on the tablet-sized
      in-app viewport; reserve that space before the page title begins. */
-  #page-overview {
-    padding-top: 84px;
-  }
-  #page-overview .ov-hero,
-  #page-overview .ov-body {
-    width: calc(100% - 32px) !important;
-  }
-  #page-overview .ov-hero {
-    padding-top: 24px !important;
-  }
-  #page-overview .ov-hero-top {
-    display: grid !important;
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  #page-overview .ov-hero-date {
-    padding-bottom: 0;
-  }
-  #page-overview .ov-hero-bottom {
-    justify-content: stretch !important;
-    margin-top: 16px !important;
-  }
-  #page-overview .ov-hero-week {
-    grid-template-columns: auto minmax(116px, 1fr) auto;
-    width: 100%;
-    min-width: 0;
-  }
-  #page-overview .weekly-team-overview {
-    grid-template-columns: 1fr;
-    gap: 16px;
-    margin-bottom: 32px;
-    padding-bottom: 16px;
-  }
-  #page-overview .weekly-team-index {
-    justify-content: flex-start;
-    margin-inline: -2px;
-  }
-  #page-overview .weekly-work-card {
-    padding: 20px 18px 16px !important;
-  }
-}
-
-@media (max-width: 520px) {
-  #page-overview {
-    padding-top: 76px;
-  }
-  #page-overview .ov-hero,
-  #page-overview .ov-body {
-    width: calc(100% - 24px) !important;
-  }
-  #page-overview .ov-hero-title {
-    font-size: 2rem !important;
-  }
-  #page-overview .ov-hero-desc {
-    max-width: 30rem;
-    font-size: 13px;
-  }
-  #page-overview .ov-hero-week {
-    grid-template-columns: 40px minmax(0, 1fr) 40px;
-  }
-  #page-overview .ov-hero-week .ov-week-nav,
-  #page-overview .ov-hero-week .ov-week-current {
-    min-width: 0 !important;
-    padding-inline: 6px !important;
-  }
-  #page-overview .ov-hero-week .ov-week-nav span:not(.ui-icon) {
-    display: none;
-  }
-  #page-overview .weekly-work-card {
-    padding-inline: 16px !important;
-  }
-  #page-overview .weekly-work-top {
-    gap: 8px;
-  }
-  #page-overview .weekly-work-top h3 {
-    font-size: 16px !important;
-  }
-  #page-overview .weekly-work-top time {
-    font-size: 11px !important;
-  }
 }
 
 /* v3 final cascade: keep the weekly page on the same paper-first canvas even
    when the automatic performance mode has disabled material effects. */
-#page-overview,
-html.motion-lite #page-overview {
-  background: transparent !important;
-  background-image: none !important;
-}
-
-#page-overview .ov-hero {
-  padding-top: 86px !important;
-  padding-bottom: 20px !important;
-}
-
-#page-overview .ov-body {
-  padding-top: 24px !important;
-}
 
 /* Final responsive corrections: the task row has three direct children
    (index, copy, date). Keeping that grid explicit prevents narrow screens

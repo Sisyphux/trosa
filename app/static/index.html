@@ -551,23 +551,23 @@
 
     <!-- ==================== OVERVIEW ==================== -->
     <div class="page-section" id="page-overview">
-      <div class="page-header ov-header">
+      <div class="page-header wk-head">
         <div class="page-heading">
           <div class="page-eyebrow">团队工作台</div>
           <h2>本周工作</h2>
           <p class="page-lede">团队成员各自确认过的沟通事实，按客户排开。</p>
         </div>
-        <div class="ov-header-meta">
-          <div class="ov-header-date" id="overviewDateLabel"></div>
-          <div class="ov-week-switch" role="group" aria-label="周报切换">
-            <button class="ov-week-nav" onclick="overviewPrevWeek()" aria-label="上一周"><span class="ui-icon ui-icon-left" aria-hidden="true"></span><span>上一周</span></button>
-            <button class="ov-week-current" onclick="overviewWeekOffset=0;loadOverview()">本周</button>
-            <button class="ov-week-nav" onclick="overviewNextWeek()" aria-label="下一周"><span>下一周</span><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
+        <div class="wk-week">
+          <div class="wk-week-range" id="overviewDateLabel"></div>
+          <div class="wk-week-switch" role="group" aria-label="周报切换">
+            <button type="button" class="wk-week-nav" onclick="overviewPrevWeek()" aria-label="上一周"><span class="ui-icon ui-icon-left" aria-hidden="true"></span><span>上一周</span></button>
+            <button type="button" class="wk-week-current" onclick="overviewWeekOffset=0;loadOverview()">本周</button>
+            <button type="button" class="wk-week-nav" onclick="overviewNextWeek()" aria-label="下一周"><span>下一周</span><span class="ui-icon ui-icon-right" aria-hidden="true"></span></button>
           </div>
         </div>
       </div>
-      <div class="ov-body">
-        <div class="ov-reports-wrap" id="ovReports"></div>
+      <div class="page-body wk-body">
+        <div class="wk-reports" id="ovReports"></div>
       </div>
     </div>
 
