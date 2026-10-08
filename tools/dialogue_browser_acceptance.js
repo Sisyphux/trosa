@@ -38,7 +38,8 @@ await page.locator('#roomBrand').waitFor({ state: 'visible', timeout: 15000 });
 const openDialogue = async () => {
   await page.locator('#roomBrand').click();
   await page.locator('#roomIndex').waitFor({ state: 'visible', timeout: 15000 });
-  await page.locator('#roomIndex [data-page="dialogue"]').first().click();
+  // 对话是 Inbox 的页签：导航里只有 Inbox，有等你回复的对话时它直接打开「对话」。
+  await page.locator('#roomIndex [data-page="inbox"]').first().click();
   await page.locator('#page-dialogue.active').waitFor({ timeout: 15000 });
   await page.locator('#dialogueList .dialogue-row').first().waitFor({ timeout: 15000 });
   await settle();

@@ -40,6 +40,8 @@ async function gotoPage(name) {
   await page.locator('#roomBrand').click();
   await page.locator('#roomIndex').waitFor({state: 'visible', timeout: 15000});
   await page.locator('#roomIndex [data-page="' + name + '"]').first().click();
+  // Inbox 有「对话」「其他事项」两个页签；本验收走的是「其他事项」（客户来信等条目）。
+  if (name === 'inbox') await page.locator('#inboxTabOther').click();
 }
 
 function localDate() {

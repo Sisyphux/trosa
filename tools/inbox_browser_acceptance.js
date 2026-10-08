@@ -30,6 +30,7 @@ await page.getByRole('button', {name:'保存设置', exact:true}).click();
 await page.waitForFunction(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'), null, {timeout:15000});
 await openIndex();
 await page.locator('#roomIndex [data-page="inbox"]').first().click();
+await page.locator('#inboxTabOther').click();
 await page.locator('#page-inbox.active').waitFor();
 const apiKinds = await page.evaluate(() => fetch('/api/inbox').then(r => r.json()).then(x => x.questions.filter(q => q.headline === '调查证据 CSV').map(q => [q.kind, q.response_schema.attachments.allowed])));
 if (apiKinds.length !== 1 || apiKinds[0][0] !== 'investigation_request' || !apiKinds[0][1]) throw new Error('fixture API contract missing: ' + JSON.stringify(apiKinds));
@@ -283,6 +284,7 @@ await page.reload({waitUntil:'domcontentloaded'});
 await page.locator('#loginOverlay').waitFor({state:'hidden', timeout:15000}).catch(() => {});
 await page.locator('#roomBrand').click();
 await page.locator('#roomIndex [data-page="inbox"]').first().click();
+await page.locator('#inboxTabOther').click();
 await page.locator('#page-inbox.active').waitFor({timeout:15000});
 await page.waitForFunction(() => !document.querySelector('#inboxList')?.textContent?.includes('正在整理 Inbox'), null, {timeout:15000});
 // Responsive and reduced-motion inspection use the same rendered fixture.
