@@ -104,14 +104,11 @@
           <div class="nav-item lit-row active" data-page="dashboard" data-nav-page="dashboard" onclick="switchPage('dashboard')" role="button" tabindex="0" aria-label="今天" title="今天" aria-current="page">
             <span class="nav-index tnum">01</span><span class="nav-name">今天</span>
           </div>
-          <div class="nav-item lit-row" data-page="inbox" data-nav-page="inbox" onclick="switchPage('inbox')" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
+          <div class="nav-item lit-row" data-page="inbox" data-nav-page="inbox" onclick="openInboxRoom()" role="button" tabindex="0" aria-label="Inbox" title="Inbox">
             <span class="nav-index tnum">02</span><span class="nav-name">Inbox</span><span class="nav-count" id="inboxNavCount"></span>
           </div>
-          <div class="nav-item lit-row" data-page="dialogue" data-nav-page="dialogue" onclick="switchPage('dialogue')" role="button" tabindex="0" aria-label="对话" title="与 sela 的对话">
-            <span class="nav-index tnum">03</span><span class="nav-name">对话</span><span class="nav-count" id="dialogueNavCount"></span>
-          </div>
           <div class="nav-item lit-row" data-page="customers" data-nav-page="customers" onclick="switchPage('customers')" role="button" tabindex="0" aria-label="客户" title="客户">
-            <span class="nav-index tnum">04</span><span class="nav-name">客户</span>
+            <span class="nav-index tnum">03</span><span class="nav-name">客户</span>
           </div>
         </div>
         <div class="nav-overview" style="display:none;">
@@ -240,6 +237,12 @@
     </div>
 
     <!-- ==================== INBOX ==================== -->
+    <!-- Inbox has two tabs: sela's dialogue (the default) and everything else. -->
+    <div class="inbox-tabs" id="inboxTabs" role="tablist" aria-label="Inbox" hidden>
+      <button type="button" class="inbox-tab" role="tab" data-inbox-tab="dialogue" id="inboxTabDialogue" onclick="switchPage('dialogue')">对话<span class="inbox-tab-count tnum" id="dialogueNavCount"></span></button>
+      <button type="button" class="inbox-tab" role="tab" data-inbox-tab="inbox" id="inboxTabOther" onclick="switchPage('inbox')">其他事项<span class="inbox-tab-count tnum" id="inboxOtherCount"></span></button>
+    </div>
+
     <div class="page-section" id="page-inbox">
       <div class="page-header inbox-page-header">
         <div class="page-heading">
@@ -271,8 +274,8 @@
     <div class="page-section" id="page-dialogue">
       <div class="page-header dialogue-page-header">
         <div class="page-heading">
-          <div class="page-eyebrow">对话</div>
-          <h2>与 sela 对话</h2>
+          <div class="page-eyebrow">待判断</div>
+          <h2>Inbox</h2>
           <p class="page-lede dialogue-overview" id="dialogueOverview">sela 用一句话说明要你决定什么，你回一句话即可；你的回复原样交给 sela。</p>
         </div>
       </div>

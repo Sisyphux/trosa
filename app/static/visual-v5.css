@@ -3535,3 +3535,26 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 @media (pointer: coarse) {
   .wk-member, .wk-week-switch button { min-height: var(--dl-tap-touch, 48px); }
 }
+
+/* Inbox 页签：「对话」与「其他事项」是同一个 Inbox 的两个页签，不是两个页面。 */
+#trosa .inbox-tabs {
+  display: flex;
+  gap: clamp(1rem, 2.4vw, 1.8rem);
+  padding: clamp(14px, 2.4vh, 26px) var(--room-gut) 0;
+}
+#trosa .inbox-tabs[hidden] { display: none; }
+#trosa .inbox-tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  padding: 0 0 .35rem;
+  font: inherit;
+  font-size: .95rem;
+  color: var(--dl-ink-3);
+  cursor: pointer;
+}
+#trosa .inbox-tab:hover { color: var(--dl-ink); }
+#trosa .inbox-tab.active { color: var(--dl-ink); border-bottom-color: var(--dl-gold-ink); }
+#trosa .inbox-tab-count { margin-left: .45rem; font-size: .78rem; color: var(--dl-gold-ink); }
+#trosa .inbox-tab-count:empty { display: none; }

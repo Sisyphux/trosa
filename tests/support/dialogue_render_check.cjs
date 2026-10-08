@@ -156,6 +156,27 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.ok(list.querySelector('[data-group="awaiting"]').textContent.includes('Northwind 是不是已经排除了？'), list.textContent);
   assert.ok(doc.getElementById('dialogueOverview').textContent.includes('2'), doc.getElementById('dialogueOverview').textContent);
   assert.equal(doc.getElementById('dialogueNavCount').textContent, '2');
+
+  // 对话是 Inbox 的页签，不是独立入口：导航里没有「对话」，它的数字并进 Inbox。
+  const navPages = Array.from(doc.querySelectorAll('.nav-personal [data-nav-page]')).map((el) => el.dataset.navPage);
+  assert.deepEqual(navPages, ['dashboard', 'inbox', 'customers'], JSON.stringify(navPages));
+  assert.equal(doc.getElementById('inboxNavCount').textContent, '2');
+  win.setInboxOtherCount(3);
+  assert.equal(doc.getElementById('inboxNavCount').textContent, '5');
+  assert.equal(doc.getElementById('inboxOtherCount').textContent, '3');
+  win.setInboxOtherCount(0);
+
+  // 保存过的导航顺序里没有的页面，留在默认位置，不能浮到最前。
+  const nav = doc.querySelector('.nav-personal');
+  const extra = doc.createElement('div');
+  extra.className = 'nav-item';
+  extra.dataset.navPage = 'brandnew';
+  nav.querySelector('[data-nav-page="inbox"]').after(extra);
+  win.applyNavOrder(['customers', 'dashboard']);
+  const reordered = Array.from(nav.querySelectorAll('[data-nav-page]')).map((el) => el.dataset.navPage);
+  assert.deepEqual(reordered, ['customers', 'dashboard', 'inbox', 'brandnew'], JSON.stringify(reordered));
+  win.applyNavOrder([]);
+  extra.remove();
   win.updateTodayDialogueEntry();
   assert.equal(doc.getElementById('todayDialogueEntry').hidden, false);
   assert.equal(doc.getElementById('todayDialogueCount').textContent, '2');
@@ -222,6 +243,18 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.ok(failed.textContent.includes('失败'), failed.textContent);
   assert.ok(!failed.textContent.includes('现在没有对话'), failed.textContent);
   assert.ok(failed.querySelector('button'), '应提供重试按钮');
+
+  // Inbox 页签：两个页签同属一个 Inbox，导航始终高亮 Inbox。
+  win.switchPage('dialogue');
+  await tick(50);
+  assert.equal(doc.getElementById('inboxTabs').hidden, false);
+  assert.ok(doc.getElementById('inboxTabDialogue').classList.contains('active'));
+  assert.ok(doc.querySelector('.nav-item[data-page="inbox"]').classList.contains('active'), '对话页时导航应高亮 Inbox');
+  win.switchPage('inbox');
+  await tick(50);
+  assert.ok(doc.getElementById('inboxTabOther').classList.contains('active'));
+  win.syncInboxTabs('customers');
+  assert.equal(doc.getElementById('inboxTabs').hidden, true);
 
   process.stdout.write('dialogue render regression: OK\n', () => process.exit(0));
 })().catch((error) => {

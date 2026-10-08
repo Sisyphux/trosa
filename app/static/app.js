@@ -1298,13 +1298,14 @@ function switchPage(page) {
       n.classList.remove('active');
       n.removeAttribute('aria-current');
     });
-    var activeNav = document.querySelector('.nav-item[data-page="' + nextPage + '"]');
+    var activeNav = document.querySelector('.nav-item[data-page="' + (nextPage === 'dialogue' ? 'inbox' : nextPage) + '"]');
     if (activeNav) {
       activeNav.classList.add('active');
       activeNav.setAttribute('aria-current', 'page');
     }
     closeRoomIndex({ skipFocus: true });
     updateRoomChrome(nextPage);
+    syncInboxTabs(nextPage);
     window.scrollTo({ top: 0, behavior: 'auto' });
     if (window.clearDaylightLit) window.clearDaylightLit();
     if (window.refreshDaylightRest) window.refreshDaylightRest();
@@ -1334,7 +1335,7 @@ function switchPage(page) {
 // There is no resident navigation. Pages, the global search and account actions
 // live in one full-screen index layer that the user summons and dismisses.
 var ROOM_PAGE_NAMES = {
-  dashboard: '今天', inbox: 'Inbox', dialogue: '对话', customers: '客户', overview: '本周工作',
+  dashboard: '今天', inbox: 'Inbox', dialogue: 'Inbox', customers: '客户', overview: '本周工作',
   calendar: '跟进日历', history: '沟通记录', logs: '操作日志', settings: '设置'
 };
 var _roomIndexReturnFocus = null;
@@ -1360,6 +1361,45 @@ function updateRoomChrome(page) {
   document.documentElement.dataset.roomPage = page || '';
   if (page !== 'dashboard') setRoomStatus(ROOM_PAGE_NAMES[page] || '', '');
   else updateTodayRoomStatus();
+}
+
+// Inbox is one room with two tabs: sela's dialogue and everything else.
+var _inboxTab = null;
+var _inboxOtherCount = 0;
+
+function syncInboxTabs(page) {
+  var strip = document.getElementById('inboxTabs');
+  if (!strip) return;
+  var inInbox = page === 'inbox' || page === 'dialogue';
+  strip.hidden = !inInbox;
+  if (!inInbox) return;
+  _inboxTab = page;
+  strip.querySelectorAll('[data-inbox-tab]').forEach(function(tab) {
+    var on = tab.dataset.inboxTab === page;
+    tab.classList.toggle('active', on);
+    tab.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
+
+function setInboxOtherCount(count) {
+  _inboxOtherCount = Number(count || 0);
+  var tabCount = document.getElementById('inboxOtherCount');
+  if (tabCount) tabCount.textContent = _inboxOtherCount || '';
+  updateInboxNavCount();
+}
+
+function updateInboxNavCount() {
+  var nav = document.getElementById('inboxNavCount');
+  var total = _inboxOtherCount + (typeof dialogueAwaitingCount === 'function' ? dialogueAwaitingCount() : 0);
+  if (nav) nav.textContent = total || '';
+}
+
+// The index's "Inbox" opens the tab you were last on; the first time, the dialogue,
+// unless nothing is waiting there but something is waiting in the other tab.
+function openInboxRoom() {
+  var target = _inboxTab;
+  if (!target) target = (!dialogueAwaitingCount() && _inboxOtherCount) ? 'inbox' : 'dialogue';
+  switchPage(target);
 }
 
 function isRoomIndexOpen() {
@@ -2125,8 +2165,7 @@ async function autoAttributeInbox() {
 async function refreshInboxBadge() {
   try {
     var data = await api('/api/inbox/counts');
-    var navCount = document.getElementById('inboxNavCount');
-    if (navCount) navCount.textContent = (data && (data.actionable == null ? data.all : data.actionable)) || '';
+    setInboxOtherCount((data && (data.actionable == null ? data.all : data.actionable)) || 0);
   } catch (e) {}
 }
 
@@ -2193,8 +2232,7 @@ function toggleInboxItem(key) {
 function renderInbox(counts) {
   if (_inboxQuestionsContractLoaded) return renderInboxQuestionWorkspace(counts || {});
   counts = counts || {};
-  var navCount = document.getElementById('inboxNavCount');
-  if (navCount) navCount.textContent = counts.all || inboxQuestions.length || '';
+  setInboxOtherCount(counts.all || inboxQuestions.length || 0);
   var overview = document.getElementById('inboxOverview');
   if (overview) {
     var identityCount = inboxQuestions.filter(function(question) { return question.kind === 'identity'; }).length;
@@ -2447,7 +2485,7 @@ function renderInboxQuestionWorkspace(counts) {
   var retiredCount = inboxState.questions.filter(isRetiredInboxSendApproval).length;
   var activeCount = inboxState.questions.length - retiredCount;
   var actionableQuestions = inboxState.questions.filter(function(q) { return !isRetiredInboxSendApproval(q); });
-  var nav = document.getElementById('inboxNavCount'); if (nav) nav.textContent = activeCount || '';
+  setInboxOtherCount(activeCount);
   if (overview) overview.innerHTML = '<strong>' + activeCount + '</strong><span>项待处理</span>';
   // Order the categories by the shared contract order first, then any kind the
   // server adds later, so the rail never reorders itself between refreshes.
@@ -5645,6 +5683,28 @@ async function persistUserPreferences(silent) {
   } catch(e) { return false; }
 }
 
+// Saved order wins; a page the saved list has never heard of keeps its place
+// after the page that precedes it by default (otherwise it floats to the top).
+var _defaultNavOrder = null;
+function applyNavOrder(saved) {
+  var container = document.querySelector('.nav-personal');
+  if (!container) return;
+  var items = {};
+  container.querySelectorAll('[data-nav-page]').forEach(function(el) { items[el.dataset.navPage] = el; });
+  if (!_defaultNavOrder) _defaultNavOrder = Object.keys(items);
+  var order = (saved || []).filter(function(page, i, all) { return items[page] && all.indexOf(page) === i; });
+  _defaultNavOrder.forEach(function(page, index) {
+    if (order.indexOf(page) >= 0) return;
+    var at = 0;
+    for (var i = index - 1; i >= 0; i--) {
+      var previous = order.indexOf(_defaultNavOrder[i]);
+      if (previous >= 0) { at = previous + 1; break; }
+    }
+    order.splice(at, 0, page);
+  });
+  order.forEach(function(page) { container.appendChild(items[page]); });
+}
+
 function applyUserPreferences() {
   if (!userPreferences) userPreferences = defaultUserPreferences();
   var modules = userPreferences.modules || {};
@@ -5657,13 +5717,7 @@ function applyUserPreferences() {
   document.querySelectorAll('.draft-email-import').forEach(function(element) {
     element.classList.toggle('module-hidden', modules.email_validation === false);
   });
-  var navContainer = document.querySelector('.nav-personal');
-  if (navContainer) {
-    (userPreferences.nav_order || []).forEach(function(page) {
-      var item = navContainer.querySelector('[data-nav-page="' + page + '"]');
-      if (item) navContainer.appendChild(item);
-    });
-  }
+  applyNavOrder(userPreferences.nav_order || []);
   applyCustomerColumnVisibility();
   applyFontSize(userPreferences.font_size);
   applyInterfacePerformance(configuredInterfacePerformanceMode());
@@ -13788,8 +13842,9 @@ function dialogueNextAwaitingId(excludeId) {
 function dialogueAwaitingCount() { return Number(dialogueCounts.awaiting_human || 0); }
 
 function dialogueNavBadge() {
-  var nav = document.getElementById('dialogueNavCount');
-  if (nav) nav.textContent = dialogueAwaitingCount() || '';
+  var tabCount = document.getElementById('dialogueNavCount');
+  if (tabCount) tabCount.textContent = dialogueAwaitingCount() || '';
+  updateInboxNavCount();
 }
 
 function renderDialogueOverview() {
