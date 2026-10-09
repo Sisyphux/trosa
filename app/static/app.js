@@ -3547,6 +3547,32 @@ function communicationContextData(context) {
   };
 }
 
+// Communication records state what happened; they never show the mail itself.
+// Anything that reads like a pasted/captured message (header block, RFC date
+// stamp, confidentiality footer, quoted thread, long Latin body with an address)
+// is replaced by a one-line fact. The source text stays in the audit payload.
+function looksLikeRawMessageText(content) {
+  var text = String(content || '').trim();
+  if (!text) return false;
+  if (/^(?:客户通过 Gmail 回复|外联邮件退信)/.test(text)) return true;
+  if (/^[A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}/.test(text)) return true;
+  if (/(?:^|\n)\s*(?:subject|from|主题|发件人)\s*[:：]\s*\S/i.test(text) && /(?:^|\n)\s*(?:to|sent|date|收件人|发送时间|消息 ID)\s*[:：]/i.test(text)) return true;
+  if (/notice of confidentiality|sent from my |wrote\s*:|原始邮件|-{3,}\s*(?:original|forwarded) message/i.test(text)) return true;
+  var cjk = (text.match(/[一-鿿]/g) || []).length;
+  return text.length > 160 && cjk < text.length * 0.1 && /[\w.+-]+@[\w-]+\.[\w.-]+/.test(text);
+}
+
+function communicationDisplayText(content, activityType, direction) {
+  var text = String(content || '').trim();
+  if (!looksLikeRawMessageText(text)) return text;
+  var subjectMatch = text.match(/(?:^|\n)\s*(?:主题|subject)\s*[:：]\s*([^\n]{1,80})/i);
+  var subject = subjectMatch ? subjectMatch[1].trim().replace(/^(?:re|回复)\s*[:：]\s*/i, '') : '';
+  var label = /^外联邮件退信/.test(text) || activityType === 'outreach_bounced' ? '外联邮件退信'
+    : direction === 'outbound' ? '我方发出邮件'
+    : '客户回复了邮件';
+  return label + (subject ? '：' + subject : '');
+}
+
 function inferCommunicationDirectionFromText(content) {
   var userName = currentUser && (currentUser.name || currentUser.label || currentUser.id);
   var userKey = normalizeSpeakerName(userName);
@@ -5159,8 +5185,9 @@ function renderTodayFacts(items, customerId) {
   }
   body.classList.add('lit-group--dim');
   body.innerHTML = items.slice(0, _TODAY_FACTS_LIMIT).map(function(item) {
-    var text = richPlainText(item.content || item.subject || '', 150);
+    var text = richPlainText(communicationDisplayText(item.content || item.subject || '', item.activity_type, item.direction), 150);
     var result = richPlainText(item.result || item.reply_content || '', 60);
+    if (looksLikeRawMessageText(item.result || item.reply_content || '')) result = '';
     var kind = item.activity_type ? communicationTypeLabel(item.activity_type) : (item.type === 'outreach' ? '开发邮件' : '沟通');
     return '<button type="button" class="room-row lit-row" onclick="openEditModal(' + Number(customerId) + ')">' +
       '<span class="room-dt tnum">' + escapeHtml(todayFactDate(item.date || item.follow_date || item.sent_date)) + '</span>' +
@@ -5393,7 +5420,7 @@ async function loadWeeklyFollowList(prefetchedData) {
         content: f.content || '',
         result: f.result || '',
         is_reported: f.is_reported || false,
-        meta: (f.result || f.content || '').substring(0, 60),
+        meta: communicationDisplayText(f.result || f.content || '', f.activity_type, f.direction).substring(0, 60),
       });
     });
     (data.outreach_logs || []).forEach(function(o) {
@@ -9948,7 +9975,7 @@ function timelineItemHtml(item) {
   if (isEmail) tail = CW_REPLY_LABELS[item.reply_status] || '';
   else if (item.meta_text) tail = '结果 — <span data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</span>';
   else if (item.activity_type !== 'task_completed') tail = escapeHtml(CW_DIRECTION_LABELS[item.direction] || communicationDirectionLabel(item.direction));
-  var richAttrs = !isEmail ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
+  var richAttrs = !isEmail && !item.collapsed ? ' data-rich-log-id="' + item.id + '" data-rich-field="' + (item.content ? 'content' : 'result') + '"' : '';
   var acts = '<span class="cw-row-acts">' +
     (!isEmail ? '<button type="button" class="cw-link" onclick="openFollowEditModal(' + item.id + ')">编辑</button><i>·</i>' : '') +
     '<button type="button" class="cw-link" onclick="toggleReport(\'' + reportType + '\',' + item.id + ')" aria-pressed="' + (item.is_reported ? 'true' : 'false') + '">' + reportLabel + '</button><i>·</i>' +
@@ -10004,7 +10031,8 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
     items.push({
       motionKey: 'follow-' + f.id,
       type: 'activity', activity_type: f.activity_type || 'follow_up', direction: displayedDirection, id: f.id,
-      date: f.follow_date || '', title: f.content || f.result || '沟通记录', content: f.content || '',
+      date: f.follow_date || '', title: communicationDisplayText(f.content || f.result || '沟通记录', f.activity_type, displayedDirection),
+      collapsed: looksLikeRawMessageText(f.content || f.result || ''), content: f.content || '',
       result: f.result || '', next_plan: f.next_plan || '', is_reported: f.is_reported || false,
       meta_text: f.content && f.result ? f.result : ''
     });
@@ -11516,7 +11544,7 @@ async function loadHistory() {
     var html = '<div class="timeline">';
     history.forEach(function(h) {
       _followTimelineCache[h.id] = h;
-      html += '<div class="timeline-item"><div class="timeline-date">' + (h.follow_date || '') + (h.created_at ? ' | ' + h.created_at.substring(11, 16) : '') + '</div><div class="timeline-title">' + escapeHtml(h.customer_name || 'Unknown') + '</div><div class="timeline-desc" data-rich-log-id="' + h.id + '" data-rich-field="content">' + renderRichText(h.content || '') + '</div>' +
+      html += '<div class="timeline-item"><div class="timeline-date">' + (h.follow_date || '') + (h.created_at ? ' | ' + h.created_at.substring(11, 16) : '') + '</div><div class="timeline-title">' + escapeHtml(h.customer_name || 'Unknown') + '</div><div class="timeline-desc" data-rich-log-id="' + h.id + '" data-rich-field="content">' + renderRichText(communicationDisplayText(h.content || '', h.activity_type, h.direction)) + '</div>' +
         (h.result ? '<div class="timeline-desc" style="margin-top:2px;"><strong>Result:</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="result">' + renderRichText(h.result) + '</span></div>' : '') +
         (h.next_plan ? '<div class="timeline-desc" style="margin-top:2px;"><strong>Next Plan:</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="next_plan">' + renderRichText(h.next_plan) + '</span></div>' : '') +
         '<div style="margin-top:8px;display:flex;gap:6px;">' +
@@ -13735,9 +13763,9 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
     '</div></div><button type="button" class="modal-close" aria-label="返回本周工作" onclick="event.preventDefault();event.stopPropagation();overviewCloseCustDetail()">' + uiIcon('close') + '</button></div><div class="modal-body ov-customer-body">';
   h += '<section class="ov-customer-facts">' + facts.map(function(item) { return '<div><span>' + item[0] + '</span><strong>' + escapeHtml(String(item[1])) + '</strong></div>'; }).join('') + '</section>';
   h += '<div class="ov-customer-columns"><div class="ov-customer-main">';
-  h += '<section class="ov-customer-section"><h4>本周发生了什么</h4><div class="ov-customer-timeline">' + ((c.week_activity || []).length ? c.week_activity.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(item.result || item.content || '已记录工作') + '</p>' + (item.next_plan ? '<small>已记录下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">本周没有更多已上报记录。</p>') + '</div></section>';
+  h += '<section class="ov-customer-section"><h4>本周发生了什么</h4><div class="ov-customer-timeline">' + ((c.week_activity || []).length ? c.week_activity.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(communicationDisplayText(item.result || item.content || '已记录工作', item.activity_type, item.direction)) + '</p>' + (item.next_plan ? '<small>已记录下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">本周没有更多已上报记录。</p>') + '</div></section>';
   var pagination = c.timeline_pagination || {};
-  h += '<section class="ov-customer-section"><h4>此前发生过什么</h4><div class="ov-customer-timeline">' + ((c.recent_timeline || []).length ? c.recent_timeline.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(item.result || item.content || '已记录工作') + '</p>' + (item.next_plan ? '<small>下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">暂无可展示的历史记录。</p>') + '</div>' + (pagination.has_next ? '<button class="ov-timeline-more" type="button" onclick="overviewShowCustDetail(' + custId + ',\'' + escapeHtml(owner) + '\',' + (timelinePage + 1) + ')">查看更早记录</button>' : '') + '</section></div><aside class="ov-customer-side"><section class="ov-customer-section"><h4>当前状态</h4><div class="ov-customer-copy"><span>当前等待</span><p>' + escapeHtml(customer.current_waiting || '当前未记录明确等待事项') + '</p></div><div class="ov-customer-copy"><span>已确认下一步</span><p>' + escapeHtml(customer.next_confirmed_action || '本周未记录明确下一步') + '</p></div></section>';
+  h += '<section class="ov-customer-section"><h4>此前发生过什么</h4><div class="ov-customer-timeline">' + ((c.recent_timeline || []).length ? c.recent_timeline.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(communicationDisplayText(item.result || item.content || '已记录工作', item.activity_type, item.direction)) + '</p>' + (item.next_plan ? '<small>下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">暂无可展示的历史记录。</p>') + '</div>' + (pagination.has_next ? '<button class="ov-timeline-more" type="button" onclick="overviewShowCustDetail(' + custId + ',\'' + escapeHtml(owner) + '\',' + (timelinePage + 1) + ')">查看更早记录</button>' : '') + '</section></div><aside class="ov-customer-side"><section class="ov-customer-section"><h4>当前状态</h4><div class="ov-customer-copy"><span>当前等待</span><p>' + escapeHtml(customer.current_waiting || '当前未记录明确等待事项') + '</p></div><div class="ov-customer-copy"><span>已确认下一步</span><p>' + escapeHtml(customer.next_confirmed_action || '本周未记录明确下一步') + '</p></div></section>';
   h += '<section class="ov-customer-section"><h4>未完成待办</h4>' + ((c.open_tasks || []).length ? c.open_tasks.map(function(item) { return '<div class="ov-customer-task"><time>' + escapeHtml(formatDate(item.remind_date || '')) + '</time><strong>' + escapeHtml(item.title || item.content || '待办') + '</strong>' + (item.reason ? '<p>' + escapeHtml(item.reason) + '</p>' : '') + '</div>'; }).join('') : '<p class="ov-customer-empty">暂无未完成待办。</p>') + '</section></aside></div></div></div></div>';
   
   var div = document.createElement('div');
