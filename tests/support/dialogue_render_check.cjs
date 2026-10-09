@@ -247,9 +247,16 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   // Inbox 页签：两个页签同属一个 Inbox，导航始终高亮 Inbox。
   win.switchPage('dialogue');
   await tick(50);
+  // The dialogue is the Inbox: with nothing under "other items" there is no tab strip at all.
+  win.setInboxOtherCount(0);
+  assert.equal(doc.getElementById('inboxTabs').hidden, true);
+  win.setInboxOtherCount(2);
   assert.equal(doc.getElementById('inboxTabs').hidden, false);
   assert.ok(doc.getElementById('inboxTabDialogue').classList.contains('active'));
   assert.ok(doc.querySelector('.nav-item[data-page="inbox"]').classList.contains('active'), '对话页时导航应高亮 Inbox');
+  win.openInboxRoom();
+  await tick(50);
+  assert.ok(doc.getElementById('inboxTabDialogue').classList.contains('active'), '入口始终打开对话');
   win.switchPage('inbox');
   await tick(50);
   assert.ok(doc.getElementById('inboxTabOther').classList.contains('active'));

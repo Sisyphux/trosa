@@ -1334,7 +1334,8 @@ function syncInboxTabs(page) {
   var strip = document.getElementById('inboxTabs');
   if (!strip) return;
   var inInbox = page === 'inbox' || page === 'dialogue';
-  strip.hidden = !inInbox;
+  // The dialogue is the Inbox.  The tab strip only shows while "other items" has something in it.
+  strip.hidden = !inInbox || !_inboxOtherCount;
   if (!inInbox) return;
   strip.querySelectorAll('[data-inbox-tab]').forEach(function(tab) {
     var on = tab.dataset.inboxTab === page;
@@ -1347,6 +1348,7 @@ function setInboxOtherCount(count) {
   _inboxOtherCount = Number(count || 0);
   var tabCount = document.getElementById('inboxOtherCount');
   if (tabCount) tabCount.textContent = _inboxOtherCount || '';
+  syncInboxTabs(currentPage);
   updateInboxNavCount();
 }
 
@@ -1356,10 +1358,9 @@ function updateInboxNavCount() {
   if (nav) nav.textContent = total || '';
 }
 
-// The index's "Inbox" opens the tab with something waiting for you: the dialogue
-// when sela is waiting on a reply, otherwise the other items.
+// The index's "Inbox" always opens the dialogue with sela.
 function openInboxRoom() {
-  switchPage(dialogueAwaitingCount() ? 'dialogue' : 'inbox');
+  switchPage('dialogue');
 }
 
 function isRoomIndexOpen() {
