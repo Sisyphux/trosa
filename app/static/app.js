@@ -440,8 +440,10 @@ function effectivePerformanceLevel(mode) {
 function applyInterfacePerformance(mode) {
   mode = ['auto', 'lite', 'performance', 'full'].indexOf(mode) >= 0 ? mode : 'auto';
   _interfacePerformanceMode = mode;
-  var level = effectivePerformanceLevel(mode);
   var html = document.documentElement;
+  // 瑞士式排版本身是平面、无模糊无动画，不需要分档：始终完整视觉，不做卡顿自动降级。
+  var swiss = html.getAttribute('data-type') === 'swiss';
+  var level = swiss ? 'full' : effectivePerformanceLevel(mode);
   // 轻量：去掉毛玻璃、模糊滤镜和循环动画，保留光、渐变与细线阴影。
   html.classList.toggle('perf-lite', level === 'lite');
   // 性能优先：在轻量基础上关闭光与全部材质，只保留层级和文字。
@@ -450,7 +452,7 @@ function applyInterfacePerformance(mode) {
   html.classList.toggle('performance-priority', priority);
   html.dataset.interfacePerformance = mode;
   html.dataset.effectivePerformance = level;
-  if (mode === 'auto') initRuntimePerformanceMonitor();
+  if (mode === 'auto' && !swiss) initRuntimePerformanceMonitor();
 }
 
 function initMotionSystem() {

@@ -85,3 +85,36 @@ html[data-type="swiss"][data-type][data-type] :is(.micro,.tide-sub,.room-bot-dat
 /* top bar / footer / bottom strip: hairline only */
 html[data-type="swiss"][data-type][data-type] :is(.room-top,.room-bot,.room-foot,.room-bar,header.topbar):is(#trosa,#trosa *){box-shadow:none !important;
   background:#fff !important}
+
+/* ---- All pages: same flat vocabulary (customers, detail, inbox, calendar,
+   settings, weekly overview, modals, search). Square corners, hairlines,
+   no atmosphere (light bands / vignettes / sheen), decorative red -> ink. */
+html[data-type="swiss"][data-type][data-type] :is(button,.btn,select,input:not([type=checkbox],[type=radio]),textarea,
+  .form-control,.tide-win,.wk-week-switch,.wk-week-nav,.wk-week-current,.wk-member,.settings-nav-item,.nav-order-item,
+  .btn-icon,.ld-ghost,.ld-open,.ld-lens,.ld-lit,.command-primary,.inbox-filter,.cat-pill,.modal,.modal-sheet,
+  .customer-file-dropzone,.calendar-day,.dropdown,.ui-menu,.toast):is(#trosa,#trosa *,body *){
+  border-radius:2px !important; box-shadow:none !important;
+}
+/* floating layers keep one hairline instead of a soft shadow */
+html[data-type="swiss"][data-type][data-type] :is(.modal,.modal-sheet,.ui-menu,.dropdown):is(#trosa,#trosa *,body *){
+  border:1px solid var(--dl-hair) !important;
+}
+html[data-type="swiss"][data-type][data-type] :is(.command-shelf,.modal,.cw-app,.customer-file-dropzone):is(#trosa,#trosa *,body *)::before{
+  background:none !important; display:none !important}
+html[data-type="swiss"][data-type][data-type] :is(.cw-sunband,.cw-pool,.cw-vig):is(#trosa,#trosa *,body *){display:none !important}
+html[data-type="swiss"][data-type][data-type] :is(.cw-app,.customer-file-dropzone):is(#trosa,#trosa *,body *){
+  background-image:none !important; background-color:#fff !important}
+html[data-type="swiss"][data-type][data-type] .customer-file-dropzone:is(#trosa,#trosa *){
+  border:1px dashed var(--dl-hair-strong) !important}
+html[data-type="swiss"][data-type][data-type] :is(.ld-gl,.day-tasks,.wk-week-current.is-current,.page-section strong.accent,
+  #page-dialogue strong):is(#trosa,#trosa *,body *){color:var(--dl-ink) !important}
+html[data-type="swiss"][data-type][data-type] :is(.customer-view-chip,.customer-card-header,.customer-select-cell,
+  .calendar-day-header,.wk-members-label,.ld-gl,.customer-index-caption){
+  text-transform:none !important; letter-spacing:0 !important}
+html[data-type="swiss"][data-type][data-type] :is(.customer-view-chip.active,.inbox-filter.active){
+  background:#111 !important; color:#fff !important; border-color:#111 !important}
+/* performance tiers no longer apply: the setting is hidden under swiss */
+html[data-type="swiss"] .settings-group:has(#preferenceInterfacePerformance){display:none}
+/* customer workspace + top bar: no tracked labels anywhere */
+html[data-type="swiss"][data-type][data-type] :is(.cw-app,.room-top,.room-bot,.modal) :not(h1,h2,h3,.cw-name,.cw-title){
+  letter-spacing:0 !important; text-transform:none !important}
