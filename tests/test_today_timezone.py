@@ -135,7 +135,7 @@ class TodayTimezoneApiTest(unittest.TestCase):
 
     def test_ambiguous_country_stays_unknown(self):
         client = self._client()
-        # An ambiguous country must not be guessed; the row stays empty.
+        # A worldwide marker has no single place; the row stays empty.
         customer_id = self._engaged_customer(
             client, name="NoZone", company="NoZone Co.", country="全球"
         )

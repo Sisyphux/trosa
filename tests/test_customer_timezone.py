@@ -63,12 +63,63 @@ class CustomerTimezoneInferenceTest(unittest.TestCase):
         self.assertEqual(infer('Brazil'), 'America/Sao_Paulo')
         self.assertEqual(infer('Ecuador'), 'America/Guayaquil')
 
-    def test_unknown_values_stay_empty(self):
+    def test_blank_and_worldwide_stay_empty(self):
         infer = customer_timezone.infer_timezone
-        for value in ('', None, '   ', '全球', '迪拜', '马来西亚？',
-                      '美国\n加州', '美国/加拿大', '西班牙马德里',
-                      '埃及（2%）', 'Dominican Republic多米尼加共和国'):
-            self.assertEqual(infer(value), '', f'{value!r} should not be guessed')
+        for value in ('', None, '   ', '全球'):
+            self.assertEqual(infer(value), '', f'{value!r} should stay empty')
+
+    def test_messy_values_resolve_to_most_likely_zone(self):
+        infer = customer_timezone.infer_timezone
+        cases = {
+            '迪拜': 'Asia/Dubai',
+            'Dubai': 'Asia/Dubai',
+            '马来西亚？': 'Asia/Kuala_Lumpur',
+            '美国\n加州': 'America/New_York',
+            '美国/加拿大': 'America/New_York',
+            '美国/土耳其': 'America/New_York',
+            '美国犹他州': 'America/New_York',
+            '美国\n（佛罗里达州）': 'America/New_York',
+            '西班牙马德里': 'Europe/Madrid',
+            '埃及（2%）': 'Africa/Cairo',
+            '菲律宾（6%，普通10%）': 'Asia/Manila',
+            '苏里南\n南美': 'America/Paramaribo',
+            'Dominican Republic多米尼加共和国': 'America/Santo_Domingo',
+        }
+        for value, expected in cases.items():
+            self.assertEqual(infer(value), expected, f'{value!r}')
+
+    def test_newly_mapped_countries(self):
+        infer = customer_timezone.infer_timezone
+        cases = {
+            '加纳': 'Africa/Accra',
+            'Ghana': 'Africa/Accra',
+            'Jamaica': 'America/Jamaica',
+            'Kenya': 'Africa/Nairobi',
+            'Uruguay': 'America/Montevideo',
+            'Paraguay': 'America/Asuncion',
+            'Bolivia': 'America/La_Paz',
+            'Nicaragua': 'America/Managua',
+            'Austria': 'Europe/Vienna',
+            'Barbados': 'America/Barbados',
+            'Belize': 'America/Belize',
+            'El Salvador': 'America/El_Salvador',
+            'Grenada': 'America/Grenada',
+            'Guyana': 'America/Guyana',
+            'Bahamas': 'America/Nassau',
+            'Aruba': 'America/Aruba',
+            'Antigua and Barbuda': 'America/Antigua',
+            'Bangladesh': 'Asia/Dhaka',
+            'Botswana': 'Africa/Gaborone',
+            'China': 'Asia/Shanghai',
+            'Norway': 'Europe/Oslo',
+            'Saint Lucia': 'America/St_Lucia',
+            'Sri Lanka': 'Asia/Colombo',
+            'Tanzania': 'Africa/Dar_es_Salaam',
+            'Uganda': 'Africa/Kampala',
+            'Trinidad and Tobago': 'America/Port_of_Spain',
+        }
+        for value, expected in cases.items():
+            self.assertEqual(infer(value), expected, f'{value!r}')
 
     def test_known_timezone_validation(self):
         self.assertTrue(customer_timezone.is_known_timezone('America/New_York'))
@@ -126,6 +177,12 @@ class CustomerTimezoneApiTest(unittest.TestCase):
         customer = self.get_customer(customer_id)
         self.assertEqual(customer['timezone'], '')
         self.assertEqual(customer['timezone_source'], '')
+
+    def test_create_infers_timezone_from_messy_country(self):
+        customer_id = self.create_customer('加州客户', country='美国\n加州')
+        customer = self.get_customer(customer_id)
+        self.assertEqual(customer['timezone'], 'America/New_York')
+        self.assertEqual(customer['timezone_source'], 'inferred')
 
     def test_manual_override_is_not_replaced_by_country_change(self):
         customer_id = self.create_customer('手动时区客户', country='美国')

@@ -2075,12 +2075,19 @@ def _backfill_customer_timezones_sqlite(cursor):
 
 
 def _backfill_customer_timezones_postgres(cursor):
-    """Infer a default timezone once for existing PostgreSQL accounts.
+    """Infer a default timezone once for existing PostgreSQL accounts and refs.
 
-    The canonical default lives on ``trosa.customer_details`` and is derived
-    from the company country code. Only empty rows are touched, and an
-    unrecognisable country stays empty. Per-user manual values live in
-    ``account_legacy_refs.legacy_payload`` and are never touched here.
+    Two passes, both only touching empty rows and never overwriting a manual
+    value:
+
+    * The account-level canonical default on ``trosa.customer_details``,
+      derived from the company country code, kept as a fallback.
+    * The per-user effective value written into each
+      ``trosa.account_legacy_refs.legacy_payload`` from that ref's own country
+      (the payload ``country`` when present, otherwise the company country
+      code). This is what makes a customer display the timezone of its own
+      country even when a legacy import collapsed several customers onto one
+      account/company.
     """
     from customer_timezone import TIMEZONE_SOURCE_INFERRED, infer_timezone
 
@@ -2102,7 +2109,45 @@ def _backfill_customer_timezones_postgres(cursor):
             "UPDATE trosa.customer_details SET timezone=%s, timezone_source=%s WHERE account_id=%s",
             updates,
         )
-    return len(updates)
+
+    cursor.execute('''
+        SELECT ref.organization_id, ref.legacy_user_id, ref.legacy_customer_id,
+               ref.legacy_payload, c.country_code
+          FROM trosa.account_legacy_refs ref
+          JOIN trosa.accounts a ON a.id = ref.account_id
+          JOIN core.companies c ON c.id = a.company_id
+         WHERE COALESCE(ref.legacy_payload->>'timezone', '') = ''
+           AND COALESCE(ref.legacy_payload->>'timezone_source', '') <> 'manual'
+    ''')
+    ref_updates = []
+    for organization_id, legacy_user_id, legacy_customer_id, payload, company_country in cursor.fetchall():
+        if isinstance(payload, dict):
+            data = payload
+        elif isinstance(payload, str):
+            try:
+                data = json.loads(payload)
+            except (TypeError, ValueError):
+                data = {}
+        else:
+            data = {}
+        country = data.get('country') if 'country' in data else company_country
+        inferred = infer_timezone(country)
+        if not inferred:
+            continue
+        patch = json.dumps({
+            'timezone': inferred,
+            'timezone_source': TIMEZONE_SOURCE_INFERRED,
+        })
+        ref_updates.append((patch, organization_id, legacy_user_id, legacy_customer_id))
+    if ref_updates:
+        cursor.executemany(
+            "UPDATE trosa.account_legacy_refs "
+            "SET legacy_payload = COALESCE(legacy_payload, '{}'::jsonb) || %s::jsonb "
+            "WHERE organization_id=%s AND legacy_user_id=%s AND legacy_customer_id=%s",
+            ref_updates,
+        )
+
+    return len(updates) + len(ref_updates)
 
 
 def init_user_tables(user):
