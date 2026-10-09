@@ -10,6 +10,8 @@ await page.setViewportSize({width: 1440, height: 900});
 await page.goto('about:blank', {waitUntil: 'domcontentloaded'});
 await page.goto(origin, {waitUntil: 'domcontentloaded'});
 await page.evaluate(async () => { localStorage.clear(); sessionStorage.clear(); if (navigator.serviceWorker) await Promise.all((await navigator.serviceWorker.getRegistrations()).map(r => r.unregister())); });
+// This run exercises the classic look's performance tiers; swiss (default) has none.
+await page.evaluate(() => localStorage.setItem('trosa.type', 'classic'));
 await page.reload({waitUntil: 'domcontentloaded'});
 if (await page.locator('#loginOverlay').isVisible()) {
   await page.waitForFunction(() => !document.querySelector('#loginOverlay') || getComputedStyle(document.querySelector('#loginOverlay')).display === 'none' || !!document.querySelector('#loginUsers [data-user-id="hamid"]'), null, {timeout:15000});
