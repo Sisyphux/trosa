@@ -10,11 +10,18 @@
 <title>操作台</title>
 <!-- Use platform fonts on the first screen; the bundled CJK font packs are loaded
      only when a future text-heavy workspace explicitly needs them. -->
+<script>
+/* Type switch: ?type=swiss | ?type=classic (remembered); default classic. */
+(function(){try{var q=new URLSearchParams(location.search).get('type'),k='trosa.type';
+if(q==='swiss'||q==='classic')localStorage.setItem(k,q);var t=localStorage.getItem(k);
+if(t==='swiss')document.documentElement.setAttribute('data-type','swiss');}catch(e){}})();
+</script>
 <link rel="stylesheet" href="/style.css?v={{VERSION}}-daylight-20260930">
 <link rel="stylesheet" href="/visual-v2.css?v={{VERSION}}-daylight-20260930">
 <link rel="stylesheet" href="/visual-v3.css?v={{VERSION}}-daylight-20260930">
 <link rel="stylesheet" href="/visual-v4.css?v={{VERSION}}-daylight-20260930">
 <link rel="stylesheet" href="/visual-v5.css?v={{VERSION}}-daylight-20260930">
+<link rel="stylesheet" href="/swiss-d.css?v={{VERSION}}-swiss-20261009">
 </head>
 <body id="trosa">
 

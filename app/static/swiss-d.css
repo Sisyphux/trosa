@@ -1,0 +1,52 @@
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/fonts/HankenGrotesk-Normal-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;font-display:swap;
+  src:url(/fonts/HankenGrotesk-Normal-latin.woff2) format("woff2");unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:"Hanken Grotesk";font-style:italic;font-weight:100 900;font-display:swap;
+  src:url(/fonts/HankenGrotesk-Italic-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:"Hanken Grotesk";font-style:italic;font-weight:100 900;font-display:swap;
+  src:url(/fonts/HankenGrotesk-Italic-latin.woff2) format("woff2");unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+
+/* ==========================================================================
+   Swiss type (variant D) — opt-in, typography only.
+   Active only under <html data-type="swiss">; remove the attribute (or visit
+   ?type=classic) and the Daylight look is untouched.
+   One typeface (Hanken Grotesk, Chinese falls through to Source Han Sans /
+   system sans), no serif, no mono; bold = 600; flat surfaces; one accent.
+   ========================================================================== */
+html[data-type="swiss"]{
+  --sw-font:"Hanken Grotesk","Noto Sans SC Variable","Noto Sans SC","Source Han Sans SC",
+    "PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  --dl-display:var(--sw-font); --dl-sans:var(--sw-font); --dl-mono:var(--sw-font);
+  --font-display:var(--sw-font); --font-sans:var(--sw-font); --font-serif:var(--sw-font);
+  --font-mono:var(--sw-font); --font-body:var(--sw-font); --entry-font:var(--sw-font);
+  --room-serif:var(--sw-font);
+
+  /* black / grey / white, one accent */
+  --dl-ink:#111; --dl-ink-2:#444; --dl-ink-3:#595959; --dl-mut:#666;
+  --dl-gold:#8f8f8f; --dl-gold-ink:#c8361a; --dl-focus:#c8361a;
+  --dl-gold-soft:#f2f2f2; --dl-gold-wash:rgba(0,0,0,.04);
+  --dl-hi:#fff; --dl-canvas:#fff; --dl-canvas-low:#fff;
+  --dl-paper:#fff; --dl-paper-2:#fff; --dl-paper-3:#f5f5f5;
+  --dl-hair:rgba(17,17,17,.16); --dl-hair-2:rgba(17,17,17,.09); --dl-hair-strong:rgba(17,17,17,.4);
+  --dl-ink-wash:rgba(17,17,17,.04); --dl-ink-wash-2:rgba(17,17,17,.08);
+  --dl-track-micro:.04em;       /* no wide-tracked caps labels */
+
+  /* flat: no card radii, no soft shadows (floating layers keep one) */
+  --dl-r-xs:2px; --dl-r-sm:2px; --dl-r-md:2px; --dl-r-lg:2px; --dl-r-xl:2px;
+  --dl-shadow-1:none; --dl-shadow-2:none; --dl-shadow-ink:none;
+}
+html[data-type="swiss"] body{
+  font-kerning:normal; font-variant-numeric:tabular-nums lining-nums;
+  text-autospace:normal; line-break:strict; text-align:left; text-wrap:pretty;
+}
+html[data-type="swiss"] :is(h1,h2,h3,.dl-title,[class*="hero"]){
+  font-weight:600; letter-spacing:-.02em; font-style:normal;
+}
+/* the single thin accent rule across the top (body::before is reserved off by visual-v2) */
+html[data-type="swiss"]::before{content:"";position:fixed;top:0;left:0;right:0;height:4px;
+  background:#e8431f;z-index:2147483000;pointer-events:none}
+/* the warm "light" (wall gradient, vignette, sun band, pointer pool) is atmosphere, not content: flat white */
+html[data-type="swiss"] .daylight-room__field:is(#trosa,#trosa *){background:#fff}
+html[data-type="swiss"] :is(.daylight-room__vig,.daylight-room__pool,.daylight-room__band):is(#trosa,#trosa *){display:none}
+html[data-type="swiss"] body{background-image:none !important}
