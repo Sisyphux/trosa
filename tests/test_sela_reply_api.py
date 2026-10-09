@@ -187,7 +187,11 @@ class SelaReplyApiTest(unittest.TestCase):
                    FROM follow_up_logs WHERE customer_id=? ORDER BY id DESC LIMIT 1''',
                 (trosa_id,),
             ).fetchone()
-            self.assertIn('Please contact me next month.', activity['content'])
+            # The mail body never becomes the record: it is summarised on entry
+            # (no model in tests -> deterministic one-line fact with the subject).
+            self.assertNotIn('Please contact me next month.', activity['content'])
+            self.assertNotIn('正文', activity['content'])
+            self.assertEqual(activity['content'], '客户回复了邮件：Acrylic sheet supply')
             self.assertIn('事件：INTERESTED', activity['result'])
             self.assertEqual(activity['follow_date'], '2026-08-17')
             self.assertEqual(activity['direction'], 'inbound')
@@ -392,6 +396,33 @@ class SelaReplyApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()['status'], 'SYNCED')
         return response
+
+    def test_reply_body_is_summarised_by_the_model_before_it_is_recorded(self):
+        outbound = outbound_payload('candidate-summary')
+        first = self.post_outbound(outbound)
+        trosa_id = first.get_json()['trosa_id']
+        self.module.quick_chat = lambda prompt, *a, **k: '客户想先看规格书，并询问最小起订量。'
+        body = ('Tue, 25 Aug 2026 09:11:31 -0400 · info@acme.com Good day, please share the specs. '
+                'Notice of Confidentiality: The information contained in this communication is intended solely for you.')
+        reply = {
+            'candidate_id': outbound['candidate_id'], 'trosa_id': trosa_id,
+            'reply': {'message_id': 'gmail-reply-sum', 'from': 'info@acme.com', 'subject': 'Re: Quote',
+                      'received_at': 'Tue, 25 Aug 2026 09:11:31 -0400', 'body': body},
+            'action': {'name': 'REPLIED', 'route': 'REVIEW', 'intent': 'UNKNOWN', 'event': 'REPLIED'},
+            'idempotency_key': 'sela-reply:summary-1',
+        }
+        response = self.client.post('/api/integrations/sela/reply', json=reply,
+                                    headers=self.headers(reply['idempotency_key']))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            content = conn.execute(
+                'SELECT content FROM follow_up_logs WHERE customer_id=? ORDER BY id DESC LIMIT 1',
+                (trosa_id,)).fetchone()['content']
+        finally:
+            conn.close()
+        self.assertEqual(content, '客户回复了邮件：客户想先看规格书，并询问最小起订量。')
+        self.assertNotIn('Confidentiality', content)
 
     def test_bounce_is_not_an_inbound_customer_reply(self):
         # Regression (E2): a bounce must not be written to the timeline as an

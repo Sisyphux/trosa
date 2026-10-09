@@ -327,3 +327,63 @@ def strip_quoted_email_text(value, limit=_MAX_LENGTH):
     if not cleaned:
         return _collapse(_dedupe_paragraphs(original)) or original.strip()
     return cleaned[:limit]
+
+
+# --- Raw message detection ---------------------------------------------------
+# A communication record states what happened; it is never the message itself.
+# ``looks_like_raw_message`` is the write-side gate: anything that still reads
+# like a captured mail/chat body is summarised before it becomes a record.
+# Mirrors ``looksLikeRawMessageText`` in app/static/app.js (display safety net).
+_RAW_PREFIX = re.compile(r'^\s*(?:客户通过 Gmail 回复|外联邮件退信)')
+_RAW_RFC_DATE = re.compile(r'^\s*[A-Za-z]{3},\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}')
+_RAW_HEADER_A = re.compile(r'(?:^|\n)\s*(?:subject|from|主题|发件人)\s*[:：]\s*\S', re.IGNORECASE)
+_RAW_HEADER_B = re.compile(r'(?:^|\n)\s*(?:to|sent|date|收件人|发送时间|消息 ID)\s*[:：]', re.IGNORECASE)
+_RAW_BOILERPLATE = re.compile(
+    r'notice of confidentiality|sent from my |wrote\s*:|原始邮件|-{3,}\s*(?:original|forwarded) message',
+    re.IGNORECASE,
+)
+_EMAIL_ADDRESS = re.compile(r'[\w.+-]+@[\w-]+\.[\w.-]+')
+_SUBJECT_LINE = re.compile(r'(?:^|\n)\s*(?:主题|subject)\s*[:：]\s*([^\n]{1,80})', re.IGNORECASE)
+
+
+def looks_like_raw_message(value):
+    text = str(value or '').strip()
+    if not text:
+        return False
+    if _RAW_PREFIX.match(text) or _RAW_RFC_DATE.match(text):
+        return True
+    if _RAW_HEADER_A.search(text) and _RAW_HEADER_B.search(text):
+        return True
+    if _RAW_BOILERPLATE.search(text):
+        return True
+    cjk = len(re.findall(r'[一-鿿]', text))
+    return len(text) > 160 and cjk < len(text) * 0.1 and bool(_EMAIL_ADDRESS.search(text))
+
+
+def raw_message_subject(value):
+    match = _SUBJECT_LINE.search(str(value or ''))
+    if not match:
+        return ''
+    return re.sub(r'^(?:re|回复)\s*[:：]\s*', '', match.group(1).strip(), flags=re.IGNORECASE)
+
+
+def message_body_for_summary(value):
+    """The message body without the sync envelope or quoted history."""
+    cleaned = strip_quoted_email_text(value)
+    marker = re.search(r'(?:^|\n)\s*正文\s*[:：]\s*', cleaned)
+    if marker:
+        cleaned = cleaned[marker.end():].strip()
+    return cleaned
+
+
+def fallback_message_fact(value, direction='inbound', activity_type=''):
+    """One-line fact used when no summary model is available; never the body."""
+    text = str(value or '')
+    if activity_type == 'outreach_bounced' or text.lstrip().startswith('外联邮件退信'):
+        label = '外联邮件退信'
+    elif direction == 'outbound':
+        label = '我方发出邮件'
+    else:
+        label = '客户回复了邮件'
+    subject = raw_message_subject(text)
+    return label + ('：' + subject if subject else '')

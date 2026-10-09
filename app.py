@@ -62,7 +62,10 @@ from app.engine import (
     list_ai_models,
 )
 from config import EMAIL_VERIFICATION_CONFIG
-from communication_text import looks_like_quoted_email, strip_quoted_email_text
+from communication_text import (
+    fallback_message_fact, looks_like_quoted_email, looks_like_raw_message,
+    message_body_for_summary, strip_quoted_email_text,
+)
 from gmail_sync import (
     GmailConfigurationError,
     GmailSyncError,
@@ -16376,6 +16379,32 @@ def get_follow_history(customer_id):
     return jsonify(history)
 
 
+def _summarize_raw_communication(content, direction='unknown', activity_type=''):
+    """Turn a captured message body into the one-line fact a record should hold.
+
+    Uses the same model route as Inbox reply analysis.  Without a model, or if
+    the reply is unusable, a deterministic one-line fact is stored instead; the
+    raw body is never written into the communication timeline.  The original
+    stays in its source (mailbox message id / captured source item).
+    """
+    fallback = fallback_message_fact(content, direction, activity_type)
+    body = message_body_for_summary(content)[:6000]
+    if not body:
+        return fallback
+    who = {'outbound': '我方发给客户', 'inbound': '客户发给我方'}.get(direction, '客户发给我方')
+    prompt = ('请把下面这封邮件整理成 1-2 句中文事实摘要，只写发生了什么：对方回复、询问、确认或拒绝了什么，'
+              '涉及的产品/规格/数量/价格/交期要写清。这封邮件是' + who + '的。不要抄原文、签名、保密声明或引用历史，'
+              '不得编造原文没有的信息，不要 Markdown，只输出摘要文字。\n原文：\n' + body)
+    try:
+        raw = (quick_chat(prompt) or '').strip()
+    except Exception:
+        logger.exception('raw communication summary failed')
+        return fallback
+    if not raw or raw.startswith('[ERROR_') or raw.startswith('[错误]') or looks_like_raw_message(raw) or len(raw) > 400:
+        return fallback
+    return fallback.split('：')[0] + '：' + raw
+
+
 def record_customer_communication(customer_id, data, before_commit=None):
     """Record a verified communication, its task consequences and Inbox resolution atomically."""
     data = data or {}
@@ -16388,6 +16417,10 @@ def record_customer_communication(customer_id, data, before_commit=None):
     recorded_next_plan, next_task, next_follow_date = _communication_next_step(data)
     if not activity_content:
         raise CrmWriteError('请填写发生了什么')
+    # Entry gate: a captured mail/chat body is summarised before it becomes a
+    # record (human-confirmed summaries pass through untouched).
+    if looks_like_raw_message(activity_content):
+        activity_content = _summarize_raw_communication(activity_content, direction, activity_type)
     follow_date = _normalize_required_date(
         data.get('follow_date') or _calendar_today().isoformat(), '沟通日期'
     )

@@ -7,6 +7,8 @@ sys.path.insert(0, str(ROOT))
 
 from communication_text import (
     clean_legacy_sela_content,
+    fallback_message_fact,
+    looks_like_raw_message,
     looks_like_legacy_sela_content,
     looks_like_quoted_email,
     strip_quoted_email_text,
@@ -219,6 +221,19 @@ class CompatibilityAliasesTest(unittest.TestCase):
         self.assertNotIn('Sela Feedback ID', items[1]['result'])
         self.assertEqual(items[1]['subject'], '历史 sela 外联')
         self.assertEqual(items[1]['reply_status'], 'replied')
+
+
+class RawMessageGateTest(unittest.TestCase):
+    def test_captured_mail_is_raw_but_a_human_summary_is_not(self):
+        self.assertTrue(looks_like_raw_message(PROTON_SAMPLE))
+        self.assertTrue(looks_like_raw_message('客户通过 Gmail 回复\n主题：Re: Quote\n正文：\nhi'))
+        self.assertFalse(looks_like_raw_message('客户想先看规格书，并询问最小起订量。'))
+        self.assertFalse(looks_like_raw_message('电话沟通，对方下周回复 john@x.com'))
+
+    def test_fallback_fact_never_contains_the_body(self):
+        text = '客户通过 Gmail 回复\n主题：Re: Quote\n发件人：a@b.com\n正文：\nsecret body'
+        self.assertEqual(fallback_message_fact(text, 'inbound'), '客户回复了邮件：Quote')
+        self.assertEqual(fallback_message_fact('外联邮件退信\n主题：Hi', 'outbound', 'outreach_bounced'), '外联邮件退信：Hi')
 
 
 if __name__ == '__main__':
