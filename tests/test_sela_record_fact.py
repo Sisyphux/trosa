@@ -303,18 +303,18 @@ class SelaRecordFactTest(unittest.TestCase):
                           message_id, 'f:more:wrong')
         self.assertEqual(wrong.status_code, 409)
         note = self.fact(thread_id, 'note',
-                         {'source_id': source_id, 'kind': 'direction', 'text': '不排除；首触问对方是否需要第二供应商或只作价格参考'},
+                         {'source_id': source_id, 'text': '不排除；首触问对方是否需要第二供应商或只作价格参考'},
                          message_id, 'f:more:note')
         self.assertEqual(note.status_code, 200, note.get_data(as_text=True))
         view = self.prospect_view(source_id)
         self.assertEqual(view['contact_details']['name'], 'Ada Lin')
         self.assertIn('1380000', ''.join(ch for ch in view['contact_details']['phone'] if ch.isdigit()))
 
-    def test_note_needs_a_valid_kind_and_text(self):
+    def test_note_needs_text(self):
         source_id = 'fact-note-1'
         self.create_prospect(source_id)
         thread_id, message_id = self.thread_with_human(source_id, '随便说一句', 'f:note')
-        response = self.fact(thread_id, 'note', {'source_id': source_id, 'kind': 'gossip', 'text': 'x'},
+        response = self.fact(thread_id, 'note', {'source_id': source_id, 'text': '  '},
                              message_id, 'f:note:1')
         self.assertEqual(response.status_code, 400)
 

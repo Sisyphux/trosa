@@ -1096,7 +1096,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(ok.status_code, 200, ok.get_data(as_text=True))
         person = fact('contact_person', {'source_id': source_id, 'name': 'Ada Pg'}, f'{source_id}:p')
         self.assertEqual(person.status_code, 200, person.get_data(as_text=True))
-        note = fact('note', {'source_id': source_id, 'kind': 'decision', 'text': '不排除，继续开发'}, f'{source_id}:n')
+        note = fact('note', {'source_id': source_id, 'text': '不排除，继续开发'}, f'{source_id}:n')
         self.assertEqual(note.status_code, 200, note.get_data(as_text=True))
         listed = client.get('/api/integrations/sela/prospects?limit=200').get_json()['prospects']
         row = next(item for item in listed if item['id'] == source_id)

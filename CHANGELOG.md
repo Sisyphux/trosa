@@ -28,7 +28,7 @@
   - `contact_person`：联系人姓名（可带职位）；原联系人是 UNKNOWN 时直接补全；
   - `contact_phone`：电话；已有不同电话时拒绝；
   - `identity_different`：你确认「不是同一家公司」，记录成可复用的身份事实，下次不再问同一个问题；
-  - `note`：你的决定 / 方向 / 背景 / 其他，作为一条带来源的记录写进客户时间线（例如「不排除，首触问对方是否需要第二供应商」）。
+  - `note`：你的决定 / 方向 / 背景，sela 用自己的话概括，作为一条带来源的记录写进客户时间线（例如「不排除，首触问对方是否需要第二供应商」）。
 - 影响范围：`inbox_dialogue.py`（`record_fact`）、`app.py`（路由、处理函数、服务令牌白名单加入 `facts`）、`tests/test_sela_record_fact.py`、`tests/test_postgres_rehearsal.py`。不改表结构、不加迁移。
 - 验证：SQLite 单测 10 条（逐字来源、来源必须是你的消息、已有邮箱不覆盖、非法邮箱、非冷线索、令牌、备注类型等）与 PostgreSQL 演练库端到端用例通过。
 

@@ -6693,7 +6693,6 @@ def sela_integration_irreversible_action(thread_id):
 
 _CONTACT_DEFAULTS = {'name': '', 'title': '', 'email': '', 'phone': '', 'whatsapp': '', 'linkedin': '',
                      'preferred_channel': '', 'contact_type': 'person', 'is_primary': False, 'notes': ''}
-_FACT_NOTE_KINDS = {'decision': '你的决定', 'direction': '你的方向', 'background': '背景信息', 'other': '其他事实'}
 
 
 def _dialogue_fact_target(conn, source_id):
@@ -6812,19 +6811,18 @@ def _dialogue_fact_spec(fact, arguments, *, thread_id, source_message_id):
             return {'applied': applied}
         return handler, [], []
     if fact == 'note':
-        kind = str(arguments.get('kind') or 'other').strip().lower()
         text = _sela_prospect_text(arguments.get('text'), 2000)
-        if kind not in _FACT_NOTE_KINDS or not text:
-            raise _dialogue.DialogueError('invalid_request', 'note 需要 kind（decision/direction/background/other）和 text')
+        if not text:
+            raise _dialogue.DialogueError('invalid_request', 'note 需要 text')
 
         def handler(conn, args, now):
             _profile, customer_id = _dialogue_fact_target(conn, source_id)
-            content = (f'[Inbox 对话 · {_FACT_NOTE_KINDS[kind]}]\n{text}\n'
+            content = (f'[Inbox 对话记录]\n{text}\n'
                        f'（来自对话 {thread_id}，依据你的消息 {source_message_id}）')
             interaction = _record_interaction(
                 conn, customer_id=customer_id, content=sanitize_mark_html(content)[:30000],
                 occurred_on=now[:10], direction='unknown', source='sela_human_input',
-                activity_type='human_fact', result=kind, is_reported=True)
+                activity_type='human_fact', result='note', is_reported=True)
             return {'interaction_id': interaction, 'already_present': False}
         return handler, [], []
     raise _dialogue.DialogueError('invalid_request', '未知的事实类型')
