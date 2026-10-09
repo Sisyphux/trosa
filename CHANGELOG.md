@@ -12,6 +12,14 @@
 - 修复：Inbox 入口（索引与导航）始终打开和 sela 的对话；「对话 / 其他事项」页签条只在「其他事项」里确实有内容（客户回复捕获、待确认主体等）时才出现，没有时整条隐藏。sela 的人工请求已全部走对话，旧表单请求已关闭。
 - 影响范围：`app/static/app.js`（`openInboxRoom`、`syncInboxTabs`、`setInboxOtherCount`）、`tests/support/dialogue_render_check.cjs`。不改接口、不改表结构。
 - 验证：`node --check app/static/app.js`；对话渲染回归脚本通过（含「无其他事项隐藏页签 / 有则显示 / 入口打开对话」）。
+## 2026-10-09 — 联系人邮箱已是公司级联系方式时，写入联系人不再触发 `contact_methods_check` 报错
+
+- 现象：sela 自动开发写入 prospect 时，某些公司的联系人邮箱写入失败，返回「Prospect 写入事务失败」，prospect 一直排在重试队列里（例如 Qatar International Trading，邮箱 info@qatarinternational.com.sa）；服务日志里是 `psycopg.errors.CheckViolation: ... violates check constraint "contact_methods_check"`。
+- 原因：`core.contact_methods` 约束为「公司或人二选一，恰好一个」。`trosa_domain.create_contact` 在同一邮箱已经作为公司级联系方式存在时，走 `ON CONFLICT DO UPDATE` 只补了 `person_id`，没有放掉 `company_id`，于是一行同时挂了公司和人，被约束拒绝。旧联系人触发器与统一导入早就是「人接手时放掉公司」的写法，只有这一处漏了。
+- 修复：`create_contact` 的冲突更新同样在人接手该邮箱时把 `company_id` 置空，与触发器、导入保持一致；不改表结构、不加迁移。
+- 影响范围：`trosa_domain.py`（`create_contact`）、`tests/test_postgres_rehearsal.py`（新增复现用例：先造公司级邮箱再建联系人）。
+- 验证：本地 PostgreSQL rehearsal：不带修复时该用例准确复现 `contact_methods_check` 报错，带修复通过。
+- 未证实：sela 对话里 PlasticSheet、Pro Acrílicos 的「邮箱写不进 Trosa」是否属于同一原因，需要发布后用线上数据再确认。
 
 ## 2026-10-09 — 客户时区按客户自己的国家取「最可能」时区，模糊国家不再留空
 

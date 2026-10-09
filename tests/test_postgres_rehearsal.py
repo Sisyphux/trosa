@@ -9,6 +9,7 @@ same tests with real PostgreSQL and the production compatibility adapter.
 from __future__ import annotations
 
 import os
+import uuid
 import sys
 import unittest
 import base64
@@ -1019,6 +1020,48 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertIsNotNone(match, restored)
         self.assertEqual(match['email'], 'undo-target@example.test')
         self.assertEqual(match['name'], 'Undo Target Buyer')
+
+    def test_contact_email_already_held_by_the_company_moves_to_the_person(self):
+        """An address that was a company-level method must not violate the one-owner CHECK.
+
+        Production hit ``contact_methods_check`` when a prospect's contact email already
+        existed as a company method: the person was added next to the company owner.
+        """
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        customer_id = load_fixture()['customer_id']
+        company = self.connection.execute(
+            '''SELECT account.company_id FROM trosa.account_legacy_refs ref
+                 JOIN trosa.accounts account ON account.id=ref.account_id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id=trosa.compat_current_user() AND ref.legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()['company_id']
+        email = f'company-held-{uuid.uuid4().hex[:8]}@example.test'
+        self.connection.execute(
+            '''INSERT INTO core.contact_methods
+               (id, organization_id, company_id, kind, value, normalized_value)
+               VALUES (trosa.compat_uuid(?), trosa.compat_org_id(), ?, 'email', ?, ?)''',
+            (f'test-company-email:{email}', company, email, email),
+        )
+        self.connection.commit()
+        contact_id = trosa_domain.create_contact(self.connection, customer_id=customer_id, values={
+            'name': 'Company Mailbox Owner', 'title': 'Sales', 'email': email,
+            'preferred_channel': 'email', 'contact_type': 'person', 'is_primary': False, 'notes': '',
+        })
+        self.connection.commit()
+        row = self.connection.execute(
+            "SELECT company_id, person_id FROM core.contact_methods WHERE kind='email' AND normalized_value=?",
+            (email,),
+        ).fetchone()
+        self.assertIsNone(row['company_id'])
+        self.assertIsNotNone(row['person_id'])
+        listed = trosa_domain.customer_contacts(self.connection, customer_id)
+        self.assertTrue(any(int(item['id']) == int(contact_id) and item['email'] == email for item in listed), listed)
 
     def test_customer_search_matches_display_source_label(self):
         """客户列表把来源显示成“自动开发”，搜索这个显示词也要能命中。"""

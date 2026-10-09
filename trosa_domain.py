@@ -811,7 +811,13 @@ def create_contact(conn: Any, *, customer_id: int, values: dict[str, Any], creat
                (id, organization_id, person_id, kind, value, normalized_value)
                VALUES (?, trosa.compat_org_id(), ?, 'email', ?, ?)
                ON CONFLICT (organization_id, kind, normalized_value) DO UPDATE
-                 SET person_id=coalesce(core.contact_methods.person_id, excluded.person_id), updated_at=now()''',
+                 SET person_id=coalesce(core.contact_methods.person_id, excluded.person_id),
+                     -- exactly one owner (CHECK num_nonnulls(company_id, person_id)=1): when a person
+                     -- takes an address that was a company-level method, the company side is released
+                     -- (same rule as the legacy-contact trigger and the unified import).
+                     company_id=CASE WHEN coalesce(core.contact_methods.person_id, excluded.person_id) IS NULL
+                                     THEN core.contact_methods.company_id ELSE NULL END,
+                     updated_at=now()''',
             (method_id, person_id, email, email),
         )
         method = conn.execute(
