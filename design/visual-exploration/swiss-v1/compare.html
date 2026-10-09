@@ -1,0 +1,33 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Swiss 字体对比</title>
+<link href="https://fonts.googleapis.com/css2?family=Arimo:ital,wght@0,400;0,700;1,400&family=Archivo:ital,wght@0,400;0,700;0,800;1,400&family=Public+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Hanken+Grotesk:ital,wght@0,400;0,600;0,700;1,400&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="swiss.css"><style>
+.cmp{display:grid;grid-template-columns:repeat(4,1fr);column-gap:var(--gap);margin-top:calc(var(--u)*6)}
+article{font-family:var(--font);min-width:0}article td{padding-right:8px}article td:first-child{width:auto;white-space:nowrap}article p{margin-top:calc(var(--u)*2)}article table{margin-top:calc(var(--u)*2)}
+.big{font-size:32px;line-height:40px;font-weight:var(--title-w);letter-spacing:var(--title-track);text-wrap:balance}
+@media(max-width:1000px){.cmp{grid-template-columns:1fr 1fr}}@media(max-width:560px){.cmp{grid-template-columns:1fr}}</style></head><body>
+<div class="topbar"></div><div class="page"><header class="mast grid"><div><strong>Trosa</strong></div><div class="g">字体对比 · 同一段内容</div><div></div></header>
+<h1 style="font-family:Arimo">四款字体</h1><section class="cmp"><article style="--font:'Arimo','Noto Sans SC',system-ui,sans-serif;--title-w:700;--title-track:-.03em">
+<h2>A · Arimo</h2><p class="label">Helvetica 系</p>
+<p class="big">Hanseatic Marine 汉萨海事</p>
+<p>客户的下一步，是10月16日发送第 2 版报价单。Reply within 48 小时，数量 1,200 pcs，FOB 汉堡。</p>
+<p><strong>粗体小标题 Bold</strong> · 常规 Regular · <span class="it">Italic Kessler &amp; Partner</span></p>
+<table><tr><td>10月8日</td><td class="n">1,200</td><td class="n">18,450.00</td></tr><tr><td>9月28日</td><td class="n">88</td><td class="n">1,111.11</td></tr><tr><td>9月19日</td><td class="n">6</td><td class="n">212.40</td></tr></table>
+<p class="g small">与 Helvetica 同字宽的免费替身（Liberation Sans 同源），最中性、最接近 Neue Haas Grotesk 的观感。数字天然等宽。</p></article><article style="--font:'Archivo','Noto Sans SC',system-ui,sans-serif;--title-w:800;--title-track:-.035em;--strong-w:700">
+<h2>B · Archivo</h2><p class="label">Akzidenz 系</p>
+<p class="big">Hanseatic Marine 汉萨海事</p>
+<p>客户的下一步，是10月16日发送第 2 版报价单。Reply within 48 小时，数量 1,200 pcs，FOB 汉堡。</p>
+<p><strong>粗体小标题 Bold</strong> · 常规 Regular · <span class="it">Italic Kessler &amp; Partner</span></p>
+<table><tr><td>10月8日</td><td class="n">1,200</td><td class="n">18,450.00</td></tr><tr><td>9月28日</td><td class="n">88</td><td class="n">1,111.11</td></tr><tr><td>9月19日</td><td class="n">6</td><td class="n">212.40</td></tr></table>
+<p class="g small">德式老牌 grotesk 的味道：字面略宽、粗体有力，大标题最有「海报感」。支持字宽轴，后续可做窄体标题。</p></article><article style="--font:'Public Sans','Noto Sans SC',system-ui,sans-serif;--title-w:700;--title-track:-.025em;--strong-w:600">
+<h2>C · Public Sans</h2><p class="label">Univers 系</p>
+<p class="big">Hanseatic Marine 汉萨海事</p>
+<p>客户的下一步，是10月16日发送第 2 版报价单。Reply within 48 小时，数量 1,200 pcs，FOB 汉堡。</p>
+<p><strong>粗体小标题 Bold</strong> · 常规 Regular · <span class="it">Italic Kessler &amp; Partner</span></p>
+<table><tr><td>10月8日</td><td class="n">1,200</td><td class="n">18,450.00</td></tr><tr><td>9月28日</td><td class="n">88</td><td class="n">1,111.11</td></tr><tr><td>9月19日</td><td class="n">6</td><td class="n">212.40</td></tr></table>
+<p class="g small">基于 Libre Franklin，清晰、均匀、略带温度；粗体用 600 而非 700，页面更轻。</p></article><article style="--font:'Hanken Grotesk','Noto Sans SC',system-ui,sans-serif;--title-w:700;--title-track:-.03em;--strong-w:600">
+<h2>D · Hanken Grotesk</h2><p class="label">Akkurat 系</p>
+<p class="big">Hanseatic Marine 汉萨海事</p>
+<p>客户的下一步，是10月16日发送第 2 版报价单。Reply within 48 小时，数量 1,200 pcs，FOB 汉堡。</p>
+<p><strong>粗体小标题 Bold</strong> · 常规 Regular · <span class="it">Italic Kessler &amp; Partner</span></p>
+<table><tr><td>10月8日</td><td class="n">1,200</td><td class="n">18,450.00</td></tr><tr><td>9月28日</td><td class="n">88</td><td class="n">1,111.11</td></tr><tr><td>9月19日</td><td class="n">6</td><td class="n">212.40</td></tr></table>
+<p class="g small">当代瑞士风：字形紧凑、x 高偏大，小字号下最易读，数字表格最干净。</p></article></section></div><div class="vswitch"><a href="a.html">A Arimo</a><a href="b.html">B Archivo</a><a href="c.html">C Public Sans</a><a href="d.html">D Hanken Grotesk</a><a href="compare.html">对比</a></div></body></html>
