@@ -1062,6 +1062,45 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertIsNotNone(row['person_id'])
         listed = trosa_domain.customer_contacts(self.connection, customer_id)
         self.assertTrue(any(int(item['id']) == int(contact_id) and item['email'] == email for item in listed), listed)
+    def test_sela_record_fact_writes_email_person_and_note_on_postgres(self):
+        """Contract §4.4B on PostgreSQL: facts the human gave land on the cold prospect."""
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        source_id = f'fact-pg-{uuid.uuid4().hex[:8]}'
+        created = client.post('/api/integrations/sela/prospects', json={'prospect': {
+            'source_id': source_id, 'company': f'Fact PG {source_id}', 'country': 'Brazil',
+            'website': f'https://{source_id}.example/', 'business_type': 'Acrylic sheet fabricator',
+            'status': 'READY TO CONTACT', 'confidence': 'HIGH', 'reason': 'Public evidence.',
+            'source_urls': [f'https://{source_id}.example/about'],
+            'evidence': [{'type': 'website', 'text': 'Fabricates.', 'source_url': f'https://{source_id}.example/about'}],
+            'contact': {}, 'email': '', 'outreach_status': '', 'subject': '', 'email_draft': '',
+            'gmail_draft_id': '', 'gmail_thread_id': '', 'sent_at': ''},
+            'idempotency_key': f'fact-pg:{source_id}'})
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        thread = client.post('/api/integrations/sela/threads', json={
+            'title': 'fact pg', 'text': '找不到联系方式', 'subject': f'prospect:{source_id}'}).get_json()['thread']
+        email = f'{source_id}@fact-pg.example'
+        reply = client.post(f'/api/inbox/threads/{thread["id"]}/reply', json={
+            'text': f'邮箱是 {email}，联系人 Ada Pg，先不排除', 'seen_revision': thread['revision']})
+        self.assertEqual(reply.status_code, 200, reply.get_data(as_text=True))
+        message_id = reply.get_json()['message']['id']
+
+        def fact(name, arguments, key):
+            return client.post(f'/api/integrations/sela/threads/{thread["id"]}/facts', json={
+                'fact': name, 'arguments': arguments, 'source_message_id': message_id, 'idempotency_key': key})
+
+        wrong = fact('contact_email', {'source_id': source_id, 'email': 'nobody@fact-pg.example'}, f'{source_id}:w')
+        self.assertEqual(wrong.status_code, 409, wrong.get_data(as_text=True))
+        ok = fact('contact_email', {'source_id': source_id, 'email': email}, f'{source_id}:e')
+        self.assertEqual(ok.status_code, 200, ok.get_data(as_text=True))
+        person = fact('contact_person', {'source_id': source_id, 'name': 'Ada Pg'}, f'{source_id}:p')
+        self.assertEqual(person.status_code, 200, person.get_data(as_text=True))
+        note = fact('note', {'source_id': source_id, 'kind': 'decision', 'text': '不排除，继续开发'}, f'{source_id}:n')
+        self.assertEqual(note.status_code, 200, note.get_data(as_text=True))
+        listed = client.get('/api/integrations/sela/prospects?limit=200').get_json()['prospects']
+        row = next(item for item in listed if item['id'] == source_id)
+        self.assertEqual(row['email'], email)
 
     def test_customer_search_matches_display_source_label(self):
         """客户列表把来源显示成“自动开发”，搜索这个显示词也要能命中。"""

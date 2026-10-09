@@ -20,6 +20,17 @@
 - 影响范围：`trosa_domain.py`（`create_contact`）、`tests/test_postgres_rehearsal.py`（新增复现用例：先造公司级邮箱再建联系人）。
 - 验证：本地 PostgreSQL rehearsal：不带修复时该用例准确复现 `contact_methods_check` 报错，带修复通过。
 - 未证实：sela 对话里 PlasticSheet、Pro Acrílicos 的「邮箱写不进 Trosa」是否属于同一原因，需要发布后用线上数据再确认。
+## 2026-10-09 — sela 能记录你在对话里给出的事实：邮箱、联系人、电话、「不是同一家」、备注
+
+- 现象：你在 Inbox 对话里说「可以用这个邮箱」「先不排除，问问他们要不要做第二供应商」，这些话只留在对话文字里，没有任何环节能把它们写进 Trosa，sela 也就没法接着往下开发。
+- 新增：`POST /api/integrations/sela/threads/<id>/facts`（sela 服务令牌）。可逆，不消耗确认消息，但有来源校验：引用的必须是这个对话里你写的消息；邮箱、联系人姓名要逐字出现在那条消息里，电话按数字串比对；只写冷线索，已有回复或已是客户的一律拒绝；邮箱已存在时不覆盖（覆盖仍要走「不可逆动作」并得到你明确同意）。
+  - `contact_email`：写入联系人邮箱（沿用 Trosa 现有的联系人写入，邮箱已属于其他客户时拒绝并说明）；
+  - `contact_person`：联系人姓名（可带职位）；原联系人是 UNKNOWN 时直接补全；
+  - `contact_phone`：电话；已有不同电话时拒绝；
+  - `identity_different`：你确认「不是同一家公司」，记录成可复用的身份事实，下次不再问同一个问题；
+  - `note`：你的决定 / 方向 / 背景 / 其他，作为一条带来源的记录写进客户时间线（例如「不排除，首触问对方是否需要第二供应商」）。
+- 影响范围：`inbox_dialogue.py`（`record_fact`）、`app.py`（路由、处理函数、服务令牌白名单加入 `facts`）、`tests/test_sela_record_fact.py`、`tests/test_postgres_rehearsal.py`。不改表结构、不加迁移。
+- 验证：SQLite 单测 10 条（逐字来源、来源必须是你的消息、已有邮箱不覆盖、非法邮箱、非冷线索、令牌、备注类型等）与 PostgreSQL 演练库端到端用例通过。
 
 ## 2026-10-09 — 客户时区按客户自己的国家取「最可能」时区，模糊国家不再留空
 

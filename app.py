@@ -380,7 +380,7 @@ def _sela_integration_path_allowed():
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
-            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions)',
+            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions|facts)',
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
@@ -6687,6 +6687,175 @@ def sela_integration_irreversible_action(thread_id):
     except Exception:
         conn.rollback()
         return _dialogue_write_failure('irreversible')
+    finally:
+        conn.close()
+
+
+_CONTACT_DEFAULTS = {'name': '', 'title': '', 'email': '', 'phone': '', 'whatsapp': '', 'linkedin': '',
+                     'preferred_channel': '', 'contact_type': 'person', 'is_primary': False, 'notes': ''}
+_FACT_NOTE_KINDS = {'decision': '你的决定', 'direction': '你的方向', 'background': '背景信息', 'other': '其他事实'}
+
+
+def _dialogue_fact_target(conn, source_id):
+    """The cold prospect a human-supplied fact is about (contract §4.2, §4.4B)."""
+    source_id = str(source_id or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+        raise _dialogue.DialogueError('invalid_request', 'source_id 无效')
+    profile = _sela_profile_by_source(conn, source_id)
+    if not profile:
+        raise _dialogue.DialogueError('not_found', 'Prospect 不存在', 404)
+    profile = dict(profile)
+    view = _sela_prospect_view(conn, profile)
+    if not view:
+        raise _dialogue.DialogueError('not_found', 'Prospect 不存在', 404)
+    if (view.get('lifecycle_stage') != 'cold_prospect'
+            or view.get('customer_linked') or view.get('lifecycle_rejected')):
+        raise _dialogue.DialogueError(
+            'guardrail_rejected',
+            '该 Prospect 已进入 Trosa 的人工阶段（有回复或已是客户），sela 不能直接写入', 409)
+    return profile, int(profile['customer_id'])
+
+
+def _dialogue_fact_contacts(conn, customer_id):
+    if postgres_mode():
+        return [dict(row) for row in _customer_contacts(conn, customer_id)]
+    return [dict(row) for row in conn.execute(
+        'SELECT * FROM contacts WHERE customer_id=? ORDER BY is_primary DESC, created_at ASC, id ASC',
+        (customer_id,)).fetchall()]
+
+
+def _dialogue_fact_spec(fact, arguments, *, thread_id, source_message_id):
+    """``(handler, verbatim needles, phone needles)`` for one reversible fact (§4.4B)."""
+    arguments = arguments if isinstance(arguments, dict) else {}
+    source_id = arguments.get('source_id')
+    if fact == 'contact_email':
+        raw = _sela_prospect_text(arguments.get('email'), 320)
+        if not raw:
+            raise _dialogue.DialogueError('invalid_request', '缺少 email')
+
+        def handler(conn, args, now):
+            try:
+                email = _canonical_email(validate_email_address(raw, check_deliverability=False).normalized)
+            except EmailNotValidError:
+                raise _dialogue.DialogueError('invalid_request', '邮箱格式无效')
+            _profile, customer_id = _dialogue_fact_target(conn, source_id)
+            existing = [_canonical_email(c.get('email')) for c in _dialogue_fact_contacts(conn, customer_id)]
+            if email in existing:
+                return {'already_present': True}
+            if any(existing):
+                raise _dialogue.DialogueError(
+                    'guardrail_rejected', '这个对象已经有邮箱，要换成新的需要你明确同意（overwrite_email）', 409)
+            try:
+                saved = _sela_resolve_contact_email(conn, customer_id, email, now, actor='sela')
+            except CrmWriteError as error:
+                raise _dialogue.DialogueError('guardrail_rejected', error.message, error.status)
+            return {'contact_id': saved.get('contact_id'), 'already_present': bool(saved.get('already_present'))}
+        return handler, [raw], []
+    if fact == 'contact_person':
+        name = _sela_prospect_text(arguments.get('name'), 200)
+        title = _sela_prospect_text(arguments.get('title'), 200)
+        if not name:
+            raise _dialogue.DialogueError('invalid_request', '缺少 name')
+
+        def handler(conn, args, now):
+            _profile, customer_id = _dialogue_fact_target(conn, source_id)
+            contacts = _dialogue_fact_contacts(conn, customer_id)
+            if any(str(c.get('name') or '').strip().lower() == name.lower() for c in contacts):
+                return {'already_present': True}
+            blank = [c for c in contacts if str(c.get('name') or '').strip().upper() in ('', 'UNKNOWN')]
+            if blank and len(contacts) == 1:
+                values = {key: blank[0].get(key, default) for key, default in _CONTACT_DEFAULTS.items()}
+                values.update({'name': name, 'title': title or values['title']})
+                _update_contact(conn, contact_id=int(blank[0]['id']), values=values)
+                return {'contact_id': int(blank[0]['id']), 'already_present': False}
+            values = {**_CONTACT_DEFAULTS, 'name': name, 'title': title, 'is_primary': not contacts}
+            contact_id = _create_contact(conn, customer_id=customer_id, values=values, created_at=now)
+            return {'contact_id': int(contact_id), 'already_present': False}
+        return handler, [name], []
+    if fact == 'contact_phone':
+        phone = _sela_prospect_text(arguments.get('phone'), 80)
+        digits = ''.join(ch for ch in phone if ch.isdigit())
+        if len(digits) < 5:
+            raise _dialogue.DialogueError('invalid_request', '电话号码无效')
+
+        def handler(conn, args, now):
+            _profile, customer_id = _dialogue_fact_target(conn, source_id)
+            contacts = _dialogue_fact_contacts(conn, customer_id)
+            if not contacts:
+                values = {**_CONTACT_DEFAULTS, 'name': 'UNKNOWN', 'phone': phone, 'is_primary': True}
+                return {'contact_id': int(_create_contact(conn, customer_id=customer_id, values=values,
+                                                          created_at=now)), 'already_present': False}
+            primary = contacts[0]
+            current = ''.join(ch for ch in str(primary.get('phone') or '') if ch.isdigit())
+            if current == digits:
+                return {'already_present': True}
+            if current:
+                raise _dialogue.DialogueError('guardrail_rejected', '这个联系人已经有电话，要换需要你明确同意', 409)
+            values = {key: primary.get(key, default) for key, default in _CONTACT_DEFAULTS.items()}
+            values['phone'] = phone
+            _update_contact(conn, contact_id=int(primary['id']), values=values)
+            return {'contact_id': int(primary['id']), 'already_present': False}
+        return handler, [], [phone]
+    if fact == 'identity_different':
+        def handler(conn, args, now):
+            profile = _sela_profile_by_source(conn, str(source_id or '').strip())
+            own_customer_id = None
+            if profile:
+                _p, own_customer_id = _dialogue_fact_target(conn, source_id)
+            identifiers = _sela_identity_identifiers(source_id, args)
+            if not identifiers:
+                raise _dialogue.DialogueError('invalid_request', '缺少可用于识别的 source_id')
+            applied = _sela_record_identity_decision(
+                conn, decision='different', customer_id=None, identifiers=identifiers,
+                source_id=str(source_id or '').strip(), now=now, actor='sela', inbox_item_id=None,
+                own_customer_id=own_customer_id)
+            return {'applied': applied}
+        return handler, [], []
+    if fact == 'note':
+        kind = str(arguments.get('kind') or 'other').strip().lower()
+        text = _sela_prospect_text(arguments.get('text'), 2000)
+        if kind not in _FACT_NOTE_KINDS or not text:
+            raise _dialogue.DialogueError('invalid_request', 'note 需要 kind（decision/direction/background/other）和 text')
+
+        def handler(conn, args, now):
+            _profile, customer_id = _dialogue_fact_target(conn, source_id)
+            content = (f'[Inbox 对话 · {_FACT_NOTE_KINDS[kind]}]\n{text}\n'
+                       f'（来自对话 {thread_id}，依据你的消息 {source_message_id}）')
+            interaction = _record_interaction(
+                conn, customer_id=customer_id, content=sanitize_mark_html(content)[:30000],
+                occurred_on=now[:10], direction='unknown', source='sela_human_input',
+                activity_type='human_fact', result=kind, is_reported=True)
+            return {'interaction_id': interaction, 'already_present': False}
+        return handler, [], []
+    raise _dialogue.DialogueError('invalid_request', '未知的事实类型')
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/facts', methods=['POST'])
+@login_required
+def sela_integration_record_fact(thread_id):
+    """Record a reversible fact the human gave in this thread (contract §4.4B)."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        fact = str(payload.get('fact') or '').strip()
+        source_message_id = str(payload.get('source_message_id') or '').strip()
+        arguments = payload.get('arguments') or {}
+        handler, needles, digit_needles = _dialogue_fact_spec(
+            fact, arguments, thread_id=thread_id, source_message_id=source_message_id)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.record_fact(
+            conn, thread_id=thread_id, fact=fact, arguments=arguments,
+            source_message_id=source_message_id, handler=handler, needles=needles,
+            digit_needles=digit_needles, idempotency_key=key, actor='sela')
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('fact')
     finally:
         conn.close()
 

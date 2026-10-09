@@ -36,6 +36,8 @@ import db
 ORG_ID = '859a998d-1b48-589b-8035-34dc65c01440'
 DAILY_NEW_THREAD_CAP = 50
 IRREVERSIBLE_ACTIONS = ('stop_contact', 'merge_identity', 'overwrite_email')
+# Reversible facts the human gave in a conversation (contract §4.4B).
+FACT_KINDS = ('contact_email', 'contact_person', 'contact_phone', 'identity_different', 'note')
 MAX_TEXT = 8000
 MAX_TITLE = 200
 MAX_SUBJECT = 200
@@ -1073,4 +1075,58 @@ def irreversible_action(conn, *, thread_id, action, arguments,
             raise DialogueError('confirmation_required', '确认消息已被使用', 409,
                                 {'reason': 'already_consumed'})
         raise
+    return body
+
+
+def _digits(text):
+    return ''.join(ch for ch in str(text or '') if ch.isdigit())
+
+
+def record_fact(conn, *, thread_id, fact, arguments, source_message_id, handler,
+                needles=(), digit_needles=(), idempotency_key=None, actor='sela'):
+    """Record a fact the human supplied in this thread (contract §4.4B, reversible).
+
+    No confirmation is consumed (one human message can carry several facts), but
+    the cited message must be a ``role=human`` message of this thread, and every
+    value that must come from the human appears **verbatim** in it (case-insensitive;
+    phone numbers compare as digit strings).  ``note`` carries the agent's own
+    words, so it only needs the human source message.
+    """
+    if fact not in FACT_KINDS:
+        raise DialogueError('invalid_request', '未知的事实类型')
+    if not isinstance(arguments, dict):
+        raise DialogueError('invalid_request', 'arguments 必须是对象')
+    if not source_message_id:
+        raise DialogueError('invalid_request', '缺少 source_message_id')
+    operation = 'fact:' + fact
+    if not idempotency_key:
+        idempotency_key = 'auto:' + uuid.uuid4().hex
+    request_hash = _hash({'op': operation, 'thread_id': thread_id, 'fact': fact,
+                          'arguments': arguments, 'source_message_id': source_message_id})
+    replay = _receipt_replay(conn, operation, idempotency_key, request_hash)
+    if replay is not None:
+        return replay
+    if not _lock_thread(conn, thread_id):
+        raise DialogueError('not_found', '对话不存在', 404)
+    source = _message_row(conn, source_message_id)
+    if not source or str(source['thread_id']) != str(thread_id) or source['role'] != 'human':
+        raise DialogueError('provenance_mismatch', '来源消息必须是这个对话里人写的消息', 409,
+                            {'reason': 'source_message_invalid'})
+    text = str(source.get('text') or '')
+    lowered = text.lower()
+    for needle in needles:
+        if str(needle or '').strip().lower() not in lowered:
+            raise DialogueError('provenance_mismatch', '这个值没有出现在你引用的那条消息里', 409,
+                                {'reason': 'value_not_in_message'})
+    for number in digit_needles:
+        wanted = _digits(number)
+        if not wanted or wanted not in _digits(text):
+            raise DialogueError('provenance_mismatch', '这个号码没有出现在你引用的那条消息里', 409,
+                                {'reason': 'value_not_in_message'})
+    now = _now()
+    result = handler(conn, arguments, now) if handler is not None else {}
+    body = {'success': True, 'fact': fact, 'thread': _thread_dict(conn, _thread_row(conn, thread_id)),
+            'result': result, 'already_present': bool(isinstance(result, dict) and result.get('already_present'))}
+    _receipt_write(conn, thread_id=thread_id, operation=operation, key=idempotency_key,
+                   request_hash=request_hash, response=body, message_id=source_message_id)
     return body
