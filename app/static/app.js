@@ -409,12 +409,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ========== Motion System ==========
 var _motionReduced = false;
-var _autoLowPowerDevice = false;
-var _runtimePerformanceSlow = false;
 var _interfacePerformanceMode = 'auto';
-var _performanceProbePromise = null;
 var _performanceMonitorFrame = null;
 var _performanceMonitorState = null;
+// auto 模式下的运行时档位：0 完整视觉 · 1 轻量 · 2 性能优先。只有连续多个窗口实测卡顿才升档，持续流畅才降回。
+var PERFORMANCE_LEVELS = ['full', 'lite', 'performance'];
+var _runtimePerformanceLevel = 0;
+var _performanceSlowWindows = 0;
+var _performanceCalmWindows = 0;
 
 function isMotionLite() {
   return document.documentElement.classList.contains('motion-lite');
@@ -426,27 +428,33 @@ function shouldAnimateLists() {
 
 function configuredInterfacePerformanceMode() {
   var mode = userPreferences && userPreferences.interface_performance;
-  return ['auto', 'performance', 'full'].indexOf(mode) >= 0 ? mode : 'auto';
+  return ['auto', 'lite', 'performance', 'full'].indexOf(mode) >= 0 ? mode : 'auto';
+}
+
+// 完整 / 轻量 / 性能优先 三档。自动模式只由实测卡顿决定，不再看核数或内存。
+function effectivePerformanceLevel(mode) {
+  if (mode === 'auto') return PERFORMANCE_LEVELS[_runtimePerformanceLevel] || 'full';
+  return mode === 'full' || mode === 'lite' ? mode : 'performance';
 }
 
 function applyInterfacePerformance(mode) {
-  mode = ['auto', 'performance', 'full'].indexOf(mode) >= 0 ? mode : 'auto';
+  mode = ['auto', 'lite', 'performance', 'full'].indexOf(mode) >= 0 ? mode : 'auto';
   _interfacePerformanceMode = mode;
-  var probeSaysSlow = !!(userPreferences && userPreferences.performance_probe && userPreferences.performance_probe.slow);
-  var useLiteMaterials = mode === 'performance' ||
-    (mode === 'auto' && (_autoLowPowerDevice || _runtimePerformanceSlow || probeSaysSlow));
+  var level = effectivePerformanceLevel(mode);
   var html = document.documentElement;
-  html.classList.toggle('motion-lite', useLiteMaterials);
-  html.classList.toggle('performance-priority', useLiteMaterials);
+  // 轻量：去掉毛玻璃、模糊滤镜和循环动画，保留光、渐变与细线阴影。
+  html.classList.toggle('perf-lite', level === 'lite');
+  // 性能优先：在轻量基础上关闭光与全部材质，只保留层级和文字。
+  var priority = level === 'performance';
+  html.classList.toggle('motion-lite', priority);
+  html.classList.toggle('performance-priority', priority);
   html.dataset.interfacePerformance = mode;
+  html.dataset.effectivePerformance = level;
   if (mode === 'auto') initRuntimePerformanceMonitor();
 }
 
 function initMotionSystem() {
   var reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-  _autoLowPowerDevice = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
-    (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
-    (navigator.connection && navigator.connection.saveData);
   function syncMotionPreference() {
     _motionReduced = reducedQuery.matches;
     document.documentElement.classList.toggle('motion-reduced', _motionReduced);
@@ -501,7 +509,6 @@ function initDaylightRoom() {
 
   function roomEnabled() {
     return !!pool && finePointer.matches && !isMotionLite() && !_motionReduced &&
-      !document.documentElement.classList.contains('performance-probe') &&
       !document.hidden;
   }
 
@@ -642,84 +649,35 @@ function initDaylightRoom() {
 // Sample a representative, off-screen list for less than one second.  Hardware
 // hints do not describe old integrated GPUs reliably, so Auto mode also uses
 // this local result.  It never reads customer data or sends page contents.
-function runPerformanceProbe() {
-  if (_performanceProbePromise) return _performanceProbePromise;
-  if (!window.requestAnimationFrame || !window.performance || document.hidden) return Promise.resolve(null);
-  _performanceProbePromise = new Promise(function(resolve) {
-    var probe = document.createElement('div');
-    probe.className = 'performance-probe';
-    probe.setAttribute('aria-hidden', 'true');
-    probe.innerHTML = Array.from({ length: 24 }, function(_, index) {
-      return '<article><span></span><div><b>客户工作 ' + (index + 1) + '</b><i>最近沟通与下一步安排</i></div><em>今天</em></article>';
-    }).join('');
-    document.body.appendChild(probe);
-    var frameCount = 0;
-    var slowFrames = 0;
-    var longestFrame = 0;
-    var longTasks = 0;
-    var previousFrame = performance.now();
-    var frameId = null;
-    var settled = false;
-    var observer = null;
-    if (window.PerformanceObserver) {
-      try {
-        observer = new PerformanceObserver(function(list) {
-          list.getEntries().forEach(function(entry) { if (entry.duration >= 100) longTasks++; });
-        });
-        observer.observe({ entryTypes: ['longtask'] });
-      } catch (ignore) { observer = null; }
-    }
-    function finish() {
-      if (settled) return;
-      settled = true;
-      if (frameId) cancelAnimationFrame(frameId);
-      if (observer) observer.disconnect();
-      probe.remove();
-      var slowRatio = frameCount ? slowFrames / frameCount : 1;
-      resolve({
-        version: 1,
-        sampled_at: new Date().toISOString(),
-        frame_count: frameCount,
-        slow_frames: slowFrames,
-        slow_ratio: Number(slowRatio.toFixed(3)),
-        long_tasks: longTasks,
-        longest_frame: Math.round(longestFrame),
-        slow: frameCount < 18 || slowRatio > 0.08 || longTasks > 0
-      });
-    }
-    function sample(now) {
-      var delta = now - previousFrame;
-      previousFrame = now;
-      frameCount++;
-      longestFrame = Math.max(longestFrame, delta);
-      if (delta > 25) slowFrames++;
-      frameId = requestAnimationFrame(sample);
-    }
-    frameId = requestAnimationFrame(sample);
-    window.setTimeout(finish, 760);
-  }).finally(function() { _performanceProbePromise = null; });
-  return _performanceProbePromise;
-}
-
-function startInitialPerformanceProbe() {
-  if (!currentUser || !userPreferences || userPreferences.performance_probe || document.hidden) return;
-  window.setTimeout(async function() {
-    if (!currentUser || !userPreferences || userPreferences.performance_probe || document.hidden) return;
-    var result = await runPerformanceProbe();
-    if (!result || !userPreferences || !currentUser) return;
-    userPreferences.performance_probe = result;
-    if (configuredInterfacePerformanceMode() === 'auto' && result.slow) _runtimePerformanceSlow = true;
-    applyInterfacePerformance(configuredInterfacePerformanceMode());
-    // Persist silently so the same account does not repeat a startup probe.
-    persistUserPreferences(true);
-  }, 350);
-}
-
+// 运行时监测：只在自动模式下运行。每 3 秒一个窗口，超过 10% 的帧慢于 30ms 记为卡顿窗口。
+// 连续 3 个卡顿窗口才降一档；连续 4 个流畅窗口（慢帧低于 3%）才升回一档，避免来回跳。
 function initRuntimePerformanceMonitor() {
   if (_performanceMonitorFrame || document.hidden || !currentUser || configuredInterfacePerformanceMode() !== 'auto') return;
   _performanceMonitorState = { startedAt: performance.now(), previousFrame: performance.now(), frames: 0, slowFrames: 0 };
   function reset(now) {
     _performanceMonitorState = { startedAt: now, previousFrame: now, frames: 0, slowFrames: 0 };
+  }
+  function judgeWindow(state) {
+    var ratio = state.slowFrames / state.frames;
+    var before = _runtimePerformanceLevel;
+    if (ratio > 0.1) {
+      _performanceSlowWindows++;
+      _performanceCalmWindows = 0;
+    } else if (ratio < 0.03) {
+      _performanceCalmWindows++;
+      _performanceSlowWindows = 0;
+    } else {
+      _performanceSlowWindows = 0;
+      _performanceCalmWindows = 0;
+    }
+    if (_performanceSlowWindows >= 3 && _runtimePerformanceLevel < PERFORMANCE_LEVELS.length - 1) {
+      _runtimePerformanceLevel++;
+      _performanceSlowWindows = 0;
+    } else if (_performanceCalmWindows >= 4 && _runtimePerformanceLevel > 0) {
+      _runtimePerformanceLevel--;
+      _performanceCalmWindows = 0;
+    }
+    if (_runtimePerformanceLevel !== before) applyInterfacePerformance('auto');
   }
   function sample(now) {
     if (document.hidden || !currentUser || configuredInterfacePerformanceMode() !== 'auto') {
@@ -735,10 +693,7 @@ function initRuntimePerformanceMonitor() {
       state.frames++;
       if (delta > 30) state.slowFrames++;
       if (now - state.startedAt >= 3000) {
-        if (state.frames >= 30 && state.slowFrames / state.frames > 0.1) {
-          _runtimePerformanceSlow = true;
-          applyInterfacePerformance('auto');
-        }
+        if (state.frames >= 30) judgeWindow(state);
         reset(now);
       }
     }
@@ -5669,7 +5624,6 @@ async function loadUserPreferences() {
     localStorage.removeItem('tradeos_saved_customer_views');
   }
   applyUserPreferences();
-  startInitialPerformanceProbe();
   return userPreferences;
 }
 
@@ -5726,17 +5680,17 @@ function applyUserPreferences() {
   applyInterfacePerformance(configuredInterfacePerformanceMode());
 }
 
-function performanceProbeStatusText(probe) {
-  if (!probe || !probe.sampled_at) return '自动模式会在本机做一次流畅度测试。测试不会上传你的页面内容或客户数据。';
-  var sampledAt = new Date(probe.sampled_at);
-  var dateText = isNaN(sampledAt.getTime()) ? '已完成' : ('上次检测：' + sampledAt.toLocaleDateString());
-  var ratio = Math.round(Number(probe.slow_ratio || 0) * 100);
-  var result = probe.slow ? '检测到较多慢帧，自动模式会优先保证操作流畅。' : '当前设备可以保留完整视觉。';
-  return dateText + ' · 慢帧 ' + ratio + '% · ' + result + ' 测试只在本机运行，不上传页面内容或客户数据。';
+function performanceModeHelpText(mode) {
+  if (mode === 'full') return '始终使用完整视觉，不做任何自动降级。';
+  if (mode === 'lite') return '去掉毛玻璃、模糊和循环动画，保留光、渐变与细线阴影，外观接近完整视觉。';
+  if (mode === 'performance') return '关闭光与所有材质效果，只保留层级和文字，适合老旧电脑或远程桌面。';
+  return '默认完整视觉。操作明显卡顿时自动切到轻量，持续流畅后自动恢复。';
 }
 
 function previewInterfacePerformance(mode) {
   applyInterfacePerformance(mode);
+  var help = document.getElementById('performanceProbeStatus');
+  if (help) help.textContent = performanceModeHelpText(mode);
 }
 
 function applyCustomerColumnVisibility() {
@@ -5778,8 +5732,8 @@ function renderPersonalSettings() {
   if (fontSize) fontSize.value = userPreferences.font_size || 'standard';
   var performance = document.getElementById('preferenceInterfacePerformance');
   if (performance) performance.value = configuredInterfacePerformanceMode();
-  var probeStatus = document.getElementById('performanceProbeStatus');
-  if (probeStatus) probeStatus.textContent = performanceProbeStatusText(userPreferences.performance_probe);
+  var modeHelp = document.getElementById('performanceProbeStatus');
+  if (modeHelp) modeHelp.textContent = performanceModeHelpText(configuredInterfacePerformanceMode());
 }
 
 function renderNavOrderSettings() {

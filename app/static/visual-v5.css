@@ -3559,3 +3559,36 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .inbox-tab.active { color: var(--dl-ink); border-bottom-color: var(--dl-gold-ink); }
 #trosa .inbox-tab-count { margin-left: .45rem; font-size: .78rem; color: var(--dl-gold-ink); }
 #trosa .inbox-tab-count:empty { display: none; }
+
+/* ============================================================================
+   15. 轻量档（自动降级第一档 / 手动“轻量”）
+   只拿掉 Win10 集成显卡上最贵、又不承担层级的效果：毛玻璃、模糊滤镜、
+   循环动画、大模糊阴影。光斑、渐变、细线阴影保留，外观接近完整视觉。
+   性能优先档（motion-lite / performance-priority）仍由上面各节单独处理。
+   ============================================================================ */
+
+html.perf-lite #trosa *,
+html.perf-lite #trosa *::before,
+html.perf-lite #trosa *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  /* 循环动画只跑一次并立即到终态；入场动画保留最终画面。 */
+  animation-iteration-count: 1 !important;
+  animation-duration: .01s !important;
+  animation-delay: 0s !important;
+  /* 过渡保留但变短，不影响 transitionend 的回调。 */
+  transition-duration: .12s !important;
+}
+
+html.perf-lite #trosa .card,
+html.perf-lite #trosa .modal,
+html.perf-lite #trosa .toast,
+html.perf-lite #trosa .global-page-search,
+html.perf-lite #trosa .command-shelf,
+html.perf-lite #trosa .today-focus-card,
+html.perf-lite #trosa .connection-status,
+html.perf-lite #trosa .action-status {
+  /* 大模糊阴影改成细线：层级仍然可见，绘制成本接近零。 */
+  box-shadow: 0 0 0 1px rgba(36, 34, 29, .08), 0 1px 0 rgba(36, 34, 29, .05) !important;
+}

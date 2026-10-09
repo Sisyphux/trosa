@@ -995,7 +995,7 @@ def _sanitize_user_preferences(raw):
     defaults['font_size'] = font_size if font_size in ('small', 'standard', 'large', 'xl') else 'standard'
 
     performance_mode = raw.get('interface_performance')
-    defaults['interface_performance'] = performance_mode if performance_mode in ('auto', 'performance', 'full') else 'auto'
+    defaults['interface_performance'] = performance_mode if performance_mode in ('auto', 'lite', 'performance', 'full') else 'auto'
     probe = raw.get('performance_probe') if isinstance(raw.get('performance_probe'), dict) else None
     if probe:
         def clamp_probe_number(key, maximum, integer=False):

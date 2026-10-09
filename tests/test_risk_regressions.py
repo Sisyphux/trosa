@@ -511,6 +511,12 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(preferences.get_json()['preferences']['interface_performance'], 'performance')
         self.assertTrue(preferences.get_json()['preferences']['performance_probe']['slow'])
 
+        lite = client.put('/api/preferences', json={'interface_performance': 'lite'})
+        self.assertEqual(lite.status_code, 200, lite.get_json())
+        self.assertEqual(lite.get_json()['preferences']['interface_performance'], 'lite')
+        unknown = client.put('/api/preferences', json={'interface_performance': 'turbo'})
+        self.assertEqual(unknown.get_json()['preferences']['interface_performance'], 'auto')
+
         compact_weekly = module._page_weekly_summary({
             'user_id': 'hamid',
             'reported_customers': [{'customer_id': index} for index in range(12)],
@@ -643,7 +649,7 @@ class CalendarAndAccessTest(unittest.TestCase):
             self.assertNotIn(retired, modal)
             self.assertNotIn(retired, javascript)
         # The light belongs to the workspace while it is open.
-        light = javascript[javascript.index('function initDaylightRoom() {'):javascript.index('function runPerformanceProbe()')]
+        light = javascript[javascript.index('function initDaylightRoom() {'):javascript.index('function initRuntimePerformanceMonitor()')]
         self.assertIn(".cw-focus.lit-anchor", light)
         self.assertIn(".cw-pool", light)
         # The focal's single solid action is 记录沟通 when a next step exists.
