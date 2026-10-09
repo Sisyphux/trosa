@@ -81,3 +81,5 @@ node --check app/static/app.js
 ```
 
 后端、前端、数据迁移、性能和发布还须遵循 `TROSA_MAINTENANCE.md` 的最低验证与 ECS 发布检查。用户可感知的功能变动同步记录到 `CHANGELOG.md`；仅开发环境或开发文档变动无需伪造产品变更日志。
+
+界面缺陷必须先在真实浏览器里重现再修：按 [`docs/REAL_BROWSER_REPRO.md`](docs/REAL_BROWSER_REPRO.md) 用隔离服务和 `tools/repro_*.cjs` 脚本重现，修复前脚本须以退出码 20 报告缺陷，修复后同一脚本须退出 0，证据存入 `docs/repro/<场景>/`。仅凭 jsdom 或读代码，不能宣称界面问题已修复。

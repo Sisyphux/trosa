@@ -118,11 +118,11 @@
         </div>
         <div class="sidebar-tools-menu room-index-more">
           <button type="button" data-module="weekly_overview" onclick="switchPage('overview')" aria-label="打开本周工作" title="打开本周工作"><span class="sidebar-tool-label">本周工作</span></button>
-          <button type="button" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="sidebar-tool-label">完整日历</span></button>
-          <button type="button" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="sidebar-tool-label">沟通记录</span></button>
-          <button type="button" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="sidebar-tool-label">未建立真实沟通</span></button>
-          <button type="button" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="sidebar-tool-label">操作日志</span></button>
-          <button type="button" onclick="switchPage('settings')" aria-label="设置" title="设置"><span class="sidebar-tool-label">设置</span></button>
+          <button type="button" class="room-personal-tool" data-module="calendar_sync" onclick="switchPage('calendar')" aria-label="打开完整日历" title="打开完整日历"><span class="sidebar-tool-label">完整日历</span></button>
+          <button type="button" class="room-personal-tool" onclick="switchPage('history')" aria-label="打开沟通记录" title="打开沟通记录"><span class="sidebar-tool-label">沟通记录</span></button>
+          <button type="button" class="room-personal-tool" onclick="openUncontactedCustomers()" aria-label="查看未建立真实沟通的客户" title="查看未建立真实沟通的客户"><span class="sidebar-tool-label">未建立真实沟通</span></button>
+          <button type="button" class="room-personal-tool" onclick="switchPage('logs')" aria-label="打开操作日志" title="打开操作日志"><span class="sidebar-tool-label">操作日志</span></button>
+          <button type="button" class="room-personal-tool" onclick="switchPage('settings')" aria-label="设置" title="设置"><span class="sidebar-tool-label">设置</span></button>
           <button type="button" onclick="showLogin()" aria-label="切换账号" title="切换账号"><span class="sidebar-tool-label">切换账号</span></button>
         </div>
       </nav>

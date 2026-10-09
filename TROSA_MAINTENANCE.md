@@ -208,6 +208,8 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 6. **数据库改动保护**：`migrations/` 是迁移唯一事实源，新迁移必须先预留编号并通过 `tools/check_migrations.py`；两个并行任务不得占用同一编号（后合并者改名）。涉及 schema、迁移或导入边界时，自动入口先执行 PostgreSQL logical dump + 附件 bundle 备份；疑似破坏性 SQL 不自动执行。
 7. **发布后事实检查**：健康接口、用户隔离、一次沟通记录、一个明确待办、Inbox 消除/保留逻辑、Sela 重放幂等性。若产品有用户可见变化，同步更新 `CHANGELOG.md`。
 
+8. **界面缺陷先在真实浏览器重现**：修复前用隔离服务（`tools/repro_dev_server.py`）和 `tools/repro_*.cjs` 脚本重现，脚本退出码须为 20；修复后同一脚本退出 0，证据存入 `docs/repro/<场景>/`。做法见 [`docs/REAL_BROWSER_REPRO.md`](docs/REAL_BROWSER_REPRO.md)。
+
 ## 绝对不能破坏的能力
 
 - 未配置 AI 时，客户、联系人、沟通、待办、Today、Inbox、Search、日历、导入导出和备份恢复仍完整可用。

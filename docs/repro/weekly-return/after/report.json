@@ -1,0 +1,156 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18190",
+  "generatedAt": "2026-10-09T02:45:25.430Z",
+  "checks": [
+    {
+      "id": "weekly-only-hides-personal-entries",
+      "title": "只看周报时，不显示需要登录的个人入口（今天 / Inbox / 客户）",
+      "pass": true,
+      "detail": "未显示"
+    },
+    {
+      "id": "weekly-only-visible-rows-labelled",
+      "title": "只看周报时，导航里可见的每一行都有名字",
+      "pass": true,
+      "detail": "今天:hidden, Inbox:hidden, 客户:hidden, 本周工作:shown"
+    },
+    {
+      "id": "weekly-only-personal-entry-no-login-bounce",
+      "title": "只看周报时点个人入口，不会弹出“登录已过期”并跳回登录页",
+      "pass": true,
+      "detail": "周报模式不提供个人入口，无法误点"
+    },
+    {
+      "id": "way-back-lands-on-today",
+      "title": "从周报经“切换账号”选择成员后，回到个人操作台（今天）",
+      "pass": true,
+      "detail": "今天页已显示（选择成员尝试 1 次）"
+    },
+    {
+      "id": "way-back-no-401",
+      "title": "返回操作台的过程中没有 401",
+      "pass": true,
+      "detail": "无 401"
+    },
+    {
+      "id": "signed-in-labels-at-945",
+      "title": "登录后，导航里“今天 / Inbox / 客户”在 945px 宽时都显示名字",
+      "pass": true,
+      "detail": "今天:shown, Inbox:shown, 客户:shown, 本周工作:hidden"
+    },
+    {
+      "id": "signed-in-labels-at-1440",
+      "title": "登录后，导航里“今天 / Inbox / 客户”在 1440px 宽时都显示名字",
+      "pass": true,
+      "detail": "今天:shown, Inbox:shown, 客户:shown, 本周工作:hidden"
+    },
+    {
+      "id": "signed-in-labels-at-375",
+      "title": "登录后，导航里“今天 / Inbox / 客户”在 375px 宽时都显示名字",
+      "pass": true,
+      "detail": "今天:shown, Inbox:shown, 客户:shown, 本周工作:hidden"
+    }
+  ],
+  "measurements": {
+    "weeklyOnly945": [
+      {
+        "label": "今天",
+        "rowShown": false,
+        "nameShown": false
+      },
+      {
+        "label": "Inbox",
+        "rowShown": false,
+        "nameShown": false
+      },
+      {
+        "label": "客户",
+        "rowShown": false,
+        "nameShown": false
+      },
+      {
+        "label": "本周工作",
+        "rowShown": true,
+        "nameShown": true
+      }
+    ],
+    "signedIn945": [
+      {
+        "label": "今天",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "Inbox",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "客户",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "本周工作",
+        "rowShown": false,
+        "nameShown": false
+      }
+    ],
+    "signedIn1440": [
+      {
+        "label": "今天",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "Inbox",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "客户",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "本周工作",
+        "rowShown": false,
+        "nameShown": false
+      }
+    ],
+    "signedIn375": [
+      {
+        "label": "今天",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "Inbox",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "客户",
+        "rowShown": true,
+        "nameShown": true
+      },
+      {
+        "label": "本周工作",
+        "rowShown": false,
+        "nameShown": false
+      }
+    ]
+  },
+  "screenshots": [
+    "01-weekly-board-945.png",
+    "02-index-weekly-945.png",
+    "03-account-chooser-945.png",
+    "04-workbench-after-return-945.png",
+    "05-index-signed-in-945.png",
+    "05-index-signed-in-375.png"
+  ],
+  "pageErrors": [],
+  "unauthorizedPaths": [],
+  "browser": "chromium 153.0.8010.12"
+}

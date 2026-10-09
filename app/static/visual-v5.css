@@ -342,7 +342,9 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 
 /* pages: numbered serif rows; the light picks one and the rest step back */
 #trosa .room-index-nav { margin-top: clamp(1.6rem, 6vh, 3.4rem); }
-#trosa .room-index .nav-personal.nav-personal { display: block !important; padding: 0 !important; }
+/* No !important on display: enterOverview() hides this group with an inline
+   display:none for the weekly-only entry, and !important here would override it. */
+#trosa .room-index .nav-personal.nav-personal { display: block; padding: 0 !important; }
 #trosa .room-index .nav-item.nav-item.nav-item {
   display: flex !important;
   align-items: baseline !important;
@@ -365,6 +367,11 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
 #trosa .room-index .nav-item.nav-item.nav-item::before { content: none !important; display: none !important; }
 #trosa .room-index .nav-index { font-size: .62rem; letter-spacing: .16em; color: var(--dl-faint); transition: color .55s var(--room-ease); }
 #trosa .room-index .nav-name { font-family: var(--room-serif); font-size: clamp(1.35rem, 2.5vw, 1.9rem); letter-spacing: -.012em; line-height: 1.2; }
+/* visual-v3 hides every span inside a nav item between 621px and 1180px (a legacy
+   collapsed-sidebar rule). The room index is a full-screen layer with no sidebar,
+   so its numbers and names must always show, or the rows are blank and unusable. */
+#trosa .room-index .nav-item.nav-item.nav-item > .nav-index,
+#trosa .room-index .nav-item.nav-item.nav-item > .nav-name { display: block !important; }
 #trosa .room-index .nav-count.nav-count { margin-left: auto; font-size: .78rem; color: var(--dl-gold-ink) !important; font-variant-numeric: tabular-nums; }
 #trosa .room-index .nav-item.nav-item.nav-item.active .nav-index { color: var(--dl-gold); }
 #trosa .room-index .nav-item.nav-item.nav-item.is-lit .nav-index { color: var(--dl-gold); }
@@ -404,6 +411,7 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   transition: color .3s var(--room-ease), border-color .3s var(--room-ease);
 }
 #trosa .room-index .room-index-more button:hover { color: var(--dl-ink) !important; border-bottom-color: var(--dl-gold) !important; }
+#trosa .room-index .room-index-more button[hidden] { display: none !important; }
 
 /* ============================================================================
    3. THE LIGHT — attention is the hierarchy

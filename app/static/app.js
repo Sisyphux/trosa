@@ -13408,6 +13408,8 @@ function enterOverview() {
   var o = document.querySelector('.nav-overview');
   if(p) p.style.display = 'none';
   if(o) o.style.display = '';
+  // Personal tools need a signed-in account; without one they only bounce to login.
+  document.querySelectorAll('.room-personal-tool').forEach(function(button) { button.hidden = true; });
   currentUser = null;
   userPreferences = null;
   updateSidebarIdentity();
@@ -13426,6 +13428,7 @@ async function showApp() {
   var o = document.querySelector('.nav-overview');
   if(p) p.style.display = '';
   if(o) o.style.display = 'none';
+  document.querySelectorAll('.room-personal-tool').forEach(function(button) { button.hidden = false; });
   updateSidebarIdentity();
   // 先显示默认页面，让手机用户可以立即开始工作；偏好设置在后台补齐。
   var now = new Date();
