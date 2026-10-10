@@ -3094,6 +3094,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   padding: 4px 8px; font-size: var(--dl-fs-micro); text-transform: uppercase;
   letter-spacing: var(--dl-track-micro); color: var(--dl-mut);
 }
+#trosa .dialogue-group-toggle {
+  width: 100%; background: none; border: 0; cursor: pointer; text-align: left; font: inherit;
+  text-transform: uppercase; font-size: var(--dl-fs-micro); letter-spacing: var(--dl-track-micro); color: var(--dl-mut);
+}
+#trosa .dialogue-group-toggle:hover { color: var(--dl-ink, inherit); }
 #trosa .dialogue-row {
   padding: 10px 12px; border-radius: var(--dl-r-md);
   border: 1px solid transparent; cursor: pointer;

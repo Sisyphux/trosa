@@ -1,7 +1,7 @@
 // 对话界面回归检查：通过真实 loadDialogue / selectDialogueThread / submitDialogueReply
 // 数据流驱动 renderDialogueList / renderDialogueThreadHtml。
 //
-//   * 列表按「等你 / sela 处理中 / 已完成」分组，行内显示标题、摘要、轮到谁与多久。
+//   * 列表按「等你 / sela 处理中 / 已归档」分组，行内显示标题、摘要、轮到谁与多久。
 //   * 打开一条对话后显示消息（含 system）与 sela 的建议回复。
 //   * 建议回复只填入回复框，不会直接发送。
 //   * 发送后提示「sela 已收到」，并自动跳到下一条「等你」。
@@ -151,7 +151,14 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   const list = doc.getElementById('dialogueList');
   const groups = Array.from(list.querySelectorAll('.dialogue-group')).map((g) => g.dataset.group);
   assert.deepEqual(groups, ['awaiting', 'sela', 'done'], JSON.stringify(groups));
-  assert.ok(list.textContent.includes('等你') && list.textContent.includes('sela 处理中') && list.textContent.includes('已完成'));
+  assert.ok(list.textContent.includes('等你') && list.textContent.includes('sela 处理中') && list.textContent.includes('已归档'));
+  // 已归档默认折叠：只有标题和数量，行内容要点开才显示；选中的归档对话始终可见。
+  assert.equal(list.querySelector('[data-group="done"]').dataset.open, 'false');
+  assert.ok(!list.querySelector('[data-group="done"]').textContent.includes('这件事已完成'));
+  win.toggleDialogueArchived();
+  assert.equal(doc.getElementById('dialogueList').querySelector('[data-group="done"]').dataset.open, 'true');
+  assert.ok(doc.getElementById('dialogueList').querySelector('[data-group="done"]').textContent.includes('这件事已完成'));
+  win.toggleDialogueArchived();
   assert.equal(list.querySelector('[data-group="awaiting"] .dialogue-group-label .tnum').textContent, '2');
   assert.ok(list.querySelector('[data-group="awaiting"]').textContent.includes('Northwind 是不是已经排除了？'), list.textContent);
   assert.ok(doc.getElementById('dialogueOverview').textContent.includes('2'), doc.getElementById('dialogueOverview').textContent);

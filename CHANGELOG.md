@@ -31,6 +31,12 @@
   - `note`：你的决定 / 方向 / 背景，sela 用自己的话概括，作为一条带来源的记录写进客户时间线（例如「不排除，首触问对方是否需要第二供应商」）。
 - 影响范围：`inbox_dialogue.py`（`record_fact`）、`app.py`（路由、处理函数、服务令牌白名单加入 `facts`）、`tests/test_sela_record_fact.py`、`tests/test_postgres_rehearsal.py`。不改表结构、不加迁移。
 - 验证：SQLite 单测 10 条（逐字来源、来源必须是你的消息、已有邮箱不覆盖、非法邮箱、非冷线索、令牌、备注类型等）与 PostgreSQL 演练库端到端用例通过。
+## 2026-10-10 — Inbox 对话：处理好就「归档」，已归档默认折叠
+
+- 现象：对话处理完只能「结束对话」，已完成的对话一直排在列表里，越积越长，分不清哪些还要你管。
+- 改动：「结束对话」改为「归档」，确认文案说明「你这边已经处理好了，不用再回复；sela 之后有新事会另开一条」。列表里的「已完成」改称「已归档」并**默认折叠**（只显示标题和数量，点开才看；选中的归档对话始终可见，展开状态记在本机浏览器里）。sela 自己办完关闭的对话同样进「已归档」，不再占着你的列表。
+- 影响范围：`app/static/app.js`（`DIALOGUE_GROUP_LABELS`、`renderDialogueList`、`closeDialogueThread`）、`app/static/visual-v5.css`、`tests/support/dialogue_render_check.cjs`。不改接口、不改表结构；归档沿用已有的「关闭对话」接口。
+- 验证：`node --check app/static/app.js`；对话渲染回归脚本通过（含默认折叠、展开、选中项可见）。
 
 ## 2026-10-09 — 客户时区按客户自己的国家取「最可能」时区，模糊国家不再留空
 

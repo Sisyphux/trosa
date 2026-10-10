@@ -13816,7 +13816,16 @@ var dialogueUploading = false;
 var dialogueConflictNote = null;
 var dialogueMobileView = 'list';
 
-var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: 'sela 处理中', done: '已完成' };
+var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: 'sela 处理中', done: '已归档' };
+// Finished conversations are archived: the group stays collapsed unless the reader opens it.
+var dialogueArchivedOpen = false;
+try { dialogueArchivedOpen = localStorage.getItem('trosa.dialogue.archivedOpen') === '1'; } catch (error) { dialogueArchivedOpen = false; }
+
+function toggleDialogueArchived() {
+  dialogueArchivedOpen = !dialogueArchivedOpen;
+  try { localStorage.setItem('trosa.dialogue.archivedOpen', dialogueArchivedOpen ? '1' : '0'); } catch (error) { /* per-viewer convenience only */ }
+  renderDialogueList();
+}
 
 function dialogueElapsed(value) {
   if (!value) return '';
@@ -13918,6 +13927,17 @@ function renderDialogueList() {
   ['awaiting', 'sela', 'done'].forEach(function(group) {
     var rows = ordered.filter(function(thread) { return dialogueGroup(thread) === group; });
     if (!rows.length) return;
+    if (group === 'done') {
+      // A selected archived conversation stays visible even while the group is collapsed.
+      var open = dialogueArchivedOpen || rows.some(function(thread) { return thread.id === dialogueSelectedId; });
+      html += '<section class="dialogue-group dialogue-group--archived" data-group="done" data-open="' + (open ? 'true' : 'false') + '">' +
+          '<button type="button" class="dialogue-group-label dialogue-group-toggle" aria-expanded="' + (open ? 'true' : 'false') + '"' +
+            ' onclick="toggleDialogueArchived()"><span>' + DIALOGUE_GROUP_LABELS[group] + (open ? '' : '（点开查看）') + '</span>' +
+            '<span class="tnum">' + rows.length + '</span></button>' +
+          (open ? '<div class="dialogue-rows" role="list">' + rows.map(dialogueRowHtml).join('') + '</div>' : '') +
+        '</section>';
+      return;
+    }
     html += '<section class="dialogue-group" data-group="' + group + '">' +
         '<div class="dialogue-group-label"><span>' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
           '<span class="tnum">' + rows.length + '</span></div>' +
@@ -14068,7 +14088,7 @@ function dialogueComposerHtml() {
       '<label class="dialogue-attach-btn' + (attachable ? '' : ' is-disabled') + '">附件' +
         '<input type="file" id="dialogueAttachInput" onchange="uploadDialogueAttachment(this)"' + (attachable ? '' : ' disabled') + '></label>' +
       '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending ? ' disabled' : '') + '>发送</button>' +
-      '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()">结束对话</button>' +
+      '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()">归档</button>' +
     '</div>' +
     '<div class="dialogue-composer-error" role="alert" hidden></div>' +
   '</form>';
@@ -14184,9 +14204,9 @@ async function submitDialogueReply(event) {
 async function closeDialogueThread() {
   if (!dialogueThread) return;
   var confirmed = await showAppConfirm({
-    title: '结束这条对话？',
-    message: '结束后这条对话会移到「已完成」。',
-    submitLabel: '结束对话'
+    title: '归档这条对话？',
+    message: '你这边已经处理好了，不用再回复。归档后它会收进「已归档」；sela 之后有新事，会另开一条来找你。',
+    submitLabel: '归档'
   });
   if (!confirmed) return;
   var threadId = dialogueThread.id;
@@ -14202,10 +14222,10 @@ async function closeDialogueThread() {
       showToast('有新消息，请先看', 'error');
       return;
     }
-    showToast('结束失败：' + ((error && error.error && error.error.message) || (error && error.message) || '请重试'), 'error');
+    showToast('归档失败：' + ((error && error.error && error.error.message) || (error && error.message) || '请重试'), 'error');
     return;
   }
-  showToast('已结束对话', 'success');
+  showToast('已归档', 'success');
   await loadDialogue({ afterReply: true, sentId: threadId });
 }
 
