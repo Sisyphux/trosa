@@ -399,7 +399,17 @@ def _lock_thread(conn, thread_id):
     return _row_dict(row)
 
 
+def _is_uuid(value):
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def _message_row(conn, message_id):
+    if not _is_uuid(message_id):
+        return None  # a malformed id names no message (never reaches the uuid column)
     row = conn.execute(
         f'SELECT * FROM {_t("inbox_messages")} WHERE id=?', [message_id],
     ).fetchone()
@@ -1113,6 +1123,16 @@ def record_fact(conn, *, thread_id, fact, arguments, source_message_id, handler,
         raise DialogueError('provenance_mismatch', '来源消息必须是这个对话里人写的消息', 409,
                             {'reason': 'source_message_invalid'})
     text = str(source.get('text') or '')
+    # A value sela proposed and the human then agreed to ("可以用这个邮箱") is human-supplied:
+    # the human read it and answered it.  Only the sela message immediately before the human's
+    # message counts, so an old or unrelated proposal can never vouch for a value.
+    previous = conn.execute(
+        f'SELECT * FROM {_t("inbox_messages")} WHERE thread_id=? AND seq<? ORDER BY seq DESC LIMIT 1',
+        [thread_id, source['seq']],
+    ).fetchone()
+    previous = _row_dict(previous)
+    if previous and previous.get('role') == 'sela':
+        text = text + '\n' + str(previous.get('text') or '')
     lowered = text.lower()
     for needle in needles:
         if str(needle or '').strip().lower() not in lowered:

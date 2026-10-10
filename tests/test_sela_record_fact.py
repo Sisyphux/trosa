@@ -255,6 +255,53 @@ class SelaRecordFactTest(unittest.TestCase):
         self.assertEqual(response.get_json()['error']['code'], 'provenance_mismatch')
         self.assertEqual(self.prospect_view(source_id)['email'], '')
 
+    def sela_message(self, thread_id, text, key):
+        thread = self.client.get(f'/api/integrations/sela/threads/{thread_id}', headers=self.headers()).get_json()['thread']
+        response = self.client.post(
+            f'/api/integrations/sela/threads/{thread_id}/messages',
+            json={'text': text, 'seen_revision': thread['revision'], 'idempotency_key': key},
+            headers=self.headers(key))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+    def human_reply(self, thread_id, text):
+        thread = self.client.get(f'/api/integrations/sela/threads/{thread_id}', headers=self.headers()).get_json()['thread']
+        reply = self.human().post(f'/api/inbox/threads/{thread_id}/reply',
+                                  json={'text': text, 'seen_revision': thread['revision']})
+        self.assertEqual(reply.status_code, 200, reply.get_data(as_text=True))
+        return reply.get_json()['message']['id']
+
+    def test_value_sela_proposed_and_the_human_agreed_to_is_recorded(self):
+        source_id = 'fact-agree-1'
+        self.create_prospect(source_id)
+        thread_id, _first = self.thread_with_human(source_id, '我再想想', 'f:agree')
+        self.sela_message(thread_id, '我在官网找到 sales@fact-agree.example，能用这个吗？', 'f:agree:ask')
+        agreed = self.human_reply(thread_id, '可以用这个邮箱')
+        response = self.fact(thread_id, 'contact_email', {'source_id': source_id, 'email': 'sales@fact-agree.example'},
+                             agreed, 'f:agree:1')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(self.prospect_view(source_id)['email'], 'sales@fact-agree.example')
+
+    def test_an_older_proposal_cannot_vouch_for_a_value(self):
+        source_id = 'fact-old-1'
+        self.create_prospect(source_id)
+        thread_id, _first = self.thread_with_human(source_id, '我再想想', 'f:old')
+        self.sela_message(thread_id, '我在官网找到 sales@fact-old.example，能用这个吗？', 'f:old:ask')
+        self.sela_message(thread_id, '另外那家我先挂着。', 'f:old:other')
+        agreed = self.human_reply(thread_id, '可以')
+        response = self.fact(thread_id, 'contact_email', {'source_id': source_id, 'email': 'sales@fact-old.example'},
+                             agreed, 'f:old:1')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.prospect_view(source_id)['email'], '')
+
+    def test_a_malformed_message_id_is_refused_not_a_server_error(self):
+        source_id = 'fact-badid-1'
+        self.create_prospect(source_id)
+        thread_id, _message_id = self.thread_with_human(source_id, 'a@fact-badid.example', 'f:badid')
+        response = self.fact(thread_id, 'contact_email', {'source_id': source_id, 'email': 'a@fact-badid.example'},
+                             'bebl5489-380b-4786-955a-a1d6dd19b99d', 'f:badid:1')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['error']['code'], 'provenance_mismatch')
+
     def test_source_message_must_be_a_human_message_of_this_thread(self):
         source_id = 'fact-src-1'
         self.create_prospect(source_id)
