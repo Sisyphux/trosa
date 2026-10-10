@@ -4702,7 +4702,12 @@ def _inbox_sela_resume_runs(conn, limit=8):
 
 
 def _sela_resolve_agent_request(conn, item_id, action, resolution, now):
-    """Resolve one Trosa-owned Agent request and leave a customer timeline fact."""
+    """Resolve one Trosa-owned Agent request.
+
+    The decision is internal bookkeeping: the Inbox item's resolution is its audit
+    trail.  It is not customer communication or reported work, so nothing is
+    written to the customer timeline or the weekly record.
+    """
     try:
         item_id = int(item_id)
     except (TypeError, ValueError):
@@ -4729,32 +4734,6 @@ def _sela_resolve_agent_request(conn, item_id, action, resolution, now):
     final_resolution = resolution or '本轮跳过，暂不处理。'
     _resolve_inbox_item(conn, inbox_item_id=item_id, resolved_at=now,
                         resolution_reason=action, resolution_note=final_resolution)
-    customer_id = row['customer_id']
-    if customer_id:
-        marker = f'[Sela Agent Request ID: {item_id}]'
-        if postgres_mode():
-            already_recorded = any(
-                marker in str(item.get('content') or '')
-                for item in _customer_interactions(conn, int(customer_id), limit=100)
-            )
-        else:
-            already_recorded = bool(conn.execute(
-                '''SELECT id FROM follow_up_logs WHERE customer_id=? AND content LIKE ? LIMIT 1''',
-                (customer_id, marker + '%'),
-            ).fetchone())
-        if not already_recorded:
-            content = '\n'.join((
-                marker,
-                '人工处理 AI 建议',
-                f'请求：{row["title"]}',
-                f'决定：{action}',
-                f'结果：{final_resolution}',
-            ))[:30000]
-            _record_interaction(
-                conn, customer_id=customer_id, content=sanitize_mark_html(content), occurred_on=now[:10],
-                direction='unknown', source='sela_agent', activity_type='agent_decision',
-                result=action, is_reported=True,
-            )
     if postgres_mode():
         updated = next(iter(_modern_inbox_rows(conn, item_id=item_id)), None)
     else:
@@ -6816,14 +6795,11 @@ def _dialogue_fact_spec(fact, arguments, *, thread_id, source_message_id):
             raise _dialogue.DialogueError('invalid_request', 'note 需要 text')
 
         def handler(conn, args, now):
-            _profile, customer_id = _dialogue_fact_target(conn, source_id)
-            content = (f'[Inbox 对话记录]\n{text}\n'
-                       f'（来自对话 {thread_id}，依据你的消息 {source_message_id}）')
-            interaction = _record_interaction(
-                conn, customer_id=customer_id, content=sanitize_mark_html(content)[:30000],
-                occurred_on=now[:10], direction='unknown', source='sela_human_input',
-                activity_type='human_fact', result='note', is_reported=True)
-            return {'interaction_id': interaction, 'already_present': False}
+            # The note is the assistant's own words about a decision made in the dialogue.
+            # It is not customer communication or reported work, so it stays in the
+            # dialogue receipt (this result) instead of the customer timeline.
+            _dialogue_fact_target(conn, source_id)
+            return {'noted': True, 'text': sanitize_mark_html(text), 'already_present': False}
         return handler, [], []
     raise _dialogue.DialogueError('invalid_request', '未知的事实类型')
 

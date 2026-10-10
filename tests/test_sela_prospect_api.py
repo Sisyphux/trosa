@@ -641,9 +641,11 @@ class SelaProspectApiTest(unittest.TestCase):
                 (item_id,),
             ).fetchone()
             self.assertEqual(tuple(inbox), ('sela_agent_request', 'resolved', 'edit', resolve_body['resolution']))
+            # Resolving an Inbox request is internal bookkeeping: it must not leave a
+            # communication record or weekly work behind (the Inbox item is the audit trail).
             self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM follow_up_logs WHERE activity_type='agent_decision'"
-            ).fetchone()[0], 1)
+                "SELECT COUNT(*) FROM follow_up_logs WHERE activity_type='agent_decision' OR source='sela_agent'"
+            ).fetchone()[0], 0)
         finally:
             conn.close()
 

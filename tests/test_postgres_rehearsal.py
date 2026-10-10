@@ -1757,7 +1757,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
                 "AND event.event_type='agent_decision'",
                 ('hamid', prospect_customer_id),
             ).fetchone()[0],
-            1,
+            0,
         )
 
         exclusion = client.post(

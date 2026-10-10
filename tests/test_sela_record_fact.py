@@ -353,6 +353,14 @@ class SelaRecordFactTest(unittest.TestCase):
                          {'source_id': source_id, 'text': '不排除；首触问对方是否需要第二供应商或只作价格参考'},
                          message_id, 'f:more:note')
         self.assertEqual(note.status_code, 200, note.get_data(as_text=True))
+        # A note is the assistant's own words, not customer communication or reported work.
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM follow_up_logs WHERE activity_type='human_fact' OR source='sela_human_input'"
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
         view = self.prospect_view(source_id)
         self.assertEqual(view['contact_details']['name'], 'Ada Lin')
         self.assertIn('1380000', ''.join(ch for ch in view['contact_details']['phone'] if ch.isdigit()))
