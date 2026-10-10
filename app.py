@@ -6518,6 +6518,44 @@ def _dialogue_attachments(conn, attachment_ids):
     return out
 
 
+def _dialogue_irreversible_customer_id(conn, raw, field):
+    """The Trosa customer number an irreversible action targets.
+
+    sela sometimes sends a prospect's source id where the number belongs
+    (2026-10-10 ``agent-nguan-kee-malaysia`` made ``int()`` raise and the whole action
+    answer 500).  A positive integer is used as is.  A source id is accepted only when
+    it is the exact source of a Sela profile that is still a cold prospect, and then
+    resolves to that profile's own ``customer_id``.  Anything else is a readable 400.
+    """
+    shown = str(raw)[:80]
+    hint = (f'{field} 需要 Trosa 的数字客户编号，或 sela 里已有 Prospect 的 source_id；'
+            f'收到的是「{shown}」')
+    number = None
+    if isinstance(raw, bool):
+        raise _dialogue.DialogueError('invalid_request', hint)
+    if isinstance(raw, int):
+        number = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        number = int(raw)
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if re.fullmatch(r'[0-9]{1,18}', text):
+            number = int(text)
+        elif re.fullmatch(r'[A-Za-z0-9_-]{1,128}', text):
+            if not _sela_profile_by_source(conn, text):
+                raise _dialogue.DialogueError(
+                    'invalid_request',
+                    f'{hint}。Trosa 里找不到 source_id 为「{text}」的 Prospect')
+            _profile, customer_id = _dialogue_fact_target(conn, text)
+            return customer_id
+    if number is None or number <= 0:
+        raise _dialogue.DialogueError('invalid_request', hint)
+    if not _sela_profile_customer(conn, number):
+        raise _dialogue.DialogueError(
+            'not_found', f'Trosa 里没有客户编号 {number}', 404)
+    return number
+
+
 def _dialogue_irreversible_handler(action):
     if action == 'stop_contact':
         def handler(conn, arguments, now):
@@ -6542,9 +6580,11 @@ def _dialogue_irreversible_handler(action):
             if not source_id or not customer_id:
                 raise _dialogue.DialogueError(
                     'invalid_request', '缺少 source_id 或 target_customer_id')
+            customer_id = _dialogue_irreversible_customer_id(
+                conn, customer_id, 'target_customer_id')
             identifiers = _sela_identity_identifiers(source_id, arguments)
             applied = _sela_record_identity_decision(
-                conn, decision='same', customer_id=int(customer_id),
+                conn, decision='same', customer_id=customer_id,
                 identifiers=identifiers, source_id=source_id, now=now,
                 actor='sela', inbox_item_id=None,
             )
@@ -6556,9 +6596,11 @@ def _dialogue_irreversible_handler(action):
             email = _sela_prospect_text(arguments.get('email'), 320)
             if not customer_id or not email:
                 raise _dialogue.DialogueError('invalid_request', '缺少 customer_id 或 email')
+            customer_id = _dialogue_irreversible_customer_id(
+                conn, customer_id, 'customer_id')
             try:
                 saved = _sela_resolve_contact_email(
-                    conn, int(customer_id), email, now, actor='sela')
+                    conn, customer_id, email, now, actor='sela')
             except CrmWriteError as error:
                 raise _dialogue.DialogueError(
                     'guardrail_rejected', error.message, error.status)
