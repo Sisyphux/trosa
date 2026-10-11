@@ -215,6 +215,39 @@ class InboxDialoguePostgresTest(unittest.TestCase):
             conn.close()
         self.assertEqual(int(markers), 1, 'the losing transaction must roll back')
 
+    def test_malformed_thread_id_and_time_are_refused_not_a_server_error(self):
+        """A thread id that is not a uuid names no thread (404), and a malformed
+        ``updated_after`` is a readable 400; neither reaches the typed column."""
+        import db
+        import inbox_dialogue as dialogue
+
+        bad_ids = ('bebl5489-380b-4786-955a-a1d6dd19b99d', 'agent-nguan-kee-malaysia', '')
+        conn = db.get_db()
+        try:
+            for bad in bad_ids:
+                with self.assertRaises(dialogue.DialogueError) as caught:
+                    dialogue.get_thread(conn, thread_id=bad)
+                self.assertEqual(caught.exception.code, 'not_found')
+                conn.execute('BEGIN IMMEDIATE')
+                with self.assertRaises(dialogue.DialogueError) as caught:
+                    dialogue.append_message(conn, thread_id=bad, payload={'text': 'x'})
+                self.assertEqual(caught.exception.code, 'not_found')
+                with self.assertRaises(dialogue.DialogueError) as caught:
+                    dialogue.irreversible_action(
+                        conn, thread_id=bad, action='merge_identity', arguments={},
+                        proposal_message_id=str(uuid.uuid4()),
+                        confirmed_by_message_id=str(uuid.uuid4()),
+                        handler=lambda *_: {}, idempotency_key=f'bad-{uuid.uuid4().hex}')
+                self.assertEqual(caught.exception.code, 'not_found')
+                conn.rollback()
+            with self.assertRaises(dialogue.DialogueError) as caught:
+                dialogue.list_threads(conn, updated_after='yesterday')
+            self.assertEqual(caught.exception.code, 'invalid_request')
+            listed = dialogue.list_threads(conn, updated_after='2026-01-01T00:00:00Z')
+            self.assertTrue(listed['success'])
+        finally:
+            conn.close()
+
 
 if __name__ == '__main__':
     unittest.main()

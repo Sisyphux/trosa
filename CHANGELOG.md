@@ -1,3 +1,10 @@
+## 2026-10-12 — 对话编号格式不对时不再报服务器错误
+
+- 现象：正式环境日志里，sela 用一个格式不对的对话编号（例如把客户 source_id 当成对话编号）读取或回复对话时，Trosa 返回 500；同一请求在本地 SQLite 上返回「对话不存在」。sela 收到 500 会当成临时故障反复重试。
+- 原因：对话编号直接进了 PostgreSQL 的 uuid 列查询，格式不对时数据库报错。消息编号上周已修过同一问题，对话编号和列表的 `updated_after` 时间参数还没修。
+- 修复：格式不对的对话编号按「对话不存在」返回 404；`updated_after` 不是 ISO 时间时返回 400 并说明要什么格式。不改接口形状、不改表结构。
+- 影响范围：`inbox_dialogue.py`（`_thread_row`、`_lock_thread`、`list_threads`）、`tests/test_inbox_dialogue_postgres.py`、`tests/test_inbox_dialogue_routes.py`。
+- 验证：新增 PostgreSQL 演练用例，修复前报 `InvalidTextRepresentation`，修复后通过；SQLite 路由用例同时覆盖 404 / 400 / 合法时间 200。
 ## 2026-10-12 — 本周工作和客户列表显示客户来源
 
 - 需求：周报里要能看到客户是从哪里来的（展会、海关数据、Google、LinkedIn、转介绍等），页面保持干净。

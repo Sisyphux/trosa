@@ -235,6 +235,18 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['error']['code'], 'invalid_request')
 
+    def test_malformed_thread_id_and_updated_after(self):
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        response = human.get('/api/inbox/threads/not-a-thread-id')
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.get_json()['error']['code'], 'not_found')
+        response = human.get('/api/inbox/threads?updated_after=yesterday')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['error']['code'], 'invalid_request')
+        response = human.get('/api/inbox/threads?updated_after=2026-10-01T00:00:00Z')
+        self.assertEqual(response.status_code, 200)
+
 
 if __name__ == '__main__':
     unittest.main()

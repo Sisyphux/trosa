@@ -382,6 +382,8 @@ def _summary_dict(conn, row):
 # ---------------------------------------------------------------------------
 
 def _thread_row(conn, thread_id):
+    if not _is_uuid(thread_id):
+        return None  # a malformed id names no thread (never reaches the uuid column)
     where, params = _scope()
     row = conn.execute(
         f'SELECT * FROM {_t("inbox_threads")} WHERE id=? AND {where}',
@@ -391,6 +393,8 @@ def _thread_row(conn, thread_id):
 
 
 def _lock_thread(conn, thread_id):
+    if not _is_uuid(thread_id):
+        return None
     where, params = _scope()
     sql = f'SELECT * FROM {"trosa.inbox_threads" if is_postgres() else "inbox_threads"} WHERE id=? AND {where}'
     if is_postgres():
@@ -843,6 +847,10 @@ def list_threads(conn, *, awaiting=None, status='open', subject=None,
         where += ' AND subject=?'
         params.append(subject)
     if updated_after:
+        try:
+            datetime.fromisoformat(str(updated_after).replace('Z', '+00:00'))
+        except ValueError:
+            raise DialogueError('invalid_request', 'updated_after 需要 ISO 时间，例如 2026-10-01T00:00:00Z')
         where += ' AND updated_at>=?'
         params.append(updated_after)
     order = 'ASC' if awaiting == 'sela' else 'DESC'
