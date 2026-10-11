@@ -14323,10 +14323,10 @@ function updateTodayDialogueEntry() {
   var countEl = document.getElementById('todayDialogueCount');
   var labelEl = document.getElementById('todayDialogueLabel');
   if (countEl) countEl.textContent = count;
-  if (labelEl) labelEl.textContent = count ? '条 sela 对话等你回复' : '目前没有等你回复的对话';
-  entry.hidden = false;
-  entry.classList.toggle('is-empty', !count);
-  entry.setAttribute('aria-label', count ? (count + ' 条 sela 对话等你回复') : '目前没有等你回复的对话');
+  if (labelEl) labelEl.textContent = '条对话等你回复';
+  // 没有等你回复的对话时整块不出现：没在用对话的成员看到的就是普通 CRM。
+  entry.hidden = !count;
+  entry.setAttribute('aria-label', count + ' 条对话等你回复');
 }
 
 function openTodayDialogueEntry() { switchPage('dialogue'); }

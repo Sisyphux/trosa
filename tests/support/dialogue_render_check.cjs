@@ -187,6 +187,13 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   win.updateTodayDialogueEntry();
   assert.equal(doc.getElementById('todayDialogueEntry').hidden, false);
   assert.equal(doc.getElementById('todayDialogueCount').textContent, '2');
+  assert.equal(doc.getElementById('todayDialogueLabel').textContent.indexOf('sela'), -1, 'Today 入口不应出现 sela');
+  const savedAwaiting = win.dialogueCounts.awaiting_human;
+  win.dialogueCounts.awaiting_human = 0;
+  win.updateTodayDialogueEntry();
+  assert.equal(doc.getElementById('todayDialogueEntry').hidden, true, '没有等你回复的对话时 Today 入口应隐藏');
+  win.dialogueCounts.awaiting_human = savedAwaiting;
+  win.updateTodayDialogueEntry();
 
   // 默认选中最靠前的「等你」对话：消息含 sela 与 system，建议回复以可点击文字出现。
   assert.equal(win.dialogueSelectedId, A, '应默认打开第一条等你对话');

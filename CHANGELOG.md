@@ -1,3 +1,9 @@
+## 2026-10-11 — Today 的对话入口不再出现「sela」，没有对话时不显示
+
+- 现象：Today 顶部写着「2 条 sela 对话等你回复」；没在用对话的同事也会看到一块「目前没有等你回复的对话」。
+- 修复：文案改为「N 条对话等你回复」；没有等你回复的对话时整块不出现，对这些成员来说 Today 就是普通 CRM 的样子。计数本来就按当前登录人统计。
+- 影响范围：`app/static/app.js`（`updateTodayDialogueEntry`）、`app/static/index.html`、`tests/support/dialogue_render_check.cjs`。
+- 验证：对话渲染用例新增「文案不含 sela」「计数为 0 时入口隐藏」两条断言并通过。
 ## 2026-10-10 — Inbox 里的内部决定不再写进沟通记录和本周工作
 
 - 现象：客户页的「实际工作」和沟通记录里出现「[Inbox 对话记录]……（来自对话 …，依据你的消息 …）」和「[Sela Agent Request ID: …] 人工处理 AI 建议 … 决定：skip」，同一条还带着「结果：note / skip」，本周工作里满是这类条目。
