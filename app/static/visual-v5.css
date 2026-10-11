@@ -3446,6 +3446,16 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   line-height: 1.5;
   color: var(--dl-ink-3);
 }
+.wk-source {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 0;
+  font-size: var(--dl-fs-label);
+  line-height: 1.5;
+  color: var(--dl-ink-2);
+  overflow-wrap: anywhere;
+}
+.wk-source span { flex: none; color: var(--dl-ink-3); }
 .wk-when { margin-top: 10px; gap: 2px 12px; }
 .wk-when time { color: var(--dl-ink-2); font-variant-numeric: tabular-nums; }
 

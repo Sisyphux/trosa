@@ -3658,7 +3658,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         rows = client.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows']
         self.assertEqual([row['id'] for row in rows], order)
         self.assertEqual(set(rows[0]), {
-            'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'website',
+            'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'source', 'website',
             'event_date', 'days', 'flags',
             'has_contact', 'waiting_reply', 'activity_kind', 'activity_snippet', 'next_task_title',
             'next_task_date', 'next_task_days', 'match',

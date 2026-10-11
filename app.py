@@ -9490,6 +9490,7 @@ def get_customer_ledger_rows():
             'timezone': customer.get('timezone') or '',
             'timezone_source': customer.get('timezone_source') or '',
             'field': customer.get('field') or customer.get('industry') or '',
+            'source': customer.get('source') or '',
             'website': customer.get('website') or '',
             'event_date': facts['event_date'], 'days': facts['days'], 'flags': facts['flags'],
             'has_contact': bool(customer.get('has_contact')),
@@ -20263,12 +20264,18 @@ def _build_weekly_summary(user, week_start, week_end):
                 'customer_name': item.get('customer_name', ''),
                 'customer_company': item.get('customer_company', ''),
                 'customer_country': item.get('customer_country', ''),
+                'customer_source': item.get('customer_source') or '',
+                'customer_source_detail': item.get('customer_source_detail') or '',
                 'date': item.get('occurred_on', ''),
                 '_seen_events': set(),
                 '_actual_work': [],
                 '_result': [],
                 '_next_steps': [],
             })
+            # Legacy rows of one company may disagree; keep the first recorded source.
+            if not group['customer_source'] and item.get('customer_source'):
+                group['customer_source'] = item.get('customer_source') or ''
+                group['customer_source_detail'] = item.get('customer_source_detail') or ''
             event_key = (item.get('kind'), item.get('id'))
             if event_key in group['_seen_events']:
                 continue
@@ -20284,6 +20291,8 @@ def _build_weekly_summary(user, week_start, week_end):
                 'customer_name': group['customer_name'],
                 'customer_company': group['customer_company'],
                 'customer_country': group['customer_country'],
+                'customer_source': group['customer_source'],
+                'customer_source_detail': group['customer_source_detail'],
                 'date': group['date'],
                 'activity_count': len(group['_actual_work']),
                 'actual_work': _join_weekly_text(group['_actual_work']),

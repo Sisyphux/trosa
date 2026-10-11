@@ -1,3 +1,9 @@
+## 2026-10-12 — 本周工作和客户列表显示客户来源
+
+- 需求：周报里要能看到客户是从哪里来的（展会、海关数据、Google、LinkedIn、转介绍等），页面保持干净。
+- 修改：本周工作里，填了来源的客户名下多一行「来源 展会 · SIGN CHINA 2026」；没填的客户不显示这一行。客户列表每行国家后面跟着来源（例如「德国 · 展会」），没填就不显示。来源仍只在客户资料的「客户来源」「来源补充说明」里填一次，两处只是读出来。
+- 影响范围：`trosa_domain.py`（`weekly_interactions` 多读两列）、`app.py`（`_build_weekly_summary` 返回 `customer_source` / `customer_source_detail`；`/api/customers/ledger/rows` 多返回 `source`）、`app/static/app.js`（`weeklySourceLine`、`ledgerRowHtml`，本地周报缓存键升到 v4）、`app/static/visual-v5.css`。不改表结构。
+- 验证：周报与客户列表用例新增来源断言；隔离服务上用真实 Chromium 在 1440 与 375 宽度检查周报和客户列表：有来源的显示、没来源的不显示，无横向滚动、无页面错误。
 ## 2026-10-11 — Today 的对话入口不再出现「sela」，没有对话时不显示
 
 - 现象：Today 顶部写着「2 条 sela 对话等你回复」；没在用对话的同事也会看到一块「目前没有等你回复的对话」。

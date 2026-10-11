@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 import db
 
 ROW_KEYS = {
-    'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'website',
+    'id', 'company', 'person', 'country', 'timezone', 'timezone_source', 'field', 'source', 'website',
     'event_date', 'days', 'flags',
     'has_contact', 'waiting_reply', 'activity_kind', 'activity_snippet', 'next_task_title',
     'next_task_date', 'next_task_days', 'match',
@@ -222,6 +222,7 @@ class CustomerLedgerTest(unittest.TestCase):
         customer_id = self._add('hamid', 'Orbit Alpha', reply_days=3)
         row = self.client.get(f'/api/customers/ledger/rows?ids={customer_id}&search=orbit').get_json()['rows'][0]
         self.assertEqual(set(row), ROW_KEYS)
+        self.assertEqual(row['source'], '')
         legacy = self.client.get('/api/customers?search=orbit').get_json()['customers'][0]
         self.assertNotIn('_search_score', legacy)
 
@@ -306,6 +307,17 @@ class CustomerLedgerTest(unittest.TestCase):
         for key in ('next_task_date', 'has_contact', 'waiting_reply', 'days_since_contact', 'match_reasons'):
             self.assertIn(key, unpaged['customers'][0])
 
+    def test_row_carries_recorded_customer_source(self):
+        customer_id = self._add('hamid', 'Source Fair Co', reply_days=2)
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("UPDATE customers SET source='展会', source_detail='SIGN CHINA 2026' WHERE id=?", (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        row = self.client.get(f'/api/customers/ledger/rows?ids={customer_id}').get_json()['rows'][0]
+        self.assertEqual(row['source'], '展会')
+
 
 class CustomerLedgerContractTest(unittest.TestCase):
     """Static guards for the ledger room (design/rooms/customers.md)."""
@@ -381,3 +393,4 @@ class CustomerLedgerContractTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

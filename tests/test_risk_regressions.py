@@ -419,6 +419,9 @@ class CalendarAndAccessTest(unittest.TestCase):
                     'kind': 'communication', 'id': event_id, 'customer_id': legacy_customer_id,
                     'customer_name': 'KPS', 'customer_company': 'KPS Global Solutions',
                     'customer_country': '印度', 'occurred_on': day,
+                    # Only the second legacy row carries the recorded source.
+                    'customer_source': '展会' if legacy_customer_id == 102 else '',
+                    'customer_source_detail': 'SIGN CHINA 2026' if legacy_customer_id == 102 else '',
                     'content': '根据展宇价格按15%报价', 'result': '客户反馈价格太高',
                     'next_plan': '客户询问镜面板价格', 'created_at': day,
                 })
@@ -429,6 +432,8 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(card['customer_company'], 'KPS Global Solutions')
         self.assertEqual(card['activity_count'], 2)
         self.assertEqual(card['actual_work'].count('根据展宇价格按15%报价'), 1)
+        self.assertEqual(card['customer_source'], '展会')
+        self.assertEqual(card['customer_source_detail'], 'SIGN CHINA 2026')
 
     def test_weekly_summary_filters_reported_rows_and_returns_customer_facts_only(self):
         spec = importlib.util.spec_from_file_location('crm_app_weekly_summary_test', ROOT / 'app.py')
@@ -437,8 +442,8 @@ class CalendarAndAccessTest(unittest.TestCase):
         conn = sqlite3.connect(db.get_user_db_path('hamid'))
         try:
             conn.execute("""INSERT INTO customers
-                         (name, company, country, customer_type, created_at)
-                         VALUES ('摘要客户', '摘要公司', '德国', 'existing', '2026-08-04')""")
+                         (name, company, country, customer_type, source, source_detail, created_at)
+                         VALUES ('摘要客户', '摘要公司', '德国', 'existing', '海关数据', 'ImportGenius', '2026-08-04')""")
             customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
             conn.execute("""INSERT INTO follow_up_logs
                          (customer_id, content, follow_date, result, next_plan, is_reported)
@@ -467,6 +472,8 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(summary['next_step'], '<mark class="hl-pink">确认交期</mark>')
         self.assertNotIn('未上报工作', summary['actual_work'])
         self.assertEqual(summary['customer_country'], '德国')
+        self.assertEqual(summary['customer_source'], '海关数据')
+        self.assertEqual(summary['customer_source_detail'], 'ImportGenius')
         self.assertNotIn('week_entries', summary)
         self.assertNotIn('不应出现在周报', str(payload))
 

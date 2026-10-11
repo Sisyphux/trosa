@@ -6645,7 +6645,7 @@ function ledgerRowHtml(row) {
   var query = LD.query;
   var company = row.company || '未命名公司';
   var what = row.days === null ? '' : (row.waiting_reply ? '等待回复' : (row.has_contact ? '已有联系' : '未获回复'));
-  var cf = [row.country, row.field].filter(Boolean).join(' · ') || '—';
+  var cf = [row.country, row.field, customerSourceLabel(row.source)].filter(Boolean).join(' · ') || '—';
   var snippet;
   // A company-name hit is already shown (and marked) on the line above; say where else it matched.
   if (row.match && query && row.match.indexOf('公司名称 · ') !== 0) snippet = '命中 · ' + highlightSearchText(row.match, query);
@@ -13562,7 +13562,7 @@ function setWeeklyMemberFilter(uid) {
 }
 
 function weeklyLocalCacheKey(uid, weekStart) {
-  return 'tradeos.weekly-summary.v3:' + weekStart + ':' + uid;
+  return 'tradeos.weekly-summary.v4:' + weekStart + ':' + uid;
 }
 
 function readWeeklyLocalCache(uid, weekStart) {
@@ -13582,6 +13582,15 @@ function writeWeeklyLocalCache(uid, weekStart, data) {
 
 function weeklyCustomerText(customer, field) {
   return customer && customer[field] || '';
+}
+
+// Where the customer was found (展会 / 海关数据 / Google …), from the customer record.
+function weeklySourceLine(customer) {
+  var source = customerSourceLabel(customer && customer.customer_source);
+  var detail = String(customer && customer.customer_source_detail || '').trim();
+  if (!source && !detail) return '';
+  var text = [source, detail].filter(Boolean).join(' · ');
+  return '<p class="wk-source" title="' + escapeHtml(text) + '"><span>来源</span>' + escapeHtml(text) + '</p>';
 }
 
 // One labelled fact. Several same-week activities arrive joined by line breaks;
@@ -13622,6 +13631,7 @@ function renderWeeklyMember(uid, data, error, options) {
     html += '<article class="wk-row">';
     html += '<header class="wk-who"><h3 title="' + escapeHtml(nm) + '">' + escapeHtml(nm) + '</h3>';
     if (meta.length) html += '<p class="wk-meta">' + escapeHtml(meta.join(' · ')) + '</p>';
+    html += weeklySourceLine(r);
     html += '<p class="wk-when"><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(formatChineseDate(r.date || '')) + '</time><span>本周 ' + count + ' 次活动</span></p></header>';
     html += '<div class="wk-facts">';
     html += weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), '', '实际工作');
