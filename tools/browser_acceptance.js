@@ -94,7 +94,7 @@ await dashboard.waitFor({state: 'visible', timeout: 15000});
 // Customer → real customer workspace.
 await gotoPage('customers');
 await page.locator('#page-customers.active').waitFor({state: 'visible', timeout: 15000});
-// The customer list is the ledger (design/rooms/customers.md): select the row,
+// The customer list is the ledger (design/DESIGN_WORLD.md §3): select the row,
 // then open it with the keyboard path (Enter) the room documents.
 const ledgerRow = () => page.locator('#ledgerScroll .ld-ent').filter({hasText: customerName}).first();
 const openLedgerRow = async () => {

@@ -61,7 +61,7 @@ email_verifier.py      可选的邮箱可发送性后台复核
 app/static/            单页前端
 tests/                 风险回归测试
 deploy/                Linux 服务与 Tunnel 示例
-design/                视觉系统与原型
+design/                视觉基准与 UI 质量底线
 archive/               历史发布包
 ```
 

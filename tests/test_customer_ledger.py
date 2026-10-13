@@ -1,6 +1,6 @@
 """Read-only customer ledger endpoints: counts, segment subtotals, ruler index, rows.
 
-The ledger room (design/rooms/customers.md) only *reads* the relationship facts
+The ledger room (design/DESIGN_WORLD.md §3) only *reads* the relationship facts
 that ``GET /api/customers`` already projects.  These tests pin the aggregation
 (paging window, per-view counts, segment buckets), the ruler flags, the field
 whitelist and per-user isolation, and that the legacy list keeps its shape.
@@ -320,7 +320,7 @@ class CustomerLedgerTest(unittest.TestCase):
 
 
 class CustomerLedgerContractTest(unittest.TestCase):
-    """Static guards for the ledger room (design/rooms/customers.md)."""
+    """Static guards for the ledger room (design/DESIGN_WORLD.md §3)."""
 
     @classmethod
     def setUpClass(cls):
