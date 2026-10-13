@@ -324,6 +324,50 @@ class SelaRecordFactTest(unittest.TestCase):
         self.assertEqual(response.get_json()['error']['code'], 'guardrail_rejected')
         self.assertEqual(self.prospect_view(source_id)['email'], 'old@fact-over.example')
 
+    def test_additional_email_keeps_the_primary_and_is_listed_for_sending(self):
+        source_id = 'fact-extra-1'
+        self.create_prospect(source_id, email='main@fact-extra.example',
+                             contact={'email': 'main@fact-extra.example'})
+        thread_id, message_id = self.thread_with_human(
+            source_id, '这两个都发：main@fact-extra.example 和 Info@Fact-Extra.example', 'f:extra')
+        response = self.fact(thread_id, 'additional_email', {'source_id': source_id, 'email': 'Info@Fact-Extra.example'},
+                             message_id, 'f:extra:1')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        view = self.prospect_view(source_id)
+        self.assertEqual(view['email'], 'main@fact-extra.example')
+        self.assertEqual(view['additional_emails'], ['info@fact-extra.example'])
+        again = self.fact(thread_id, 'additional_email', {'source_id': source_id, 'email': 'info@fact-extra.example'},
+                          message_id, 'f:extra:2')
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.get_json()['already_present'])
+        self.assertEqual(self.prospect_view(source_id)['additional_emails'], ['info@fact-extra.example'])
+        # the primary itself is never listed as an additional address
+        same = self.fact(thread_id, 'additional_email', {'source_id': source_id, 'email': 'main@fact-extra.example'},
+                         message_id, 'f:extra:3')
+        self.assertTrue(same.get_json()['already_present'])
+        self.assertEqual(self.prospect_view(source_id)['additional_emails'], ['info@fact-extra.example'])
+
+    def test_additional_email_without_a_primary_becomes_the_primary(self):
+        source_id = 'fact-extra-2'
+        self.create_prospect(source_id)
+        thread_id, message_id = self.thread_with_human(source_id, '发 info@fact-extra2.example', 'f:extra2')
+        response = self.fact(thread_id, 'additional_email', {'source_id': source_id, 'email': 'info@fact-extra2.example'},
+                             message_id, 'f:extra2:1')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        view = self.prospect_view(source_id)
+        self.assertEqual(view['email'], 'info@fact-extra2.example')
+        self.assertEqual(view['additional_emails'], [])
+
+    def test_additional_email_must_be_in_the_human_message(self):
+        source_id = 'fact-extra-3'
+        self.create_prospect(source_id, email='main@fact-extra3.example',
+                             contact={'email': 'main@fact-extra3.example'})
+        thread_id, message_id = self.thread_with_human(source_id, '两个都发吧', 'f:extra3')
+        response = self.fact(thread_id, 'additional_email', {'source_id': source_id, 'email': 'made.up@fact-extra3.example'},
+                             message_id, 'f:extra3:1')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.prospect_view(source_id)['additional_emails'], [])
+
     def test_invalid_email_and_unknown_prospect(self):
         source_id = 'fact-bad-1'
         self.create_prospect(source_id)

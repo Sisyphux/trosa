@@ -1,3 +1,9 @@
+## 2026-10-13 — Sela 线索可以登记多个外发邮箱
+
+- 现象：在 Inbox 对话里说「这两个邮箱一起发」，第二个邮箱只能当备注记下，Sela 开发信只会发到主邮箱。
+- 修改：对话事实新增 `additional_email`：保留原主邮箱，把人给的邮箱加成这家公司的另一个联系人（值仍必须逐字出现在人的那条消息里，属于别的客户的邮箱照旧拒绝；还没有主邮箱时它就成为主邮箱）。Sela 的 prospect 视图多返回 `additional_emails`（主邮箱之外的所有联系人邮箱），Sela 发开信时一并放进收件人。
+- 影响范围：`inbox_dialogue.py`（`FACT_KINDS`）、`app.py`（`_dialogue_fact_spec`、`_sela_resolve_contact_email(additional=)`、`_sela_prospect_view`）。不改表结构。
+- 验证：`tests/test_sela_record_fact.py` 新增三条：额外邮箱保留主邮箱并出现在 `additional_emails`、无主邮箱时成为主邮箱、人原话里没有的邮箱被拒绝。
 ## 2026-10-12 — 对话编号格式不对时不再报服务器错误
 
 - 现象：正式环境日志里，sela 用一个格式不对的对话编号（例如把客户 source_id 当成对话编号）读取或回复对话时，Trosa 返回 500；同一请求在本地 SQLite 上返回「对话不存在」。sela 收到 500 会当成临时故障反复重试。

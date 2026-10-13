@@ -5468,9 +5468,14 @@ def _sela_prospect_view(conn, profile):
     research = _sela_json_value(profile.get('research_json'), {})
     transport = _sela_json_value(profile.get('transport_json'), {})
     agent_state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
-    contact = _sela_profile_contact(conn, int(customer['id']))
-    contact = dict(contact) if contact else {}
+    contacts = _dialogue_fact_contacts(conn, int(customer['id']))
+    contact = contacts[0] if contacts else {}
     email = _canonical_email(contact.get('email'))
+    additional_emails = []
+    for row in contacts:
+        other = _canonical_email(row.get('email'))
+        if other and other != email and other not in additional_emails:
+            additional_emails.append(other)
     contact_details = {
         key: contact[key] for key in (
             'name', 'title', 'email', 'phone', 'whatsapp', 'linkedin',
@@ -5588,6 +5593,9 @@ def _sela_prospect_view(conn, profile):
         'contact': contact_label,
         'contact_details': contact_details,
         'email': email,
+        # Every further contact email of this prospect; Sela sends the outreach
+        # to ``email`` and these together in one message.
+        'additional_emails': additional_emails,
         'email_source_url': str(research.get('email_source_url') or ''),
         'email_type': str(research.get('email_type') or ''),
         'email_route_status': route_status,
@@ -6811,6 +6819,23 @@ def _dialogue_fact_spec(fact, arguments, *, thread_id, source_message_id):
                     'guardrail_rejected', '这个对象已经有邮箱，要换成新的需要你明确同意（overwrite_email）', 409)
             try:
                 saved = _sela_resolve_contact_email(conn, customer_id, email, now, actor='sela')
+            except CrmWriteError as error:
+                raise _dialogue.DialogueError('guardrail_rejected', error.message, error.status)
+            return {'contact_id': saved.get('contact_id'), 'already_present': bool(saved.get('already_present'))}
+        return handler, [raw], []
+    if fact == 'additional_email':
+        raw = _sela_prospect_text(arguments.get('email'), 320)
+        if not raw:
+            raise _dialogue.DialogueError('invalid_request', '缺少 email')
+
+        def handler(conn, args, now):
+            try:
+                email = _canonical_email(validate_email_address(raw, check_deliverability=False).normalized)
+            except EmailNotValidError:
+                raise _dialogue.DialogueError('invalid_request', '邮箱格式无效')
+            _profile, customer_id = _dialogue_fact_target(conn, source_id)
+            try:
+                saved = _sela_resolve_contact_email(conn, customer_id, email, now, actor='sela', additional=True)
             except CrmWriteError as error:
                 raise _dialogue.DialogueError('guardrail_rejected', error.message, error.status)
             return {'contact_id': saved.get('contact_id'), 'already_present': bool(saved.get('already_present'))}
@@ -13652,12 +13677,16 @@ def _sela_linked_prospect(conn, source_id):
     return dict(profile), _sela_prospect_view(conn, profile)
 
 
-def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
+def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', additional=False):
     """Create or refresh one contact email on the prospect's Trosa customer.
 
     This is the single audited write path for a human-confirmed Sela email; the
     standalone save endpoint and the unified Inbox answer both use it, so an
     answered email is a real contact fact Sela can verify afterwards.
+
+    ``additional`` keeps the existing primary email and adds the address as a
+    further contact; Sela sends its outreach to every contact email of a cold
+    prospect (``additional_emails`` in the prospect view).
     """
     try:
         email = _canonical_email(validate_email_address(email, check_deliverability=False).normalized)
@@ -13694,7 +13723,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
     if duplicate:
         company = (duplicate.get('company') or duplicate.get('name') or '其他客户') if isinstance(duplicate, dict) else '其他客户'
         raise CrmWriteError(f'该邮箱已属于其他客户：{company}', 409)
-    if contacts:
+    if contacts and not (additional and any(_canonical_email(row.get('email')) for row in contacts)):
         primary = contacts[0]
         contact_id = int(primary['id'])
         before = _snapshot_entity(conn, 'contacts', contact_id)
@@ -13708,7 +13737,8 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor=''):
     contact_id = int(_create_contact(conn, customer_id=customer_id, values={
         'name': '', 'email': email, 'preferred_channel': 'email',
         'contact_type': 'person', 'is_primary': 0,
-        'notes': '由 Inbox 人工回答确认；邮箱尚未验证。',
+        'notes': ('由 Inbox 人工确认的额外外发邮箱，与主邮箱一起收开发信。' if additional
+                  else '由 Inbox 人工回答确认；邮箱尚未验证。'),
     }, created_at=now))
     after = _snapshot_entity(conn, 'contacts', contact_id)
     _record_operation_log(conn, 'CREATE', 'contact', contact_id,
