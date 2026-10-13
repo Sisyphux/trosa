@@ -2,16 +2,18 @@
 
 一个页面一份 `rooms/<页面>.md`，例如 `customer.md`、`today.md`、`inbox.md`、`search.md`。
 
+> **【方向已替代（2026-10-09 起）】** 下面四份房间文档记录的是 2026-09-30 选定的方向（Inbox=灯箱、Today=潮汐、客户列表=账页、客户详情=Daylight 房间）。默认外观此后改为瑞士式排版（见 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md) 顶部说明与 `app/static/swiss-d.css`），Inbox 入口改为与 sela 的对话。这些文档只作历史与“结构为何如此”的参考，不再作为新设计的依据；若再选新房间方向，先按本页流程出原型、选定、再提炼，并在对应文档里写明替代关系。
+
 **它是怎么产生的**：先在 `design/visual-exploration/` 做几个独立 HTML 原型，由人选定其一，再从被选中的原型提炼成这里的文档，最后才实现。规范跟着原型走，不先写规范再画页面。流程与世界规则见 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md)。
 
 **边界**：房间可以在空间模型、隐喻、构图、招牌交互上自由发挥；但不得引入新材质（新色系、新字体家族、玻璃、重阴影），也不得放松 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md) 的底线。
 
 目前已有四个房间文档：
 
-- [`today.md`](today.md) —— 今天，来源原型 [`../visual-exploration/rooms-v5/today/03-tide.html`](../visual-exploration/rooms-v5/today/03-tide.html)（2026-09-30 选定）：已选定，尚未实现。
-- [`customers.md`](customers.md) —— 客户列表，来源原型 [`../visual-exploration/rooms-v5/customers/03-ledger.html`](../visual-exploration/rooms-v5/customers/03-ledger.html)（2026-09-30 选定）：已实现于分支 `agent/room-customers-impl-0930`，未发布。
-- [`customer.md`](customer.md) —— 客户详情，无原型，来源是分支 `agent/ui-daylight-perpage` 的实现（2026-09-30 选定）：已选定，实现在分支、未发布。
-- [`inbox.md`](inbox.md) —— Inbox，来源原型 [`../visual-exploration/rooms-v5/inbox/01-lightbox.html`](../visual-exploration/rooms-v5/inbox/01-lightbox.html)（2026-09-30 选定）：已选定，尚未实现。
+- [`today.md`](today.md) —— 今天，来源原型 [`../visual-exploration/rooms-v5/today/03-tide.html`](../visual-exploration/rooms-v5/today/03-tide.html)（2026-09-30 选定）：已实现（2026-09-30 变更记录），**方向已被瑞士式外观替代**，潮线表结构仍在代码里。
+- [`customers.md`](customers.md) —— 客户列表，来源原型 [`../visual-exploration/rooms-v5/customers/03-ledger.html`](../visual-exploration/rooms-v5/customers/03-ledger.html)（2026-09-30 选定）：已实现（账页），**方向已被瑞士式外观替代**，账页结构仍在代码里。
+- [`customer.md`](customer.md) —— 客户详情，无原型，来源是分支 `agent/ui-daylight-perpage` 的实现（2026-09-30 选定）：已实现，**Daylight 房间方向已被瑞士式外观替代**。
+- [`inbox.md`](inbox.md) —— Inbox，来源原型 [`../visual-exploration/rooms-v5/inbox/01-lightbox.html`](../visual-exploration/rooms-v5/inbox/01-lightbox.html)（2026-09-30 选定）：已实现（灯箱），**方向已被替代**：入口改为与 sela 的对话（2026-10-09），灯箱只在“其他事项”里保留。
 
 ## 模板
 

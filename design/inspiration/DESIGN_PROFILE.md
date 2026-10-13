@@ -1,5 +1,7 @@
 # Trosa 设计画像：Daylight
 
+> **【已被替代（2026-10-09 起）】** 默认外观已改为瑞士式排版（白底黑字、方角细线、单一字体、单一强调色），本页描述的暖纸、衬线、金色与光池气质只保留在 `?type=classic` 旧外观里，不再是现行审美。现行取值见 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md) 顶部说明与 `app/static/swiss-d.css`。以下为历史画像。
+
 > 一页读懂现行审美的气质与分工。规则、token、动效底线与验收矩阵以 [`../DESIGN_WORLD.md`](../DESIGN_WORLD.md) 为准，质量底线见 [`../UI_QUALITY_BASELINE.md`](../UI_QUALITY_BASELINE.md)。本页只回答「它像什么、为什么这样选」，不复制规范正文。
 
 ## 一句话

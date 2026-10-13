@@ -1,6 +1,13 @@
 # Trosa 设计世界：Daylight + 房间
 
-> 现行 UI 规范。结构是“**世界 + 房间**”：世界全站固定，房间每页可以完全不同。
+> **【方向已替代（2026-10-09 起）】默认外观是瑞士式排版，不再是本文的 Daylight 视觉；2026-09-30 据此选定的房间方向（Inbox=灯箱、Today=潮汐、客户列表=账页、客户详情=Daylight 房间）也不再是新设计的依据。**
+> - **现行外观**：白底黑字、方角（2px）、1px 细线、无阴影、一种字体（Hanken Grotesk，中文用系统无衬线：苹方 / 微软雅黑）、粗体只用 600、只有一个强调色（顶部 4px 橙红线与“当前”标记，焦点环 `#c8361a`）；无宽字距大写标签；墙面渐变、暗角、天光带与光池一律关闭。事实来源是 `app/static/swiss-d.css`（在 `visual-v5.css` 之后加载，由 `html[data-type="swiss"]` 触发，`index.html` 默认开启；网址加 `?type=classic` 可临时回到 Daylight 外观）。该外观下“界面性能”不再分档，设置里隐藏该选项。
+> - **仍然有效**：“一屏一个焦点”“唯一实心元素”、状态区分、键盘与触屏等价、减少动态、`UI_QUALITY_BASELINE.md` 的全部底线；以及 §1.1–1.8 里与配色、字体、材质无关的行为规则。
+> - **已过时，仅作历史**：§1.1 的光池与金色语言、§1.2 的墙/纸/墨/金色值与圆角、§1.3 的 Newsreader / Inter 字阶、各 `rooms/*.md` 的隐喻与空间模型。代码里这些房间的结构（Today 的潮线表、账页、客户工作区、Inbox 的“其他事项”灯箱）仍在，只是被瑞士式外观重新着色，不再有“按隐喻继续扩展”的计划。
+> - **Inbox 的现状**：入口始终打开与 sela 的对话（2026-10-09 起）；灯箱只留在有内容时才出现的“其他事项”页签里。
+> - 新界面按瑞士式外观与 `UI_QUALITY_BASELINE.md` 设计，先在 `app/static/swiss-d.css` 的约定里取值，不再引用 `--dl-gold*` 作装饰、不再新增衬线与暖色。下文保留原文，便于理解仍在代码里的 `--dl-*` token 与旧外观。
+
+> 现行 UI 规范（Daylight，已被上面的瑞士式外观覆盖）。结构是“**世界 + 房间**”：世界全站固定，房间每页可以完全不同。
 > 事实来源：`app/static/visual-v3.css` 的 `:root`（`--dl-*`）与 `design/visual-exploration/workspace-v4/02-daylight.html`（含同目录 `README.md`）。文中数值若与代码不符，以代码为准并回来改本文。
 > 与风格无关的可访问性、状态、组件行为和验收矩阵见 [`UI_QUALITY_BASELINE.md`](UI_QUALITY_BASELINE.md)。旧的暖质编辑式规范已归档到 [`archive/`](archive/TRADE_OS_UI_SYSTEM.v1-warm-editorial.md)，不再约束新设计。产品原则仍以 `PRODUCT_DESIGN_STANDARD.md` 为准。
 
