@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>一笔全站方案</title>
+<style>
+@font-face{font-family:"Hanken Grotesk";font-weight:100 900;font-display:swap;src:url(HankenGrotesk-Normal-latin.woff2) format("woff2")}
+:root{
+  --ink:#111;--ink2:#444;--ink3:#595959;--mut:#666;
+  --hair:rgba(17,17,17,.16);--hair2:rgba(17,17,17,.09);--hairs:rgba(17,17,17,.4);
+  --ac:#e8431f;--r:2px;--ease:cubic-bezier(.16,1,.3,1);--fast:.16s;--dur:.28s;--slow:.55s;
+  --font:"Hanken Grotesk","PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{font-size:15px}
+body{margin:0;background:#fff;color:var(--ink);font-family:var(--font);line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto 0;height:4px;background:var(--ac);z-index:10}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+button{font:inherit;color:inherit}
+code{font-family:var(--font);font-size:.9em;background:rgba(17,17,17,.05);padding:0 .3em;border-radius:var(--r)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+h1{margin:0;font-size:2.4rem;line-height:1.15;font-weight:700;letter-spacing:-.01em}
+h2{margin:0;font-size:1.45rem;line-height:1.3;font-weight:700}
+h3{margin:0;font-size:1rem;font-weight:600}
+p{margin:0}
+.lede{margin-top:14px;max-width:44em;color:var(--ink2)}
+header.top{padding:56px 0 8px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);margin-top:32px;border-top:1px solid var(--ink)}
+.facts div{padding:14px 16px 0 0}
+.facts b{display:block;font-size:2rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.facts span{color:var(--ink2);font-size:.9rem}
+section{padding:72px 0 0}
+section>.wrap>header{display:grid;grid-template-columns:3.2rem 1fr;gap:0 16px;border-top:1px solid var(--ink);padding-top:14px}
+.num{font-size:1.45rem;font-weight:700;font-variant-numeric:tabular-nums}
+.sub{margin-top:4px;color:var(--ink2);max-width:46em}
+.block{margin-top:24px}
+.label{margin:0 0 8px;font-size:.82rem;font-weight:600;color:var(--ink2)}
+.panel{border:1px solid var(--hair);border-radius:var(--r);background:#fff}
+.cap{margin-top:8px;font-size:.82rem;color:var(--ink3)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+@media (max-width:860px){.two,.three,.facts{grid-template-columns:1fr}.facts div{border-bottom:1px solid var(--hair2);padding-bottom:12px}}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+th{text-align:left;font-weight:600;color:var(--ink2);font-size:.82rem;padding:8px 12px 8px 0;border-bottom:1px solid var(--ink)}
+td{padding:10px 12px 10px 0;border-bottom:1px solid var(--hair2);vertical-align:top}
+td:first-child{font-weight:600;white-space:nowrap}
+.scroll{overflow-x:auto}
+.play{height:36px;padding:0 14px;border:1px solid var(--ink);border-radius:var(--r);background:#fff;cursor:pointer;font-size:.86rem;font-weight:600}
+.play:hover{background:var(--ink);color:#fff}
+.btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border:1px solid var(--ink);border-radius:var(--r);background:var(--ink);color:#fff;font-size:.88rem;font-weight:600;white-space:nowrap;cursor:pointer}
+.btn-q{background:#fff;color:var(--ink);border-color:var(--hair)}
+
+/* ---- 现状清单 ---- */
+.find{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.find li{display:grid;grid-template-columns:8.5em 1fr;gap:16px;padding:12px 0;border-bottom:1px solid var(--hair2)}
+.find b{font-weight:600}
+.find span{color:var(--ink2)}
+
+/* ---- 规矩 ---- */
+.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-left:1px solid var(--hair)}
+.rules>div{border-right:1px solid var(--hair);padding:4px 20px 8px}
+.rules svg{width:64px;height:48px;display:block;margin:8px 0 12px}
+.rules p{color:var(--ink2);font-size:.9rem;margin-top:6px}
+@media (max-width:860px){.rules{grid-template-columns:1fr;border-left:0}.rules>div{border-right:0;border-bottom:1px solid var(--hair);padding:12px 0}}
+
+/* ---- 手绘图标 ---- */
+.hi{display:block;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;overflow:visible}
+.hi .pt path{fill:currentColor;fill-opacity:.1;stroke:none}
+.hi .d{fill:currentColor;stroke:none}
+.hi .s{stroke-dasharray:1 2}
+.draw-on .hi .s,.hi.draw .s{animation:hiDraw .55s var(--ease) both}
+@keyframes hiDraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.icons{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));border-top:1px solid var(--hair);border-left:1px solid var(--hair)}
+.icons>div{border-right:1px solid var(--hair);border-bottom:1px solid var(--hair);padding:14px 8px 10px;display:grid;justify-items:center;gap:8px;cursor:default}
+.icons .pair{display:flex;align-items:center;gap:14px}
+.icons .old{width:24px;height:24px;opacity:.55}
+.icons .new{width:40px;height:40px}
+.icons small{font-size:.74rem;color:var(--ink3);text-align:center;line-height:1.35}
+.icons small i{font-style:normal;color:var(--mut)}
+.icons>div:hover .hi .s{animation:hiDraw .55s var(--ease) both}
+.sizes{display:flex;gap:20px;align-items:flex-end;flex-wrap:wrap;padding:16px}
+.sizes figure{margin:0;display:grid;gap:6px;justify-items:center}
+.sizes figcaption{font-size:.74rem;color:var(--ink3)}
+
+/* ---- 等待 ---- */
+.il{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;flex:none}
+.il path{stroke-dasharray:100 200;animation:ilA 1.5s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes ilA{0%{stroke-dashoffset:100}50%{stroke-dashoffset:0}100%{stroke-dashoffset:-101}}
+.bl{display:flex;align-items:center;gap:14px;padding:20px}
+.bl svg{width:38px;height:46px;flex:none;fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.bl .ln{stroke-dasharray:100 200;stroke-dashoffset:100;animation:blL 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.bl .ln:nth-of-type(3){animation-name:blL2}.bl .ln:nth-of-type(4){animation-name:blL3}
+@keyframes blL{0%{stroke-dashoffset:100}25%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes blL2{0%,25%{stroke-dashoffset:100}50%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes blL3{0%,50%{stroke-dashoffset:100}70%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+.bl p{color:var(--ink2);font-size:.92rem}
+.sA{width:100%;height:auto;display:block}
+.sA .line,.sA .sheet{fill:none;stroke:var(--ink);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:100 200;stroke-dashoffset:100}
+.sA .doc{animation:aFade 5.2s linear infinite}
+.sA .sheet{animation:aSheet 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.sA .l1{animation:aL1 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.sA .l2{animation:aL2 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.sA .l3{animation:aL3 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.sA .quill{animation:aQuill 5.2s cubic-bezier(.4,0,.2,1) infinite;opacity:0}
+.sA .leaf{fill:#e4e3df;stroke:var(--ink);stroke-width:2;stroke-linejoin:round}
+.sA .shaft{stroke:var(--ink);stroke-width:2.2;stroke-linecap:round;fill:none}
+@keyframes aFade{0%,90%{opacity:1}100%{opacity:0}}
+@keyframes aSheet{0%{stroke-dashoffset:100}20%,100%{stroke-dashoffset:0}}
+@keyframes aL1{0%,20%{stroke-dashoffset:100}40%,100%{stroke-dashoffset:0}}
+@keyframes aL2{0%,42%{stroke-dashoffset:100}56%,100%{stroke-dashoffset:0}}
+@keyframes aL3{0%,58%{stroke-dashoffset:100}68%,100%{stroke-dashoffset:0}}
+@keyframes aQuill{
+  0%,18%{transform:translate(192px,98px);opacity:0}
+  22%{transform:translate(192px,98px);opacity:1}
+  40%{transform:translate(288px,98px);opacity:1}
+  42%{transform:translate(192px,128px);opacity:1}
+  56%{transform:translate(264px,128px);opacity:1}
+  58%{transform:translate(192px,158px);opacity:1}
+  68%{transform:translate(240px,158px);opacity:1}
+  78%,90%{transform:translate(266px,176px);opacity:1}
+  100%{transform:translate(266px,176px);opacity:0}}
+.sim{min-height:132px;display:grid;align-content:start}
+.sim .rows{padding:12px 20px}
+.sim .row{padding:10px 0;border-bottom:1px solid var(--hair2);animation:rowIn var(--dur) var(--ease) both}
+.sim .row:nth-child(2){animation-delay:.04s}.sim .row:nth-child(3){animation-delay:.08s}
+.sim .row b{font-weight:600}.sim .row span{display:block;color:var(--ink3);font-size:.86rem}
+@keyframes rowIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* ---- 空状态 ---- */
+.empty{display:grid;justify-items:center;text-align:center;gap:10px;padding:36px 20px}
+.empty svg{width:104px;height:78px;fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;overflow:visible}
+.empty .pt path{fill:var(--ink);fill-opacity:.07;stroke:none}
+.empty .leaf{fill:#e4e3df}
+.empty h3{font-size:.98rem}
+.empty p{color:var(--ink2);font-size:.88rem;max-width:20em}
+.empty .s{stroke-dasharray:1 2;animation:hiDraw .9s var(--ease) both}
+.ba{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--hair);border-radius:var(--r)}
+.ba>div{min-height:220px;display:grid}
+.ba>div:first-child{border-right:1px solid var(--hair)}
+.ba .tag{font-size:.76rem;color:var(--ink3);padding:10px 12px 0}
+.ba .was{padding:12px 16px;color:var(--ink2);font-size:.9rem}
+@media (max-width:860px){.ba{grid-template-columns:1fr}.ba>div:first-child{border-right:0;border-bottom:1px solid var(--hair)}}
+
+/* ---- 确认 ---- */
+.stage{position:relative;padding:20px;min-height:170px}
+.status{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border:1px solid var(--hair);border-radius:var(--r);background:#fff;font-size:.86rem;white-space:nowrap}
+.status[hidden]{display:none}
+.okc{width:18px;height:18px;fill:none;stroke:var(--ink);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.okc path{stroke-dasharray:100 200;stroke-dashoffset:100}
+.status.done .okc path:nth-child(1){animation:okDraw var(--dur) var(--ease) forwards}
+.status.done .okc path:nth-child(2){animation:okDraw var(--dur) var(--ease) .16s forwards}
+@keyframes okDraw{to{stroke-dashoffset:0}}
+.tl{list-style:none;margin:0;padding:0}
+.tl li{padding:10px 0;border-bottom:1px solid var(--hair2)}
+.tl li b{font-weight:600;font-size:.92rem}
+.tl li span{display:block;color:var(--ink3);font-size:.84rem}
+.tl li.new{animation:rowIn var(--dur) var(--ease) both}
+.ink{position:relative;display:inline-block}
+.ink svg{position:absolute;left:-2px;right:-2px;bottom:-6px;width:calc(100% + 4px);height:8px;overflow:visible;fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round}
+.ink svg path{stroke-dasharray:100 200;stroke-dashoffset:100;animation:inkDraw 1.9s var(--ease) forwards}
+@keyframes inkDraw{0%{stroke-dashoffset:100;opacity:1}30%{stroke-dashoffset:0;opacity:1}70%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+.todo{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--hair2);transition:opacity var(--slow) var(--ease)}
+.todo .t{position:relative}
+.todo .t svg{position:absolute;left:-3px;top:50%;width:calc(100% + 6px);height:8px;margin-top:-4px;overflow:visible;fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round}
+.todo .t svg path{stroke-dasharray:100 200;stroke-dashoffset:100}
+.todo.is-done .t svg path{animation:okDraw var(--dur) var(--ease) forwards}
+.todo.is-done .t{color:var(--ink3);transition:color var(--dur) var(--ease) .2s}
+.todo.is-gone{opacity:0}
+.undo{font-size:.86rem;color:var(--ink2);padding:12px 0}
+.undo button{border:0;background:none;padding:0;text-decoration:underline;cursor:pointer;font-weight:600}
+.toast{position:absolute;right:16px;top:16px;display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--hair);border-radius:var(--r);background:#fff;font-size:.88rem;animation:toastIn var(--dur) var(--ease) both}
+.toast svg{width:18px;height:18px}
+@keyframes toastIn{from{opacity:0;transform:translateX(8px)}to{opacity:1;transform:none}}
+.toast .hi .s{animation:hiDraw var(--slow) var(--ease) .08s both}
+
+/* ---- 页面点睛 ---- */
+.under{position:relative;display:inline-block}
+.under svg{position:absolute;left:0;bottom:-8px;width:100%;height:10px;overflow:visible;fill:none;stroke:var(--ink);stroke-width:1.8;stroke-linecap:round}
+.under svg path{stroke-dasharray:100 200;stroke-dashoffset:100;animation:okDraw var(--slow) var(--ease) .15s forwards}
+.focusdemo{padding:24px 24px 28px}
+.focusdemo small{display:block;font-size:.8rem;color:var(--ink3)}
+.focusdemo .h{font-size:1.7rem;font-weight:600;line-height:1.25;margin:6px 0 12px}
+.focusdemo .m{color:var(--ink2);font-size:.9rem}
+.phase td:nth-child(2){min-width:16em}
+.ask{display:grid;gap:12px;counter-reset:q}
+.ask>div{display:grid;grid-template-columns:2rem 1fr;gap:12px;padding:14px 0;border-bottom:1px solid var(--hair2)}
+.ask>div::before{counter-increment:q;content:counter(q);font-weight:700;font-size:1.2rem}
+.ask p{color:var(--ink2);font-size:.92rem;margin-top:2px}
+footer{padding:72px 0 96px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header class="top">
+  <h1>「一笔」全站方案</h1>
+  <p class="lede">目标：用 A 方向的“一笔”把现在安静但有点干的瑞士式页面变得有呼吸感——<b>不加颜色、不加装饰、不改布局</b>，只让三件事更生动：等待时有人在写，空的时候有一张纸，动作完成时有一笔回应。</p>
+  <p class="lede">下面先说我在前端看到的现状，再给出语言规矩、五个落点（都能点“播放”看），最后是分期与需要你拍板的三件事。</p>
+  <div class="facts">
+    <div><b>32 → 34</b><span>个图标一次换完。全站图标都从一个入口出图，换文件即可，不改调用。</span></div>
+    <div><b>5 → 1</b><span>种“等待”写法合成一个组件，三档尺寸。</span></div>
+    <div><b>约 30</b><span>处纯文字空状态，挑 8 个高频的配插画，其余保留文字。</span></div>
+  </div>
+</header>
+</div>
+
+<section><div class="wrap">
+  <header><div class="num">1</div><div><h2>现状：我在前端看到的</h2><p class="sub">在隔离服务里用演示数据走了今天、Inbox、客户列表、客户工作区、记录沟通弹窗和搜索，并对照了代码。</p></div></header>
+  <div class="block">
+  <ul class="find">
+    <li><b>图标</b><span>32 个 Phosphor 通用图标，规整、几何，和“一笔”的手感冲突。好消息是全部经 <code>uiIcon(name)</code> + CSS 遮罩（<code>visual-v2.css</code> 的 <code>.ui-icon-*</code>）出图；<code>index.html</code> 里 12 处内联 SVG 也会被 <code>applyIconButtons</code> 换成同一套遮罩。换掉 SVG 文件，全站自动生效。</span></li>
+    <li><b>等待</b><span>五种写法并存：<code>loadLoadingHtml</code> 的纯文字“正在加载…”（6 处）、客户分区的 <code>.cw-empty</code>“正在读取…”、三个转圈（<code>smart-spin</code>、<code>connectionStatusSpin</code>、<code>action-status-spinner</code>）、客户工作区的进度条、零星的骨架行。文案约 40 种“正在…”，大多很好，可以保留。</span></li>
+    <li><b>空状态</b><span>约 30 处纯文字。Inbox 空时是两个大白框加一行小字；客户工作区“还没有沟通记录”占半屏留白；今天的焦点区也是一行字。这是最“干”的地方，也是最适合放一张纸的地方。</span></li>
+    <li><b>完成反馈</b><span>Toast 用 Phosphor 勾/叉，从右侧滑入 20px（超过规范的 8px）；全局保存状态用字符 ✓ / !。保存沟通、标记完成之后，页面上没有“刚刚发生了什么”的痕迹。</span></li>
+    <li><b>已有动效</b><span>页面切换用 View Transition，弹窗 8px 上浮，已尊重减少动态。底子是对的，缺的是“有信息时的那一笔”。</span></li>
+  </ul>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">2</div><div><h2>一笔的三条规矩</h2><p class="sub">全站只用这三条，任何新增动效都对照它们判断。</p></div></header>
+  <div class="block rules" id="rules"></div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">3</div><div><h2>落点一：图标全部重画</h2><p class="sub">左边浅色是现在的 Phosphor，右边是一笔版。悬停任意格子看它被画出来。所有图标由同一个生成器画出，抖动幅度、线宽、浅灰片偏移都一样，所以是一家人；以后新增图标也用它画，不需要同一个人手绘。</p></div></header>
+  <div class="block"><div class="icons" id="icons"></div></div>
+  <div class="block two">
+    <div><p class="label">尺寸检查（16 / 20 / 24 / 40）</p><div class="panel sizes" id="sizes"></div></div>
+    <div><p class="label">浅灰片只给“身份”用</p><div class="panel" style="padding:16px;display:grid;gap:12px" id="patchrule"></div>
+      <p class="cap">导航、空状态、整页加载有浅灰片；按钮里 16px 的小图标不要，否则会脏。</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">4</div><div><h2>落点二：一个“等待”组件，三档</h2><p class="sub">替换现有五种写法。规则：等待超过 300ms 才出现，避免一闪而过；文案沿用现在的“正在读取沟通记录…”这类具体说法。</p></div></header>
+  <div class="block three">
+    <div><p class="label">行内：按钮、状态条</p><div class="panel" style="padding:20px;display:grid;gap:14px;justify-items:start">
+      <span class="btn" style="cursor:default"><svg class="il" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="100" d="M3 13c3-5 5 5 8 0s5 5 8 0"/></svg>正在保存…</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;font-size:.88rem;color:var(--ink2)"><svg class="il" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="100" d="M3 13c3-5 5 5 8 0s5 5 8 0"/></svg>网络中断，正在重连…</span></div>
+      <p class="cap">替换三个转圈。</p></div>
+    <div><p class="label">区块：分区、列表、弹窗内</p><div class="panel">
+      <div class="bl"><svg viewBox="0 0 38 46" aria-hidden="true"><path d="M4 3.5c10-.8 20-.8 30 0 .7 13 .7 26 0 39-10 .7-20 .7-30 0-.7-13-.7-26 0-39z"/><path class="ln" pathLength="100" d="M10 14c3-2 6 2 9 0s6 2 9 0"/><path class="ln" pathLength="100" d="M10 22c3-2 6 2 9 0s6 2 9 0"/><path class="ln" pathLength="100" d="M10 30c3-2 6 2 9 0"/></svg><p>正在读取沟通记录…</p></div></div>
+      <p class="cap">替换 <code>loadLoadingHtml</code> 与 <code>.cw-empty</code> 的纯文字。</p></div>
+    <div><p class="label">整页：首屏、打开客户</p><div class="panel" style="padding:4px 8px" id="pageLoader"></div>
+      <p class="cap">替换客户工作区进度条；只在首屏数据未到时出现。</p></div>
+  </div>
+  <div class="block"><p class="label">实际体验：模拟一次 1.2 秒的读取</p>
+    <div class="panel sim" id="sim"><div class="rows"><p style="color:var(--ink3)">点右边按钮开始</p></div></div>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="play" type="button" onclick="runSim(1200)">读取 1.2 秒</button><button class="play" type="button" onclick="runSim(180)">读取 0.18 秒（不出现等待）</button></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">5</div><div><h2>落点三：空的时候，有一张纸</h2><p class="sub">挑 8 个最常见的空状态配插画（下面展示 4 个）。文案按“这里是什么 / 为什么空 / 下一步”，不超过两句；插画只在第一次出现时描一遍，然后静止。</p></div></header>
+  <div class="block two" id="empties"></div>
+  <p class="cap">其余 4 个：没有客户、本周没有已确认的沟通、没有联系人、没有客户文件。其他二十来处低频空状态保留文字，只统一字号和间距。</p>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">6</div><div><h2>落点四：动作完成，有一笔回应</h2><p class="sub">这是“让页面更生动”的核心：每个重要动作都留下 0.3–0.6 秒的痕迹，告诉你刚刚发生了什么，然后安静下来。</p></div></header>
+  <div class="block two">
+    <div><p class="label">保存：转圈换成笔，完成时勾一笔</p>
+      <div class="panel stage" id="st1"><p style="color:var(--ink3);font-size:.9rem">全站的“正在保存 / 已保存”状态条（现 <code>#actionStatus</code>）。</p>
+        <div class="status" id="st1s" hidden></div></div>
+      <div style="margin-top:10px"><button class="play" type="button" onclick="runSave()">播放</button></div></div>
+    <div><p class="label">记录沟通：新记录“被写进”时间线</p>
+      <div class="panel stage" id="st2"><ul class="tl" id="tl">
+        <li><b>9月30日 · 邮件</b><span>寄样已发出，等待客户反馈</span></li>
+        <li><b>9月22日 · 电话</b><span>确认 MOQ 和交期</span></li></ul></div>
+      <div style="margin-top:10px"><button class="play" type="button" onclick="runWrite()">播放</button></div></div>
+    <div><p class="label">标记完成：一笔划掉，再收起</p>
+      <div class="panel stage" id="st3"></div>
+      <div style="margin-top:10px"><button class="play" type="button" onclick="runDone()">播放</button></div></div>
+    <div><p class="label">提示：图标被画出来，位移从 20px 收到 8px</p>
+      <div class="panel stage" id="st4"><p style="color:var(--ink3);font-size:.9rem">现 <code>showToast</code>。</p></div>
+      <div style="margin-top:10px"><button class="play" type="button" onclick="runToast()">播放</button></div></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">7</div><div><h2>落点五：每页一处点睛</h2><p class="sub">每页最多一个，放在“此刻该做的事”上，与“一屏一个焦点”一致。潮线、现在线、账页刻度尺这些已有的招牌不动。</p></div></header>
+  <div class="block two">
+    <div><p class="label">示例：客户工作区的“一句下一步”，打开客户时下划一笔</p>
+      <div class="panel focusdemo" id="focusdemo"></div>
+      <div style="margin-top:10px"><button class="play" type="button" onclick="runFocus()">播放</button></div></div>
+    <div class="scroll"><table>
+      <thead><tr><th>页面</th><th>点睛</th><th>什么时候</th></tr></thead>
+      <tbody>
+        <tr><td>今天</td><td>右栏焦点客户名下一笔下划线</td><td>切换焦点（悬停、方向键）时重描</td></tr>
+        <tr><td>Inbox</td><td>sela 正在回复 = 笔在写；新消息气泡描边一次</td><td>等待回复 / 新消息到达</td></tr>
+        <tr><td>客户列表</td><td>书眉分段名下描一笔</td><td>滚动跨入新分段</td></tr>
+        <tr><td>客户工作区</td><td>“一句下一步”下划线；新记录墨迹</td><td>打开客户 / 保存沟通</td></tr>
+        <tr><td>记录沟通弹窗</td><td>识别截图、AI 整理用区块等待；保存后勾一笔</td><td>等待 / 保存成功</td></tr>
+        <tr><td>日历、设置、本周、日志</td><td>不加点睛，只换图标与空状态</td><td>—</td></tr>
+        <tr><td>登录柱廊</td><td>不动</td><td>—</td></tr>
+      </tbody></table></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">8</div><div><h2>分三期做</h2><p class="sub">每期一个独立任务和提交，做完都在真实浏览器按矩阵验收（宽屏、iPad、iPhone、旧 Win10、键盘、200% 缩放、减少动态），并跑对比度检查与单测。不改任何数据、接口和写入逻辑。</p></div></header>
+  <div class="block scroll"><table class="phase">
+    <thead><tr><th>期</th><th>内容</th><th>改哪里</th><th>你会看到</th></tr></thead>
+    <tbody>
+      <tr><td>一期 · 底子</td><td>34 个图标换成一笔版；一个等待组件替换五种写法；Toast 位移 20→8px；把三条规矩写进 <code>DESIGN_WORLD.md</code>（图标、动效两节）</td><td>新增图标生成脚本与 <code>icons/hand/</code>；<code>visual-v2.css</code> 的 32 行图标映射；<code>app.js</code> 里 <code>loadLoadingHtml</code>、<code>setCustomerSectionLoading</code>、<code>setCustomerWorkspaceState</code>、状态条；<code>style.css</code> 三个转圈</td><td>全站图标变成手绘；等待时有人在写</td></tr>
+      <tr><td>二期 · 空状态</td><td>8 张插画 + 一个统一的空状态函数，文案按三问整理</td><td><code>app.js</code> 里约 8 处空状态调用；<code>swiss-d.css</code> 空状态样式</td><td>Inbox、客户、待办、搜索空的时候不再是白框</td></tr>
+      <tr><td>三期 · 回应与点睛</td><td>保存勾一笔、新记录墨迹、完成划掉、每页一处点睛</td><td><code>finishActionStatus</code>、时间线插入、待办完成、各页焦点区</td><td>动作有回应，页面“活”起来</td></tr>
+    </tbody></table></div>
+  <p class="cap">性能：图标仍是静态遮罩；动画只动描线偏移、透明度和不超过 8px 的位移；减少动态时一律直接到终态。</p>
+</div></section>
+
+<section><div class="wrap">
+  <header><div class="num">9</div><div><h2>需要你拍板的三件事</h2></div></header>
+  <div class="block ask">
+    <div><div><h3>手绘程度：保持原型的“轻微”，还是更明显？</h3><p>我建议轻微：16px 下仍要清楚，越抖越像玩具。上面的图标就是“轻微”。</p></div></div>
+    <div><div><h3>浅灰片：只给导航、空状态、整页加载，还是所有图标都加？</h3><p>我建议只给身份类。按钮里的小图标加了会发灰发脏，见第 3 节右侧对比。</p></div></div>
+    <div><div><h3>可以从一期开始做吗？</h3><p>一期覆盖面最大、风险最低，做完你会先看到截图和真实页面，再决定是否进二期。</p></div></div>
+  </div>
+</div></section>
+
+<footer><div class="wrap"><p class="cap">方案页只用于评审，不接产品数据。图标由页面内的同一个生成器绘制，选定后会把它固化成脚本，输出静态 SVG。</p></div></footer>
+
+<script>
+/* ========== 一笔生成器：同一抖动规则画出所有图标 ========== */
+function rng(seed){let a=7;for(const c of seed)a=(Math.imul(a,31)+c.charCodeAt(0))|0;
+  return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const f=n=>+n.toFixed(2);
+class Pen{
+  constructor(r,s){this.r=r;this.s=s||1;this.d='';this.x=0;this.y=0}
+  j(v){return v+(this.r()-.5)*.24*this.s}
+  M(x,y){x=this.j(x);y=this.j(y);this.d+=`M${f(x)} ${f(y)}`;this.x=x;this.y=y;return this}
+  L(x,y){x=this.j(x);y=this.j(y);const dx=x-this.x,dy=y-this.y,len=Math.hypot(dx,dy)||1,nx=-dy/len,ny=dx/len;
+    const amp=Math.min(.5*this.s,len*.03),sg=this.r()<.5?-1:1,b1=sg*amp*(.5+.5*this.r()),b2=sg*amp*(.3+.7*this.r());
+    this.d+=`C${f(this.x+dx/3+nx*b1)} ${f(this.y+dy/3+ny*b1)} ${f(this.x+2*dx/3+nx*b2)} ${f(this.y+2*dy/3+ny*b2)} ${f(x)} ${f(y)}`;
+    this.x=x;this.y=y;return this}
+  A(cx,cy,rx,ry,a0,a1){const n=Math.max(1,Math.ceil(Math.abs(a1-a0)/90)),da=(a1-a0)/n;let rj=1+(this.r()-.5)*.06;
+    for(let i=0;i<n;i++){const t0=(a0+da*i)*Math.PI/180,t1=(a0+da*(i+1))*Math.PI/180,k=4/3*Math.tan((t1-t0)/4);
+      const r0=rj;rj=1+(this.r()-.5)*.06;const r1=rj;
+      const p1x=cx+rx*r1*Math.cos(t1),p1y=cy+ry*r1*Math.sin(t1);
+      const c1x=this.x-k*rx*r0*Math.sin(t0),c1y=this.y+k*ry*r0*Math.cos(t0);
+      const c2x=p1x+k*rx*r1*Math.sin(t1),c2y=p1y-k*ry*r1*Math.cos(t1);
+      this.d+=`C${f(c1x)} ${f(c1y)} ${f(c2x)} ${f(c2y)} ${f(p1x)} ${f(p1y)}`;this.x=p1x;this.y=p1y}
+    return this}
+  Z(){this.d+='Z';return this}
+}
+class G{
+  constructor(r,s){this.r=r;this.sc=s||1;this.s=[];this.p=[];this.dots=[]}
+  pen(){return new Pen(this.r,this.sc)}
+  add(d,patch){this.s.push(d);if(patch)this.p.push(d)}
+  line(x1,y1,x2,y2){this.add(this.pen().M(x1,y1).L(x2,y2).d)}
+  poly(pts,closed,patch){const p=this.pen().M(...pts[0]);pts.slice(1).forEach(q=>p.L(...q));if(closed)p.L(...pts[0]);this.add(p.d,patch)}
+  rect(x,y,w,h,patch){this.poly([[x,y],[x+w,y],[x+w,y+h],[x,y+h]],true,patch)}
+  ellipse(cx,cy,rx,ry,patch){const a0=200+this.r()*60,t=a0*Math.PI/180;
+    const p=this.pen().M(cx+rx*Math.cos(t),cy+ry*Math.sin(t)).A(cx,cy,rx,ry,a0,a0+366);this.add(p.d,patch)}
+  circle(cx,cy,r,patch){this.ellipse(cx,cy,r,r,patch)}
+  arc(cx,cy,r,a0,a1,patch){const t=a0*Math.PI/180;this.add(this.pen().M(cx+r*Math.cos(t),cy+r*Math.sin(t)).A(cx,cy,r,r,a0,a1).d,patch)}
+  capsule(x1,y1,x2,y2,r){const dx=x2-x1,dy=y2-y1,l=Math.hypot(dx,dy),nx=-dy/l*r,ny=dx/l*r,th=Math.atan2(ny,nx)*180/Math.PI;
+    const p=this.pen().M(x1+nx,y1+ny).L(x2+nx,y2+ny).A(x2,y2,r,r,th,th-180).L(x1-nx,y1-ny).A(x1,y1,r,r,th-180,th-360);this.add(p.d)}
+  pin(cx,cy,r,tipY,patch){const a=145,b=395,ta=a*Math.PI/180,tb=b*Math.PI/180;
+    const p=this.pen().M(cx,tipY).L(cx+r*Math.cos(ta),cy+r*Math.sin(ta)).A(cx,cy,r,r,a,b).L(cx,tipY);this.add(p.d,patch)}
+  dot(x,y,r){this.dots.push([x+(this.r()-.5)*.2,y+(this.r()-.5)*.2,r||1.2])}
+  svg(cls,vb){vb=vb||'0 0 24 24';const o=this.sc*1.4,oy=this.sc*1.6;
+    return `<svg class="${cls||'hi'}" viewBox="${vb}" aria-hidden="true">`+
+      (this.p.length?`<g class="pt" transform="translate(${o} ${oy})">${this.p.map(d=>`<path d="${d}"/>`).join('')}</g>`:'')+
+      this.s.map(d=>`<path class="s" pathLength="1" d="${d}"/>`).join('')+
+      this.dots.map(([x,y,r])=>`<circle class="d" cx="${f(x)}" cy="${f(y)}" r="${r}"/>`).join('')+'</svg>'}
+}
+const star=()=>{const p=[];for(let i=0;i<10;i++){const a=(-90+i*36)*Math.PI/180,r=i%2?3.8:8.6;p.push([12+r*Math.cos(a),12.8+r*Math.sin(a)])}return p};
+/* name: [Phosphor 文件, 中文用途, 画法]；patch 只给闭合的主体形 */
+const ICONS={
+ clock:['clock.svg','时间 / 今天',g=>{g.circle(12,12,8.6,1);g.poly([[12,7.4],[12,12.3],[15.3,14.3]])}],
+ users:['users.svg','客户',g=>{g.circle(9.4,7.6,3.1,1);g.arc(9.4,20,5.9,180,360,1);g.arc(15.6,7.6,2.6,-90,90);g.arc(15.2,20,5.3,-62,0)}],
+ message:['chat-circle-text.svg','对话 / 记录沟通',g=>{g.poly([[4,5.2],[20,5.2],[20,15.4],[12.6,15.4],[8.2,19.4],[8.2,15.4],[4,15.4]],1,1);g.line(8,9.2,16,9.2);g.line(8,12.1,13,12.1)}],
+ calendar:['calendar-blank.svg','日历',g=>{g.rect(4,5.6,16,14.6,1);g.line(8.5,3.4,8.5,7.6);g.line(15.5,3.4,15.5,7.6);g.line(4,10.2,20,10.2);g.dot(9,14.8);g.dot(12.4,14.8)}],
+ search:['magnifying-glass.svg','搜索',g=>{g.circle(10.6,10.6,6.3,1);g.line(15.3,15.4,20,20.1)}],
+ settings:['gear-six.svg','设置',g=>{g.line(4,7.2,20,7.2);g.line(4,12,20,12);g.line(4,16.8,20,16.8);g.circle(9.2,7.2,2.2,1);g.circle(15,12,2.2,1);g.circle(8.2,16.8,2.2,1)}],
+ done:['check.svg','完成（新增）',g=>{g.circle(12,12,8.6,1);g.poly([[7.8,12.4],[10.8,15.3],[16.3,9.2]])}],
+ plus:['plus.svg','添加',g=>{g.line(12,5,12,19);g.line(5,12,19,12)}],
+ edit:['pencil-simple.svg','编辑',g=>{g.poly([[4.6,19.4],[5.5,15.3],[16.2,4.6],[19.4,7.8],[8.7,18.5]],1,1);g.line(14.2,6.6,17.4,9.8)}],
+ check:['check.svg','勾',g=>{g.poly([[4.8,12.6],[9.8,17.4],[19.2,7]])}],
+ close:['x.svg','关闭',g=>{g.line(6,6,18,18);g.line(18,6,6,18)}],
+ alert:['warning.svg','提醒',g=>{g.poly([[12,3.8],[21,19.6],[3,19.6]],1,1);g.line(12,9.4,12,14);g.dot(12,16.9)}],
+ info:['info.svg','说明',g=>{g.circle(12,12,8.6,1);g.line(12,11,12,16.4);g.dot(12,7.8)}],
+ sparkle:['sparkle.svg','AI 建议',g=>{g.poly([[12,3],[13.9,10.1],[21,12],[13.9,13.9],[12,21],[10.1,13.9],[3,12],[10.1,10.1]],1,1)}],
+ list:['list-bullets.svg','列表 / 日志',g=>{g.line(9,7,20,7);g.line(9,12,20,12);g.line(9,17,16,17);g.dot(4.8,7);g.dot(4.8,12);g.dot(4.8,17)}],
+ mail:['envelope-simple.svg','邮箱',g=>{g.rect(3.5,6,17,12.5,1);g.poly([[4.2,7],[12,13],[19.8,7]])}],
+ file:['paperclip.svg','文件',g=>{g.poly([[6,3.5],[14,3.5],[18.5,8],[18.5,20.5],[6,20.5]],1,1);g.poly([[14,3.5],[14,8],[18.5,8]])}],
+ archive:['archive.svg','归档',g=>{g.rect(3.5,4,17,5,1);g.poly([[5,9],[5,20],[19,20],[19,9]]);g.line(10,13,14,13)}],
+ trash:['trash.svg','删除',g=>{g.line(4,7,20,7);g.poly([[9.5,7],[9.8,4.5],[14.2,4.5],[14.5,7]]);g.poly([[6,7],[7,20],[17,20],[18,7]]);g.line(10,11,10,16);g.line(14,11,14,16)}],
+ export:['download-simple.svg','导出',g=>{g.line(12,4,12,15);g.poly([[7.5,10.5],[12,15],[16.5,10.5]]);g.line(4.5,20,19.5,20)}],
+ refresh:['arrows-clockwise.svg','重新加载',g=>{g.arc(12,12,7.4,200,335);g.poly([[15.8,9.4],[18.7,8.9],[19.2,5.8]]);g.arc(12,12,7.4,20,155);g.poly([[8.2,14.6],[5.3,15.1],[4.8,18.2]])}],
+ external:['arrow-square-out.svg','在新窗口打开',g=>{g.poly([[13.5,4],[20,4],[20,10.5]]);g.line(20,4,11,13);g.poly([[17,13.5],[17,20],[4,20],[4,7],[10.5,7]])}],
+ open:['identification-card.svg','查看原文 / 资料',g=>{g.rect(3,5,18,14,1);g.circle(8.6,10.6,2.1);g.arc(8.6,17.6,3.4,200,340);g.line(13.6,10,18,10);g.line(13.6,13.8,16.8,13.8)}],
+ link:['link-simple.svg','复制链接',g=>{g.capsule(6.2,17.8,10.4,13.6,2.9);g.capsule(13.6,10.4,17.8,6.2,2.9);g.line(9.6,14.4,14.4,9.6)}],
+ globe:['globe.svg','官网',g=>{g.circle(12,12,8.6,1);g.ellipse(12,12,3.6,8.6);g.line(3.6,12,20.4,12)}],
+ map:['map-pin.svg','地址',g=>{g.pin(12,10,6,20.6,1);g.circle(12,10,2.2)}],
+ star:['star.svg','重点',g=>{g.poly(star(),1,1)}],
+ more:['dots-three.svg','更多',g=>{g.dot(6,12,1.4);g.dot(12,12,1.4);g.dot(18,12,1.4)}],
+ 'sign-out':['sign-out.svg','切换账号',g=>{g.poly([[10,4],[4.6,4],[4.6,20],[10,20]]);g.line(9.6,12,20,12);g.poly([[16,8],[20,12],[16,16]])}],
+ left:['caret-left.svg','上一页',g=>{g.poly([[15,5],[8,12],[15,19]])}],
+ right:['caret-right.svg','下一页',g=>{g.poly([[9,5],[16,12],[9,19]])}],
+ up:['caret-up.svg','收起',g=>{g.poly([[5,15.5],[12,8.5],[19,15.5]])}],
+ down:['caret-down.svg','展开',g=>{g.poly([[5,8.5],[12,15.5],[19,8.5]])}],
+ today:['clock.svg','今天（导航，新增）',g=>{g.arc(12,15,7,180,360,1);g.line(3,15,21,15);g.line(12,3.6,12,5.4);g.line(5.2,6.6,6.4,7.8);g.line(18.8,6.6,17.6,7.8);g.line(7,19.2,17,19.2)}]
+};
+function icon(name,opts){opts=opts||{};const g=new G(rng(name));ICONS[name][2](g);if(opts.noPatch)g.p=[];return g.svg(opts.cls)}
+
+const PH='../../../app/static/icons/phosphor/';
+document.getElementById('icons').innerHTML=Object.keys(ICONS).map(n=>{const [file,label]=ICONS[n];
+  const isNew=/新增/.test(label);
+  return `<div tabindex="0"><div class="pair">${isNew?'<span style="width:24px;display:inline-block;text-align:center;color:var(--mut);font-size:.74rem">新</span>':`<img class="old" src="${PH+file}" alt="">`}<span class="new">${icon(n).replace('class="hi"','class="hi" style="width:40px;height:40px"')}</span></div><small>${label.replace('（新增）','').replace('（导航，新增）','')}<br><i>${n}</i></small></div>`}).join('');
+
+document.getElementById('sizes').innerHTML=[16,20,24,40].map(s=>`<figure><div style="display:flex;align-items:center">${['message','users','calendar','search'].map(n=>icon(n,{noPatch:s<24}).replace('class="hi"',`class="hi" style="width:${s}px;height:${s}px;display:inline-block;margin:0 3px;stroke-width:${s<=16?1.9:s<=20?1.75:1.6}"`)).join('')}</div><figcaption>${s}px${s<24?' · 无浅灰片':''}</figcaption></figure>`).join('');
+
+document.getElementById('patchrule').innerHTML=
+ `<div style="display:flex;gap:16px;align-items:center"><span class="btn btn-q" style="cursor:default">${icon('edit',{noPatch:1}).replace('class="hi"','class="hi" style="width:16px;height:16px"')}编辑</span><span style="font-size:.86rem;color:var(--ink2)">按钮里：只要线</span></div>
+  <div style="display:flex;gap:16px;align-items:center"><span class="btn btn-q" style="cursor:default">${icon('edit').replace('class="hi"','class="hi" style="width:16px;height:16px"')}编辑</span><span style="font-size:.86rem;color:var(--ink3)">加了浅灰片：小尺寸发灰，不用</span></div>
+  <div style="display:flex;gap:16px;align-items:center"><span style="display:inline-flex;align-items:center;gap:12px;height:40px;padding:0 12px;background:var(--ink);color:#fff;border-radius:2px;min-width:160px">${icon('clock').replace('class="hi"','class="hi" style="width:20px;height:20px"')}今天</span><span style="font-size:.86rem;color:var(--ink2)">导航：有浅灰片</span></div>`;
+
+/* 三条规矩的小图 */
+(function(){
+  const g1=new G(rng('rule1'),2);g1.line(6,30,58,26);
+  const g2=new G(rng('rule2'),2);g2.rect(14,8,34,30,1);
+  const g3=new G(rng('rule3'),2);g3.poly([[10,26],[24,36],[54,10]]);
+  const R=[[g1,'出现时，被画出来','强调线、勾、新图标在出现的那一刻描一笔（0.28–0.55 秒），之后静止。线是“写上去”的，不是“弹出来”的。'],
+           [g2,'一块浅灰，没对准','只给身份和空白：导航图标、空状态插画、整页加载。错开 1.4px，像印刷没套准。按钮里不用。'],
+           [g3,'只在有信息时动','等待、确认、引导注意，才动。没有呼吸、漂浮、循环装饰；等待超过 300ms 才出现；减少动态时直接终态。']];
+  document.getElementById('rules').innerHTML=R.map(([g,t,p])=>`<div class="draw-on">${g.svg('hi','0 0 64 48').replace('class="hi"','class="hi" style="stroke-width:2"')}<h3>${t}</h3><p>${p}</p></div>`).join('');
+})();
+
+/* 整页加载（来自原型 A） */
+document.getElementById('pageLoader').innerHTML=`<svg class="sA" viewBox="100 30 280 260" role="img" aria-label="一张纸被一笔一笔写满">
+  <g class="doc"><path class="sheet" pathLength="100" d="M170 52c40-3 100-3 140 0 3 50 3 120 0 175-40 4-100 4-140 0-3-55-3-125 0-175z"/>
+  <path class="line l1" pathLength="100" d="M192 98c8-5 16 5 24 0s16 5 24 0 16 5 24 0 16 5 24 0"/>
+  <path class="line l2" pathLength="100" d="M192 128c8-5 16 5 24 0s16 5 24 0 16 5 24 0"/>
+  <path class="line l3" pathLength="100" d="M192 158c8-5 16 5 24 0s16 5 24 0"/></g>
+  <g class="quill"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path class="shaft" d="M1 -1L34 -13"/></g>
+  <text x="240" y="268" text-anchor="middle" font-size="16" fill="#444" font-family="inherit">正在打开 Bentleigh Group</text></svg>`;
+
+/* 空状态插画 */
+const QUILL=(x,y,s)=>`<g transform="translate(${x} ${y}) scale(${s}) rotate(-8)"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path d="M1 -1L34 -13"/></g>`;
+function illus(kind){const g=new G(rng('e-'+kind),2.2);let extra='';
+  if(kind==='inbox'){g.poly([[14,10],[74,10],[74,46],[46,46],[30,60],[30,46],[14,46]],1,1);extra=QUILL(66,62,.62)}
+  if(kind==='timeline'){g.rect(26,6,44,60,1);g.line(34,18,56,18);extra=QUILL(62,58,.62)}
+  if(kind==='todo'){g.rect(20,12,52,50,1);g.line(32,6,32,18);g.line(60,6,60,18);g.line(20,26,72,26);g.poly([[36,44],[44,51],[58,36]])}
+  if(kind==='search'){g.circle(40,32,17,1);g.line(52.5,44.5,66,58);extra='<path d="M14 70h76" stroke-dasharray="3 5" stroke-width="1.4"/>'}
+  return g.svg('','0 0 96 72').replace('<svg class=""','<svg').replace('</svg>',extra+'</svg>')}
+const EMPTIES=[
+ ['inbox','Inbox 没有对话','现在没有对话。','现在没有等你回复的对话','sela 有事需要你决定时，会出现在这里。'],
+ ['timeline','客户工作区 · 最近沟通','还没有沟通记录。　记录第一条沟通','还没有沟通记录','第一次沟通发生后，会先出现在这里。','<span class="btn" style="margin-top:6px;cursor:default">记录沟通</span>'],
+ ['todo','客户工作区 · 待办','暂无未完成待办。','没有未完成的待办','确认下一步和日期后，会排在这里。'],
+ ['search','搜索没有结果','没有找到匹配的客户','没有找到「Bentley」','换个关键词，或按公司、联系人、邮箱的一部分找。']];
+document.getElementById('empties').innerHTML=EMPTIES.map(([k,t,was,h,p,act])=>`<div><p class="label">${t}</p><div class="ba"><div><span class="tag">现在</span><p class="was">${was}</p></div><div><span class="tag">一笔</span><div class="empty">${illus(k)}<h3>${h}</h3><p>${p}</p>${act||''}</div></div></div></div>`).join('');
+
+/* ===== 可播放示意 ===== */
+const SCRIB='<svg class="il" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="100" d="M3 13c3-5 5 5 8 0s5 5 8 0"/></svg>';
+const OKC='<svg class="okc" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="100" d="M12 3.6c4.6-.1 8.4 3.7 8.4 8.3-.1 4.7-3.8 8.5-8.5 8.5-4.6-.1-8.4-3.9-8.3-8.5.1-4.5 3.8-8.2 8.4-8.3z"/><path pathLength="100" d="M7.9 12.4l2.9 2.9 5.4-6.1"/></svg>';
+const UL='<svg viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M1 5c16-3 33-2 50-1s33 1 48-2"/></svg>';
+let simT;
+function runSim(ms){const el=document.getElementById('sim');clearTimeout(simT);el.innerHTML='<div class="rows"></div>';
+  const show=setTimeout(()=>{el.innerHTML='<div class="bl"><svg viewBox="0 0 38 46" aria-hidden="true"><path d="M4 3.5c10-.8 20-.8 30 0 .7 13 .7 26 0 39-10 .7-20 .7-30 0-.7-13-.7-26 0-39z"/><path class="ln" pathLength="100" d="M10 14c3-2 6 2 9 0s6 2 9 0"/><path class="ln" pathLength="100" d="M10 22c3-2 6 2 9 0s6 2 9 0"/><path class="ln" pathLength="100" d="M10 30c3-2 6 2 9 0"/></svg><p>正在读取沟通记录…</p></div>'},300);
+  simT=setTimeout(()=>{clearTimeout(show);el.innerHTML='<div class="rows"><div class="row"><b>9月30日 · 邮件</b><span>寄样已发出，等待客户反馈</span></div><div class="row"><b>9月22日 · 电话</b><span>确认 MOQ 和交期</span></div><div class="row"><b>9月15日 · WhatsApp</b><span>客户要 PDF 报价单</span></div></div>'},ms)}
+function runSave(){const s=document.getElementById('st1s');s.hidden=false;s.className='status';s.innerHTML=SCRIB+'正在保存…';
+  setTimeout(()=>{s.className='status done';s.innerHTML=OKC+'已保存'},1100);setTimeout(()=>{s.hidden=true},3300)}
+function runWrite(){const tl=document.getElementById('tl');tl.querySelectorAll('li.new').forEach(x=>x.remove());
+  const li=document.createElement('li');li.className='new';li.innerHTML=`<b>10月13日 · 邮件</b><span><span class="ink">客户确认样品，下周下单 2 个柜${UL}</span></span>`;tl.prepend(li)}
+function runDone(){const st=document.getElementById('st3');
+  st.innerHTML=`<div class="todo" id="td"><span class="t">联系 Bentleigh Group · 明天<svg viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true"><path pathLength="100" d="M1 4.6c18-1.6 36-.6 52-1.2S84 3 99 2.6"/></svg></span><span class="btn btn-q" style="cursor:default">标记完成</span></div><div class="todo"><span class="t">寄 PDF 报价单 · 10月16日</span></div>`;
+  const td=document.getElementById('td');setTimeout(()=>td.classList.add('is-done'),500);setTimeout(()=>td.classList.add('is-gone'),1500);
+  setTimeout(()=>{td.outerHTML='<div class="undo">已完成 1 项 · <button type="button">撤销</button></div>'},2100)}
+runDone();
+function runToast(){const st=document.getElementById('st4');st.querySelectorAll('.toast').forEach(x=>x.remove());
+  const t=document.createElement('div');t.className='toast';t.innerHTML=icon('done',{noPatch:1}).replace('class="hi"','class="hi" style="width:18px;height:18px"')+'已加入本周工作';st.appendChild(t);setTimeout(()=>t.remove(),3200)}
+function runFocus(){document.getElementById('focusdemo').innerHTML=`<small>下一步</small><div class="h"><span class="under">联系 Bentleigh Group${UL.replace('viewBox="0 0 100 8"','viewBox="0 0 100 10"')}</span></div><p class="m">10月14日 · 周三 · 明天　寄样已寄出，等待客户反馈</p>`}
+runFocus();
+</script>
+</body>
+</html>
