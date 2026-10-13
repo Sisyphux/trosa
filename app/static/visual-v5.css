@@ -726,17 +726,6 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   -webkit-backdrop-filter: none !important;
 }
 #trosa .today-tide #todayFocus.today-room-focus::before { content: none !important; display: none !important; }
-#trosa .room-k { display: block; color: var(--dl-gold) !important; letter-spacing: .3em !important; }
-#trosa .room-next {
-  margin: .8rem 0 0 !important;
-  font-family: var(--room-serif) !important;
-  font-size: clamp(1.5rem, 2.75vw, 2.4rem) !important;
-  font-weight: 400 !important;
-  line-height: 1.14 !important;
-  letter-spacing: -.018em !important;
-  color: var(--dl-ink) !important;
-}
-#trosa .room-when { margin: .85rem 0 0; font-size: .7rem; letter-spacing: .16em; color: var(--dl-ink-2); }
 #trosa .room-acts { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin-top: 1.6rem; }
 #trosa .room-act {
   display: inline-flex;
@@ -1644,27 +1633,7 @@ html.performance-priority #trosa #customerEditModal .cw-pool { display: none; }
    ============================================================================ */
 
 @media (max-width: 1024px) {
-  #trosa .today-room {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    padding-top: 1.2rem;
-  }
-  #trosa .today-room > .page-header.page-header { order: 1; }
-  #trosa .today-queue-toggle { order: 2; align-self: flex-start; margin: 0 0 1.2rem -.2rem; }
-  #trosa .today-room .room-ident { order: 3; }
-  #trosa .today-room #todayFocus.today-room-focus.lit-anchor { order: 4; margin: 1.2rem 0 0 !important; width: 100%; }
-  #trosa .today-room .room-panel { order: 5; margin-top: 2.4rem; }
-  #trosa .today-room .today-task-section#todayQueue {
-    position: fixed;
-    top: auto;
-    right: 12px;
-    bottom: calc(var(--room-bar) + 10px);
-    left: 12px;
-    width: auto;
-    max-height: 60dvh;
-  }
-  #trosa .room-tx { -webkit-line-clamp: 4; }
+                #trosa .room-tx { -webkit-line-clamp: 4; }
 }
 @media (max-width: 720px) {
   /* no keyboard on a phone: say what the button does instead of showing ⌘K */
@@ -2550,7 +2519,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 }
 
 /* 完成这次跟进: facts, the next-step switch and its group */
-#trosa .modal .modal-fact { margin-bottom: .95rem; }
 #trosa .modal .report-opt-toggle { display: flex; align-items: flex-start; gap: .6rem; cursor: pointer; }
 #trosa .modal .report-opt-title { color: var(--dl-ink-2); font-size: .8rem; }
 #trosa .modal .report-opt-hint,

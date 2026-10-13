@@ -108,28 +108,6 @@
 }
 
 /* --- Section headers used inside a page body ------------------------------- */
-#trosa .today-section-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--dl-hair);
-  margin-bottom: 4px;
-}
-#trosa .today-section-header h3 {
-  font-size: 17px !important;
-  font-weight: 600 !important;
-  letter-spacing: -.01em;
-  color: var(--dl-ink) !important;
-  margin: 0 !important;
-}
-#trosa .section-caption {
-  margin-top: 4px !important;
-  font-size: 12.5px !important;
-  color: var(--dl-mut) !important;
-}
-#trosa .today-sort-tools { display: flex; align-items: center; gap: 14px; }
 #trosa .today-sort-status { font-size: 12.5px; color: var(--dl-mut); }
 #trosa .text-action {
   border: 0;
@@ -148,7 +126,6 @@
    4. TODAY — agenda rail + customer context sheet + time band
    ============================================================================ */
 
-#trosa .today-page-body { padding-top: 8px !important; }
 
 /* --- Agenda rows ----------------------------------------------------------- */
 #trosa .today-group-label {
@@ -171,7 +148,6 @@
 #trosa .today-group-label[data-due-group="overdue"] span { color: var(--dl-danger); }
 #trosa .today-group-label:first-child { padding-top: 10px; }
 
-#trosa .today-task-list { margin-top: 2px; }
 #trosa .today-task-row {
   display: grid !important;
   grid-template-columns: 38px minmax(0, 1fr) auto;
@@ -207,54 +183,8 @@
 #trosa .today-task-row.selected .today-task-index { color: var(--dl-gold); }
 #trosa .today-task-checkbox { display: none; }
 #trosa .today-task-row.is-selecting .today-task-checkbox { display: inline-block; }
-#trosa .today-task-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-#trosa .today-task-customer {
-  border: 0;
-  background: none;
-  padding: 0;
-  text-align: left;
-  font-family: var(--dl-display);
-  font-size: 14.5px;
-  font-weight: 500;
-  color: var(--dl-ink-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#trosa .today-task-customer:hover { color: var(--dl-gold-ink); }
-#trosa .today-task-copy > strong {
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  color: var(--dl-ink) !important;
-  letter-spacing: -.005em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#trosa .today-task-copy > span {
-  font-size: 12.5px !important;
-  color: var(--dl-mut) !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#trosa .today-task-date {
-  font-size: 12px !important;
-  font-variant-numeric: tabular-nums;
-  color: var(--dl-mut) !important;
-  white-space: nowrap;
-  align-self: start;
-  margin-top: 2px;
-}
-#trosa .today-task-date.overdue { color: var(--dl-danger) !important; font-weight: 600; }
 
 /* --- Time band: the next 14 days ------------------------------------------- */
-#trosa .today-future-section { margin-top: var(--v4-stack); }
 #trosa .today-schedule-grid {
   display: flex !important;
   gap: 8px;
@@ -1006,21 +936,6 @@
 
 /* ---- today ---- */
 #trosa .today-workspace.today-workspace { display: block !important; }
-#trosa .today-task-section.today-task-section { margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; box-shadow: none !important; }
-#trosa .today-section-header.today-section-header {
-  display: flex !important;
-  align-items: baseline !important;
-  justify-content: space-between !important;
-  gap: 16px !important;
-  margin: 0 0 10px !important;
-  padding: 0 0 10px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair) !important;
-  background: none !important;
-}
-#trosa .today-section-header.today-section-header h3 { margin: 0 !important; color: var(--dl-ink) !important; font-size: 15px !important; font-weight: 600 !important; }
-#trosa .today-section-header.today-section-header .section-caption { margin: 3px 0 0 !important; color: var(--dl-mut) !important; font-size: 12px !important; }
-#trosa #todayReminders.today-task-list { display: block !important; margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; }
 #trosa .today-group-label.today-group-label {
   display: flex !important;
   align-items: center !important;
@@ -1067,77 +982,10 @@
 #trosa .today-task-index-wrap.today-task-index-wrap { align-self: center !important; margin: 0 !important; display: flex !important; align-items: center !important; gap: 6px !important; }
 #trosa .today-task-index.today-task-index { color: var(--dl-faint) !important; font-family: var(--dl-display) !important; font-size: 15px !important; font-weight: 500 !important; }
 #trosa .today-task-row.today-task-row.selected .today-task-index.today-task-index { color: var(--dl-gold) !important; }
-#trosa .today-task-copy.today-task-copy { min-width: 0 !important; display: block !important; }
-#trosa .today-task-copy.today-task-copy > strong {
-  display: -webkit-box !important;
-  -webkit-box-orient: vertical !important;
-  -webkit-line-clamp: 2 !important;
-  overflow: hidden !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  color: var(--dl-ink) !important;
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  line-height: 1.35 !important;
-}
-#trosa .today-task-copy.today-task-copy > span {
-  display: block !important;
-  margin: 5px 0 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  color: var(--dl-mut) !important;
-  font-size: 12.5px !important;
-  line-height: 1.4 !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
-}
-#trosa .today-task-customer.today-task-customer {
-  display: block !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: none !important;
-  color: var(--dl-ink-2) !important;
-  font-family: var(--dl-display) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-}
-#trosa .today-task-copy.today-task-copy > .today-task-customer { margin: 0 0 3px !important; }
-#trosa .today-task-date.today-task-date {
-  align-self: center !important;
-  justify-self: end !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
-  color: var(--dl-mut) !important;
-  font-size: 12.5px !important;
-  font-weight: 500 !important;
-  text-align: right !important;
-  white-space: nowrap !important;
-}
-#trosa .today-task-date.today-task-date.overdue { color: var(--dl-danger) !important; background: none !important; }
 #trosa .today-task-checkbox.today-task-checkbox { display: none !important; }
-#trosa .today-task-list.is-selecting.is-selecting .today-task-checkbox.today-task-checkbox { display: inline-block !important; }
 
 /* v2/v3 draw the overdue/selected accent with a higher-specificity rule than
    the block above, so the row box is restated under the list id. */
-#trosa #todayReminders.today-task-list .today-task-row.today-task-row,
-#trosa #todayReminders.today-task-list .today-task-row.today-task-row.selected {
-  border: 0 !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
-}
-#trosa #todayReminders.today-task-list .today-task-row.today-task-row.selected {
-  border-bottom-color: transparent !important;
-  border-radius: 14px !important;
-  background: var(--dl-paper) !important;
-  box-shadow: var(--v4-shadow-row) !important;
-}
 
 /* ---- today: future band + collapsed week ---- */
 #trosa .today-schedule-grid.today-schedule-grid {
@@ -1769,8 +1617,7 @@
   #trosa .page-header.page-header { padding-top: 74px !important; }
   #trosa .page-header.page-header h2,
   #trosa .page-heading.page-heading h2 { font-size: 30px !important; }
-  #trosa #todayReminders.today-task-list .today-task-row.today-task-row { grid-template-columns: 28px minmax(0, 1fr) auto !important; padding: 12px 10px !important; }
-  #trosa .inbox-group-hint.inbox-group-hint { display: none !important; }
+    #trosa .inbox-group-hint.inbox-group-hint { display: none !important; }
   #trosa #inboxList.inbox-list .inbox-question-open.inbox-question-open { grid-template-columns: minmax(0, 1fr) !important; padding: 14px 10px !important; }
   #trosa #inboxList.inbox-list .inbox-question-side.inbox-question-side { flex-direction: row !important; align-items: center !important; gap: 12px !important; }
   #trosa .inbox-question-go.inbox-question-go { display: none !important; }

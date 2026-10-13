@@ -333,12 +333,6 @@ html {
 .main-content:is(#trosa, #trosa *){
   position: relative;
   z-index: 1;
-}.sidebar-toggle:is(#trosa, #trosa *){
-  position: fixed;
-  z-index: 200;
-}.sidebar-scrim:is(#trosa, #trosa *){
-  position: fixed;
-  z-index: 310;
 }.sidebar:is(#trosa, #trosa *){
   position: fixed;
   z-index: 320;
@@ -431,38 +425,8 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
   overflow: visible;
 }.sidebar:is(#trosa, #trosa *)::after{
   display: none !important;
-}.sidebar-brand:is(#trosa, #trosa *){
-  padding: 26px 0 20px !important;
-  border-bottom: 1px solid var(--dl-hair-2) !important;
-  text-align: center;
-}.sidebar-brand h1:is(#trosa, #trosa *){
-  font-family: var(--dl-display) !important;
-  font-size: 0 !important;
-  line-height: 1 !important;
-  text-shadow: none !important;
-}.sidebar-brand h1:is(#trosa, #trosa *)::after{
-  content: "T";
-  display: inline-grid !important;
-  place-items: center;
-  width: 36px !important;
-  height: 36px !important;
-  border: 1px solid var(--dl-hair-strong) !important;
-  border-radius: var(--dl-r-pill) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9) !important;
-  color: var(--dl-ink) !important;
-  font-family: var(--dl-display) !important;
-  font-size: 1.1rem !important;
-  font-weight: 500 !important;
 }.sidebar-brand .subtitle:is(#trosa, #trosa *),.nav-section:is(#trosa, #trosa *),.nav-item > span:not(.nav-icon):not(.nav-count):is(#trosa, #trosa *),.sidebar-tools summary > span:last-child:is(#trosa, #trosa *),.sidebar-identity > span:last-child:is(#trosa, #trosa *){
   display: none !important;
-}.sidebar-nav:is(#trosa, #trosa *){
-  padding: 16px 10px !important;
-  display: block !important;
-  overflow-y: auto;
-  overflow-x: hidden;
-}.nav-section:is(#trosa, #trosa *){
-  padding: 6px 12px 8px !important;
 }.nav-item:is(#trosa, #trosa *){
   justify-content: center !important;
   min-height: 46px !important;
@@ -498,12 +462,6 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
   border-radius: 0 3px 3px 0;
 }.nav-item:is(#trosa, #trosa *){
   position: relative;
-}.nav-item .nav-icon:is(#trosa, #trosa *){
-  width: 22px !important;
-  color: inherit !important;
-}.nav-item .nav-icon svg:is(#trosa, #trosa *),.nav-item .nav-icon .ui-icon:is(#trosa, #trosa *){
-  width: 19px !important;
-  height: 19px !important;
 }.nav-count:is(#trosa, #trosa *){
   top: 4px !important;
   right: 4px !important;
@@ -517,18 +475,6 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
   font-weight: 600 !important;
 }.nav-count:empty:is(#trosa, #trosa *){
   display: none !important;
-}.sidebar-tools:is(#trosa, #trosa *){
-  margin: auto 10px 8px !important;
-}.sidebar-tools summary:is(#trosa, #trosa *){
-  justify-content: center !important;
-  min-height: 44px !important;
-  padding: 9px !important;
-  border-radius: var(--dl-r-md) !important;
-  color: var(--dl-ink-3) !important;
-  text-shadow: none !important;
-}.sidebar-tools summary:hover:is(#trosa, #trosa *),.sidebar-tools[open] summary:is(#trosa, #trosa *){
-  background: var(--dl-ink-wash) !important;
-  color: var(--dl-ink) !important;
 }.sidebar-tools-menu:is(#trosa, #trosa *){
   left: 74px !important;
   right: auto !important;
@@ -545,18 +491,6 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
 }.sidebar-tools-menu button:hover:is(#trosa, #trosa *){
   background: var(--dl-ink-wash) !important;
   color: var(--dl-ink) !important;
-}.account-section:is(#trosa, #trosa *){
-  border-top: 1px solid var(--dl-hair-2) !important;
-}.sidebar-identity:is(#trosa, #trosa *){
-  justify-content: center !important;
-  padding: 12px 0 14px !important;
-}.sidebar-avatar:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  background: var(--dl-paper) !important;
-  color: var(--dl-ink) !important;
-  font-family: var(--dl-display) !important;
-}.sidebar-identity small:is(#trosa, #trosa *){
-  color: var(--dl-ink-3) !important;
 }/* Wide desktop: labels return, rail becomes a real sidebar. */
 @media (min-width: 1181px){
   .sidebar:is(#trosa, #trosa *){
@@ -564,38 +498,10 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
     min-width: 244px !important;
     padding: 0 0 6px;
   }
-  .sidebar-brand:is(#trosa, #trosa *){
-    padding: 30px 26px 22px !important;
-    text-align: left;
-  }
-  .sidebar-brand h1:is(#trosa, #trosa *){
-    font-size: 1.5rem !important;
-  }
-  .sidebar-brand h1:is(#trosa, #trosa *)::after{
-    display: none !important;
-  }
-  .sidebar-brand .subtitle:is(#trosa, #trosa *), .nav-section:is(#trosa, #trosa *), .nav-item > span:not(.nav-icon):not(.nav-count):is(#trosa, #trosa *), .sidebar-tools summary > span:last-child:is(#trosa, #trosa *), .sidebar-identity > span:last-child:is(#trosa, #trosa *){
+        .sidebar-brand .subtitle:is(#trosa, #trosa *), .nav-section:is(#trosa, #trosa *), .nav-item > span:not(.nav-icon):not(.nav-count):is(#trosa, #trosa *), .sidebar-tools summary > span:last-child:is(#trosa, #trosa *), .sidebar-identity > span:last-child:is(#trosa, #trosa *){
     display: revert !important;
   }
-  .sidebar-brand .subtitle:is(#trosa, #trosa *){
-    display: block !important;
-    margin-top: 8px;
-    color: var(--dl-mut) !important;
-    font-family: var(--dl-sans) !important;
-    font-size: var(--dl-fs-micro) !important;
-    font-weight: 600 !important;
-    letter-spacing: var(--dl-track-micro) !important;
-    text-transform: uppercase;
-    line-height: 1.5;
-    text-shadow: none !important;
-  }
-  .sidebar-nav:is(#trosa, #trosa *){
-    padding: 18px 14px !important;
-  }
-  .nav-section:is(#trosa, #trosa *){
-    padding: 4px 12px 10px !important;
-  }
-  .nav-item:is(#trosa, #trosa *){
+        .nav-item:is(#trosa, #trosa *){
     justify-content: flex-start !important;
     min-height: 44px !important;
     padding: 10px 12px !important;
@@ -605,10 +511,7 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
   .nav-item.active:is(#trosa, #trosa *)::before{
     left: -14px;
   }
-  .nav-item .nav-icon:is(#trosa, #trosa *){
-    width: 20px !important;
-  }
-  .nav-count:is(#trosa, #trosa *){
+    .nav-count:is(#trosa, #trosa *){
     position: static !important;
     margin-left: auto;
     min-width: 22px !important;
@@ -617,20 +520,7 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
     border-color: transparent !important;
     color: var(--dl-mut) !important;
   }
-  .sidebar-tools:is(#trosa, #trosa *){
-    margin: auto 14px 8px !important;
-  }
-  .sidebar-tools summary:is(#trosa, #trosa *){
-    justify-content: flex-start !important;
-    gap: 12px !important;
-    padding: 10px 12px !important;
-  }
-  .sidebar-identity:is(#trosa, #trosa *){
-    justify-content: flex-start !important;
-    gap: 10px;
-    padding: 14px 22px 8px !important;
-  }
-}/* Content offsets follow the rail widths. */
+      }/* Content offsets follow the rail widths. */
 .main-content:is(#trosa, #trosa *){
   margin-left: 84px !important;
 }@media (min-width: 1181px) {.main-content:is(#trosa, #trosa *){
@@ -665,11 +555,7 @@ button:focus-visible:is(#trosa, #trosa *),a:focus-visible:is(#trosa, #trosa *),i
   font-size: var(--dl-fs-body-s) !important;
   line-height: 1.6 !important;
 }/* --- Global search: the one place glass still earns its keep ------------- */
-.global-page-tools:is(#trosa, #trosa *){
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}.global-page-search:is(#trosa, #trosa *){
+.global-page-search:is(#trosa, #trosa *){
   display: flex !important;
   align-items: center;
   gap: 10px;
@@ -1037,9 +923,6 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   line-height: 1.6;
 }[data-state="loading"]:is(#trosa, #trosa *),.is-loading:is(#trosa, #trosa *){
   color: var(--dl-ink-3) !important;
-}.section-caption:is(#trosa, #trosa *){
-  margin: 30px 0 12px;
-  display: block;
 }/* Log / timeline rows */
 .log-item:is(#trosa, #trosa *){
   display: grid;
@@ -1149,14 +1032,6 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
-}.today-date:is(#trosa, #trosa *){
-  margin-bottom: 8px !important;
-  color: var(--dl-ink-3) !important;
-  font-family: var(--dl-sans) !important;
-  font-size: var(--dl-fs-micro) !important;
-  font-weight: 600 !important;
-  letter-spacing: var(--dl-track-micro) !important;
-  text-transform: uppercase;
 }.today-summary:is(#trosa, #trosa *){
   margin-top: 12px !important;
   color: var(--dl-ink-2) !important;
@@ -1171,46 +1046,11 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.today-workspace:is(#trosa, #trosa *){
   gap: 34px !important;
   align-items: start;
-}.today-section-header:is(#trosa, #trosa *){
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-  padding-bottom: 12px !important;
-  border-bottom: 1px solid var(--dl-hair);
-}.today-section-header h3:is(#trosa, #trosa *){
-  margin: 0 !important;
-  font-family: var(--dl-display) !important;
-  font-size: var(--dl-fs-title) !important;
-  font-weight: 500 !important;
-  letter-spacing: -.015em;
-}.today-section-header .section-caption:is(#trosa, #trosa *){
-  margin: 5px 0 0 !important;
-  text-transform: none !important;
-  letter-spacing: 0 !important;
-  font-weight: 500 !important;
-  font-size: var(--dl-fs-caption) !important;
-}.today-sort-tools:is(#trosa, #trosa *){
-  display: flex;
-  align-items: center;
-  gap: 14px;
 }.today-sort-status:is(#trosa, #trosa *){
   color: var(--dl-ink-3);
   font-size: var(--dl-fs-caption);
 }/* Task list: one continuous paper field, hairline-separated rows. */
-.today-task-list:is(#trosa, #trosa *){
-  display: grid;
-  gap: 0 !important;
-  margin-top: 2px;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-lg) !important;
-  background: var(--dl-paper) !important;
-  overflow: hidden;
-}.today-task-list > .empty-state:is(#trosa, #trosa *){
-  border: 0 !important;
-  border-radius: 0 !important;
-}.today-task-row:is(#trosa, #trosa *){
+.today-task-row:is(#trosa, #trosa *){
   position: relative;
   min-height: 66px !important;
   padding: 14px 18px 14px 16px !important;
@@ -1269,10 +1109,6 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.today-task-row.customer-light-off:is(#trosa, #trosa *){
   opacity: 1 !important;
   filter: none !important;
-}.today-task-row.customer-light-off:is(#trosa, #trosa *) .today-task-copy{
-  color: var(--dl-ink-3);
-}.today-task-row.customer-light-off:is(#trosa, #trosa *) .today-task-customer{
-  color: var(--dl-ink-2) !important;
 }.today-task-index-wrap:is(#trosa, #trosa *){
   color: var(--dl-mut);
 }.today-task-index:is(#trosa, #trosa *){
@@ -1283,49 +1119,11 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
 }.today-task-row.selected:is(#trosa, #trosa *) .today-task-index,.today-task-row.selected:is(#trosa, #trosa *) .today-task-index-wrap{
   color: var(--dl-paper) !important;
 }/* visual-v2 hard-codes a light warm grey on the Today compose panel. */
-#page-dashboard .today-wide-field-label span:is(#trosa, #trosa *),#page-dashboard .today-wide-compose-footer > span:is(#trosa, #trosa *){
-  color: var(--dl-mut) !important;
-}#page-dashboard .today-wide-next-fields input:is(#trosa, #trosa *)::placeholder{
-  color: var(--dl-mut) !important;
-}#page-dashboard .today-wide-empty p:is(#trosa, #trosa *){
-  color: var(--dl-ink-3) !important;
-}.today-task-copy strong:is(#trosa, #trosa *){
-  font-family: var(--dl-sans);
-  font-size: var(--dl-fs-body) !important;
-  font-weight: 550 !important;
-  color: var(--dl-ink) !important;
-  line-height: 1.45 !important;
-}.today-task-copy span:is(#trosa, #trosa *){
-  color: var(--dl-ink-3) !important;
-  font-size: var(--dl-fs-caption) !important;
-  line-height: 1.5 !important;
-}.today-task-customer:is(#trosa, #trosa *){
-  font-family: var(--dl-sans);
-  font-size: var(--dl-fs-caption) !important;
-  font-weight: 600 !important;
-  letter-spacing: .04em;
-  color: var(--dl-gold-ink) !important;
-  background: transparent !important;
-  border: 0 !important;
-  padding: 0 !important;
-  text-align: left;
-}.today-task-customer:hover:is(#trosa, #trosa *){
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}.today-task-date:is(#trosa, #trosa *){
-  font-family: var(--dl-sans);
-  font-size: var(--dl-fs-caption) !important;
-  font-weight: 550 !important;
-  color: var(--dl-ink-3) !important;
-}.today-task-row.is-overdue .today-task-date:is(#trosa, #trosa *),.today-task-date.is-overdue:is(#trosa, #trosa *),.today-task-date.overdue:is(#trosa, #trosa *){
-  color: var(--dl-danger) !important;
-}.today-task-checkbox:is(#trosa, #trosa *){
+.today-task-checkbox:is(#trosa, #trosa *){
   accent-color: var(--dl-ink);
 }/* Focal card: the single "next step" that owns the only solid button. */
 /* Schedule strip: fourteen quiet days, one active. */
-.today-future-section:is(#trosa, #trosa *){
-  margin-top: 44px;
-}.today-schedule-grid:is(#trosa, #trosa *){
+.today-schedule-grid:is(#trosa, #trosa *){
   display: grid !important;
   grid-auto-flow: column;
   grid-auto-columns: minmax(74px, 1fr);
@@ -1361,10 +1159,7 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   font-size: 1.35rem !important;
   font-weight: 500;
   color: inherit !important;
-}.today-schedule-day.has-items:is(#trosa, #trosa *){
-  border-color: var(--dl-gold-ink) !important;
-}
-/* v2 keeps a clay hairline on the selected day; Daylight's selected day is the
+}/* v2 keeps a clay hairline on the selected day; Daylight's selected day is the
    room's gold, so the strip never carries a second, warmer accent. */
 .today-schedule-day.selected:is(#trosa, #trosa *){
   border-color: var(--dl-gold-ink) !important;
@@ -1994,36 +1789,12 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   margin-top: 8px;
   color: var(--dl-ink-3) !important;
   font-size: var(--dl-fs-body-s) !important;
-}.login-users:is(#trosa, #trosa *){
-  gap: 8px !important;
-  margin: 22px 0 4px !important;
-}.login-user:is(#trosa, #trosa *),.login-users button:is(#trosa, #trosa *){
-  min-height: 48px !important;
-  padding: 10px 14px !important;
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-md) !important;
-  background: var(--dl-paper-2) !important;
-  color: var(--dl-ink) !important;
-  font-size: var(--dl-fs-body-s) !important;
-  box-shadow: none !important;
-}.login-user:hover:is(#trosa, #trosa *),.login-users button:hover:is(#trosa, #trosa *){
-  border-color: var(--dl-gold) !important;
-  background: var(--dl-paper) !important;
 }.login-pin-form:is(#trosa, #trosa *){
   margin-top: 20px;
 }.login-error:is(#trosa, #trosa *){
   margin-top: 10px;
   color: var(--dl-danger) !important;
   font-size: var(--dl-fs-caption);
-}.login-network:is(#trosa, #trosa *){
-  margin-top: 22px;
-  padding-top: 16px;
-  border-top: 1px solid var(--dl-hair-2);
-  color: var(--dl-ink-3) !important;
-  font-size: var(--dl-fs-caption) !important;
-}.login-network-url:is(#trosa, #trosa *){
-  font-family: var(--dl-mono) !important;
-  color: var(--dl-ink-3) !important;
 }/* ============================================================================
    13. SHARED LIST PATTERNS — tables, filters, timeline
    ============================================================================ */
@@ -2130,29 +1901,13 @@ table:is(#trosa, #trosa *){
 }.calendar-day.today:is(#trosa, #trosa *){
   background: var(--dl-gold-soft) !important;
   box-shadow: inset 0 0 0 1px var(--dl-hair-strong) !important;
-}.calendar-day-number:is(#trosa, #trosa *){
-  font-family: var(--dl-display);
-  font-size: var(--dl-fs-body-s);
-  color: var(--dl-ink);
 }.calendar-day .day-tasks:is(#trosa, #trosa *){
   color: var(--dl-gold-ink) !important;
   font-weight: 600 !important;
   letter-spacing: 0;
 }.calendar-day .day-tasks.overdue:is(#trosa, #trosa *){
   color: var(--dl-danger) !important;
-}.calendar-event:is(#trosa, #trosa *){
-  border-left: 2px solid var(--dl-gold) !important;
-  border-radius: 0 var(--dl-r-xs) var(--dl-r-xs) 0;
-  background: var(--dl-paper-3) !important;
-  padding: 3px 7px !important;
-  font-size: var(--dl-fs-micro) !important;
-  color: var(--dl-ink-2) !important;
-}/* Weekly overview */.ov-customer-card:is(#trosa, #trosa *){
-  border: 1px solid var(--dl-hair) !important;
-  border-radius: var(--dl-r-md) !important;
-  background: var(--dl-paper) !important;
-  box-shadow: none !important;
-}.ov-customer-facts:is(#trosa, #trosa *),.ov-customer-columns:is(#trosa, #trosa *){
+}/* Weekly overview */.ov-customer-facts:is(#trosa, #trosa *),.ov-customer-columns:is(#trosa, #trosa *){
   border-color: var(--dl-hair) !important;
 }/* ============================================================================
    14. MOTION — entrance, state change, view transitions
@@ -2225,14 +1980,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .customer-row-card:hover .customer-action:is(#trosa, #trosa *), .customer-row-card:focus-within .customer-action:is(#trosa, #trosa *){
     opacity: 1;
   }
-  .today-task-row .today-wide-icon:is(#trosa, #trosa *){
-    opacity: 0;
-    transition: opacity var(--dl-dur-fast) var(--dl-ease);
-  }
-  .today-task-row:hover .today-wide-icon:is(#trosa, #trosa *), .today-task-row:focus-visible .today-wide-icon:is(#trosa, #trosa *){
-    opacity: 1;
-  }
-  .card:is(#trosa, #trosa *){
+      .card:is(#trosa, #trosa *){
     transition: border-color var(--dl-dur) var(--dl-ease);
   }
   .card:hover:is(#trosa, #trosa *){
@@ -2262,10 +2010,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .sidebar:is(#trosa, #trosa *){
     transform: none !important;
   }
-  .sidebar-toggle:is(#trosa, #trosa *){
-    display: none !important;
   }
-}
 
 /* ============================================================================
    16. iPad — touch-first, generous, sheet-based. No hover, no pointer light.
@@ -2286,11 +2031,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .nav-item:is(#trosa, #trosa *), .sidebar-tools summary:is(#trosa, #trosa *){
     min-height: 52px !important;
   }
-  .nav-item .nav-icon svg:is(#trosa, #trosa *), .nav-item .nav-icon .ui-icon:is(#trosa, #trosa *){
-    width: 22px !important;
-    height: 22px !important;
-  }
-  .sidebar-tools-menu:is(#trosa, #trosa *){
+    .sidebar-tools-menu:is(#trosa, #trosa *){
     left: 78px !important;
     bottom: 10px !important;
     width: 230px !important;
@@ -2520,14 +2261,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
     border-radius: var(--dl-r-lg) !important;
     box-shadow: var(--dl-shadow-3) !important;
   }
-  .modal.modal-customer-workspace:is(#trosa, #trosa *){
-    width: min(1000px, 100%) !important;
-    max-width: 1000px !important;
-    max-height: 88vh !important;
-    border: 1px solid var(--dl-hair) !important;
-    border-radius: var(--dl-r-lg) !important;
-  }
-}/* ============================================================================
+  }/* ============================================================================
    17. PHONE — a rebuilt small-screen experience, not a scaled desktop.
    ============================================================================ */
 
@@ -2582,33 +2316,10 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .sidebar.open:is(#trosa, #trosa *){
     transform: translateX(0) !important;
   }
-  .sidebar-brand:is(#trosa, #trosa *){
-    text-align: left !important;
-    padding: 24px 22px 18px !important;
-  }
-  .sidebar-brand h1:is(#trosa, #trosa *){
-    font-size: 1.4rem !important;
-  }
-  .sidebar-brand h1:is(#trosa, #trosa *)::after{
-    display: none !important;
-  }
-  .sidebar-brand .subtitle:is(#trosa, #trosa *), .nav-section:is(#trosa, #trosa *), .nav-item > span:not(.nav-icon):not(.nav-count):is(#trosa, #trosa *), .sidebar-tools summary > span:last-child:is(#trosa, #trosa *), .sidebar-identity > span:last-child:is(#trosa, #trosa *){
+        .sidebar-brand .subtitle:is(#trosa, #trosa *), .nav-section:is(#trosa, #trosa *), .nav-item > span:not(.nav-icon):not(.nav-count):is(#trosa, #trosa *), .sidebar-tools summary > span:last-child:is(#trosa, #trosa *), .sidebar-identity > span:last-child:is(#trosa, #trosa *){
     display: revert !important;
   }
-  .sidebar-brand .subtitle:is(#trosa, #trosa *){
-    display: block !important;
-    margin-top: 6px;
-    color: var(--dl-mut) !important;
-    font-family: var(--dl-sans) !important;
-    font-size: var(--dl-fs-micro) !important;
-    font-weight: 600 !important;
-    letter-spacing: var(--dl-track-micro) !important;
-    text-transform: uppercase;
-  }
-  .sidebar-nav:is(#trosa, #trosa *){
-    padding: 14px 12px !important;
-  }
-  .nav-item:is(#trosa, #trosa *){
+      .nav-item:is(#trosa, #trosa *){
     justify-content: flex-start !important;
     gap: 12px !important;
     min-height: 50px !important;
@@ -2622,38 +2333,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
     position: static !important;
     margin-left: auto;
   }
-  .sidebar-tools:is(#trosa, #trosa *){
-    margin: auto 12px 10px !important;
-  }
-  .sidebar-tools summary:is(#trosa, #trosa *){
-    justify-content: flex-start !important;
-    gap: 12px !important;
-  }
-  .sidebar-identity:is(#trosa, #trosa *){
-    justify-content: flex-start !important;
-    gap: 10px;
-    padding: 14px 20px 12px !important;
-  }
-  .sidebar-toggle:is(#trosa, #trosa *){
-    top: 12px !important;
-    left: 12px !important;
-    width: 42px !important;
-    height: 42px !important;
-    border: 1px solid var(--dl-hair) !important;
-    border-radius: var(--dl-r-md) !important;
-    background: var(--dl-paper) !important;
-    color: var(--dl-ink) !important;
-    box-shadow: var(--dl-shadow-1) !important;
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-  }
-  .global-page-tools:is(#trosa, #trosa *){
-    top: 12px !important;
-    left: 62px !important;
-    right: 12px !important;
-    height: 42px !important;
-  }
-  .global-page-search:is(#trosa, #trosa *){
+            .global-page-search:is(#trosa, #trosa *){
     width: 100% !important;
     height: 42px !important;
     padding: 0 14px 0 12px !important;
@@ -2670,10 +2350,7 @@ body:has(.modal-overlay.show) .daylight-room__pool:is(#trosa, #trosa *){
   .today-schedule-grid:is(#trosa, #trosa *){
     grid-auto-columns: minmax(80px, 1fr);
   }
-  .today-section-header:is(#trosa, #trosa *){
-    align-items: flex-start;
-  }
-  .inbox-overview:is(#trosa, #trosa *){
+    .inbox-overview:is(#trosa, #trosa *){
     gap: 18px;
   }
   .inbox-overview strong:is(#trosa, #trosa *){
