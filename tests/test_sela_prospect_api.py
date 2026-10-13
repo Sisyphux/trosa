@@ -1064,7 +1064,7 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_same_name_with_conflicting_domain_requires_review(self):
+    def test_same_name_with_different_domain_is_a_different_company(self):
         customer_id = self.add_customer('Conflict Plastics', website='https://conflict-plastics.example/')
         body = prospect('conflict-prospect')
         body['company'] = 'Conflict Plastics'
@@ -1072,14 +1072,56 @@ class SelaProspectApiTest(unittest.TestCase):
         body['contact'] = {'name': 'X', 'email': 'x@conflict-plastics-other.example', 'is_primary': 1}
         response = self.post_prospect(body, 'sela-v2:conflict:one')
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.get_json()['status'], 'REVIEW')
-        self.assertEqual(response.get_json()['reason'], 'COMPANY_DOMAIN_CONFLICT')
+        result = response.get_json()
+        self.assertEqual(result['status'], 'SYNCED', result)
+        self.assertNotEqual(result['trosa_id'], customer_id)
         conn = self.hamid_db()
         try:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 2)
             self.assertEqual(conn.execute(
                 "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
-            ).fetchone()[0], 1)
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+
+    def test_sync_closes_moot_identity_review_for_same_source(self):
+        self.add_customer('Moot Plastics', website='https://moot-plastics-au.example/')
+        body = prospect('moot-prospect')
+        body['company'] = 'Moot Plastics'
+        body['website'] = 'https://moot-plastics.example/'
+        body['contact'] = {'name': 'X', 'email': 'x@moot-plastics.example', 'is_primary': 1}
+        conn = self.hamid_db()
+        try:
+            self.module._sela_prospect_review_inbox(
+                conn, 'moot-prospect', body, 'COMPANY_DOMAIN_CONFLICT', '2026-09-24 10:00:00')
+            conn.commit()
+        finally:
+            conn.close()
+        response = self.post_prospect(body, 'sela-v2:moot:one')
+        self.assertEqual(response.get_json()['status'], 'SYNCED', response.get_json())
+        conn = self.hamid_db()
+        try:
+            row = conn.execute(
+                "SELECT status FROM inbox_items WHERE dedupe_key='sela:prospect-review:moot-prospect'"
+            ).fetchone()
+            self.assertEqual(row['status'], 'resolved')
+        finally:
+            conn.close()
+
+    def test_second_source_for_same_domain_goes_back_to_sela_only(self):
+        first = prospect('dup-a')
+        first.update({'company': 'Dup Plastics', 'website': 'https://dup-plastics.example/'})
+        first['contact'] = {'name': 'X', 'email': 'info@dup-plastics.example', 'is_primary': 1}
+        self.assertEqual(self.post_prospect(first, 'sela-v2:dup:a').get_json()['status'], 'SYNCED')
+        second = dict(first, source_id='dup-b', candidate_id='dup-b', company='Dup Plastics (Pty) Ltd')
+        result = self.post_prospect(second, 'sela-v2:dup:b').get_json()
+        self.assertEqual(result['status'], 'REVIEW', result)
+        self.assertEqual(result['reason'], 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT')
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0], 0)
         finally:
             conn.close()
 

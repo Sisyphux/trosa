@@ -3456,10 +3456,12 @@ def _sela_company_identity_matches(rows, payload):
         (domain_hits if 'domain' in matched else name_hits).append(item)
     if domain_hits:
         return domain_hits, ''
-    if wanted_domain and any(_canonical_website_domain(row.get('website')) for row in name_hits):
-        # Same name, a different recorded domain: a real identity conflict must
-        # not overwrite the existing Customer.
-        return name_hits, 'COMPANY_DOMAIN_CONFLICT'
+    if wanted_domain:
+        # Same name under a different recorded domain is a different company
+        # ("one company, one domain"), e.g. Plastic World ZA vs Plastic World
+        # AU.  It is neither reused nor sent to a human; only name hits that
+        # have no domain of their own remain candidates.
+        name_hits = [row for row in name_hits if not _canonical_website_domain(row.get('website'))]
     return name_hits, ''
 
 
@@ -4379,6 +4381,46 @@ def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now, candidat
         dedupe_key=f'sela:prospect-review:{source_id}', status='open', created_at=now,
         **_inbox_question_meta('sela_identity_review', f'sela:prospect-review:{source_id}', source_id),
     )
+
+
+def _sela_review_needs_human(result):
+    """Whether an upsert REVIEW is a question only a person can answer.
+
+    TROSA_REVISION_CONFLICT is a technical retry signal for the agent.  A
+    Customer that already carries another Sela prospect and matched by a
+    strong key (domain, email, phone) is Sela's own duplicate of a company it
+    already develops; the answer is known, so it goes back to Sela only.
+    """
+    if result.get('status') != 'REVIEW':
+        return False
+    reason = str(result.get('reason') or '')
+    if reason == 'TROSA_REVISION_CONFLICT':
+        return False
+    if reason == 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT' and (
+            set(result.get('matched_by') or []) & {'domain', 'email', 'phone'}):
+        return False
+    return True
+
+
+def _sela_close_moot_identity_review(conn, source_id, now):
+    """Close this source's open identity review once the answer is known."""
+    key = f'sela:prospect-review:{source_id}'
+    if postgres_mode():
+        rows = _modern_inbox_rows(conn, status='open', dedupe_key=key)
+    else:
+        rows = conn.execute(
+            "SELECT id FROM inbox_items WHERE dedupe_key=? AND status='open'", (key,),
+        ).fetchall()
+    resolved = []
+    for row in rows:
+        _resolve_inbox_item(
+            conn, inbox_item_id=int(row['id']), resolved_at=now,
+            resolution_reason='identity_settled',
+            resolution_note='身份已由官网域名确定，无需人工判断。',
+            resolution_source='agent', resolved_by='sela',
+        )
+        resolved.append(int(row['id']))
+    return resolved
 
 
 def _sela_exclusion_review_inbox(conn, customer_id, source_id, review, now):
@@ -5302,6 +5344,7 @@ def _sela_upsert_prospect(conn, prospect):
                 return {
                     'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT',
                     'source_id': source_id, 'trosa_id': customer_id,
+                    'matched_by': list(customer.get('matched_by') or []),
                     'candidates': [candidate for candidate in
                                    [_sela_review_candidate({**dict(customer), 'matched_by': ['external_id']},
                                                            'CUSTOMER_ALREADY_HAS_SELA_PROSPECT')] if candidate],
@@ -5721,14 +5764,15 @@ def sela_integration_upsert_prospect():
             return jsonify(response_body)
 
         result = _sela_upsert_prospect(conn, prospect)
-        # TROSA_REVISION_CONFLICT is a technical retry signal for the agent, not
-        # a question for a human.  Sela re-reads the current revision; creating
-        # an Inbox item would transfer an internal conflict onto the user.
-        if result.get('status') == 'REVIEW' and str(result.get('reason') or '') != 'TROSA_REVISION_CONFLICT':
+        if _sela_review_needs_human(result):
             _sela_prospect_review_inbox(
                 conn, source_id, prospect, str(result.get('reason') or 'IDENTITY_REVIEW'),
                 _sela_now(), candidates=result.get('candidates'),
             )
+        elif result.get('status') != 'REVIEW' or str(result.get('reason') or '') != 'TROSA_REVISION_CONFLICT':
+            # The identity question for this source is answered (synced, or
+            # Sela already develops the same company): an open review is moot.
+            _sela_close_moot_identity_review(conn, source_id, _sela_now())
         now = _sela_now()
         response_body = {
             **result,
