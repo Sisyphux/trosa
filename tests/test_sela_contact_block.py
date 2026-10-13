@@ -1,11 +1,14 @@
-"""Sela may stop contact with a COLD prospect only through the §4.4A entry.
+"""Sela may stop contact with a COLD prospect that is clearly not a target buyer.
 
-Since contract v1.3 the block-direction write is reachable only through
-``POST /api/integrations/sela/threads/<id>/irreversible-actions`` with a real
-human confirmation message, and the legacy
-``POST /api/integrations/sela/prospects/<source_id>/contact-block`` route is no
-longer on the sela service-token allowlist.  The business function itself
-(cold-only, add-only, audited) is retained for the new entry.
+Two doors share one business function (cold-only, add-only, audited):
+
+* ``POST /api/integrations/sela/prospects/<source_id>/contact-block`` -- sela's
+  own judgement for a cold prospect, a reason is required, no confirmation;
+* ``POST /api/integrations/sela/threads/<id>/irreversible-actions`` -- the
+  confirmed path for everything the dialogue decides.
+
+Neither can lift a block, and neither works once the prospect replied or was
+linked to a customer (Trosa's sales process owns those).
 """
 import hashlib
 import importlib.util
@@ -206,21 +209,52 @@ class SelaContactBlockTest(unittest.TestCase):
             conn.close()
 
     # -- tests -------------------------------------------------------------
-    def test_service_token_cannot_reach_legacy_contact_block(self):
-        source_id = 'block-legacy-auth-1'
-        self.create_prospect(source_id)
-        legacy = self.client.post(
+    def direct_block(self, source_id, reason=DEFAULT_REASON, key='block:direct'):
+        return self.client.post(
             f'/api/integrations/sela/prospects/{source_id}/contact-block',
-            json={'reason': DEFAULT_REASON, 'idempotency_key': 'block:legacy-auth'},
-            headers=self.headers('block:legacy-auth'),
+            json={'reason': reason, 'idempotency_key': key}, headers=self.headers(key),
         )
-        self.assertEqual(legacy.status_code, 401, legacy.get_data(as_text=True))
+
+    def test_service_token_blocks_a_cold_prospect_directly_and_anonymous_cannot(self):
+        source_id = 'block-direct-1'
+        self.create_prospect(source_id)
+        decision_id = self.create_exclusion_decision(source_id)
         anonymous = self.module.app.test_client().post(
             f'/api/integrations/sela/prospects/{source_id}/contact-block',
-            json={'reason': DEFAULT_REASON, 'idempotency_key': 'block:legacy-anon'},
-            headers={'X-Idempotency-Key': 'block:legacy-anon'},
+            json={'reason': DEFAULT_REASON, 'idempotency_key': 'block:direct-anon'},
+            headers={'X-Idempotency-Key': 'block:direct-anon'},
         )
         self.assertEqual(anonymous.status_code, 401)
+        self.assertFalse(self.view(source_id)['do_not_contact'])
+        response = self.direct_block(source_id)
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(self.view(source_id)['do_not_contact'])
+        self.assertEqual(self.inbox_status(decision_id)['status'], 'resolved')
+
+    def test_direct_block_is_refused_once_the_prospect_replied(self):
+        source_id = 'block-direct-engaged'
+        self.create_prospect(source_id)
+        reply = self.client.post(
+            '/api/integrations/sela/reply',
+            json={'candidate_id': source_id,
+                  'reply': {'from': 'Ana <ana@engaged.example>', 'subject': 'Re: hello',
+                            'body': 'Thanks, let us talk next week.',
+                            'received_at': 'Mon, 17 Aug 2026 09:00:00 +0800',
+                            'message_id': 'block-direct-msg-1'},
+                  'action': {'event': 'REPLIED'},
+                  'idempotency_key': 'block:direct:reply'},
+            headers=self.headers('block:direct:reply'),
+        )
+        self.assertEqual(reply.status_code, 200, reply.get_data(as_text=True))
+        response = self.direct_block(source_id, key='block:direct:engaged')
+        self.assertEqual(response.status_code, 409, response.get_data(as_text=True))
+        self.assertFalse(self.view(source_id)['do_not_contact'])
+
+    def test_direct_block_requires_a_reason(self):
+        source_id = 'block-direct-noreason'
+        self.create_prospect(source_id)
+        response = self.direct_block(source_id, reason='', key='block:direct:noreason')
+        self.assertEqual(response.status_code, 400, response.get_data(as_text=True))
         self.assertFalse(self.view(source_id)['do_not_contact'])
 
     def test_service_identity_still_cannot_unblock(self):

@@ -387,6 +387,13 @@ def _sela_integration_path_allowed():
             r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/email-verification',
             request.path,
         ))
+        # Block direction only: a COLD prospect that is clearly not a target
+        # buyer.  The route re-checks "still cold" (no reply, no customer
+        # link), requires a reason, and cannot lift a block.
+        or (request.method == 'POST' and re.fullmatch(
+            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/contact-block',
+            request.path,
+        ))
         or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/needs/\d+/resolve',
             request.path,
