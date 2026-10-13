@@ -4390,23 +4390,39 @@ def _sela_prospect_review_inbox(conn, source_id, prospect, reason, now, candidat
     )
 
 
+_SELA_STRONG_IDENTITY_KEYS = {'domain', 'email', 'phone'}
+
+
 def _sela_review_needs_human(result):
     """Whether an upsert REVIEW is a question only a person can answer.
 
-    TROSA_REVISION_CONFLICT is a technical retry signal for the agent.  A
-    Customer that already carries another Sela prospect and matched by a
-    strong key (domain, email, phone) is Sela's own duplicate of a company it
-    already develops; the answer is known, so it goes back to Sela only.
+    Three REVIEW outcomes have a known answer and go back to Sela only:
+    ``TROSA_REVISION_CONFLICT`` is a technical retry signal;
+    ``SOURCE_IDENTITY_CONFLICT`` is Sela's own prospect arriving with another
+    website than the one it was created with (Sela's data to fix, Trosa never
+    overwrites it); a Customer that Sela already develops
+    (``CUSTOMER_ALREADY_HAS_SELA_PROSPECT``) or that another source already
+    owns (``CUSTOMER_ALREADY_LINKED``), matched by a strong key (domain, email,
+    phone), is a company the CRM already has, so Sela stops.
     """
     if result.get('status') != 'REVIEW':
         return False
     reason = str(result.get('reason') or '')
-    if reason == 'TROSA_REVISION_CONFLICT':
+    if reason in ('TROSA_REVISION_CONFLICT', 'SOURCE_IDENTITY_CONFLICT'):
         return False
-    if reason == 'CUSTOMER_ALREADY_HAS_SELA_PROSPECT' and (
-            set(result.get('matched_by') or []) & {'domain', 'email', 'phone'}):
+    if reason in ('CUSTOMER_ALREADY_HAS_SELA_PROSPECT', 'CUSTOMER_ALREADY_LINKED') and (
+            set(result.get('matched_by') or []) & _SELA_STRONG_IDENTITY_KEYS):
         return False
     return True
+
+
+def _sela_review_answer_is_settled(result):
+    """The sync settled this source's identity (so an older open question is moot)."""
+    if result.get('status') != 'REVIEW':
+        return True
+    return str(result.get('reason') or '') in (
+        'CUSTOMER_ALREADY_HAS_SELA_PROSPECT', 'CUSTOMER_ALREADY_LINKED',
+    ) and not _sela_review_needs_human(result)
 
 
 def _sela_close_moot_identity_review(conn, source_id, now):
@@ -4423,7 +4439,7 @@ def _sela_close_moot_identity_review(conn, source_id, now):
         _resolve_inbox_item(
             conn, inbox_item_id=int(row['id']), resolved_at=now,
             resolution_reason='identity_settled',
-            resolution_note='身份已由官网域名确定，无需人工判断。',
+            resolution_note='身份已确定（官网域名一致或公司已在 Trosa），无需人工判断。',
             resolution_source='agent', resolved_by='sela',
         )
         resolved.append(int(row['id']))
@@ -5362,6 +5378,7 @@ def _sela_upsert_prospect(conn, prospect):
                 return {
                     'success': True, 'status': 'REVIEW', 'reason': 'CUSTOMER_ALREADY_LINKED',
                     'source_id': source_id, 'trosa_id': customer_id,
+                    'matched_by': list(customer.get('matched_by') or []),
                     'candidates': [candidate for candidate in
                                    [_sela_review_candidate({**dict(customer), 'matched_by': ['external_id']},
                                                            'CUSTOMER_ALREADY_LINKED')] if candidate],
@@ -5784,9 +5801,9 @@ def sela_integration_upsert_prospect():
                 conn, source_id, prospect, str(result.get('reason') or 'IDENTITY_REVIEW'),
                 _sela_now(), candidates=result.get('candidates'),
             )
-        elif result.get('status') != 'REVIEW' or str(result.get('reason') or '') != 'TROSA_REVISION_CONFLICT':
-            # The identity question for this source is answered (synced, or
-            # Sela already develops the same company): an open review is moot.
+        elif _sela_review_answer_is_settled(result):
+            # The identity question for this source is answered (synced, or the
+            # company is already in Trosa): an open review is moot.
             _sela_close_moot_identity_review(conn, source_id, _sela_now())
         now = _sela_now()
         response_body = {

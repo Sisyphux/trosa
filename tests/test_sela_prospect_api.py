@@ -1126,6 +1126,35 @@ class SelaProspectApiTest(unittest.TestCase):
             conn.close()
 
 
+    def inbox_review_count(self):
+        conn = self.hamid_db()
+        try:
+            return conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_same_source_with_another_website_goes_back_to_sela_only(self):
+        first = prospect('moved-site')
+        self.assertEqual(self.post_prospect(first, 'sela-v2:moved:a').get_json()['status'], 'SYNCED')
+        again = dict(first, website='https://moved-site-new.example/')
+        result = self.post_prospect(again, 'sela-v2:moved:b').get_json()
+        self.assertEqual(result['status'], 'REVIEW', result)
+        self.assertEqual(result['reason'], 'SOURCE_IDENTITY_CONFLICT')
+        self.assertEqual(self.inbox_review_count(), 0)
+
+    def test_company_already_owned_by_another_source_goes_back_to_sela_only(self):
+        self.add_customer('Owned Plastics', website='https://owned-plastics.example/',
+                          external_source='legacy-import', external_id='legacy-1')
+        body = prospect('owned-prospect')
+        body.update({'company': 'Owned Plastics', 'website': 'https://owned-plastics.example/'})
+        body['contact'] = {'name': 'X', 'email': 'x@owned-plastics.example', 'is_primary': 1}
+        result = self.post_prospect(body, 'sela-v2:owned:a').get_json()
+        self.assertEqual(result['status'], 'REVIEW', result)
+        self.assertEqual(result['reason'], 'CUSTOMER_ALREADY_LINKED')
+        self.assertEqual(self.inbox_review_count(), 0)
+
     def test_confirmed_outreach_closes_legacy_development_task(self):
         created = self.post_prospect(prospect())
         self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
