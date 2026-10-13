@@ -3313,6 +3313,7 @@ async function openCommunicationConfirm(options) {
     directionSelect.value = ['outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0 ? context.direction : 'auto';
   }
   document.getElementById('inboxReplyDate').value = context.followDate || localDateString();
+  resetInboxReplyNextStep(!context.agentProposalId);
   if (rawDetails && rawText) {
     var hasRaw = !!(context.rawContent && context.rawContent !== context.content);
     rawDetails.hidden = !hasRaw;
@@ -3481,6 +3482,10 @@ function renderInboxReplyAnalysis(result) {
   var html = '<div class="quick-analysis-head"><strong>AI 整理' + escapeHtml(directionLabel) + '</strong><span>' + escapeHtml(analysis.intent || '未知') + '</span></div>';
   html += '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>';
   if (facts.length) html += '<div class="quick-analysis-facts">' + facts.map(function(f) { return '<span>' + escapeHtml(f) + '</span>'; }).join('') + '</div>';
+  var nextSection = document.getElementById('communicationConfirmNext');
+  if (analysis.suggested_next_action && nextSection && !nextSection.hidden) {
+    html += '<div class="quick-analysis-actions"><button type="button" class="text-action" onclick="applyInboxReplyNextSuggestion()">采用下一步建议</button></div>';
+  }
   if (candidates.length) {
     html += '<div class="quick-analysis-matches"><small>可能对应</small>' + candidates.map(function(c) {
       return '<button type="button" onclick="chooseInboxReplyCandidate(' + c.id + ')"><strong>' + escapeHtml(c.company || c.name) + '</strong><span>' + escapeHtml([c.contact_name, c.country, c.reason].filter(Boolean).join(' · ')) + '</span><em>' + c.score + '%</em></button>';
@@ -3771,8 +3776,71 @@ function setInboxReplyBusy(button, busy) {
     button.setAttribute('aria-busy', 'true');
   } else {
     button.removeAttribute('aria-busy');
-    button.textContent = '保存沟通记录';
+    updateInboxReplySaveLabel();
   }
+}
+
+// 记录沟通时可顺手确认下一步：动作和日期都填才创建待办，都不填就只保存记录。
+// 代理提案有自己确认过的内容，不在这里追加下一步。
+function resetInboxReplyNextStep(available) {
+  var section = document.getElementById('communicationConfirmNext');
+  if (section) section.hidden = !available;
+  document.getElementById('inboxReplyNextTask').value = '';
+  document.getElementById('inboxReplyNextDate').value = '';
+  setAiFieldTag('inboxReplyNextTask', 'inboxReplyNextTaskAi', false);
+  markInboxReplyNextChip(null);
+  setFieldInlineError('inboxReplyNextTask', 'inboxReplyNextError', '');
+  updateInboxReplySaveLabel();
+}
+
+function markInboxReplyNextChip(button) {
+  document.querySelectorAll('#communicationConfirmNext .task-date-choices button').forEach(function(choice) {
+    choice.classList.toggle('is-selected', choice === button);
+    choice.setAttribute('aria-pressed', choice === button ? 'true' : 'false');
+  });
+}
+
+function setInboxReplyNextDate(days, button) {
+  var date = new Date();
+  date.setDate(date.getDate() + days);
+  document.getElementById('inboxReplyNextDate').value = localDateString(date);
+  markInboxReplyNextChip(button);
+  setFieldInlineError('inboxReplyNextTask', 'inboxReplyNextError', '');
+  updateInboxReplySaveLabel();
+}
+
+function onInboxReplyNextInput(fromDate) {
+  if (fromDate) markInboxReplyNextChip(null);
+  else setAiFieldTag('inboxReplyNextTask', 'inboxReplyNextTaskAi', false);
+  setFieldInlineError('inboxReplyNextTask', 'inboxReplyNextError', '');
+  updateInboxReplySaveLabel();
+}
+
+function inboxReplyNextStep() {
+  var section = document.getElementById('communicationConfirmNext');
+  if (!section || section.hidden) return { task: '', date: '' };
+  return {
+    task: document.getElementById('inboxReplyNextTask').value.trim(),
+    date: document.getElementById('inboxReplyNextDate').value
+  };
+}
+
+function updateInboxReplySaveLabel() {
+  var button = document.getElementById('saveInboxReplyButton');
+  if (!button || button.getAttribute('aria-busy') === 'true') return;
+  var next = inboxReplyNextStep();
+  button.textContent = next.task && next.date ? '保存并安排下一步' : '保存沟通记录';
+}
+
+function applyInboxReplyNextSuggestion() {
+  var suggestion = String((_inboxReplyAnalysis && _inboxReplyAnalysis.suggested_next_action) || '').trim();
+  var input = document.getElementById('inboxReplyNextTask');
+  if (!suggestion || !input) return;
+  input.value = suggestion;
+  setAiFieldTag('inboxReplyNextTask', 'inboxReplyNextTaskAi', true);
+  setFieldInlineError('inboxReplyNextTask', 'inboxReplyNextError', '');
+  updateInboxReplySaveLabel();
+  if (!document.getElementById('inboxReplyNextDate').value) document.getElementById('inboxReplyNextDate').focus();
 }
 
 async function saveInboxReply() {
@@ -3793,6 +3861,12 @@ async function saveInboxReply() {
     return;
   }
   setFieldInlineError('inboxReplyCustomerSearch', 'inboxReplyCustomerError', '');
+  var next = context.agentProposalId ? { task: '', date: '' } : inboxReplyNextStep();
+  if (!!next.task !== !!next.date) {
+    setFieldInlineError('inboxReplyNextTask', 'inboxReplyNextError', next.task ? '请选择下一步日期' : '请写下一步要做什么');
+    document.getElementById(next.task ? 'inboxReplyNextDate' : 'inboxReplyNextTask').focus();
+    return;
+  }
   var button = document.getElementById('saveInboxReplyButton');
   setInboxReplyBusy(button, true);
   try {
@@ -3812,7 +3886,7 @@ async function saveInboxReply() {
         method: 'PUT', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: savedDirection,
-          next_task: '', next_follow_up: '', is_reported: 0
+          next_task: next.task, next_follow_up: next.date, is_reported: 0
         })
       });
     } else {
@@ -3820,7 +3894,7 @@ async function saveInboxReply() {
         method: 'POST', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: savedDirection,
-          follow_date: followDate, next_task: '', next_follow_up: '',
+          follow_date: followDate, next_task: next.task, next_follow_up: next.date,
           source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
         })
       });
@@ -3830,7 +3904,7 @@ async function saveInboxReply() {
         type: 'follow', id: saved && (saved.activity_id || (!context.agentProposalId && saved.id)),
         follow_date: followDate, content: content,
         result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
-        next_plan: '', activity_type: context.activityType || 'customer_reply',
+        next_plan: next.task, activity_type: context.activityType || 'customer_reply',
         direction: savedDirection, is_reported: false
       }, saved && saved.activity ? saved.activity : {});
       if (activity.id) {
@@ -3862,11 +3936,12 @@ async function saveInboxReply() {
       return;
     }
     closeModal('inboxReplyModal', true);
+    var nextNote = next.task ? ' · 下一步 ' + formatChineseDate(next.date) : '';
     if (context.reminderId && saved && saved.undo_token) {
       // 来自 Today 的「完成并记录」：待办已完成，给出撤销入口并可恢复回今日待办。
-      showCompleteUndoToast(saved, '沟通已保存，待办已完成');
+      showCompleteUndoToast(saved, '沟通已保存，待办已完成' + nextNote);
     } else {
-      showToast('沟通已保存到时间线', 'success');
+      showToast((next.task ? '沟通已保存' : '沟通已保存到时间线') + nextNote, 'success');
     }
     loadInbox();
     if (currentPage === 'dashboard') loadDashboard();
@@ -5090,7 +5165,7 @@ function renderTodayFocus(r) {
       '<button type="button" class="room-act" onclick="openEditModal(' + Number(r.customer_id) + ')">查看客户</button>' +
       (website ? '<a class="room-act" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') +
     '</div>' +
-    '<p class="room-hint">确认记录后，这条待办会一并完成。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
+    '<p class="room-hint">确认记录后，这条待办会一并完成，也可以顺手安排下一步。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
   renderTodayWideDetail(r, name, meta, website);
   updateTodayFocusClock(r);
   updateTodayRoomStatus();

@@ -171,6 +171,25 @@ const PAIRS = [
     assert.ok(isInvalid('inboxReplyCustomerSearch'));
     assert.equal(toastCount(), 0);
   });
+  await check('记录沟通里下一步只写动作没选日期时内联提示，不保存', async () => {
+    resetToasts();
+    win._communicationConfirmContext = { source: 'today', reminderId: 7, customerId: 3, direction: 'unknown', activityType: 'follow_up' };
+    win.resetInboxReplyNextStep(true);
+    doc.getElementById('inboxReplyContent').value = '电话沟通';
+    doc.getElementById('inboxReplyNextTask').value = '发报价';
+    win.updateInboxReplySaveLabel();
+    assert.equal(doc.getElementById('saveInboxReplyButton').textContent, '保存沟通记录');
+    await win.saveInboxReply();
+    await tick();
+    assert.equal(doc.getElementById('inboxReplyNextError').hidden, false);
+    assert.match(doc.getElementById('inboxReplyNextError').textContent, /日期/);
+    win.setInboxReplyNextDate(7, doc.querySelector('#communicationConfirmNext .task-date-choices button'));
+    assert.equal(doc.getElementById('inboxReplyNextError').hidden, true, 'date chip clears the error');
+    assert.equal(doc.getElementById('saveInboxReplyButton').textContent, '保存并安排下一步');
+    win.resetInboxReplyNextStep(false);
+    assert.equal(doc.getElementById('communicationConfirmNext').hidden, true);
+    assert.equal(doc.getElementById('inboxReplyNextTask').value, '');
+  });
 
   console.log('scenario: 完成这次跟进的字段线用危险色而不是金色');
   await check('空内容把文本框标为 aria-invalid', () => {

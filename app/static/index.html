@@ -1194,6 +1194,17 @@ if(t!=='classic')document.documentElement.setAttribute('data-type','swiss');}cat
       <div class="quick-reply-row">
         <div class="form-group"><label class="form-label" for="inboxReplyDate">沟通日期</label><input type="date" class="form-control" id="inboxReplyDate"></div>
       </div>
+      <div class="form-group" id="communicationConfirmNext">
+        <div class="form-label-row"><label class="form-label" for="inboxReplyNextTask">下一步做什么？</label><span class="ai-tag ai-field-tag" id="inboxReplyNextTaskAi" hidden>AI 建议</span></div>
+        <input type="text" class="form-control" id="inboxReplyNextTask" placeholder="可留空，例如：发送报价单并确认交期" oninput="onInboxReplyNextInput()">
+        <div class="next-date-choices task-date-choices">
+          <button type="button" aria-pressed="false" onclick="setInboxReplyNextDate(7, this)">7 天</button>
+          <button type="button" aria-pressed="false" onclick="setInboxReplyNextDate(15, this)">15 天</button>
+          <button type="button" aria-pressed="false" onclick="setInboxReplyNextDate(30, this)">30 天</button>
+        </div>
+        <input type="date" class="form-control" id="inboxReplyNextDate" aria-label="下一步日期" onchange="onInboxReplyNextInput(true)">
+        <div class="field-inline-error" id="inboxReplyNextError" role="alert" hidden></div>
+      </div>
     </div>
     <div class="modal-footer"><button class="btn cw-act" onclick="closeModal('inboxReplyModal')">取消</button><button class="btn btn-primary cw-act cw-primary" id="saveInboxReplyButton" onclick="saveInboxReply()">保存沟通记录</button></div>
   </div>

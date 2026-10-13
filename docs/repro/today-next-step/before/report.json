@@ -1,0 +1,19 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18191",
+  "generatedAt": "2026-10-13T08:22:36.499Z",
+  "checks": [
+    {
+      "id": "dialog-offers-next-step",
+      "title": "今天页「记录沟通」对话框里能直接填写下一步（动作 + 日期）",
+      "pass": false,
+      "detail": "动作输入框：没有；日期：没有"
+    }
+  ],
+  "screenshots": [
+    "01-today-1440.png",
+    "02-record-dialog-1440.png"
+  ],
+  "pageErrors": [],
+  "browser": "chromium 153.0.8010.12"
+}

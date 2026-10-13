@@ -1,0 +1,60 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18193",
+  "generatedAt": "2026-10-13T08:24:35.842Z",
+  "checks": [
+    {
+      "id": "dialog-offers-next-step",
+      "title": "今天页「记录沟通」对话框里能直接填写下一步（动作 + 日期）",
+      "pass": true,
+      "detail": "动作输入框：可见；日期：可见"
+    },
+    {
+      "id": "quick-date-chip-fills-date",
+      "title": "点「7 天」后日期自动填好",
+      "pass": true,
+      "detail": "日期：2026-10-20"
+    },
+    {
+      "id": "save-label-says-next-step",
+      "title": "填写下一步后，保存按钮说明会一起安排下一步",
+      "pass": true,
+      "detail": "按钮：保存并安排下一步"
+    },
+    {
+      "id": "next-step-saved",
+      "title": "保存后客户有这条下一步，日期正确",
+      "pass": true,
+      "detail": "发送报价单并确认交期 · 2026-10-20"
+    },
+    {
+      "id": "today-todo-completed",
+      "title": "今天的待办同时完成",
+      "pass": true,
+      "detail": "发送报价单并确认交期"
+    },
+    {
+      "id": "next-step-fields-reset",
+      "title": "再次打开时下一步输入框是空的",
+      "pass": true,
+      "detail": "{\"task\":\"\",\"date\":\"\"}"
+    },
+    {
+      "id": "record-without-next-step",
+      "title": "不填下一步也能只保存记录，不多出待办",
+      "pass": true,
+      "detail": "发送报价单并确认交期"
+    }
+  ],
+  "screenshots": [
+    "01-today-1440.png",
+    "02-record-dialog-1440.png",
+    "03-dialog-filled-1440.png",
+    "04-after-save-1440.png"
+  ],
+  "pageErrors": [
+    "Transition was skipped. New ViewTransition started",
+    "Transition was skipped. New ViewTransition started"
+  ],
+  "browser": "chromium 153.0.8010.12"
+}
