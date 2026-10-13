@@ -13831,8 +13831,26 @@ var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: 'sela 处理中', done: 
 var dialogueArchivedOpen = false;
 try { dialogueArchivedOpen = localStorage.getItem('trosa.dialogue.archivedOpen') === '1'; } catch (error) { dialogueArchivedOpen = false; }
 
+// The conversation the reader chose to collapse the archived group on; selecting a different
+// archived conversation opens the group again.
+var dialogueArchivedShutFor = null;
+
+function dialogueArchivedIsOpen() {
+  if (dialogueArchivedOpen) return true;
+  if (!dialogueSelectedId || dialogueArchivedShutFor === dialogueSelectedId) return false;
+  return dialogueThreads.some(function(thread) { return thread.id === dialogueSelectedId && dialogueGroup(thread) === 'done'; });
+}
+
 function toggleDialogueArchived() {
-  dialogueArchivedOpen = !dialogueArchivedOpen;
+  // Flip what the reader currently sees: a selected archived conversation holds the group open
+  // without the stored flag, so toggling the flag alone would never close it.
+  if (dialogueArchivedIsOpen()) {
+    dialogueArchivedOpen = false;
+    dialogueArchivedShutFor = dialogueSelectedId;
+  } else {
+    dialogueArchivedOpen = true;
+    dialogueArchivedShutFor = null;
+  }
   try { localStorage.setItem('trosa.dialogue.archivedOpen', dialogueArchivedOpen ? '1' : '0'); } catch (error) { /* per-viewer convenience only */ }
   renderDialogueList();
 }
@@ -13938,8 +13956,8 @@ function renderDialogueList() {
     var rows = ordered.filter(function(thread) { return dialogueGroup(thread) === group; });
     if (!rows.length) return;
     if (group === 'done') {
-      // A selected archived conversation stays visible even while the group is collapsed.
-      var open = dialogueArchivedOpen || rows.some(function(thread) { return thread.id === dialogueSelectedId; });
+      // A selected archived conversation keeps the group open until the reader collapses it.
+      var open = dialogueArchivedIsOpen();
       html += '<section class="dialogue-group dialogue-group--archived" data-group="done" data-open="' + (open ? 'true' : 'false') + '">' +
           '<button type="button" class="dialogue-group-label dialogue-group-toggle" aria-expanded="' + (open ? 'true' : 'false') + '"' +
             ' onclick="toggleDialogueArchived()"><span>' + DIALOGUE_GROUP_LABELS[group] + (open ? '' : '（点开查看）') + '</span>' +
