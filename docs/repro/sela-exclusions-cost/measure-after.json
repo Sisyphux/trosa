@@ -1,0 +1,469 @@
+{
+  "summary": {
+    "label": "after",
+    "tree": "/Users/luoxin/Desktop/trosa-worktrees/sela-exclusions-cost",
+    "records": 1064,
+    "customers_in_db": null,
+    "median_seconds": 0.0708,
+    "max_seconds": 0.0877,
+    "sql_per_call": [
+      10
+    ],
+    "bytes": 597766,
+    "limit100_bytes": 597766,
+    "body_sha256_without_generated_at": "250734ccf4560e6577731034d107f3b17438e680ddf9dee8454fc6b524abb705",
+    "conditional_request": {
+      "status": 304,
+      "body_bytes": 0,
+      "seconds": 0.067,
+      "sql": 10
+    },
+    "data_version": "1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc",
+    "top_tables": [
+      [
+        "trosa.customer_interactions",
+        2
+      ],
+      [
+        "trosa.inbox_items",
+        2
+      ],
+      [
+        "trosa.email_delivery_events",
+        1
+      ],
+      [
+        "trosa.customer_contacts",
+        1
+      ],
+      [
+        "trosa.customer_records",
+        1
+      ],
+      [
+        "trosa.outreach_messages",
+        1
+      ],
+      [
+        "trosa.agent_prospect_profiles",
+        1
+      ],
+      [
+        "trosa.business_exclusions",
+        1
+      ]
+    ]
+  },
+  "runs": [
+    {
+      "seconds": 0.0708,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0687,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0671,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0856,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0702,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0716,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0687,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0717,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0877,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0707,
+      "sql": 10,
+      "connections": 1,
+      "bytes": 597766,
+      "etag": "\"1eb7569384e41ce43c868c19cd6fc9310d3c370c0aaf78c42eedca64a2e9cbcc\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_contacts",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    }
+  ]
+}

@@ -1836,6 +1836,66 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertTrue(any(item['source_id'] == 'pg-sela-exclusion-1'
                             for item in exclusions.get_json()['records']))
 
+    def test_sela_exclusion_snapshot_issues_the_same_reads_for_any_customer_count(self):
+        """The snapshot build is a fixed set of batch reads, not one per contacted Customer."""
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+
+        def contacted(index, sent_on):
+            source_id = f'pg-excl-{run}-{index}'
+            published = client.post(
+                '/api/integrations/sela/prospects',
+                headers={'X-Idempotency-Key': f'pg-excl:{source_id}'},
+                json={'prospect': {
+                    'source_id': source_id, 'company': f'{source_id} Co',
+                    'website': f'https://{source_id}.example/', 'country': 'US',
+                    'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+                    'contact': {'name': 'Buyer', 'email': f'buyer@{source_id}.example'},
+                    'subject': 'Intro', 'email_draft': 'Hello.',
+                    'outreach_status': 'SENT', 'sent_at': sent_on,
+                }},
+            )
+            self.assertEqual(published.status_code, 200, published.get_json())
+            customer_id = published.get_json()['trosa_id']
+            recorded = client.post(f'/api/customers/{customer_id}/follow_history', json={
+                'activity_content': '客户回复：请报价', 'direction': 'inbound',
+                'follow_date': '2026-10-02',
+            })
+            self.assertEqual(recorded.status_code, 200, recorded.get_json())
+            return customer_id
+
+        def build():
+            with mock.patch.object(self.connection, 'execute', wraps=self.connection.execute) as execute:
+                with module.app.test_request_context():
+                    records = module._sela_exclusion_snapshot_records(self.connection)
+            return execute.call_count, records
+
+        ids = [contacted(index, f'2026-10-0{index + 1}T10:00:00+08:00') for index in range(2)]
+        small, small_records = build()
+        ids += [contacted(index, f'2026-10-0{(index % 8) + 1}T10:00:00+08:00') for index in range(2, 6)]
+        large, large_records = build()
+        self.assertGreaterEqual(len(large_records), len(small_records) + 4)
+        self.assertEqual(small, large)
+        self.assertLess(large, 40)
+        # Same latest outreach date the per-Customer reader reports.
+        by_id = {record['id']: record for record in large_records if record.get('source') == 'trosa_customer'}
+        for customer_id in ids:
+            outreach = module._modern_outreach_rows(self.connection, customer_id=customer_id)
+            expected = str((outreach[0] if outreach else {}).get('sent_date') or '')
+            self.assertTrue(expected)
+            self.assertEqual(by_id[customer_id]['latest_outreach_date'], expected)
+        # Conditional read: unchanged -> 304 with no body; a new communication invalidates.
+        first = client.get('/api/integrations/sela/exclusions')
+        self.assertEqual(first.status_code, 200)
+        cached = client.get('/api/integrations/sela/exclusions', headers={'If-None-Match': first.headers['ETag']})
+        self.assertEqual((cached.status_code, cached.get_data()), (304, b''))
+        extra = contacted(99, '2026-10-09T10:00:00+08:00')
+        changed = client.get('/api/integrations/sela/exclusions', headers={'If-None-Match': first.headers['ETag']})
+        self.assertEqual(changed.status_code, 200)
+        self.assertIn(extra, {item.get('id') for item in changed.get_json()['records']})
+
     def test_sela_lifecycle_and_structured_request_are_canonical_in_postgres(self):
         module = self._app_module()
         client = module.app.test_client()

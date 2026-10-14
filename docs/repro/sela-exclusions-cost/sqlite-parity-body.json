@@ -1,0 +1,773 @@
+{
+ "data_version": "4d005603144832b46e63a583ff474af743202b9e1b4c800d1aa873a91f62b888",
+ "records": [
+  {
+   "aliases": [
+    "Buyer 3"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 3",
+   "company": "Parity Co 3",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity3.example"
+   ],
+   "id": 3,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 3",
+   "normalized_name": "parity 3",
+   "record_id": "trosa-customer:3",
+   "source": "trosa_customer",
+   "source_id": "3",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-04 10:00:00",
+   "website": "https://www.parity3.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 4"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 4",
+   "company": "Parity Co 4",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity4.example"
+   ],
+   "id": 4,
+   "latest_outreach_date": "2026-10-08",
+   "match_policy": "hard",
+   "name": "Buyer 4",
+   "normalized_name": "parity 4",
+   "record_id": "trosa-customer:4",
+   "source": "trosa_customer",
+   "source_id": "4",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-05 10:00:00",
+   "website": "https://www.parity4.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 5"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 5",
+   "company": "Parity Co 5",
+   "contact_evidence": "inbound_capture",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity5.example"
+   ],
+   "id": 5,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 5",
+   "normalized_name": "parity 5",
+   "record_id": "trosa-customer:5",
+   "source": "trosa_customer",
+   "source_id": "5",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-06 10:00:00",
+   "website": "https://www.parity5.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 6"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 6",
+   "company": "Parity Co 6",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity6.example"
+   ],
+   "id": 6,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 6",
+   "normalized_name": "parity 6",
+   "record_id": "trosa-customer:6",
+   "source": "trosa_customer",
+   "source_id": "6",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-07 10:00:00",
+   "website": "https://www.parity6.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 8"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 8",
+   "company": "Parity Co 8",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity8.example"
+   ],
+   "id": 8,
+   "latest_outreach_date": "2026-10-12",
+   "match_policy": "hard",
+   "name": "Buyer 8",
+   "normalized_name": "parity 8",
+   "record_id": "trosa-customer:8",
+   "source": "trosa_customer",
+   "source_id": "8",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-09 10:00:00",
+   "website": "https://www.parity8.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 9"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 9",
+   "company": "Parity Co 9",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity9.example"
+   ],
+   "id": 9,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 9",
+   "normalized_name": "parity 9",
+   "record_id": "trosa-customer:9",
+   "source": "trosa_customer",
+   "source_id": "9",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-10 10:00:00",
+   "website": "https://www.parity9.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 12"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 12",
+   "company": "Parity Co 12",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity12.example"
+   ],
+   "id": 12,
+   "latest_outreach_date": "2026-10-16",
+   "match_policy": "hard",
+   "name": "Buyer 12",
+   "normalized_name": "parity 12",
+   "record_id": "trosa-customer:12",
+   "source": "trosa_customer",
+   "source_id": "12",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-13 10:00:00",
+   "website": "https://www.parity12.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 15"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 15",
+   "company": "Parity Co 15",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity15.example"
+   ],
+   "id": 15,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 15",
+   "normalized_name": "parity 15",
+   "record_id": "trosa-customer:15",
+   "source": "trosa_customer",
+   "source_id": "15",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-16 10:00:00",
+   "website": "https://www.parity15.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 16"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 16",
+   "company": "Parity Co 16",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity16.example"
+   ],
+   "id": 16,
+   "latest_outreach_date": "2026-10-20",
+   "match_policy": "hard",
+   "name": "Buyer 16",
+   "normalized_name": "parity 16",
+   "record_id": "trosa-customer:16",
+   "source": "trosa_customer",
+   "source_id": "16",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-17 10:00:00",
+   "website": "https://www.parity16.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 18"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 18",
+   "company": "Parity Co 18",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity18.example"
+   ],
+   "id": 18,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 18",
+   "normalized_name": "parity 18",
+   "record_id": "trosa-customer:18",
+   "source": "trosa_customer",
+   "source_id": "18",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-19 10:00:00",
+   "website": "https://www.parity18.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 20"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 20",
+   "company": "Parity Co 20",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity20.example"
+   ],
+   "id": 20,
+   "latest_outreach_date": "2026-10-24",
+   "match_policy": "hard",
+   "name": "Buyer 20",
+   "normalized_name": "parity 20",
+   "record_id": "trosa-customer:20",
+   "source": "trosa_customer",
+   "source_id": "20",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-21 10:00:00",
+   "website": "https://www.parity20.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 24"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 24",
+   "company": "Parity Co 24",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity24.example"
+   ],
+   "id": 24,
+   "latest_outreach_date": "2026-10-28",
+   "match_policy": "hard",
+   "name": "Buyer 24",
+   "normalized_name": "parity 24",
+   "record_id": "trosa-customer:24",
+   "source": "trosa_customer",
+   "source_id": "24",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-25 10:00:00",
+   "website": "https://www.parity24.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 27"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 27",
+   "company": "Parity Co 27",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity27.example"
+   ],
+   "id": 27,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 27",
+   "normalized_name": "parity 27",
+   "record_id": "trosa-customer:27",
+   "source": "trosa_customer",
+   "source_id": "27",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-28 10:00:00",
+   "website": "https://www.parity27.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 30"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 30",
+   "company": "Parity Co 30",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity30.example"
+   ],
+   "id": 30,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 30",
+   "normalized_name": "parity 30",
+   "record_id": "trosa-customer:30",
+   "source": "trosa_customer",
+   "source_id": "30",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-03 10:00:00",
+   "website": "https://www.parity30.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 32"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 32",
+   "company": "Parity Co 32",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity32.example"
+   ],
+   "id": 32,
+   "latest_outreach_date": "2026-10-08",
+   "match_policy": "hard",
+   "name": "Buyer 32",
+   "normalized_name": "parity 32",
+   "record_id": "trosa-customer:32",
+   "source": "trosa_customer",
+   "source_id": "32",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-05 10:00:00",
+   "website": "https://www.parity32.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 33"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 33",
+   "company": "Parity Co 33",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity33.example"
+   ],
+   "id": 33,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 33",
+   "normalized_name": "parity 33",
+   "record_id": "trosa-customer:33",
+   "source": "trosa_customer",
+   "source_id": "33",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-06 10:00:00",
+   "website": "https://www.parity33.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 36"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 36",
+   "company": "Parity Co 36",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity36.example"
+   ],
+   "id": 36,
+   "latest_outreach_date": "2026-10-12",
+   "match_policy": "hard",
+   "name": "Buyer 36",
+   "normalized_name": "parity 36",
+   "record_id": "trosa-customer:36",
+   "source": "trosa_customer",
+   "source_id": "36",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-09 10:00:00",
+   "website": "https://www.parity36.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 39"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 39",
+   "company": "Parity Co 39",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity39.example"
+   ],
+   "id": 39,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 39",
+   "normalized_name": "parity 39",
+   "record_id": "trosa-customer:39",
+   "source": "trosa_customer",
+   "source_id": "39",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-12 10:00:00",
+   "website": "https://www.parity39.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 40"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 40",
+   "company": "Parity Co 40",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity40.example"
+   ],
+   "id": 40,
+   "latest_outreach_date": "2026-10-16",
+   "match_policy": "hard",
+   "name": "Buyer 40",
+   "normalized_name": "parity 40",
+   "record_id": "trosa-customer:40",
+   "source": "trosa_customer",
+   "source_id": "40",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-13 10:00:00",
+   "website": "https://www.parity40.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 44"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 44",
+   "company": "Parity Co 44",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity44.example"
+   ],
+   "id": 44,
+   "latest_outreach_date": "2026-10-20",
+   "match_policy": "hard",
+   "name": "Buyer 44",
+   "normalized_name": "parity 44",
+   "record_id": "trosa-customer:44",
+   "source": "trosa_customer",
+   "source_id": "44",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-17 10:00:00",
+   "website": "https://www.parity44.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 45"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 45",
+   "company": "Parity Co 45",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity45.example"
+   ],
+   "id": 45,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 45",
+   "normalized_name": "parity 45",
+   "record_id": "trosa-customer:45",
+   "source": "trosa_customer",
+   "source_id": "45",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-18 10:00:00",
+   "website": "https://www.parity45.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 48"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 48",
+   "company": "Parity Co 48",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity48.example"
+   ],
+   "id": 48,
+   "latest_outreach_date": "2026-10-24",
+   "match_policy": "hard",
+   "name": "Buyer 48",
+   "normalized_name": "parity 48",
+   "record_id": "trosa-customer:48",
+   "source": "trosa_customer",
+   "source_id": "48",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-21 10:00:00",
+   "website": "https://www.parity48.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 51"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 51",
+   "company": "Parity Co 51",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity51.example"
+   ],
+   "id": 51,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 51",
+   "normalized_name": "parity 51",
+   "record_id": "trosa-customer:51",
+   "source": "trosa_customer",
+   "source_id": "51",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-24 10:00:00",
+   "website": "https://www.parity51.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 52"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 52",
+   "company": "Parity Co 52",
+   "contact_evidence": "customer_reply",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity52.example"
+   ],
+   "id": 52,
+   "latest_outreach_date": "2026-10-28",
+   "match_policy": "hard",
+   "name": "Buyer 52",
+   "normalized_name": "parity 52",
+   "record_id": "trosa-customer:52",
+   "source": "trosa_customer",
+   "source_id": "52",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-25 10:00:00",
+   "website": "https://www.parity52.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 54"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 54",
+   "company": "Parity Co 54",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity54.example"
+   ],
+   "id": 54,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 54",
+   "normalized_name": "parity 54",
+   "record_id": "trosa-customer:54",
+   "source": "trosa_customer",
+   "source_id": "54",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-27 10:00:00",
+   "website": "https://www.parity54.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 57"
+   ],
+   "business_stage": "",
+   "canonical_name": "Parity Co 57",
+   "company": "Parity Co 57",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity57.example"
+   ],
+   "id": 57,
+   "latest_outreach_date": "",
+   "match_policy": "hard",
+   "name": "Buyer 57",
+   "normalized_name": "parity 57",
+   "record_id": "trosa-customer:57",
+   "source": "trosa_customer",
+   "source_id": "57",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-02 10:00:00",
+   "website": "https://www.parity57.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 60"
+   ],
+   "business_stage": "成交",
+   "canonical_name": "Parity Co 60",
+   "company": "Parity Co 60",
+   "contact_evidence": "recorded_communication",
+   "contacted": true,
+   "country": "Brazil",
+   "domains": [
+    "parity60.example"
+   ],
+   "id": 60,
+   "latest_outreach_date": "2026-10-08",
+   "match_policy": "hard",
+   "name": "Buyer 60",
+   "normalized_name": "parity 60",
+   "record_id": "trosa-customer:60",
+   "source": "trosa_customer",
+   "source_id": "60",
+   "status": "trosa_customer",
+   "updated_at": "2026-10-05 10:00:00",
+   "website": "https://www.parity60.example/path"
+  },
+  {
+   "aliases": [
+    "Buyer 11"
+   ],
+   "canonical_name": "Parity Co 11",
+   "country": "Brazil",
+   "domains": [
+    "parity11.example"
+   ],
+   "match_policy": "hard",
+   "normalized_name": "parity 11",
+   "reason": "not a buyer",
+   "record_id": "trosa-contact-suppression:1",
+   "source": "trosa_contact_suppression",
+   "source_id": "parity-11",
+   "status": "do_not_contact",
+   "updated_at": "2026-10-14 16:44:58"
+  },
+  {
+   "aliases": [
+    "Buyer 22"
+   ],
+   "canonical_name": "Parity Co 22",
+   "country": "Brazil",
+   "domains": [
+    "parity22.example"
+   ],
+   "match_policy": "hard",
+   "normalized_name": "parity 22",
+   "reason": "not a buyer",
+   "record_id": "trosa-contact-suppression:2",
+   "source": "trosa_contact_suppression",
+   "source_id": "parity-22",
+   "status": "do_not_contact",
+   "updated_at": "2026-10-14 16:44:58"
+  },
+  {
+   "aliases": [
+    "Buyer 33"
+   ],
+   "canonical_name": "Parity Co 33",
+   "country": "Brazil",
+   "domains": [
+    "parity33.example"
+   ],
+   "match_policy": "hard",
+   "normalized_name": "parity 33",
+   "reason": "not a buyer",
+   "record_id": "trosa-contact-suppression:3",
+   "source": "trosa_contact_suppression",
+   "source_id": "parity-33",
+   "status": "do_not_contact",
+   "updated_at": "2026-10-14 16:44:58"
+  },
+  {
+   "aliases": [
+    "Buyer 44"
+   ],
+   "canonical_name": "Parity Co 44",
+   "country": "Brazil",
+   "domains": [
+    "parity44.example"
+   ],
+   "match_policy": "hard",
+   "normalized_name": "parity 44",
+   "reason": "not a buyer",
+   "record_id": "trosa-contact-suppression:4",
+   "source": "trosa_contact_suppression",
+   "source_id": "parity-44",
+   "status": "do_not_contact",
+   "updated_at": "2026-10-14 16:44:58"
+  },
+  {
+   "aliases": [
+    "Buyer 55"
+   ],
+   "canonical_name": "Parity Co 55",
+   "country": "Brazil",
+   "domains": [
+    "parity55.example"
+   ],
+   "match_policy": "hard",
+   "normalized_name": "parity 55",
+   "reason": "not a buyer",
+   "record_id": "trosa-contact-suppression:5",
+   "source": "trosa_contact_suppression",
+   "source_id": "parity-55",
+   "status": "do_not_contact",
+   "updated_at": "2026-10-14 16:44:58"
+  }
+ ],
+ "schema_version": 1,
+ "service": "trosa",
+ "success": true
+}

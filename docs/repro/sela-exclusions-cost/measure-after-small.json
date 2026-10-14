@@ -1,0 +1,425 @@
+{
+  "summary": {
+    "label": "after-small",
+    "tree": "/Users/luoxin/Desktop/trosa-worktrees/sela-exclusions-cost",
+    "records": 13,
+    "customers_in_db": null,
+    "median_seconds": 0.0177,
+    "max_seconds": 0.0213,
+    "sql_per_call": [
+      9
+    ],
+    "bytes": 7999,
+    "limit100_bytes": 7999,
+    "body_sha256_without_generated_at": "d263fc234321a55cef4fc2a59de8c3d0b24e93eb07023e1e51eb7815fd29316e",
+    "conditional_request": {
+      "status": 304,
+      "body_bytes": 0,
+      "seconds": 0.0179,
+      "sql": 9
+    },
+    "data_version": "b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c",
+    "top_tables": [
+      [
+        "trosa.customer_interactions",
+        2
+      ],
+      [
+        "trosa.inbox_items",
+        2
+      ],
+      [
+        "trosa.email_delivery_events",
+        1
+      ],
+      [
+        "trosa.customer_records",
+        1
+      ],
+      [
+        "trosa.outreach_messages",
+        1
+      ],
+      [
+        "trosa.agent_prospect_profiles",
+        1
+      ],
+      [
+        "trosa.business_exclusions",
+        1
+      ]
+    ]
+  },
+  "runs": [
+    {
+      "seconds": 0.019,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0169,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0175,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0173,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0169,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0185,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0213,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0172,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0198,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    },
+    {
+      "seconds": 0.0179,
+      "sql": 9,
+      "connections": 1,
+      "bytes": 7999,
+      "etag": "\"b15ee126e7844d25163e823fceb22d7cc2b8a9423d03e537bc65cfc8becf3a8c\"",
+      "top_tables": [
+        [
+          "trosa.customer_interactions",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "trosa.email_delivery_events",
+          1
+        ],
+        [
+          "trosa.customer_records",
+          1
+        ],
+        [
+          "trosa.outreach_messages",
+          1
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          1
+        ],
+        [
+          "trosa.business_exclusions",
+          1
+        ]
+      ]
+    }
+  ]
+}

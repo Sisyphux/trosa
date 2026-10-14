@@ -4356,13 +4356,42 @@ def _sela_exclusion_snapshot_records(conn):
 
     if postgres_mode():
         records = []
-        for item in _active_customers(conn):
+        # One narrow Customer read and one latest-outreach read for the whole
+        # snapshot: the statement count must not grow with the Customer count.
+        # ``DISTINCT ON`` keeps exactly the row ``_modern_outreach_rows`` would
+        # return first per Customer (same ordering, same date projection).
+        customers = conn.execute(
+            '''SELECT id, name, company, website, country, business_stage, updated_at
+                 FROM trosa.customer_records WHERE deleted_at IS NULL
+                ORDER BY updated_at DESC, id DESC''',
+        ).fetchall()
+        latest_outreach_by_customer = {
+            int(row['customer_id']): str(row['sent_date'] or '')
+            for row in conn.execute(
+                '''SELECT DISTINCT ON (account_ref.legacy_customer_id)
+                          account_ref.legacy_customer_id AS customer_id,
+                          COALESCE(trosa.compat_local_date(message.sent_at), '') AS sent_date
+                     FROM trosa.outreach_messages message
+                     JOIN trosa.legacy_row_refs ref ON ref.target_id=message.id
+                     JOIN trosa.account_legacy_refs account_ref
+                       ON account_ref.account_id=message.account_id
+                      AND account_ref.organization_id=ref.organization_id
+                      AND account_ref.legacy_user_id=ref.legacy_user_id
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id=trosa.compat_current_user()
+                      AND ref.table_name='outreach_emails'
+                      AND account_ref.legacy_customer_id IS NOT NULL
+                    ORDER BY account_ref.legacy_customer_id,
+                             COALESCE(message.sent_at, message.created_at) DESC,
+                             ref.legacy_id DESC''',
+            ).fetchall()
+        }
+        for row in customers:
+            item = dict(row)
             customer_id = int(item['id'])
             if not contact_evidence.get(customer_id):
                 continue
-            latest_outreach = _modern_outreach_rows(conn, customer_id=customer_id)
-            latest_outreach_date = str((latest_outreach[0] if latest_outreach else {}).get('sent_date') or '')
-            record = customer_record(item, customer_id, latest_outreach_date)
+            record = customer_record(item, customer_id, latest_outreach_by_customer.get(customer_id, ''))
             if record:
                 records.append(record)
         suppressed = conn.execute(
