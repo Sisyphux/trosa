@@ -480,5 +480,60 @@ class SelaProspectReadToolsTest(unittest.TestCase):
         self.assertEqual(cached.get_data(), b'')
 
 
+    # --- S9 regression classes -------------------------------------------
+    #
+    # 空日期导入草稿 and 已有外发记录 are covered by the outreach-history
+    # section above: a date-less imported draft is never a send, and mail
+    # recorded under another source is still counted.  The third class,
+    # 同名占位行, is a read-surface concern here - two customers that share a
+    # name must keep separate identities and separate outreach history.
+
+    def add_customer_row(self, name, company=''):
+        conn = self.hamid_db()
+        cursor = conn.execute(
+            'INSERT INTO customers (name, company, country, website) VALUES (?, ?, ?, ?)',
+            (name, company or name, 'Germany', 'https://%s.example' % name.lower().replace(' ', '-')))
+        customer_id = cursor.lastrowid
+        conn.commit()
+        return customer_id
+
+    def add_profile(self, source_id, customer_id, permission='allowed'):
+        conn = self.hamid_db()
+        conn.execute(
+            'INSERT INTO agent_prospect_profiles '
+            '(legacy_user_id, source, source_id, customer_id, research_json, contact_permission) '
+            "VALUES ('hamid', 'sela', ?, ?, '{}', ?)",
+            (source_id, customer_id, permission))
+        conn.commit()
+
+    def test_same_name_customers_keep_separate_identities(self):
+        first = self.add_customer_row('Jigar Plast')
+        second = self.add_customer_row('Jigar Plast')
+        self.assertNotEqual(first, second)
+        self.add_profile('placeholder-1902', first)
+        self.add_profile('placeholder-842', second)
+
+        rows = {row['id']: row for row in self.list_prospects()}
+        self.assertEqual(set(rows), {'placeholder-1902', 'placeholder-842'})
+        self.assertEqual(rows['placeholder-1902']['trosa_id'], first)
+        self.assertEqual(rows['placeholder-842']['trosa_id'], second)
+
+        self.assertEqual(self.single('placeholder-842')['trosa_id'], second)
+        self.assertEqual(self.single('placeholder-1902')['trosa_id'], first)
+
+    def test_same_name_outreach_history_stays_per_customer(self):
+        first = self.add_customer_row('Same Name Ltd')
+        second = self.add_customer_row('Same Name Ltd')
+        self.add_profile('same-1', first)
+        self.add_profile('same-2', second)
+        self.add_outreach(first, 'legacy-sela', 'same-1', '2026-08-13')
+
+        self.assertEqual(self.single('same-1')['outreach']['sent_count'], 1)
+        self.assertEqual(self.single('same-1')['outreach']['first_sent_at'], '2026-08-13')
+        untouched = self.single('same-2')['outreach']
+        self.assertEqual(untouched['sent_count'], 0)
+        self.assertEqual(untouched['first_sent_at'], '')
+
+
 if __name__ == '__main__':
     unittest.main()
