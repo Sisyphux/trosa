@@ -65,8 +65,31 @@ function setRichText(el, value, isHtml) {
   el.innerHTML = isHtml ? renderRichText(value || '') : plainTextToHtml(value || '');
 }
 
-function uiIcon(name) {
-  return '<span class="ui-icon ui-icon-' + name + '" aria-hidden="true"></span>';
+// tier: 默认 16px 档（只有线）；'md' = 20px 档；'id' = 24px 档，带浅灰片，只给身份位置用。
+function uiIcon(name, tier) {
+  return '<span class="ui-icon ui-icon-' + name + (tier ? ' ui-icon-' + tier : '') + '" aria-hidden="true"></span>';
+}
+
+// ---- 统一等待组件：「一笔」写字 ------------------------------------------------
+// 三档：inline（按钮、状态条旁）、block（分区、列表、弹窗内）、page（打开客户这类整页）。
+// 超过 300ms 才出现（CSS animation-delay，不靠定时器）；文案由调用方给，保持具体说法。
+var _WAIT_PEN = '<svg class="wait-pen" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="100" d="M3 13c3-5 5 5 8 0s5 5 8 0"/></svg>';
+var _WAIT_PAPER = '<svg class="wait-paper" viewBox="0 0 38 46" aria-hidden="true"><path d="M4 3.5c10-.8 20-.8 30 0 .7 13 .7 26 0 39-10 .7-20 .7-30 0-.7-13-.7-26 0-39z"/>' +
+  '<path class="ln ln1" pathLength="100" d="M10 14c3-2 6 2 9 0s6 2 9 0"/><path class="ln ln2" pathLength="100" d="M10 22c3-2 6 2 9 0s6 2 9 0"/>' +
+  '<path class="ln ln3" pathLength="100" d="M10 30c3-2 6 2 9 0"/></svg>';
+var _WAIT_PAGE = '<svg class="wait-page-art" viewBox="160 36 200 206" aria-hidden="true">' +
+  '<path class="pt" d="M170 52c40-3 100-3 140 0 3 50 3 120 0 175-40 4-100 4-140 0-3-55-3-125 0-175z"/>' +
+  '<g class="doc"><path class="sheet" pathLength="100" d="M170 52c40-3 100-3 140 0 3 50 3 120 0 175-40 4-100 4-140 0-3-55-3-125 0-175z"/>' +
+  '<path class="line l1" pathLength="100" d="M192 98c8-5 16 5 24 0s16 5 24 0 16 5 24 0 16 5 24 0"/>' +
+  '<path class="line l2" pathLength="100" d="M192 128c8-5 16 5 24 0s16 5 24 0 16 5 24 0"/>' +
+  '<path class="line l3" pathLength="100" d="M192 158c8-5 16 5 24 0s16 5 24 0"/></g>' +
+  '<g class="quill"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path class="shaft" d="M1 -1L34 -13"/></g></svg>';
+
+function waitHtml(text, tier) {
+  var label = escapeHtml(text || '正在加载…');
+  if (tier === 'page') return '<span class="wait wait-in wait-page" role="status">' + _WAIT_PAGE + '<span class="wait-text">' + label + '</span></span>';
+  if (tier === 'inline') return '<span class="wait wait-in wait-inline" role="status">' + _WAIT_PEN + '<span class="wait-text">' + label + '</span></span>';
+  return '<span class="wait wait-in wait-block" role="status">' + _WAIT_PAPER + '<span class="wait-text">' + label + '</span></span>';
 }
 
 // ---- reusable compact menu: a trigger button + a listbox -------------------
@@ -312,8 +335,9 @@ function applyIconButtons(root) {
     if (button.closest && button.closest('.modal-footer')) return;
     var accessibleLabel = (button.getAttribute('aria-label') || button.getAttribute('title') || '').trim();
     var inlineIcon = _INLINE_ICON_ACTIONS[accessibleLabel];
-    if (inlineIcon && button.querySelector('svg')) {
-      button.querySelectorAll('svg').forEach(function(svg) {
+    // data-hand 是「一笔」内联图标（悬停会描线），不换成遮罩图标。
+    if (inlineIcon && button.querySelector('svg:not([data-hand])')) {
+      button.querySelectorAll('svg:not([data-hand])').forEach(function(svg) {
         svg.outerHTML = uiIcon(inlineIcon);
       });
       button.dataset.iconified = 'true';
@@ -961,8 +985,10 @@ function showToast(message, type) {
   var container = document.getElementById('toastContainer');
   var toast = document.createElement('div');
   toast.className = 'toast ' + type;
-  var icons = { success: "check", error: "close", info: "info", warning: "alert" };
-  toast.innerHTML = uiIcon(icons[type] || "info") + "<span>" + message + "</span>";
+  // 图标在出现时被描一笔（内联 SVG；减少动态时直接到终态）。
+  var icons = { success: "done", error: "close", info: "info", warning: "alert" };
+  var iconName = icons[type] || "info";
+  toast.innerHTML = (typeof handIcon === 'function' ? handIcon(iconName, { cls: 'hi-draw' }) : uiIcon(iconName)) + "<span>" + message + "</span>";
   container.appendChild(toast);
   setTimeout(function() {
     toast.classList.add('is-leaving');
@@ -1877,7 +1903,7 @@ function loadFailureHtml(error, what, retryExpr) {
 }
 
 function loadLoadingHtml(text) {
-  return '<div class="empty-state" data-state="loading" role="status"><p>' + escapeHtml(text || '正在加载…') + '</p></div>';
+  return '<div class="empty-state wait-state" data-state="loading">' + waitHtml(text || '正在加载…', 'block') + '</div>';
 }
 
 // ========== Badge Helpers ==========
@@ -5286,7 +5312,7 @@ async function loadTodayFacts(customerId) {
     return;
   }
   body.classList.remove('lit-group--dim', 'has-lit');
-  body.innerHTML = '<div class="room-note" role="status">正在读取最近沟通…</div>';
+  body.innerHTML = '<div class="room-note">' + waitHtml('正在读取最近沟通…', 'inline') + '</div>';
   try {
     var data = await api('/api/customers/' + id + '/timeline?page=1&per_page=' + _TODAY_FACTS_LIMIT, { silentError: true });
     if (token !== _todayFactsToken) return;
@@ -8020,7 +8046,6 @@ function setCustomerWorkspaceState(state, title, message, progress) {
   var loading = document.getElementById('customerWorkspaceLoading');
   var titleEl = document.getElementById('customerWorkspaceLoadingTitle');
   var messageEl = document.getElementById('customerWorkspaceLoadingMessage');
-  var progressEl = document.getElementById('customerWorkspaceLoadingProgress');
   var retryButton = document.getElementById('customerWorkspaceRetryButton');
   if (!modal || !loading) return;
   var blocked = state === 'loading' || state === 'error';
@@ -8028,9 +8053,10 @@ function setCustomerWorkspaceState(state, title, message, progress) {
   modal.classList.toggle('is-error', state === 'error');
   modal.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
   loading.hidden = !blocked;
+  var artEl = loading.querySelector('.cw-state-art');
+  if (artEl && state === 'loading' && !artEl.firstChild) artEl.innerHTML = '<span class="wait-in">' + _WAIT_PAGE + '</span>';
   if (titleEl) titleEl.textContent = title || (state === 'error' ? '客户资料暂时无法加载' : '正在读取…');
   if (messageEl) messageEl.textContent = message || (state === 'error' ? '可以重试；当前不会覆盖你正在查看的其他客户。' : '');
-  if (progressEl) progressEl.style.width = Math.max(8, Math.min(100, Number(progress) || (state === 'error' ? 100 : 24))) + '%';
   if (retryButton) retryButton.hidden = state !== 'error';
 }
 
@@ -8094,7 +8120,7 @@ function resetCustomerWorkspaceRoom() {
   var quick = document.getElementById('customerTaskQuickActions');
   if (quick) quick.hidden = true;
   var list = document.getElementById('outreachList');
-  if (list) list.innerHTML = '<p class="cw-empty">正在读取沟通记录…</p>';
+  if (list) list.innerHTML = '<div class="cw-empty cw-wait">' + waitHtml('正在读取沟通记录…', 'block') + '</div>';
   var more = document.getElementById('customerTimelineMore');
   if (more) { more.hidden = true; more.innerHTML = ''; }
   ['cwCountTimeline', 'cwCountTasks', 'cwCountFiles', 'cwCountContacts'].forEach(function(id) {
@@ -9765,7 +9791,7 @@ async function loadMoreCustomerTimeline() {
   var scope = beginCustomerScope(customerId);
   var more = document.getElementById('customerTimelineMore');
   _customerTimelineLoading = true;
-  if (more) { more.className = 'cw-more is-loading'; more.innerHTML = '<span>正在读取更早的沟通…</span>'; more.hidden = false; }
+  if (more) { more.className = 'cw-more is-loading'; more.innerHTML = waitHtml('正在读取更早的沟通…', 'inline'); more.hidden = false; }
   try {
     var nextPage = _customerTimelinePage + 1;
     var data = await api('/api/customers/' + customerId + '/timeline?page=' + nextPage + '&per_page=' + _customerTimelinePerPage);
@@ -11240,10 +11266,11 @@ async function smartFillCustomer(type) {
   button.textContent = '正在识别…';
   review.hidden = false;
   review.className = 'smart-fill-review is-loading';
-  review.innerHTML = '<strong>' + progressMessages[0] + '</strong><span>通常需要几秒，请不要关闭窗口。</span>';
+  review.innerHTML = '<strong class="wait-line">' + _WAIT_PEN + '<i class="wait-text">' + escapeHtml(progressMessages[0]) + '</i></strong><span>通常需要几秒，请不要关闭窗口。</span>';
   var progressTimer = setInterval(function() {
     progressStep = Math.min(progressStep + 1, progressMessages.length - 1);
-    review.querySelector('strong').textContent = progressMessages[progressStep];
+    var waitText = review.querySelector('.wait-text');
+    if (waitText) waitText.textContent = progressMessages[progressStep];
   }, 2500);
 
   try {
@@ -12070,7 +12097,7 @@ async function loadSettings() {
 async function loadTeamMembers() {
   var list = document.getElementById('teamMembersList');
   if (!list) return;
-  list.textContent = '正在读取成员…';
+  list.innerHTML = waitHtml('正在读取成员…', 'inline');
   try {
     var data = await api('/api/team/members');
     list.innerHTML = '<div class="settings-row"><span class="label">成员</span><span class="value">状态</span></div>' +
@@ -12728,7 +12755,7 @@ function setCustomerSectionLoading(section, message) {
   };
   var targetId = targets[section];
   var target = targetId && document.getElementById(targetId);
-  if (target && !target.dataset.loaded) target.innerHTML = '<p class="cw-empty">' + escapeHtml(message || '正在读取…') + '</p>';
+  if (target && !target.dataset.loaded) target.innerHTML = '<div class="cw-empty cw-wait">' + waitHtml(message || '正在读取…', 'block') + '</div>';
 }
 
 async function loadCustomerSection(tabId) {
@@ -13590,7 +13617,7 @@ function weeklyPersonHead(uid, statusText) {
 
 function weeklyMemberShell(uid) {
   return '<section class="wk-person is-loading" data-weekly-member="' + escapeHtml(uid) + '" style="--person-color:' + escapeHtml(OV.colors[uid] || '#8B7355') + '">' + weeklyPersonHead(uid) +
-    '<div class="wk-state" role="status"><span class="loading-spinner" aria-hidden="true"></span><span>正在读取已选择内容</span></div></section>';
+    '<div class="wk-state">' + waitHtml('正在读取已选择内容', 'inline') + '</div></section>';
 }
 
 function weeklyMemberIds() {
@@ -13795,7 +13822,7 @@ function showOverviewCustomerLoading(owner) {
   var existing = document.getElementById('ovDetailModal');
   if (existing) existing.remove();
   var div = document.createElement('div');
-  div.innerHTML = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace"><div class="modal-header ov-customer-header"><div><div class="workspace-kicker">客户详情 · 只读</div><h3 id="ovDetailTitle">正在加载客户详情…</h3><div class="workspace-meta"><span>' + escapeHtml(OV.labels[owner] || owner || '') + '</span></div></div><button type="button" class="modal-close" aria-label="返回本周工作" onclick="event.preventDefault();event.stopPropagation();overviewCloseCustDetail()">' + uiIcon('close') + '</button></div><div class="modal-body ov-customer-body"><div class="ov-customer-loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><p>正在读取本周进展和最近沟通…</p></div></div></div></div>';
+  div.innerHTML = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace"><div class="modal-header ov-customer-header"><div><div class="workspace-kicker">客户详情 · 只读</div><h3 id="ovDetailTitle">正在加载客户详情…</h3><div class="workspace-meta"><span>' + escapeHtml(OV.labels[owner] || owner || '') + '</span></div></div><button type="button" class="modal-close" aria-label="返回本周工作" onclick="event.preventDefault();event.stopPropagation();overviewCloseCustDetail()">' + uiIcon('close') + '</button></div><div class="modal-body ov-customer-body"><div class="ov-customer-loading">' + waitHtml('正在读取本周进展和最近沟通…', 'block') + '</div></div></div></div>';
   document.body.appendChild(div.firstElementChild);
   var close = document.getElementById('ovDetailModal').querySelector('.modal-close');
   if (close) close.focus({preventScroll:true});

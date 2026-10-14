@@ -118,3 +118,103 @@ html[data-type="swiss"] .settings-group:has(#preferenceInterfacePerformance){dis
 /* customer workspace + top bar: no tracked labels anywhere */
 html[data-type="swiss"][data-type][data-type] :is(.cw-app,.room-top,.room-bot,.modal) :not(h1,h2,h3,.cw-name,.cw-title){
   letter-spacing:0 !important; text-transform:none !important}
+
+/* ==========================================================================
+   「一笔」手绘图标与等待（2026-10-14）
+   规则见 design/DESIGN_WORLD.md §2.2（动效例外）与 §2.6（一笔）。
+   图标由 tools/hand_icons.mjs 生成：静态遮罩图在 visual-v2.css，内联 SVG 在
+   index.html 的 data-hand 占位与 hand-icons.js。颜色只用 currentColor 与低
+   透明度墨色，不新增色、字体、阴影、圆角。
+   ========================================================================== */
+svg.hi{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;overflow:visible;flex:none}
+svg.hi.hi-id{stroke-width:1.6}
+svg.hi .pt{display:none}
+svg.hi.hi-id .pt{display:inline}
+svg.hi .pt path{fill:currentColor;fill-opacity:.1;stroke:none}
+svg.hi .d{fill:currentColor;stroke:none}
+svg.hi .s{stroke-dasharray:1 2}
+@keyframes hiDraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+/* 出现时被画出来：悬停 / 键盘聚焦 / 选中 / 显式 .hi-draw（提示里的图标） */
+svg.hi-draw .s,
+:is(.command-icon,.command-primary,.nav-item):is(:hover,:focus-visible) svg.hi .s,
+.nav-item.active svg.hi .s{animation:hiDraw var(--dl-dur-slow,.55s) var(--dl-ease,cubic-bezier(.16,1,.3,1)) both}
+svg.hi-draw .s:nth-of-type(2){animation-delay:.12s}
+.toast svg.hi{width:18px;height:18px}
+#trosa .room-index .nav-hand{width:2rem;height:2rem;align-self:center;color:var(--dl-ink)}
+.ui-icon.ui-icon-id{width:1.5em;height:1.5em}
+
+/* ---- 等待：一个组件，三档 -------------------------------------------------
+   inline（按钮、状态条旁）· block（分区、列表、弹窗内）· page（打开客户这类整页）。
+   超过 300ms 才出现：延迟由 CSS 完成，不靠定时器；没有动画时直接可见。
+   基础态就是“写满的样子”，所以减少动态 / 关闭动画时是静止的、不丢信息。 */
+.wait{display:inline-flex;align-items:center;gap:.6em;color:var(--dl-ink-2,#444);font-size:inherit;line-height:1.5}
+.wait-in{animation:waitIn .01s linear .3s backwards}
+@keyframes waitIn{from{opacity:0}to{opacity:1}}
+.wait-pen{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;flex:none}
+.wait-pen path{stroke-dasharray:100 200;animation:waitScribble 1.5s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes waitScribble{0%{stroke-dashoffset:100}50%{stroke-dashoffset:0}100%{stroke-dashoffset:-101}}
+.wait-block{gap:14px;padding:18px 0}
+.wait-paper{width:38px;height:46px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.wait-paper .ln{stroke-dasharray:100 200}
+.wait-paper .ln1{animation:waitL1 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.wait-paper .ln2{animation:waitL2 2.4s cubic-bezier(.4,0,.2,1) infinite}
+.wait-paper .ln3{animation:waitL3 2.4s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes waitL1{0%{stroke-dashoffset:100}25%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes waitL2{0%,25%{stroke-dashoffset:100}50%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+@keyframes waitL3{0%,50%{stroke-dashoffset:100}70%,85%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+.wait-page{flex-direction:column;gap:14px;padding:28px 0;text-align:center}
+.wait-page-art{width:96px;height:100px;fill:none;stroke:currentColor;stroke-width:3.1;stroke-linecap:round;stroke-linejoin:round;overflow:visible}
+.wait-page-art .pt{fill:currentColor;fill-opacity:.1;stroke:none;transform:translate(3px,3.4px)}
+.wait-page-art .sheet,.wait-page-art .line{stroke-dasharray:100 200}
+.wait-page-art .doc{animation:waitFade 5.2s linear infinite}
+.wait-page-art .sheet{animation:waitSheet 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.wait-page-art .l1{animation:waitPL1 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.wait-page-art .l2{animation:waitPL2 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.wait-page-art .l3{animation:waitPL3 5.2s cubic-bezier(.4,0,.2,1) infinite}
+.wait-page-art .quill{animation:waitQuill 5.2s cubic-bezier(.4,0,.2,1) infinite;transform:translate(266px,176px)}
+.wait-page-art .leaf{fill:var(--dl-gold-soft,#f2f2f2);stroke-width:2.6}
+@keyframes waitFade{0%,90%{opacity:1}100%{opacity:0}}
+@keyframes waitSheet{0%{stroke-dashoffset:100}20%,100%{stroke-dashoffset:0}}
+@keyframes waitPL1{0%,20%{stroke-dashoffset:100}40%,100%{stroke-dashoffset:0}}
+@keyframes waitPL2{0%,42%{stroke-dashoffset:100}56%,100%{stroke-dashoffset:0}}
+@keyframes waitPL3{0%,58%{stroke-dashoffset:100}68%,100%{stroke-dashoffset:0}}
+@keyframes waitQuill{
+  0%,18%{transform:translate(192px,98px);opacity:0}
+  22%{transform:translate(192px,98px);opacity:1}
+  40%{transform:translate(288px,98px);opacity:1}
+  42%{transform:translate(192px,128px);opacity:1}
+  56%{transform:translate(264px,128px);opacity:1}
+  58%{transform:translate(192px,158px);opacity:1}
+  68%{transform:translate(240px,158px);opacity:1}
+  78%,90%{transform:translate(266px,176px);opacity:1}
+  100%{transform:translate(266px,176px);opacity:0}}
+.wait-state .wait-block{padding:4px 0}
+.cw-wait .wait-block{padding:2px 0}
+
+/* 状态条：笔 → 勾 / 叹号，都是被画出来的 */
+.connection-status-spinner .wait-pen,.action-status-spinner .wait-pen{width:18px;height:18px}
+.wait-ok,.wait-err{display:none;width:18px;height:18px;stroke-width:1.9}
+.action-status.is-success .wait-pen,.action-status.is-error .wait-pen,.connection-status.is-restored .wait-pen{display:none}
+.action-status.is-success .wait-ok,.action-status.is-error .wait-err,.connection-status.is-restored .wait-ok{display:block}
+.wait-ok .s,.wait-err .s{animation:hiDraw var(--dl-dur,.28s) var(--dl-ease,cubic-bezier(.16,1,.3,1)) both}
+.wait-ok path:nth-of-type(2),.wait-err path:nth-of-type(2){animation-delay:.16s}
+
+/* 网站识别：行内一笔 */
+.smart-fill-review .wait-line{display:flex;align-items:center;gap:7px}
+.smart-fill-review .wait-line .wait-pen{width:16px;height:16px}
+.smart-fill-review .wait-text{font-style:normal}
+
+/* 客户工作区首屏：替换原来的进度条 */
+#trosa #customerEditModal .cw-state-art{display:block;width:64px;height:68px;margin-bottom:.4rem}
+#trosa #customerEditModal .cw-state-art .wait-page-art{width:64px;height:68px;display:block}
+#trosa #customerEditModal.is-error .cw-state-art{display:none}
+#trosa #customerEditModal .cw-state-art:empty{display:none}
+
+@media (prefers-reduced-motion:reduce){
+  svg.hi .s,.wait-ok .s,.wait-err .s{animation:none !important}
+  .wait-pen path,.wait-paper .ln,.wait-page-art *{animation:none !important}
+  .wait-page-art .quill{display:none}
+}
+html.motion-reduced svg.hi .s,html.motion-reduced .wait-ok .s,html.motion-reduced .wait-err .s{animation:none !important}
+html.motion-reduced :is(.wait-pen path,.wait-paper .ln,.wait-page-art *){animation:none !important}
+html.motion-reduced .wait-page-art .quill{display:none}

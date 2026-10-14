@@ -1,0 +1,288 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18201",
+  "checks": [
+    {
+      "name": "wide: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "wide: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "wide: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "wide: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "wide: 120ms 内等待组件还没出现",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "wide: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "wide: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "ipad: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "ipad: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "ipad: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "ipad: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "ipad: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "ipad: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "ipad: 120ms 内等待组件还没出现",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "ipad: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "ipad: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "iphone: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "iphone: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "iphone: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "iphone: 120ms 内等待组件还没出现",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "iphone: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "iphone: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "zoom200: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "zoom200: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "zoom200: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "zoom200: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "zoom200: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 120ms 内等待组件还没出现",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "zoom200: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "zoom200: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "reduced: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "reduced: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "reduced: 没有循环动画在跑",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "keyboard: 导航里有 3 个带笔画的手绘图标",
+      "ok": false,
+      "detail": "[]"
+    },
+    {
+      "name": "keyboard: 今天页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "keyboard: 页面上的遮罩图标都有图",
+      "ok": false,
+      "detail": "57 个"
+    },
+    {
+      "name": "keyboard: Tab 能到达可聚焦控件（焦点环由既有规则负责）",
+      "ok": true,
+      "detail": "搜索客户"
+    },
+    {
+      "name": "keyboard: 提示起始位移 ≤ 8px",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "keyboard: 保存中显示笔",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "keyboard: 已保存显示画出的勾",
+      "ok": false,
+      "detail": ""
+    },
+    {
+      "name": "keyboard: 120ms 内等待组件还没出现",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "keyboard: 800ms 后等待组件已出现",
+      "ok": false,
+      "detail": "none"
+    },
+    {
+      "name": "keyboard: 客户页无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "全程无页面错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "failed": 30
+}

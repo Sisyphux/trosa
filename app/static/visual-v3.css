@@ -1743,9 +1743,6 @@ input[type="checkbox"]:is(#trosa, #trosa *),input[type="radio"]:is(#trosa, #tros
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
   font-size: var(--dl-fs-caption) !important;
-}.connection-status-spinner:is(#trosa, #trosa *),.action-status-spinner:is(#trosa, #trosa *){
-  border-color: var(--dl-hair-strong) !important;
-  border-top-color: var(--dl-gold) !important;
 }.action-status-retry:is(#trosa, #trosa *){
   color: var(--dl-gold-ink) !important;
   background: transparent !important;

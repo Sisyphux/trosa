@@ -45,7 +45,7 @@
   --fs-micro: 0.72rem;        /* 10.8px  - 仅限装饰性大写小字 */
 }
 
-/* Phosphor Icons 2.1.1, regular weight, stored locally for a consistent UI language. */
+/* 「一笔」手绘图标：tools/hand_icons.mjs 生成的静态 SVG，用 CSS mask 出图。 */
 .ui-icon {
   --ui-icon: none;
   width: 1em;
@@ -56,38 +56,47 @@
   -webkit-mask: var(--ui-icon) center / contain no-repeat;
   mask: var(--ui-icon) center / contain no-repeat;
 }
-.ui-icon-close { --ui-icon: url("icons/phosphor/x.svg"); }
-.ui-icon-check { --ui-icon: url("icons/phosphor/check.svg"); }
-.ui-icon-alert { --ui-icon: url("icons/phosphor/warning.svg"); }
-.ui-icon-info { --ui-icon: url("icons/phosphor/info.svg"); }
-.ui-icon-sparkle { --ui-icon: url("icons/phosphor/sparkle.svg"); }
-.ui-icon-calendar { --ui-icon: url("icons/phosphor/calendar-blank.svg"); }
-.ui-icon-list { --ui-icon: url("icons/phosphor/list-bullets.svg"); }
-.ui-icon-left { --ui-icon: url("icons/phosphor/caret-left.svg"); }
-.ui-icon-right { --ui-icon: url("icons/phosphor/caret-right.svg"); }
-.ui-icon-up { --ui-icon: url("icons/phosphor/caret-up.svg"); }
-.ui-icon-down { --ui-icon: url("icons/phosphor/caret-down.svg"); }
-.ui-icon-external { --ui-icon: url("icons/phosphor/arrow-square-out.svg"); }
-.ui-icon-open { --ui-icon: url("icons/phosphor/identification-card.svg"); }
-.ui-icon-archive { --ui-icon: url("icons/phosphor/archive.svg"); }
-.ui-icon-edit { --ui-icon: url("icons/phosphor/pencil-simple.svg"); }
-.ui-icon-message { --ui-icon: url("icons/phosphor/chat-circle-text.svg"); }
-.ui-icon-mail { --ui-icon: url("icons/phosphor/envelope-simple.svg"); }
-.ui-icon-star { --ui-icon: url("icons/phosphor/star.svg"); }
-.ui-icon-settings { --ui-icon: url("icons/phosphor/gear-six.svg"); }
-.ui-icon-map { --ui-icon: url("icons/phosphor/map-pin.svg"); }
-.ui-icon-link { --ui-icon: url("icons/phosphor/link-simple.svg"); }
-.ui-icon-globe { --ui-icon: url("icons/phosphor/globe.svg"); }
-.ui-icon-search { --ui-icon: url("icons/phosphor/magnifying-glass.svg"); }
-.ui-icon-trash { --ui-icon: url("icons/phosphor/trash.svg"); }
-.ui-icon-export { --ui-icon: url("icons/phosphor/download-simple.svg"); }
-.ui-icon-refresh { --ui-icon: url("icons/phosphor/arrows-clockwise.svg"); }
-.ui-icon-plus { --ui-icon: url("icons/phosphor/plus.svg"); }
-.ui-icon-users { --ui-icon: url("icons/phosphor/users.svg"); }
-.ui-icon-more { --ui-icon: url("icons/phosphor/dots-three.svg"); }
-.ui-icon-sign-out { --ui-icon: url("icons/phosphor/sign-out.svg"); }
-.ui-icon-clock { --ui-icon: url("icons/phosphor/clock.svg"); }
-.ui-icon-file { --ui-icon: url("icons/phosphor/paperclip.svg"); }
+/* hand-icons:begin — 由 tools/hand_icons.mjs 生成，勿手改。默认 16px 档（只有线）；.ui-icon-md = 20px 档；.ui-icon-id = 24px 档，带浅灰片，只给身份位置用。 */
+.ui-icon-clock { --ui-icon: url("icons/hand/clock-16.svg"); --ui-icon-md: url("icons/hand/clock-20.svg"); --ui-icon-id: url("icons/hand/clock.svg"); }
+.ui-icon-users { --ui-icon: url("icons/hand/users-16.svg"); --ui-icon-md: url("icons/hand/users-20.svg"); --ui-icon-id: url("icons/hand/users.svg"); }
+.ui-icon-message { --ui-icon: url("icons/hand/message-16.svg"); --ui-icon-md: url("icons/hand/message-20.svg"); --ui-icon-id: url("icons/hand/message.svg"); }
+.ui-icon-calendar { --ui-icon: url("icons/hand/calendar-16.svg"); --ui-icon-md: url("icons/hand/calendar-20.svg"); --ui-icon-id: url("icons/hand/calendar.svg"); }
+.ui-icon-search { --ui-icon: url("icons/hand/search-16.svg"); --ui-icon-md: url("icons/hand/search-20.svg"); --ui-icon-id: url("icons/hand/search.svg"); }
+.ui-icon-settings { --ui-icon: url("icons/hand/settings-16.svg"); --ui-icon-md: url("icons/hand/settings-20.svg"); --ui-icon-id: url("icons/hand/settings.svg"); }
+.ui-icon-done { --ui-icon: url("icons/hand/done-16.svg"); --ui-icon-md: url("icons/hand/done-20.svg"); --ui-icon-id: url("icons/hand/done.svg"); }
+.ui-icon-plus { --ui-icon: url("icons/hand/plus-16.svg"); --ui-icon-md: url("icons/hand/plus-20.svg"); --ui-icon-id: url("icons/hand/plus.svg"); }
+.ui-icon-edit { --ui-icon: url("icons/hand/edit-16.svg"); --ui-icon-md: url("icons/hand/edit-20.svg"); --ui-icon-id: url("icons/hand/edit.svg"); }
+.ui-icon-check { --ui-icon: url("icons/hand/check-16.svg"); --ui-icon-md: url("icons/hand/check-20.svg"); --ui-icon-id: url("icons/hand/check.svg"); }
+.ui-icon-close { --ui-icon: url("icons/hand/close-16.svg"); --ui-icon-md: url("icons/hand/close-20.svg"); --ui-icon-id: url("icons/hand/close.svg"); }
+.ui-icon-alert { --ui-icon: url("icons/hand/alert-16.svg"); --ui-icon-md: url("icons/hand/alert-20.svg"); --ui-icon-id: url("icons/hand/alert.svg"); }
+.ui-icon-info { --ui-icon: url("icons/hand/info-16.svg"); --ui-icon-md: url("icons/hand/info-20.svg"); --ui-icon-id: url("icons/hand/info.svg"); }
+.ui-icon-sparkle { --ui-icon: url("icons/hand/sparkle-16.svg"); --ui-icon-md: url("icons/hand/sparkle-20.svg"); --ui-icon-id: url("icons/hand/sparkle.svg"); }
+.ui-icon-list { --ui-icon: url("icons/hand/list-16.svg"); --ui-icon-md: url("icons/hand/list-20.svg"); --ui-icon-id: url("icons/hand/list.svg"); }
+.ui-icon-mail { --ui-icon: url("icons/hand/mail-16.svg"); --ui-icon-md: url("icons/hand/mail-20.svg"); --ui-icon-id: url("icons/hand/mail.svg"); }
+.ui-icon-file { --ui-icon: url("icons/hand/file-16.svg"); --ui-icon-md: url("icons/hand/file-20.svg"); --ui-icon-id: url("icons/hand/file.svg"); }
+.ui-icon-archive { --ui-icon: url("icons/hand/archive-16.svg"); --ui-icon-md: url("icons/hand/archive-20.svg"); --ui-icon-id: url("icons/hand/archive.svg"); }
+.ui-icon-trash { --ui-icon: url("icons/hand/trash-16.svg"); --ui-icon-md: url("icons/hand/trash-20.svg"); --ui-icon-id: url("icons/hand/trash.svg"); }
+.ui-icon-export { --ui-icon: url("icons/hand/export-16.svg"); --ui-icon-md: url("icons/hand/export-20.svg"); --ui-icon-id: url("icons/hand/export.svg"); }
+.ui-icon-refresh { --ui-icon: url("icons/hand/refresh-16.svg"); --ui-icon-md: url("icons/hand/refresh-20.svg"); --ui-icon-id: url("icons/hand/refresh.svg"); }
+.ui-icon-external { --ui-icon: url("icons/hand/external-16.svg"); --ui-icon-md: url("icons/hand/external-20.svg"); --ui-icon-id: url("icons/hand/external.svg"); }
+.ui-icon-open { --ui-icon: url("icons/hand/open-16.svg"); --ui-icon-md: url("icons/hand/open-20.svg"); --ui-icon-id: url("icons/hand/open.svg"); }
+.ui-icon-link { --ui-icon: url("icons/hand/link-16.svg"); --ui-icon-md: url("icons/hand/link-20.svg"); --ui-icon-id: url("icons/hand/link.svg"); }
+.ui-icon-globe { --ui-icon: url("icons/hand/globe-16.svg"); --ui-icon-md: url("icons/hand/globe-20.svg"); --ui-icon-id: url("icons/hand/globe.svg"); }
+.ui-icon-map { --ui-icon: url("icons/hand/map-16.svg"); --ui-icon-md: url("icons/hand/map-20.svg"); --ui-icon-id: url("icons/hand/map.svg"); }
+.ui-icon-star { --ui-icon: url("icons/hand/star-16.svg"); --ui-icon-md: url("icons/hand/star-20.svg"); --ui-icon-id: url("icons/hand/star.svg"); }
+.ui-icon-more { --ui-icon: url("icons/hand/more-16.svg"); --ui-icon-md: url("icons/hand/more-20.svg"); --ui-icon-id: url("icons/hand/more.svg"); }
+.ui-icon-sign-out { --ui-icon: url("icons/hand/sign-out-16.svg"); --ui-icon-md: url("icons/hand/sign-out-20.svg"); --ui-icon-id: url("icons/hand/sign-out.svg"); }
+.ui-icon-left { --ui-icon: url("icons/hand/left-16.svg"); --ui-icon-md: url("icons/hand/left-20.svg"); --ui-icon-id: url("icons/hand/left.svg"); }
+.ui-icon-right { --ui-icon: url("icons/hand/right-16.svg"); --ui-icon-md: url("icons/hand/right-20.svg"); --ui-icon-id: url("icons/hand/right.svg"); }
+.ui-icon-up { --ui-icon: url("icons/hand/up-16.svg"); --ui-icon-md: url("icons/hand/up-20.svg"); --ui-icon-id: url("icons/hand/up.svg"); }
+.ui-icon-down { --ui-icon: url("icons/hand/down-16.svg"); --ui-icon-md: url("icons/hand/down-20.svg"); --ui-icon-id: url("icons/hand/down.svg"); }
+.ui-icon-today { --ui-icon: url("icons/hand/today-16.svg"); --ui-icon-md: url("icons/hand/today-20.svg"); --ui-icon-id: url("icons/hand/today.svg"); }
+.ui-icon-inbox { --ui-icon: url("icons/hand/inbox-16.svg"); --ui-icon-md: url("icons/hand/inbox-20.svg"); --ui-icon-id: url("icons/hand/inbox.svg"); }
+.ui-icon-tidy { --ui-icon: url("icons/hand/tidy-16.svg"); --ui-icon-md: url("icons/hand/tidy-20.svg"); --ui-icon-id: url("icons/hand/tidy.svg"); }
+.ui-icon-batch { --ui-icon: url("icons/hand/batch-16.svg"); --ui-icon-md: url("icons/hand/batch-20.svg"); --ui-icon-id: url("icons/hand/batch.svg"); }
+.ui-icon.ui-icon-md { --ui-icon: var(--ui-icon-md); }
+.ui-icon.ui-icon-id { --ui-icon: var(--ui-icon-id); }
+/* hand-icons:end */
 
 html { background: var(--v2-canvas); }
 body {
@@ -496,7 +505,6 @@ tbody tr:hover { background: rgba(255,253,249,.43); }
 #logsList .card, #historyList .card { border-color: rgba(255,255,255,.72); background: rgba(255,253,249,.48); box-shadow: inset 0 1px 0 rgba(255,255,255,.62); }
 .settings-group { border-bottom-color: var(--v2-line); }
 .nav-order-item { border-color: var(--v2-line); border-radius: 10px; background: rgba(255,253,249,.45); }
-.loading-spinner { width: 14px; height: 14px; border: 2px solid var(--v2-line); border-top-color: var(--v2-clay); border-radius: 50%; animation: customer-workspace-spin .8s linear infinite; }
 
 /* Weekly review shares the primary workspace's timber-line canvas, with light glass cards for each discussion item. */
 
@@ -1898,7 +1906,6 @@ html.motion-lite .modal {
 @media (prefers-reduced-motion: reduce) {
   .command-shelf, #inboxReplyModal .modal-header { transition: none !important; }
 }
-@keyframes customer-workspace-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 680px) {
   :root { --glass-radius-panel: 28px; }
@@ -2286,7 +2293,7 @@ html:not(.supports-view-transitions) .page-section.active {
 }
 
 @keyframes trade-os-toast-in {
-  from { opacity: 0; transform: translate3d(0,4px,0); }
+  from { opacity: 0; transform: translate3d(8px,0,0); }
   to { opacity: 1; transform: translate3d(0,0,0); }
 }
 
