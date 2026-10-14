@@ -1154,6 +1154,31 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         row = next(item for item in listed if item['id'] == source_id)
         self.assertEqual(row['email'], email)
 
+    def test_application_connections_cancel_runaway_statements(self):
+        """The web connection has a statement timeout; a separate connection does not."""
+        import psycopg
+        import postgres_compat
+
+        with mock.patch.dict(os.environ, {postgres_compat.STATEMENT_TIMEOUT_ENV: '1000'}):
+            conn = postgres_compat.connect('hamid')
+            try:
+                shown = conn.execute('SHOW statement_timeout').fetchone()[0]
+                self.assertEqual(shown, '1s')
+                with self.assertRaises(psycopg.errors.QueryCanceled):
+                    conn.execute('SELECT pg_sleep(3)')
+                conn.rollback()
+            finally:
+                conn.close()
+        with mock.patch.dict(os.environ, {postgres_compat.STATEMENT_TIMEOUT_ENV: '0'}):
+            conn = postgres_compat.connect('hamid')
+            try:
+                self.assertEqual(conn.execute('SHOW statement_timeout').fetchone()[0], '0')
+            finally:
+                conn.close()
+        # Backups, migrations and imports connect on their own and keep the server default.
+        with psycopg.connect(os.environ['TRADE_OS_DATABASE_URL']) as own:
+            self.assertEqual(own.execute('SHOW statement_timeout').fetchone()[0], '0')
+
     def test_customer_search_matches_display_source_label(self):
         """客户列表把来源显示成“自动开发”，搜索这个显示词也要能命中。"""
         module = self._app_module()

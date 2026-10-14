@@ -1,3 +1,9 @@
+## 2026-10-14 — Web 应用的数据库连接加语句超时
+
+- 现象：10-14 两段故障里，被 Cloudflare 放弃的请求在数据库里继续执行，占着为数不多的服务线程；数据库侧 `statement_timeout` 为 0，没有任何上限。
+- 修改：应用自己的数据库连接默认带 60 秒语句超时，超过即被数据库取消；可用 `TRADE_OS_STATEMENT_TIMEOUT_MS` 调整，设 0 关闭。备份、迁移和独立连接的导入不受影响（不走这条连接）。
+- 影响范围：`postgres_compat.py`（`connect`、`statement_timeout_ms`）。不改表结构、不改接口形状。
+- 验证：`tests/test_statement_timeout.py`（3 条）；PostgreSQL 演练用例确认 1 秒限制下 3 秒查询被取消、设 0 可关闭、独立连接不受限。尚未发布到 ECS。
 ## 2026-10-14 — Sela 排除清单读取不再随客户数增长
 
 - 现象：`GET /api/integrations/sela/exclusions` 在正式站每次约 518 条查询、0.8 s，Sela 轮询时占满线程。

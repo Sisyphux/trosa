@@ -9,6 +9,7 @@ rehearsal, and an explicitly approved rollback environment.
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from typing import Any, Iterable
@@ -16,6 +17,26 @@ from typing import Any, Iterable
 import psycopg
 from psycopg import errors
 from psycopg.rows import tuple_row
+
+
+# A web request that runs longer than this is worth cutting off: Cloudflare gives
+# up on the client after ~100 s, but the database keeps executing, and a stuck
+# statement holds one of the few server threads for as long as it runs.  The
+# limit is applied per application connection only (backups, migrations and
+# imports that connect on their own are not affected).  0 disables it.
+DEFAULT_STATEMENT_TIMEOUT_MS = 60_000
+STATEMENT_TIMEOUT_ENV = "TRADE_OS_STATEMENT_TIMEOUT_MS"
+
+
+def statement_timeout_ms() -> int:
+    raw = str(os.environ.get(STATEMENT_TIMEOUT_ENV, "") or "").strip()
+    if not raw:
+        return DEFAULT_STATEMENT_TIMEOUT_MS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_STATEMENT_TIMEOUT_MS
+    return value if value >= 0 else DEFAULT_STATEMENT_TIMEOUT_MS
 
 
 _PRAGMA_TABLE_INFO = re.compile(
@@ -323,6 +344,7 @@ def connect(user: str | None = None) -> CompatConnection:
     # the PostgreSQL server happens to run.
     raw.execute("SELECT set_config('TimeZone', 'Asia/Shanghai', false)")
     raw.execute("SELECT set_config('trade_os.user', %s, false)", (str(user or "hamid"),))
+    raw.execute("SELECT set_config('statement_timeout', %s, false)", (str(statement_timeout_ms()),))
     raw.commit()
     return CompatConnection(raw)
 
