@@ -257,6 +257,164 @@ class SelaProspectReadToolsTest(unittest.TestCase):
         for index in range(3):
             self.assertEqual(listed[f'page-{index}'], self.single(f'page-{index}'))
 
+    # ---- filters (T2) ----------------------------------------------------
+    def upsert_body(self, body):
+        key = f"sela-v2:{body['source_id']}:read-tools"
+        response = self.client.post(
+            '/api/integrations/sela/prospects',
+            json={'prospect': body, 'idempotency_key': key},
+            headers={**self.headers, 'X-Idempotency-Key': key},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()
+
+    def upsert_without_email(self, source_id, company):
+        return self.upsert_body({
+            'source_id': source_id, 'company': company, 'country': 'Germany',
+            'website': f'https://{source_id}.example/', 'status': 'READY TO CONTACT',
+            'contact': {'name': 'Buyer', 'title': 'Purchasing'},
+            'outreach_status': 'CONTACT_NEEDED',
+        })
+
+    def filtered(self, query):
+        response = self.client.get(
+            '/api/integrations/sela/prospects?' + query, headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()
+        return body, [row['id'] for row in body['prospects']]
+
+    def add_verification(self, email, status='likely_deliverable'):
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                'INSERT INTO email_verifications (email, deliverability_status) VALUES (?, ?)',
+                (email, status),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_permission(self, source_id, permission):
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                'UPDATE agent_prospect_profiles SET contact_permission=? WHERE source_id=?',
+                (permission, source_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def test_needs_email_returns_prospects_without_a_contact_email(self):
+        self.upsert('has-email', 'Has Email GmbH')
+        self.upsert_without_email('no-email', 'No Email GmbH')
+
+        _, ids = self.filtered('needs=email')
+        self.assertEqual(ids, ['no-email'])
+
+    def test_needs_verify_tracks_the_email_route_status(self):
+        created = self.upsert('to-verify', 'To Verify GmbH')
+
+        _, ids = self.filtered('needs=verify')
+        self.assertEqual(ids, ['to-verify'])
+
+        self.add_verification(f'buyer@to-verify.example')
+        _, ids = self.filtered('needs=verify')
+        self.assertNotIn('to-verify', ids)
+
+    def test_needs_first_touch_needs_a_verified_unsent_mailbox(self):
+        self.upsert('unsent', 'Unsent GmbH')
+        self.add_verification('buyer@unsent.example')
+
+        _, ids = self.filtered('needs=first_touch')
+        self.assertEqual(ids, ['unsent'])
+
+        created = self.upsert('already-sent', 'Already Sent GmbH')
+        self.add_verification('buyer@already-sent.example')
+        self.add_outreach(created['trosa_id'], 'legacy-sela', 'sent-1', '2026-08-13')
+
+        _, ids = self.filtered('needs=first_touch')
+        self.assertEqual(ids, ['unsent'])
+        self.assertNotIn('already-sent', ids)
+
+    def test_needs_follow_up_uses_the_cadence_and_the_due_date(self):
+        created = self.upsert('due-now', 'Due Now GmbH')
+        self.add_verification('buyer@due-now.example')
+        self.add_outreach(created['trosa_id'], 'legacy-sela', 'sent-1', '2026-09-14')
+
+        # First touch 30 days ago with no later send -> a milestone is due.
+        _, ids = self.filtered('needs=follow_up&due_on_or_before=2026-10-14')
+        self.assertEqual(ids, ['due-now'])
+
+        # Same day as the first touch: no milestone has elapsed yet.
+        _, ids = self.filtered('needs=follow_up&due_on_or_before=2026-09-14')
+        self.assertEqual(ids, [])
+
+    def test_needs_follow_up_skips_bounced_mail(self):
+        created = self.upsert('bounced-one', 'Bounced One GmbH')
+        self.add_verification('buyer@bounced-one.example')
+        self.add_outreach(created['trosa_id'], 'legacy-sela', 'b-1', '2026-09-14', 'bounced')
+
+        _, ids = self.filtered('needs=follow_up&due_on_or_before=2026-10-14')
+        self.assertNotIn('bounced-one', ids)
+
+    def test_needs_skip_a_suppressed_prospect(self):
+        self.upsert('stopped', 'Stopped GmbH')
+        self.set_permission('stopped', 'do_not_contact')
+
+        _, ids = self.filtered('needs=verify')
+        self.assertNotIn('stopped', ids)
+
+    def test_updated_after_narrows_without_needs(self):
+        self.upsert('one', 'One GmbH')
+        self.upsert('two', 'Two GmbH')
+
+        _, ids = self.filtered('updated_after=2999-01-01 00:00:00')
+        self.assertEqual(ids, [])
+        _, ids = self.filtered('updated_after=2000-01-01 00:00:00')
+        self.assertEqual(sorted(ids), ['one', 'two'])
+
+    def test_fields_projects_the_returned_keys(self):
+        self.upsert('projected', 'Projected GmbH')
+
+        response = self.client.get(
+            '/api/integrations/sela/prospects/projected?fields=id,company,outreach',
+            headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(
+            set(response.get_json()['prospect']), {'id', 'company', 'outreach'})
+
+        body, _ = self.filtered('fields=id,outreach_status')
+        self.assertEqual(body['prospects'][0], {'id': 'projected', 'outreach_status': 'EMAIL_VERIFY'})
+
+    def test_unknown_field_is_400_with_supported_fields(self):
+        response = self.client.get(
+            '/api/integrations/sela/prospects?fields=id,bogus', headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supported_fields', response.get_json())
+
+    def test_unknown_need_is_400(self):
+        response = self.client.get(
+            '/api/integrations/sela/prospects?needs=bogus', headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('supported_needs', response.get_json())
+
+    def test_due_on_or_before_requires_the_follow_up_need(self):
+        response = self.client.get(
+            '/api/integrations/sela/prospects?due_on_or_before=2026-10-14', headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+
+        response = self.client.get(
+            '/api/integrations/sela/prospects?needs=follow_up&due_on_or_before=not-a-date',
+            headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+
+    def test_ids_cannot_combine_with_filters(self):
+        self.upsert('combo', 'Combo GmbH')
+        response = self.client.get(
+            '/api/integrations/sela/prospects?ids=combo&needs=verify', headers=self.headers)
+        self.assertEqual(response.status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -6135,8 +6135,220 @@ _SELA_PROSPECT_SOURCE_ID_RE = re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
 # Query parameters each read route accepts.  Anything else is refused with a
 # 400 instead of being silently ignored, so a caller can never believe it
 # filtered a result set that was in fact returned whole.
-_SELA_PROSPECT_LIST_PARAMS = frozenset({'after', 'limit', 'ids'})
-_SELA_PROSPECT_SINGLE_PARAMS = frozenset()
+_SELA_PROSPECT_LIST_PARAMS = frozenset({
+    'after', 'limit', 'ids', 'needs', 'due_on_or_before', 'updated_after', 'fields',
+})
+_SELA_PROSPECT_SINGLE_PARAMS = frozenset({'fields'})
+# The conditions ``needs=`` can express.  Each one is computed from the same
+# facts a caller sees in the view, never from a copy of sela's own state.
+_SELA_PROSPECT_NEEDS = frozenset({'email', 'verify', 'follow_up', 'first_touch'})
+# A ``fields=`` projection may only name real view keys, so a typo is an error
+# rather than a silently empty result.
+_SELA_PROSPECT_VIEW_FIELDS = frozenset({
+    'id', 'trosa_id', 'customer_linked', 'lifecycle_stage', 'lifecycle_rejected',
+    'lifecycle_signals', 'company', 'normalized_name', 'website', 'domain',
+    'country', 'business_type', 'contact', 'contact_details', 'email',
+    'additional_emails', 'email_source_url', 'email_type', 'email_route_status',
+    'email_route_checked_at', 'email_route_detail', 'status', 'research_status',
+    'confidence', 'reason', 'research_reason', 'qualification_method',
+    'qualification_reason', 'angle', 'supplier_pivot', 'site_hygiene',
+    'evidence', 'source_urls', 'campaign', 'source_run', 'do_not_contact',
+    'do_not_contact_reason', 'subject', 'email_draft', 'outreach_status',
+    'outcome', 'outreach', 'bounced', 'replied', 'sent_at', 'first_touch_at',
+    'last_outreach_at', 'last_inbound_at', 'last_reply_received_at',
+    'last_reply_body', 'gmail_message_id', 'gmail_thread_id', 'gmail_draft_id',
+    'gmail_draft_url', 'imported_at', 'updated_at', 'trosa_revision',
+}) | frozenset(_SELA_PROSPECT_AGENT_STATE_TEXT_FIELDS) | frozenset(_SELA_PROSPECT_AGENT_STATE_JSON_FIELDS)
+# The no-reply follow-up cadence sela owns: fixed touches, then every 90 days,
+# never two automated sends closer than a week apart.
+_SELA_FOLLOW_UP_DAYS = (7, 14, 30, 60, 90)
+_SELA_FOLLOW_UP_REPEAT_DAYS = 90
+_SELA_FOLLOW_UP_MIN_GAP_DAYS = 7
+# A filtered read fills ``limit`` by scanning profile rows in id order.  Batches
+# are larger than the page so a sparse filter (e.g. "no email") rarely needs a
+# second round of set queries.
+_SELA_PROSPECT_SCAN_WINDOW = 200
+
+
+def _sela_parse_day(value):
+    """A ``YYYY-MM-DD`` date, or ``None`` when the value is not one."""
+    text = str(value or '').strip()[:10]
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _sela_follow_up_due(first_sent_at, last_sent_at, today):
+    """True when the no-reply follow-up cadence is due, using sela's rules."""
+    first = _sela_parse_day(first_sent_at)
+    last = _sela_parse_day(last_sent_at)
+    if first is None or last is None:
+        return False
+    days_since_first = (today - first).days
+    if days_since_first < _SELA_FOLLOW_UP_MIN_GAP_DAYS:
+        return False
+    milestone = 0
+    for day in _SELA_FOLLOW_UP_DAYS:
+        if day <= days_since_first:
+            milestone = day
+    while milestone and milestone + _SELA_FOLLOW_UP_REPEAT_DAYS <= days_since_first:
+        milestone += _SELA_FOLLOW_UP_REPEAT_DAYS
+    if not milestone:
+        return False
+    if last >= first + timedelta(days=milestone):
+        return False
+    if (today - last).days < _SELA_FOLLOW_UP_MIN_GAP_DAYS:
+        return False
+    return True
+
+
+def _sela_prospect_needs_match(view, needs, *, due_on_or_before=''):
+    """Whether a computed prospect view satisfies one ``needs`` filter."""
+    if str(view.get('lifecycle_stage') or '') != 'cold_prospect':
+        return False
+    if view.get('do_not_contact'):
+        return False
+    email = str(view.get('email') or '').strip()
+    verified = str(view.get('email_route_status') or '').upper() == 'VERIFIED'
+    outreach = view.get('outreach') if isinstance(view.get('outreach'), dict) else {}
+    sent = int(outreach.get('sent_count') or 0) > 0
+    status = str(view.get('outreach_status') or '').upper()
+    if needs == 'email':
+        return not email
+    if needs == 'verify':
+        return bool(email) and not verified
+    if needs == 'first_touch':
+        return bool(email) and verified and not sent and status not in ('DRAFT_READY', 'GMAIL_DRAFTED')
+    if needs == 'follow_up':
+        if not email or not verified or not sent or view.get('bounced'):
+            return False
+        today = _sela_parse_day(due_on_or_before) or datetime.now(_CALENDAR_TZ).date()
+        return _sela_follow_up_due(outreach.get('first_sent_at'), outreach.get('last_sent_at'), today)
+    return False
+
+
+def _sela_needs_narrow_sql(needs):
+    """Coarse SQL narrowing for a ``needs`` filter (a safe superset).
+
+    Only conditions that can never exclude a real match are pushed down; the
+    exact lifecycle and cadence rules are applied afterwards to the computed
+    view.  The profile table is aliased ``p`` by the caller.
+    """
+    if needs not in _SELA_PROSPECT_NEEDS:
+        return ''
+    if postgres_mode():
+        contacts_rel = 'trosa.customer_contacts'
+        dated = (
+            'EXISTS (SELECT 1 FROM trosa.outreach_messages m '
+            'JOIN trosa.account_legacy_refs a ON a.account_id=m.account_id '
+            'AND a.organization_id=trosa.compat_org_id() '
+            'AND a.legacy_user_id=trosa.compat_current_user() '
+            'WHERE a.legacy_customer_id=p.customer_id AND m.sent_at IS NOT NULL)'
+        )
+    else:
+        contacts_rel = 'contacts'
+        dated = (
+            'EXISTS (SELECT 1 FROM outreach_emails oe '
+            "WHERE oe.customer_id=p.customer_id AND TRIM(COALESCE(oe.sent_date,''))<>'')"
+        )
+    parts = []
+    if needs in ('verify', 'first_touch', 'follow_up'):
+        parts.append(
+            f"EXISTS (SELECT 1 FROM {contacts_rel} ct WHERE ct.customer_id=p.customer_id "
+            "AND TRIM(COALESCE(ct.email,''))<>'')"
+        )
+    if needs == 'first_touch':
+        parts.append('NOT ' + dated)
+    elif needs == 'follow_up':
+        parts.append(dated)
+    return ' AND '.join(parts)
+
+
+def _sela_prospect_projection(raw):
+    """Parse ``fields=`` into an ordered projection, or ``None`` when absent.
+
+    Raises ``ValueError`` naming the unknown fields when a value is not a real
+    view key.
+    """
+    if raw is None:
+        return None
+    names = [part.strip() for part in str(raw).split(',')]
+    names = [name for name in names if name]
+    if not names:
+        raise ValueError('（空）')
+    unknown = sorted({name for name in names if name not in _SELA_PROSPECT_VIEW_FIELDS})
+    if unknown:
+        raise ValueError(', '.join(unknown))
+    ordered = []
+    for name in names:
+        if name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
+def _sela_project_view(view, fields):
+    if not fields:
+        return view
+    return {key: view[key] for key in fields if key in view}
+
+
+def _sela_prospect_filtered_page(conn, *, after, limit, needs, due_on_or_before, updated_after):
+    """Cursor page of prospects matching a ``needs`` / ``updated_after`` filter.
+
+    Cheap conditions narrow the scan in SQL to a superset; the exact rules are
+    then applied to each computed view, so a filtered row is exactly what the
+    caller would read by fetching that prospect on its own.
+    """
+    profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    profile_scope = 'organization_id=trosa.compat_org_id() AND ' if postgres_mode() else ''
+    where = [f'{profile_scope}legacy_user_id=? AND source=?', 'p.id>?']
+    params = [_sela_prospect_user(), _SELA_PROSPECT_SOURCE, after]
+    if needs:
+        where.append("COALESCE(p.contact_permission, 'allowed') <> 'do_not_contact'")
+        narrow = _sela_needs_narrow_sql(needs)
+        if narrow:
+            where.append(narrow)
+    if updated_after:
+        where.append('p.updated_at > ?')
+        params.append(updated_after)
+    window = max(limit + 1, _SELA_PROSPECT_SCAN_WINDOW)
+    prospects = []
+    next_after = None
+    cursor = after
+    while len(prospects) < limit:
+        window_params = list(params)
+        window_params[2] = cursor
+        rows = conn.execute(
+            f'''SELECT p.* FROM {profile_relation} p
+               WHERE {' AND '.join(where)}
+               ORDER BY p.id ASC LIMIT ?''',
+            (*window_params, window),
+        ).fetchall()
+        if not rows:
+            next_after = None
+            break
+        page = _SelaProspectPage(conn, rows)
+        for row in rows:
+            cursor = int(row['id'])
+            view = _sela_prospect_view(conn, row, context=page)
+            if view is None:
+                continue
+            if needs and not _sela_prospect_needs_match(
+                    view, needs, due_on_or_before=due_on_or_before):
+                continue
+            prospects.append(view)
+            if len(prospects) >= limit:
+                break
+        if len(prospects) >= limit:
+            next_after = cursor
+            break
+        if len(rows) < window:
+            next_after = None
+            break
+    return prospects, next_after
 
 
 def _sela_unsupported_params(allowed):
@@ -6202,9 +6414,20 @@ def sela_integration_prospects():
     unknown = _sela_unsupported_params(_SELA_PROSPECT_LIST_PARAMS)
     if unknown:
         return _sela_unsupported_params_response(unknown, _SELA_PROSPECT_LIST_PARAMS)
+    try:
+        fields = _sela_prospect_projection(request.args.get('fields'))
+    except ValueError as exc:
+        return jsonify({
+            'success': False,
+            'error': 'fields 包含未知字段：' + str(exc),
+            'supported_fields': sorted(_SELA_PROSPECT_VIEW_FIELDS),
+        }), 400
     if 'ids' in request.args:
-        if 'after' in request.args or 'limit' in request.args:
-            return jsonify({'success': False, 'error': 'ids 不能与 after/limit 同时使用'}), 400
+        if {'after', 'limit', 'needs', 'due_on_or_before', 'updated_after'} & set(request.args):
+            return jsonify({
+                'success': False,
+                'error': 'ids 不能与 after/limit/needs/due_on_or_before/updated_after 同时使用',
+            }), 400
         ids = _sela_prospect_source_ids(request.args.get('ids'))
         if ids is None:
             return jsonify({
@@ -6219,7 +6442,7 @@ def sela_integration_prospects():
         return jsonify({
             'success': True,
             'prospect_api': 'sela-v2',
-            'prospects': prospects,
+            'prospects': [_sela_project_view(view, fields) for view in prospects],
             'missing': missing,
             'next_after': None,
             'server_time': _sela_now(),
@@ -6229,30 +6452,49 @@ def sela_integration_prospects():
         limit = max(1, min(100, int(request.args.get('limit', 50))))
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': '分页参数无效'}), 400
+    needs = str(request.args.get('needs') or '').strip().lower()
+    if needs and needs not in _SELA_PROSPECT_NEEDS:
+        return jsonify({
+            'success': False,
+            'error': 'needs 必须是 email/verify/follow_up/first_touch 之一',
+            'supported_needs': sorted(_SELA_PROSPECT_NEEDS),
+        }), 400
+    due_on_or_before = str(request.args.get('due_on_or_before') or '').strip()
+    if due_on_or_before:
+        if needs != 'follow_up':
+            return jsonify({'success': False, 'error': 'due_on_or_before 只能与 needs=follow_up 一起使用'}), 400
+        if _sela_parse_day(due_on_or_before) is None:
+            return jsonify({'success': False, 'error': 'due_on_or_before 必须是 YYYY-MM-DD'}), 400
+    updated_after = str(request.args.get('updated_after') or '').strip()
     conn = get_db()
     try:
-        profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
-        profile_scope = ('organization_id=trosa.compat_org_id() AND ' if postgres_mode() else '')
-        rows = conn.execute(
-            f'''SELECT * FROM {profile_relation}
-               WHERE {profile_scope}legacy_user_id=? AND source=? AND id>?
-               ORDER BY id ASC LIMIT ?''',
-            (_sela_prospect_user(), _SELA_PROSPECT_SOURCE, after, limit + 1),
-        ).fetchall()
-        has_more = len(rows) > limit
-        rows = rows[:limit]
-        page = _SelaProspectPage(conn, rows) if rows else None
-        prospects = [
-            view for row in rows
-            if (view := _sela_prospect_view(conn, row, context=page)) is not None
-        ]
-        next_after = int(rows[-1]['id']) if has_more and rows else None
+        if needs or updated_after:
+            prospects, next_after = _sela_prospect_filtered_page(
+                conn, after=after, limit=limit, needs=needs,
+                due_on_or_before=due_on_or_before, updated_after=updated_after)
+        else:
+            profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+            profile_scope = ('organization_id=trosa.compat_org_id() AND ' if postgres_mode() else '')
+            rows = conn.execute(
+                f'''SELECT * FROM {profile_relation}
+                   WHERE {profile_scope}legacy_user_id=? AND source=? AND id>?
+                   ORDER BY id ASC LIMIT ?''',
+                (_sela_prospect_user(), _SELA_PROSPECT_SOURCE, after, limit + 1),
+            ).fetchall()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            page = _SelaProspectPage(conn, rows) if rows else None
+            prospects = [
+                view for row in rows
+                if (view := _sela_prospect_view(conn, row, context=page)) is not None
+            ]
+            next_after = int(rows[-1]['id']) if has_more and rows else None
     finally:
         conn.close()
     return jsonify({
         'success': True,
         'prospect_api': 'sela-v2',
-        'prospects': prospects,
+        'prospects': [_sela_project_view(view, fields) for view in prospects],
         'next_after': next_after,
         'server_time': _sela_now(),
     })
@@ -6269,6 +6511,14 @@ def sela_integration_prospect(source_id):
     unknown = _sela_unsupported_params(_SELA_PROSPECT_SINGLE_PARAMS)
     if unknown:
         return _sela_unsupported_params_response(unknown, _SELA_PROSPECT_SINGLE_PARAMS)
+    try:
+        fields = _sela_prospect_projection(request.args.get('fields'))
+    except ValueError as exc:
+        return jsonify({
+            'success': False,
+            'error': 'fields 包含未知字段：' + str(exc),
+            'supported_fields': sorted(_SELA_PROSPECT_VIEW_FIELDS),
+        }), 400
     source_id = str(source_id or '').strip()
     if not _SELA_PROSPECT_SOURCE_ID_RE.fullmatch(source_id):
         return jsonify({'success': False, 'error': 'Prospect source_id 无效'}), 400
@@ -6283,7 +6533,7 @@ def sela_integration_prospect(source_id):
     return jsonify({
         'success': True,
         'prospect_api': 'sela-v2',
-        'prospect': view,
+        'prospect': _sela_project_view(view, fields),
         'server_time': _sela_now(),
     })
 

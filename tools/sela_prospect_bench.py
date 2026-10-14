@@ -350,6 +350,17 @@ def ids_batch(client, headers):
     return f"{len(body['prospects'])} prospects"
 
 
+def filter_scenario(query):
+    """One filtered read; the report shows how many rows the filter matched."""
+    def run(client, headers):
+        response = client.get(f"/api/integrations/sela/prospects?{query}", headers=headers)
+        if response.status_code != 200:
+            raise SystemExit(f"filter failed: {response.status_code} {response.get_data(as_text=True)}")
+        body = response.get_json()
+        return f"{len(body['prospects'])} rows"
+    return run
+
+
 def verify_equivalence(app_module, *, sample_pages=3, limit=100):
     """The batched page view must equal the per-row view, field for field.
 
@@ -424,6 +435,11 @@ def main():
             ("single_page_50", single_page),
             ("single_prospect", single_prospect),
             ("ids_20", ids_batch),
+            ("needs_email", filter_scenario("needs=email&limit=100")),
+            ("needs_verify", filter_scenario("needs=verify&limit=100")),
+            ("needs_follow_up", filter_scenario("needs=follow_up&due_on_or_before=2099-12-31&limit=100")),
+            ("updated_after", filter_scenario("updated_after=2000-01-01 00:00:00&limit=100")),
+            ("fields_projection", filter_scenario("fields=id,company,outreach_status&limit=100")),
         ]
         results = measure(app_module, scenarios, args.repeats)
     finally:
