@@ -329,6 +329,27 @@ def single_page(client, headers):
     return f"{len(response.get_json()['prospects'])} rows"
 
 
+def single_prospect(client, headers):
+    response = client.get("/api/integrations/sela/prospects/bench-00777", headers=headers)
+    if response.status_code != 200:
+        raise SystemExit(f"single prospect failed: {response.status_code} {response.get_data(as_text=True)}")
+    body = response.get_json()
+    if not body.get("prospect"):
+        raise SystemExit("single prospect returned no prospect")
+    return "1 prospect"
+
+
+def ids_batch(client, headers):
+    ids = ",".join(f"bench-{index:05d}" for index in range(20))
+    response = client.get(f"/api/integrations/sela/prospects?ids={ids}", headers=headers)
+    if response.status_code != 200:
+        raise SystemExit(f"ids read failed: {response.status_code} {response.get_data(as_text=True)}")
+    body = response.get_json()
+    if body.get("missing"):
+        raise SystemExit(f"ids read reported missing: {body['missing']}")
+    return f"{len(body['prospects'])} prospects"
+
+
 def verify_equivalence(app_module, *, sample_pages=3, limit=100):
     """The batched page view must equal the per-row view, field for field.
 
@@ -401,6 +422,8 @@ def main():
         scenarios = [
             ("full_read", full_read),
             ("single_page_50", single_page),
+            ("single_prospect", single_prospect),
+            ("ids_20", ids_batch),
         ]
         results = measure(app_module, scenarios, args.repeats)
     finally:

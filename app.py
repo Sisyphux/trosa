@@ -383,6 +383,10 @@ def _sela_integration_path_allowed():
             r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions|facts)',
             request.path,
         ))
+        or (request.method == 'GET' and re.fullmatch(
+            r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}',
+            request.path,
+        ))
         or (request.method == 'POST' and re.fullmatch(
             r'/api/integrations/sela/prospects/[A-Za-z0-9_-]{1,128}/email-verification',
             request.path,
@@ -6028,10 +6032,99 @@ def sela_integration_health():
     })
 
 
+_SELA_PROSPECT_SOURCE_ID_RE = re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
+# Query parameters each read route accepts.  Anything else is refused with a
+# 400 instead of being silently ignored, so a caller can never believe it
+# filtered a result set that was in fact returned whole.
+_SELA_PROSPECT_LIST_PARAMS = frozenset({'after', 'limit', 'ids'})
+_SELA_PROSPECT_SINGLE_PARAMS = frozenset()
+
+
+def _sela_unsupported_params(allowed):
+    return sorted(set(request.args.keys()) - set(allowed))
+
+
+def _sela_unsupported_params_response(unknown, allowed):
+    return jsonify({
+        'success': False,
+        'error': '不支持的查询参数：' + ', '.join(unknown),
+        'supported_params': sorted(allowed),
+    }), 400
+
+
+def _sela_prospect_source_ids(raw):
+    """Parse a comma list of prospect source ids.
+
+    Returns the requested ids in order (deduplicated), or ``None`` when the
+    value is not 1-100 valid ``[A-Za-z0-9_-]{1,128}`` ids.
+    """
+    text = str(raw or '').strip()
+    if not text:
+        return None
+    parts = [part.strip() for part in text.split(',')]
+    if not parts or any(not part for part in parts) or len(parts) > 100:
+        return None
+    ordered = []
+    for part in parts:
+        if not _SELA_PROSPECT_SOURCE_ID_RE.fullmatch(part):
+            return None
+        if part not in ordered:
+            ordered.append(part)
+    return ordered
+
+
+def _sela_prospects_by_ids(conn, ids):
+    """Return the requested prospects in the order asked, plus unknown ids."""
+    if not ids:
+        return [], []
+    profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    profile_scope = ('organization_id=trosa.compat_org_id() AND ' if postgres_mode() else '')
+    marks = ','.join('?' for _ in ids)
+    rows = conn.execute(
+        f'''SELECT * FROM {profile_relation}
+           WHERE {profile_scope}legacy_user_id=? AND source=? AND source_id IN ({marks})''',
+        (_sela_prospect_user(), _SELA_PROSPECT_SOURCE, *ids),
+    ).fetchall()
+    by_source = {str(row['source_id']): row for row in rows}
+    ordered = [by_source[source_id] for source_id in ids if source_id in by_source]
+    missing = [source_id for source_id in ids if source_id not in by_source]
+    page = _SelaProspectPage(conn, ordered) if ordered else None
+    prospects = [
+        view for row in ordered
+        if (view := _sela_prospect_view(conn, row, context=page)) is not None
+    ]
+    return prospects, missing
+
+
 @app.route('/api/integrations/sela/prospects', methods=['GET'])
 @login_required
 def sela_integration_prospects():
     """Read the Agent's current Prospect worklist from Trosa, never a mirror."""
+    unknown = _sela_unsupported_params(_SELA_PROSPECT_LIST_PARAMS)
+    if unknown:
+        return _sela_unsupported_params_response(unknown, _SELA_PROSPECT_LIST_PARAMS)
+    if 'ids' in request.args:
+        if 'after' in request.args or 'limit' in request.args:
+            return jsonify({'success': False, 'error': 'ids 不能与 after/limit 同时使用'}), 400
+        ids = _sela_prospect_source_ids(request.args.get('ids'))
+        if ids is None:
+            return jsonify({
+                'success': False,
+                'error': 'ids 必须是 1-100 个逗号分隔的 source_id（[A-Za-z0-9_-]{1,128}）',
+            }), 400
+        conn = get_db()
+        try:
+            prospects, missing = _sela_prospects_by_ids(conn, ids)
+        finally:
+            conn.close()
+        return jsonify({
+            'success': True,
+            'prospect_api': 'sela-v2',
+            'prospects': prospects,
+            'missing': missing,
+            'next_after': None,
+            'server_time': _sela_now(),
+        })
     try:
         after = max(0, int(request.args.get('after', 0)))
         limit = max(1, min(100, int(request.args.get('limit', 50))))
@@ -6062,6 +6155,36 @@ def sela_integration_prospects():
         'prospect_api': 'sela-v2',
         'prospects': prospects,
         'next_after': next_after,
+        'server_time': _sela_now(),
+    })
+
+
+@app.route('/api/integrations/sela/prospects/<source_id>', methods=['GET'])
+@login_required
+def sela_integration_prospect(source_id):
+    """Read exactly one prospect by its sela source id.
+
+    Reading a single prospect answers "who is this / what is their state"
+    without paying for the whole worklist.
+    """
+    unknown = _sela_unsupported_params(_SELA_PROSPECT_SINGLE_PARAMS)
+    if unknown:
+        return _sela_unsupported_params_response(unknown, _SELA_PROSPECT_SINGLE_PARAMS)
+    source_id = str(source_id or '').strip()
+    if not _SELA_PROSPECT_SOURCE_ID_RE.fullmatch(source_id):
+        return jsonify({'success': False, 'error': 'Prospect source_id 无效'}), 400
+    conn = get_db()
+    try:
+        profile = _sela_profile_by_source(conn, source_id)
+        view = _sela_prospect_view(conn, profile) if profile else None
+    finally:
+        conn.close()
+    if view is None:
+        return jsonify({'success': False, 'error': '未找到该 Prospect'}), 404
+    return jsonify({
+        'success': True,
+        'prospect_api': 'sela-v2',
+        'prospect': view,
         'server_time': _sela_now(),
     })
 
