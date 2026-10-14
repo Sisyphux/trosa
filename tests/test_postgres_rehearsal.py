@@ -1842,6 +1842,16 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         client = module.app.test_client()
         self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
         run = uuid.uuid4().hex[:8]
+        created = []
+
+        def remove_created():
+            # The rehearsal DB is shared with the browser acceptance that follows
+            # in the gate; leftover live customers push its fixture row off the
+            # first ledger page.  Soft-delete what this test made.
+            for customer_id in created:
+                client.delete(f'/api/customers/{customer_id}')
+
+        self.addCleanup(remove_created)
 
         def contacted(index, sent_on):
             source_id = f'pg-excl-{run}-{index}'
@@ -1859,6 +1869,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             )
             self.assertEqual(published.status_code, 200, published.get_json())
             customer_id = published.get_json()['trosa_id']
+            created.append(customer_id)
             recorded = client.post(f'/api/customers/{customer_id}/follow_history', json={
                 'activity_content': '客户回复：请报价', 'direction': 'inbound',
                 'follow_date': '2026-10-02',
