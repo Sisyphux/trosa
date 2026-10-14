@@ -1,0 +1,438 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18203",
+  "checks": [
+    {
+      "name": "wide: week 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "wide: week 有标题",
+      "ok": true,
+      "detail": "本周没有已确认的沟通"
+    },
+    {
+      "name": "wide: week 说明不超过两句",
+      "ok": true,
+      "detail": "在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。"
+    },
+    {
+      "name": "wide: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "wide: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "wide: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "wide: inbox 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "wide: inbox 有标题",
+      "ok": true,
+      "detail": "现在没有等你回复的对话"
+    },
+    {
+      "name": "wide: inbox 说明不超过两句",
+      "ok": true,
+      "detail": "sela 有事需要你决定时，会出现在这里。"
+    },
+    {
+      "name": "wide: Inbox 列表仍写“现在没有对话”",
+      "ok": true,
+      "detail": "现在没有对话需要你决定的事，sela 会放在这里。"
+    },
+    {
+      "name": "wide: 台账“没有匹配”有插画",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "wide: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "wide: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "wide: contacts 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "wide: contacts 有标题",
+      "ok": true,
+      "detail": "还没有联系人"
+    },
+    {
+      "name": "wide: contacts 说明不超过两句",
+      "ok": true,
+      "detail": "记录沟通时填写邮箱或电话，也可以直接添加。"
+    },
+    {
+      "name": "wide: files 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "wide: files 有标题",
+      "ok": true,
+      "detail": "还没有客户文件"
+    },
+    {
+      "name": "wide: files 说明不超过两句",
+      "ok": true,
+      "detail": "报价单、样品图、合同放在这里，随客户保存。"
+    },
+    {
+      "name": "wide: todo 有插画且带笔画",
+      "ok": true,
+      "detail": "5 笔"
+    },
+    {
+      "name": "wide: todo 有标题",
+      "ok": true,
+      "detail": "没有未完成的待办"
+    },
+    {
+      "name": "wide: todo 说明不超过两句",
+      "ok": true,
+      "detail": "确认下一步和日期后，会排在这里。"
+    },
+    {
+      "name": "wide: 同一插画第二次出现不再描线",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: log 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "wide: log 有标题",
+      "ok": true,
+      "detail": "暂无沟通记录"
+    },
+    {
+      "name": "wide: log 说明不超过两句",
+      "ok": true,
+      "detail": "在客户页记录沟通后，会按时间排在这里。"
+    },
+    {
+      "name": "iphone: week 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "iphone: week 有标题",
+      "ok": true,
+      "detail": "本周没有已确认的沟通"
+    },
+    {
+      "name": "iphone: week 说明不超过两句",
+      "ok": true,
+      "detail": "在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。"
+    },
+    {
+      "name": "iphone: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "iphone: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "iphone: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "iphone: inbox 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "iphone: inbox 有标题",
+      "ok": true,
+      "detail": "现在没有等你回复的对话"
+    },
+    {
+      "name": "iphone: inbox 说明不超过两句",
+      "ok": true,
+      "detail": "sela 有事需要你决定时，会出现在这里。"
+    },
+    {
+      "name": "iphone: Inbox 列表仍写“现在没有对话”",
+      "ok": true,
+      "detail": "现在没有对话需要你决定的事，sela 会放在这里。"
+    },
+    {
+      "name": "iphone: 台账“没有匹配”有插画",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "iphone: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "iphone: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "iphone: contacts 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "iphone: contacts 有标题",
+      "ok": true,
+      "detail": "还没有联系人"
+    },
+    {
+      "name": "iphone: contacts 说明不超过两句",
+      "ok": true,
+      "detail": "记录沟通时填写邮箱或电话，也可以直接添加。"
+    },
+    {
+      "name": "iphone: files 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "iphone: files 有标题",
+      "ok": true,
+      "detail": "还没有客户文件"
+    },
+    {
+      "name": "iphone: files 说明不超过两句",
+      "ok": true,
+      "detail": "报价单、样品图、合同放在这里，随客户保存。"
+    },
+    {
+      "name": "iphone: todo 有插画且带笔画",
+      "ok": true,
+      "detail": "5 笔"
+    },
+    {
+      "name": "iphone: todo 有标题",
+      "ok": true,
+      "detail": "没有未完成的待办"
+    },
+    {
+      "name": "iphone: todo 说明不超过两句",
+      "ok": true,
+      "detail": "确认下一步和日期后，会排在这里。"
+    },
+    {
+      "name": "iphone: 同一插画第二次出现不再描线",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "iphone: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: log 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "iphone: log 有标题",
+      "ok": true,
+      "detail": "暂无沟通记录"
+    },
+    {
+      "name": "iphone: log 说明不超过两句",
+      "ok": true,
+      "detail": "在客户页记录沟通后，会按时间排在这里。"
+    },
+    {
+      "name": "reduced: week 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "reduced: week 有标题",
+      "ok": true,
+      "detail": "本周没有已确认的沟通"
+    },
+    {
+      "name": "reduced: week 说明不超过两句",
+      "ok": true,
+      "detail": "在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。"
+    },
+    {
+      "name": "reduced: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "reduced: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "reduced: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "reduced: inbox 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "reduced: inbox 有标题",
+      "ok": true,
+      "detail": "现在没有等你回复的对话"
+    },
+    {
+      "name": "reduced: inbox 说明不超过两句",
+      "ok": true,
+      "detail": "sela 有事需要你决定时，会出现在这里。"
+    },
+    {
+      "name": "reduced: Inbox 列表仍写“现在没有对话”",
+      "ok": true,
+      "detail": "现在没有对话需要你决定的事，sela 会放在这里。"
+    },
+    {
+      "name": "reduced: 台账“没有匹配”有插画",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: timeline 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "reduced: timeline 有标题",
+      "ok": true,
+      "detail": "还没有沟通记录"
+    },
+    {
+      "name": "reduced: timeline 说明不超过两句",
+      "ok": true,
+      "detail": "第一次沟通发生后，会先出现在这里。"
+    },
+    {
+      "name": "reduced: contacts 有插画且带笔画",
+      "ok": true,
+      "detail": "3 笔"
+    },
+    {
+      "name": "reduced: contacts 有标题",
+      "ok": true,
+      "detail": "还没有联系人"
+    },
+    {
+      "name": "reduced: contacts 说明不超过两句",
+      "ok": true,
+      "detail": "记录沟通时填写邮箱或电话，也可以直接添加。"
+    },
+    {
+      "name": "reduced: files 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "reduced: files 有标题",
+      "ok": true,
+      "detail": "还没有客户文件"
+    },
+    {
+      "name": "reduced: files 说明不超过两句",
+      "ok": true,
+      "detail": "报价单、样品图、合同放在这里，随客户保存。"
+    },
+    {
+      "name": "reduced: todo 有插画且带笔画",
+      "ok": true,
+      "detail": "5 笔"
+    },
+    {
+      "name": "reduced: todo 有标题",
+      "ok": true,
+      "detail": "没有未完成的待办"
+    },
+    {
+      "name": "reduced: todo 说明不超过两句",
+      "ok": true,
+      "detail": "确认下一步和日期后，会排在这里。"
+    },
+    {
+      "name": "reduced: 同一插画第二次出现不再描线",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 插画不描线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: log 有插画且带笔画",
+      "ok": true,
+      "detail": "4 笔"
+    },
+    {
+      "name": "reduced: log 有标题",
+      "ok": true,
+      "detail": "暂无沟通记录"
+    },
+    {
+      "name": "reduced: log 说明不超过两句",
+      "ok": true,
+      "detail": "在客户页记录沟通后，会按时间排在这里。"
+    },
+    {
+      "name": "全程无页面错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "failed": 0
+}

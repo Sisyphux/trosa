@@ -85,6 +85,25 @@ var _WAIT_PAGE = '<svg class="wait-page-art" viewBox="160 36 200 206" aria-hidde
   '<path class="line l3" pathLength="100" d="M192 158c8-5 16 5 24 0s16 5 24 0"/></g>' +
   '<g class="quill"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path class="shaft" d="M1 -1L34 -13"/></g></svg>';
 
+// ---- 统一空状态：一张纸 + 一句话 ------------------------------------------------
+// 文案回答三件事：这里是什么（title）、为什么空（hint 前半）、下一步做什么（hint 后半 / action），
+// 不超过两句。action 是调用方已经拼好的按钮 HTML（需自行 escape）。
+// 插画第一次出现时描一遍（hi-draw），之后重新渲染都是静止的，避免列表刷新时反复动。
+var _emptyDrawn = {};
+function emptyIllustration(kind) {
+  if (typeof handIllus !== 'function') return '';
+  var art = handIllus(kind, { cls: _emptyDrawn[kind] ? '' : 'hi-draw' });
+  _emptyDrawn[kind] = true;
+  return art;
+}
+function emptyStateHtml(kind, title, hint, action, opts) {
+  opts = opts || {};
+  var art = opts.noArt ? '' : emptyIllustration(kind);
+  return '<div class="hand-empty' + (opts.compact ? ' is-compact' : '') + '" data-state="empty" data-empty-kind="' + escapeHtml(kind) + '" role="status">' +
+    art + '<h3 class="hand-empty-title">' + escapeHtml(title) + '</h3>' +
+    (hint ? '<p>' + escapeHtml(hint) + '</p>' : '') + (action || '') + '</div>';
+}
+
 function waitHtml(text, tier) {
   var label = escapeHtml(text || '正在加载…');
   if (tier === 'page') return '<span class="wait wait-in wait-page" role="status">' + _WAIT_PAGE + '<span class="wait-text">' + label + '</span></span>';
@@ -5281,7 +5300,7 @@ function renderTodayFacts(items, customerId) {
   if (!body) return;
   if (!items.length) {
     body.classList.remove('lit-group--dim', 'has-lit');
-    body.innerHTML = '<div class="room-note">还没有沟通记录。第一次沟通发生后，会先出现在这里。</div>';
+    body.innerHTML = '<div class="room-note">' + emptyStateHtml('timeline', '还没有沟通记录', '第一次沟通发生后，会先出现在这里。', '', { compact: true }) + '</div>';
     if (meta) meta.textContent = '';
     return;
   }
@@ -5541,7 +5560,7 @@ async function loadWeeklyFollowList(prefetchedData) {
     items.sort(function(a, b) { return b.date.localeCompare(a.date); });
     
     if (items.length === 0) {
-      el.innerHTML = '<div class="empty-state"><p>本周暂无沟通记录</p></div>';
+      el.innerHTML = emptyStateHtml('week', '本周暂无沟通记录', '在“完成跟进”里勾选“同步到周报”后，会出现在这里。', '', { compact: true });
       return;
     }
     
@@ -7104,7 +7123,7 @@ function ledgerShowState(kind) {
     for (var i = 0; i < 10; i++) lines += '<i class="ld-sk-row"></i>';
     html = '<div class="ld-st" role="status"><h3>正在读取客户…</h3><div class="ld-sks">' + lines + '</div></div>';
   } else if (kind === 'empty') {
-    html = '<div class="ld-st"><p class="ld-micro">尚无客户</p><h3>这里还没有客户</h3><p>添加第一位客户，或导入 Excel 与邮件里的联系人。有了沟通记录，「最近发生」会自动排好。</p>' +
+    html = '<div class="ld-st">' + emptyIllustration('customers') + '<p class="ld-micro">尚无客户</p><h3>这里还没有客户</h3><p>添加第一位客户，或导入 Excel 与邮件里的联系人。有了沟通记录，「最近发生」会自动排好。</p>' +
       '<div class="ld-acts"><button type="button" class="ld-open ld-open-solid" data-ld-act="add">添加客户</button><button type="button" class="ld-ghost" data-ld-act="import">批量添加</button></div></div>';
   } else if (kind === 'error') {
     var error = LD.error || ledgerDescribeError(null);
@@ -7116,7 +7135,7 @@ function ledgerShowState(kind) {
       '<div class="ld-acts"><button type="button" class="ld-ghost" data-ld-act="all-view">回到全部</button></div></div>';
   } else {
     var subject = query ? '没有找到「<em>' + escapeHtml(query) + '</em>」' : '没有客户符合当前筛选';
-    html = '<div class="ld-st" role="status"><p class="ld-micro">没有匹配</p><h3>' + subject + '</h3><p>已搜索公司、联系人、国家、行业、网站、邮箱、沟通与待办。</p>' +
+    html = '<div class="ld-st" role="status">' + emptyIllustration('search') + '<p class="ld-micro">没有匹配</p><h3>' + subject + '</h3><p>已搜索公司、联系人、国家、行业、网站、邮箱、沟通与待办。</p>' +
       '<div class="ld-acts">' + (query ? '<button type="button" class="ld-ghost" data-ld-act="clear-search">清除搜索</button>' : '') +
       (Object.keys(customerFilters || {}).some(function(key) { return customerFilters[key] !== ''; }) ? '<button type="button" class="ld-ghost" data-ld-act="clear-filters">清空筛选</button>' : '') + '</div></div>';
   }
@@ -8451,7 +8470,8 @@ function customerTaskHtml(task) {
 function renderCustomerTaskEmpty(list) {
   var activeRows = list && list.querySelectorAll('.cw-prow:not([data-motion-leaving])');
   var rows = list && list.querySelectorAll('.cw-prow');
-  var empty = '<p class="cw-empty">暂无未完成待办。<button type="button" class="cw-link" onclick="openCustomerTaskModal(\'create\')">安排下一步</button></p>';
+  var empty = '<div class="cw-empty">' + emptyStateHtml('todo', '没有未完成的待办', '确认下一步和日期后，会排在这里。',
+    '<button type="button" class="cw-link" onclick="openCustomerTaskModal(\'create\')">安排下一步</button>', { compact: true }) + '</div>';
   if (list && rows && rows.length && shouldAnimateLists()) {
     var token = String(Date.now()) + '-' + Math.random();
     list.dataset.taskEmptyToken = token;
@@ -9316,7 +9336,8 @@ function syncContactEditInputValues(contact) {
 function renderContacts(contacts) {
   var el = document.getElementById('contactsList');
   if (!contacts || contacts.length === 0) {
-    el.innerHTML = '<p class="cw-empty">还没有联系人。<button type="button" class="cw-link" onclick="setCwForm(\'cwContactForm\', true)">添加联系人</button></p>';
+    el.innerHTML = '<div class="cw-empty">' + emptyStateHtml('contacts', '还没有联系人', '记录沟通时填写邮箱或电话，也可以直接添加。',
+      '<button type="button" class="cw-link" onclick="setCwForm(\'cwContactForm\', true)">添加联系人</button>', { compact: true }) + '</div>';
     return;
   }
   var html = '';
@@ -9582,7 +9603,8 @@ function renderCustomerFiles(files) {
   if (!el) return;
   files = files || [];
   if (!files.length) {
-    el.innerHTML = '<p class="cw-empty">还没有客户文件。<button type="button" class="cw-link" onclick="setCwForm(\'customerFileCompose\', true)">添加文件</button></p>';
+    el.innerHTML = '<div class="cw-empty">' + emptyStateHtml('files', '还没有客户文件', '报价单、样品图、合同放在这里，随客户保存。',
+      '<button type="button" class="cw-link" onclick="setCwForm(\'customerFileCompose\', true)">添加文件</button>', { compact: true }) + '</div>';
     return;
   }
   el.innerHTML = files.map(function(f) {
@@ -10113,7 +10135,8 @@ function renderCustomerTimelineEmpty(el) {
   delete el.dataset.timelineEmptyToken;
   el.innerHTML = CW_TIMELINE_EMPTY;
 }
-var CW_TIMELINE_EMPTY = '<p class="cw-empty">还没有沟通记录。<button type="button" class="cw-link" onclick="openCustomerFollowComposer()">记录第一条沟通</button></p>';
+var CW_TIMELINE_EMPTY = '<div class="cw-empty">' + emptyStateHtml('timeline', '还没有沟通记录', '第一次沟通发生后，会先出现在这里。',
+  '<button type="button" class="cw-link" onclick="openCustomerFollowComposer()">记录第一条沟通</button>', { compact: true }) + '</div>';
 
 // The timeline is reconciled by record identity instead of being replaced as a
 // block: a saved record slides in where it belongs, an edited one keeps its
@@ -11579,7 +11602,7 @@ function showCalendarDetail(dateStr) {
   var tasks = calendarData[dateStr] || [];
   var el = document.getElementById('calendarDetail');
   if (tasks.length === 0) {
-    el.innerHTML = '<div class="card" style="margin-top:16px;"><div class="card-body"><div class="empty-state" style="padding:30px;"><p>' + formatChineseDate(dateStr) + '没有安排</p></div></div></div>';
+    el.innerHTML = '<div class="card" style="margin-top:16px;"><div class="card-body">' + emptyStateHtml('day', formatChineseDate(dateStr) + '没有安排', '在客户页确认下一步和日期后，会出现在这里。', '', { compact: true }) + '</div></div>';
     return;
   }
   var html = '<div class="card" style="margin-top:16px;"><div class="card-header"><h3>' + formatChineseDate(dateStr) + ' · ' + tasks.length + ' 项</h3></div><div class="card-body">';
@@ -11642,7 +11665,7 @@ async function loadHistory() {
     if (token !== _historyLoadToken) return;
     // GET 命中 401 时 apiOnce 返回 null：那是登录过期，不是“暂无沟通记录”。
     if (history === null) throw loadAuthError();
-    if (!history || history.length === 0) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">' + uiIcon('list') + '</div><p>暂无沟通记录</p></div>'; return; }
+    if (!history || history.length === 0) { el.innerHTML = emptyStateHtml('log', '暂无沟通记录', '在客户页记录沟通后，会按时间排在这里。'); return; }
     _followTimelineCache = {};
     var html = '<div class="timeline">';
     history.forEach(function(h) {
@@ -11970,7 +11993,7 @@ async function loadLogs(action) {
     if (logs === null) throw loadAuthError();
     var html = filterHtml;
     if (!logs || logs.length === 0) {
-      html += '<div class="empty-state"><div class="empty-icon">' + uiIcon('settings') + '</div><p>暂无操作日志</p></div>';
+      html += emptyStateHtml('log', '暂无操作日志', '新增、修改、完成等操作会自动记在这里。');
       el.innerHTML = html;
       return;
     }
@@ -13725,7 +13748,7 @@ function renderWeeklyMember(uid, data, error, options) {
   var statusText = options.staleError ? '更新失败' : (options.fromCache ? '更新中' : '');
   var html = weeklyPersonHead(uid, statusText);
   if (options.staleError) html += '<div class="wk-error wk-error-inline" role="alert"><span>更新失败，已保留最近一次内容。</span><button type="button" onclick="loadWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
-  if (!reps.length) html += '<div class="wk-empty"><strong>本周没有已确认的沟通</strong><p>在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。</p></div>';
+  if (!reps.length) html += '<div class="wk-empty">' + emptyStateHtml('week', '本周没有已确认的沟通', '在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。') + '</div>';
   reps.forEach(function(r) {
     var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
     var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean);
@@ -14049,7 +14072,7 @@ function renderDialogueList() {
   if (!listEl) return;
   if (dialogueListError) { listEl.innerHTML = loadFailureHtml(dialogueListError, '对话列表', 'loadDialogue()'); return; }
   if (!dialogueThreads.length) {
-    listEl.innerHTML = '<div class="dialogue-list-empty" data-state="empty" role="status"><p>现在没有对话。</p></div>';
+    listEl.innerHTML = emptyStateHtml('inbox', '现在没有对话', '需要你决定的事，sela 会放在这里。', '', { compact: true, noArt: true });
     return;
   }
   var ordered = orderedDialogueThreads();
@@ -14132,7 +14155,7 @@ function renderDialogueThread() {
     return;
   }
   if (!dialogueSelectedId) {
-    pane.innerHTML = '<div class="dialogue-empty" data-state="empty" role="status"><p>现在没有等你回复的对话。</p></div>';
+    pane.innerHTML = emptyStateHtml('inbox', '现在没有等你回复的对话', 'sela 有事需要你决定时，会出现在这里。');
     return;
   }
   if (!dialogueThread) { pane.innerHTML = loadLoadingHtml('正在打开对话…'); return; }

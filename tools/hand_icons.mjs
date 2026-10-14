@@ -162,6 +162,35 @@ const ICONS = {
   batch: ['', '批量添加（新增）', (g) => { g.rect(3.5, 3.5, 7, 7, 1); g.rect(13.5, 3.5, 7, 7); g.rect(3.5, 13.5, 7, 7); g.line(17, 13.4, 17, 20.6); g.line(13.4, 17, 20.6, 17); }],
 };
 
+/* ---- 空状态插画（二期）：96×72，同一个生成器，手绘程度更大（一张纸 + 一支笔） ---- */
+const ILLUS_HAND = 4.2;
+const QUILL = (x, y, k) => `<g class="q" transform="translate(${x} ${y}) scale(${k}) rotate(-8)"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path class="sh" d="M1 -1L34 -13"/></g>`;
+const DASH = '<path class="dash" d="M14 69c20-1 44 1 68 0"/>';
+/* kind: [中文用途, 画法, 附加（笔 / 虚线）] */
+const ILLUS = {
+  inbox: ['Inbox 对话', (g) => { g.poly([[14, 10], [74, 10], [74, 46], [46, 46], [30, 60], [30, 46], [14, 46]], 1, 1); g.line(26, 24, 60, 24); g.line(26, 34, 48, 34); }, QUILL(66, 62, 0.62)],
+  timeline: ['客户最近沟通', (g) => { g.rect(26, 6, 44, 60, 1); g.line(34, 18, 58, 18); g.line(34, 28, 58, 28); g.line(34, 38, 48, 38); }, QUILL(62, 58, 0.62)],
+  todo: ['待办', (g) => { g.rect(20, 12, 52, 50, 1); g.line(32, 6, 32, 18); g.line(60, 6, 60, 18); g.line(20, 26, 72, 26); g.poly([[36, 44], [44, 51], [58, 36]]); }, ''],
+  search: ['搜索无结果', (g) => { g.circle(40, 32, 17, 1); g.line(52.5, 44.5, 66, 58); }, DASH],
+  customers: ['没有客户', (g) => { g.rect(14, 18, 54, 38, 1); g.circle(30, 33, 6); g.arc(30, 52, 10, 205, 335); g.line(44, 30, 58, 30); g.line(44, 40, 54, 40); g.line(72, 14, 72, 26); g.line(66, 20, 78, 20); }, ''],
+  week: ['本周没有已确认的沟通', (g) => { g.rect(10, 16, 76, 42, 1); g.line(10, 28, 86, 28); g.line(35, 28, 35, 58); g.line(60, 28, 60, 58); g.dot(22, 43); g.dot(47, 43); g.dot(72, 43); }, QUILL(70, 64, 0.55)],
+  contacts: ['联系人', (g) => { g.circle(48, 24, 12, 1); g.arc(48, 66, 24, 195, 345, 1); g.line(16, 66, 80, 66); }, ''],
+  files: ['客户文件', (g) => { g.poly([[26, 8], [52, 8], [66, 22], [66, 62], [26, 62]], 1, 1); g.poly([[52, 8], [52, 22], [66, 22]]); g.line(34, 36, 58, 36); g.line(34, 46, 52, 46); }, ''],
+  day: ['当天没有安排', (g) => { g.rect(18, 14, 60, 48, 1); g.line(34, 8, 34, 20); g.line(62, 8, 62, 20); g.line(18, 28, 78, 28); g.line(36, 46, 60, 46); }, ''],
+  log: ['记录 / 日志为空', (g) => { g.rect(24, 6, 48, 60, 1); g.dot(34, 20, 1.6); g.dot(34, 32, 1.6); g.dot(34, 44, 1.6); g.line(42, 20, 62, 20); g.line(42, 32, 62, 32); g.line(42, 44, 54, 44); }, ''],
+  clear: ['今天没有要处理的', (g) => { g.circle(48, 32, 20, 1); g.poly([[38, 33], [45, 40], [59, 24]]); }, DASH],
+};
+
+function buildIllus(kind) {
+  const [, draw, extra] = ILLUS[kind];
+  const g = new G(rng('illus-' + kind), ILLUS_HAND);
+  draw(g);
+  const pt = g.p.length ? `<g class="pt" transform="translate(2.4 2.6)">${g.p.map((d) => `<path d="${d}"/>`).join('')}</g>` : '';
+  const body = g.s.map((d) => `<path class="s" pathLength="1" d="${d}"/>`).join('');
+  const dots = g.dots.map(([x, y, r]) => `<circle class="d" cx="${f(x)}" cy="${f(y)}" r="${r}"/>`).join('');
+  return pt + body + dots + extra;
+}
+
 function build(name) {
   const g = new G(rng(name), HAND);
   ICONS[name][2](g);
@@ -208,6 +237,9 @@ function jsModule(names, built) {
   const data = {};
   for (const n of names) data[n] = { i: inlineInner(built[n]) };
   const json = JSON.stringify(data, null, 0).replace(/\},"/g, '},\n"');
+  const illus = {};
+  for (const k of Object.keys(ILLUS)) illus[k] = buildIllus(k);
+  const illusJson = JSON.stringify(illus, null, 0).replace(/","/g, '",\n"');
   return `/* 由 tools/hand_icons.mjs 生成，勿手改。「一笔」手绘图标的内联 SVG 内部结构。 */
 (function(root) {
   'use strict';
@@ -223,8 +255,18 @@ function jsModule(names, built) {
     var a11y = opts.label ? ' role="img" aria-label="' + String(opts.label).replace(/"/g, '&quot;') + '"' : ' aria-hidden="true"';
     return '<svg class="' + cls + '" viewBox="0 0 24 24"' + size + a11y + ' focusable="false">' + d.i + '</svg>';
   }
+  // 空状态插画（96×72）。handIllus('timeline', { cls: 'hi-draw' }) -> 内联 SVG；
+  // hi-draw 只在该插画第一次出现时给（描一遍，之后静止）。装饰性：对读屏隐藏，文字由标题与说明承担。
+  var HAND_ILLUS = ${illusJson};
+  function handIllus(kind, opts) {
+    var d = HAND_ILLUS[kind] || HAND_ILLUS.log;
+    opts = opts || {};
+    return '<svg class="hi hi-illus' + (opts.cls ? ' ' + opts.cls : '') + '" viewBox="0 0 96 72" aria-hidden="true" focusable="false">' + d + '</svg>';
+  }
   root.HAND_ICONS = HAND_ICONS;
+  root.HAND_ILLUS = HAND_ILLUS;
   root.handIcon = handIcon;
+  root.handIllus = handIllus;
 })(window);
 `;
 }
