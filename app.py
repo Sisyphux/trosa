@@ -5586,6 +5586,83 @@ def _sela_revision_outreach_row(conn, source_id):
     return outreach
 
 
+_SELA_EMPTY_OUTREACH_HISTORY = {
+    'first_sent_at': '', 'last_sent_at': '', 'sent_count': 0, 'last_status': '',
+}
+
+
+def _sela_customer_outreach_rows(conn, customer_ids):
+    """Every dated outbound mail for a set of customers, oldest first.
+
+    Outreach history belongs to the customer, not to the sela prospect
+    profile: a customer emailed before it joined the prospect pool keeps its
+    mail on the customer record under another source.  Drafts with no date are
+    not sends and are excluded here, so a never-emailed customer reports an
+    empty history instead of an import date.
+    """
+    ids = [int(value) for value in customer_ids]
+    if not ids:
+        return []
+    marks = ','.join('?' for _ in ids)
+    if postgres_mode():
+        return conn.execute(
+            f'''SELECT account_ref.legacy_customer_id AS customer_id,
+                       trosa.compat_local_date(message.sent_at) AS sent_date,
+                       COALESCE(message.reply_status, '') AS reply_status
+                  FROM trosa.outreach_messages message
+                  JOIN trosa.account_legacy_refs account_ref
+                    ON account_ref.account_id=message.account_id
+                   AND account_ref.organization_id=trosa.compat_org_id()
+                   AND account_ref.legacy_user_id=trosa.compat_current_user()
+                 WHERE message.sent_at IS NOT NULL
+                   AND account_ref.legacy_customer_id IN ({marks})
+                 ORDER BY account_ref.legacy_customer_id, message.sent_at, message.created_at''',
+            ids,
+        ).fetchall()
+    return conn.execute(
+        f'''SELECT customer_id, sent_date, COALESCE(reply_status, '') AS reply_status
+              FROM outreach_emails
+             WHERE TRIM(COALESCE(sent_date, '')) <> ''
+               AND customer_id IN ({marks})
+             ORDER BY customer_id, sent_date, id''',
+        ids,
+    ).fetchall()
+
+
+def _sela_customer_outreach_history(rows):
+    """Aggregate a customer's dated outbound mail into the outreach history.
+
+    ``first_sent_at`` / ``last_sent_at`` bound the customer's dated outbound
+    mail, ``sent_count`` counts it, and ``last_status`` is the reply_status of
+    the most recent dated mail (later rows win ties).  This is the fact sela
+    needs to stop treating an already-emailed customer as a first touch.
+    """
+    history: dict = {}
+    for row in rows:
+        item = dict(row)
+        try:
+            customer_id = int(item['customer_id'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        day = str(item.get('sent_date') or '')[:10]
+        if not day:
+            continue
+        entry = history.get(customer_id)
+        if entry is None:
+            history[customer_id] = {
+                'first_sent_at': day, 'last_sent_at': day, 'sent_count': 1,
+                'last_status': str(item.get('reply_status') or '').lower(),
+            }
+            continue
+        entry['sent_count'] += 1
+        if day < entry['first_sent_at']:
+            entry['first_sent_at'] = day
+        if day >= entry['last_sent_at']:
+            entry['last_sent_at'] = day
+            entry['last_status'] = str(item.get('reply_status') or '').lower()
+    return history
+
+
 class _SelaProspectContext:
     """The facts one prospect view reads, fetched row by row.
 
@@ -5621,6 +5698,11 @@ class _SelaProspectContext:
     def revision_outreach(self, source_id):
         return _sela_revision_outreach_row(self.conn, source_id)
 
+    def customer_outreach(self, customer_id):
+        history = _sela_customer_outreach_history(
+            _sela_customer_outreach_rows(self.conn, [int(customer_id)]))
+        return dict(history.get(int(customer_id), _SELA_EMPTY_OUTREACH_HISTORY))
+
 
 class _SelaProspectPage(_SelaProspectContext):
     """Set-based facts for one page of prospect profiles.
@@ -5654,6 +5736,7 @@ class _SelaProspectPage(_SelaProspectContext):
         self._verifications = self._load_verifications(emails)
         self._revision_verifications = self._load_revision_verifications(emails)
         self._outreach = self._load_outreach()
+        self._customer_outreach = self._load_customer_outreach()
         self._revision_outreach = self._load_revision_outreach()
         self._reply_events = self._load_reply_events()
         self._relationships = (
@@ -5765,6 +5848,12 @@ class _SelaProspectPage(_SelaProspectContext):
             row['first_touch_at'] = touch.get(int(row['id']), '')
         return chosen
 
+    def _load_customer_outreach(self):
+        if not self._customer_ids:
+            return {}
+        return _sela_customer_outreach_history(
+            _sela_customer_outreach_rows(self.conn, self._customer_ids))
+
     def _load_revision_outreach(self):
         if postgres_mode():
             return None  # the revision hash covers the same columns as the view row
@@ -5820,6 +5909,9 @@ class _SelaProspectPage(_SelaProspectContext):
         if self._revision_outreach is None:
             return self._outreach.get(str(source_id))
         return self._revision_outreach.get(str(source_id))
+
+    def customer_outreach(self, customer_id):
+        return dict(self._customer_outreach.get(int(customer_id), _SELA_EMPTY_OUTREACH_HISTORY))
 
 
 def _sela_prospect_view(conn, profile, context=None):
@@ -5900,6 +5992,7 @@ def _sela_prospect_view(conn, profile, context=None):
     observed_inbound_body = '' if reply_status == 'bounced' else (outreach.get('reply_content') or '')
     relationship = context.relationship(int(customer['id']))
     real_interaction = bool(relationship.get('real_interaction'))
+    outreach_history = context.customer_outreach(int(customer['id']))
     lead_stage = _sela_prospect_lifecycle_facts({
         'business_stage': str(customer.get('business_stage') or ''),
         'status': str(customer.get('status') or ''),
@@ -5959,6 +6052,12 @@ def _sela_prospect_view(conn, profile, context=None):
         'email_draft': str(outreach.get('content') or ''),
         'outreach_status': outreach_status,
         'outcome': outcome,
+        # Canonical outreach history of the whole customer, not just the sela
+        # source row: first/last dated send plus count and the latest status.
+        # Empty-date imported drafts never count as a send (sent_count=0).
+        'outreach': outreach_history,
+        'bounced': outreach_history['last_status'] == 'bounced',
+        'replied': real_interaction or outreach_history['last_status'] == 'replied',
         'sent_at': str(outreach.get('sent_date') or ''),
         'first_touch_at': str(outreach.get('first_touch_at') or ''),
         'last_outreach_at': str(outreach.get('external_updated_at') or outreach.get('sent_date') or ''),

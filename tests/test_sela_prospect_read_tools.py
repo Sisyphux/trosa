@@ -177,5 +177,86 @@ class SelaProspectReadToolsTest(unittest.TestCase):
         self.assertEqual(self.client.get('/api/integrations/sela/prospects?ids=alpha').status_code, 401)
 
 
+    # ---- canonical outreach history (T4) --------------------------------
+    def hamid_db(self):
+        db.set_db_user('hamid')
+        return db.get_db()
+
+    def add_outreach(self, customer_id, external_source, external_id, sent_date,
+                     reply_status='pending'):
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                '''INSERT INTO outreach_emails
+                   (customer_id, subject, content, sent_date, reply_status,
+                    external_source, external_id)
+                   VALUES (?, 'Subject', 'Body', ?, ?, ?, ?)''',
+                (customer_id, sent_date, reply_status, external_source, external_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def single(self, source_id):
+        response = self.client.get(
+            f'/api/integrations/sela/prospects/{source_id}', headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()['prospect']
+
+    def test_outreach_history_includes_mail_from_outside_the_sela_source(self):
+        created = self.upsert('emailed-before', 'Emailed Before GmbH')
+        customer_id = created['trosa_id']
+        # Sent before the customer joined the pool: the mail lives on the
+        # customer record under another source, not on the sela source row.
+        self.add_outreach(customer_id, 'legacy-sela', 'old-1', '2026-08-13')
+
+        view = self.single('emailed-before')
+        self.assertEqual(view['outreach'], {
+            'first_sent_at': '2026-08-13', 'last_sent_at': '2026-08-13',
+            'sent_count': 1, 'last_status': 'pending',
+        })
+        self.assertFalse(view['bounced'])
+        self.assertFalse(view['replied'])
+
+    def test_imported_draft_without_a_date_is_not_a_send(self):
+        created = self.upsert('draft-only', 'Draft Only GmbH')
+        self.add_outreach(created['trosa_id'], 'sela', 'draft-only', '')
+
+        view = self.single('draft-only')
+        self.assertEqual(view['outreach']['sent_count'], 0)
+        self.assertEqual(view['outreach']['first_sent_at'], '')
+        self.assertEqual(view['outreach']['last_sent_at'], '')
+
+    def test_outreach_history_bounds_count_and_latest_status_across_sources(self):
+        created = self.upsert('many-sends', 'Many Sends GmbH')
+        customer_id = created['trosa_id']
+        self.add_outreach(customer_id, 'legacy-sela', 'm-1', '2026-08-13', 'replied')
+        self.add_outreach(customer_id, 'sela', 'many-sends', '2026-09-01', 'pending')
+        self.add_outreach(customer_id, 'manual', 'm-2', '2026-09-20', 'bounced')
+
+        view = self.single('many-sends')
+        self.assertEqual(view['outreach']['first_sent_at'], '2026-08-13')
+        self.assertEqual(view['outreach']['last_sent_at'], '2026-09-20')
+        self.assertEqual(view['outreach']['sent_count'], 3)
+        self.assertEqual(view['outreach']['last_status'], 'bounced')
+        self.assertTrue(view['bounced'])
+
+    def test_replied_fact_follows_the_latest_status(self):
+        created = self.upsert('replied-latest', 'Replied Latest GmbH')
+        self.add_outreach(created['trosa_id'], 'legacy-sela', 'r-1', '2026-09-05', 'replied')
+
+        view = self.single('replied-latest')
+        self.assertEqual(view['outreach']['last_status'], 'replied')
+        self.assertTrue(view['replied'])
+
+    def test_batched_page_and_single_read_agree_on_outreach_history(self):
+        for index in range(3):
+            created = self.upsert(f'page-{index}', f'Page {index} GmbH')
+            self.add_outreach(created['trosa_id'], 'legacy-sela', f'p-{index}', '2026-08-13')
+        listed = {row['id']: row for row in self.list_prospects()}
+        for index in range(3):
+            self.assertEqual(listed[f'page-{index}'], self.single(f'page-{index}'))
+
+
 if __name__ == '__main__':
     unittest.main()
