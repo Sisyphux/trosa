@@ -2,6 +2,7 @@
 Trosa Flask 后端应用（多用户版）
 正式 ECS 使用统一 PostgreSQL；兼容层只提供当前 API 所需的用户作用域投影与周报读取
 """
+import collections
 import os
 import sys
 import json
@@ -3484,6 +3485,126 @@ def _sela_company_identity_matches(rows, payload):
     return name_hits, ''
 
 
+def _sela_contact_identity_condition(column_prefix, wanted_email, wanted_phones):
+    """SQL superset of "this contact row can match the wanted identity".
+
+    Every contact that the Python comparison (casefolded email, ``_sela_phone_key``
+    equality) would accept is accepted here too, so the exact Python check on the
+    returned rows decides the same outcome as scanning every contact would.  Rows
+    with any non-ASCII text in a compared column are always returned, because SQL
+    ``lower``/``regexp_replace`` do not mirror Python's casefold/Unicode digits
+    for them.  Returns ``('', [])`` when nothing is wanted.
+    """
+    conditions, params = [], []
+    prefix = column_prefix
+    if wanted_email:
+        conditions.append(f'strpos(lower({prefix}email), ?) > 0')
+        params.append(wanted_email)
+        conditions.append(f'octet_length({prefix}email) <> char_length({prefix}email)')
+    if wanted_phones:
+        for key in sorted(wanted_phones):
+            digits = re.sub(r'\D', '', key)
+            for column in ('phone', 'whatsapp'):
+                if digits:
+                    conditions.append(
+                        f"regexp_replace({prefix}{column}, '[^0-9]', '', 'g') = ?")
+                    params.append(digits)
+                else:
+                    conditions.append(f"strpos({prefix}{column}, '+') > 0")
+        for column in ('phone', 'whatsapp'):
+            conditions.append(f'octet_length({prefix}{column}) <> char_length({prefix}{column})')
+    if not conditions:
+        return '', []
+    return '(' + ' OR '.join(conditions) + ')', params
+
+
+def _sela_company_candidate_condition(wanted_name_key, wanted_domain, candidate_id):
+    """SQL superset for the Customers ``_sela_match_customers`` can pick by
+    external id, canonical domain or normalized company name.
+
+    Unfilterable inputs (a non-ASCII domain, a name with no ASCII token) widen
+    the condition to every active Customer instead of narrowing it, so the
+    Python decision on the returned rows is always the full-table decision.
+    """
+    parts, params = [], []
+    # External id owner: ``str(...).strip() == value`` implies containment.
+    parts.append('(strpos(external_source, ?) > 0 AND strpos(external_id, ?) > 0)')
+    params.extend([_SELA_INTEGRATION, candidate_id])
+    if wanted_domain:
+        if not wanted_domain.isascii():
+            return '', []
+        parts.append("(strpos(lower(translate(website, E'\\t\\r\\n', '')), ?) > 0 "
+                     "OR octet_length(website) <> char_length(website) "
+                     "OR strpos(website, '[') > 0)")
+        params.append(wanted_domain)
+    if wanted_name_key:
+        tokens = [token for token in wanted_name_key.split(' ')
+                  if token and token != 'and' and token.isascii()]
+        if not tokens:
+            return '', []
+        # Every token of an equal key is a substring of the row's own text, so
+        # requiring all of them keeps this a superset and keeps it selective.
+        text = "COALESCE(NULLIF(company, ''), name)"
+        contains = ' AND '.join(f'strpos(lower({text}), ?) > 0' for _ in tokens)
+        parts.append(f"(({contains}) OR octet_length({text}) <> char_length({text}))")
+        params.extend(tokens)
+    return '(' + ' OR '.join(parts) + ')', params
+
+
+def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain):
+    """PostgreSQL candidate read for ``_sela_match_customers``.
+
+    A fixed number of statements, independent of the Customer count: the
+    confirmed-source fact, the contacts that can carry the wanted identity, and
+    one Customer read narrowed to what the matcher can pick (contact hits,
+    external owner, same domain, same name).  Returns ``(rows, contact_rows)``
+    in the same order and shape the full-table read produced, or
+    ``(None, row)`` when a human-confirmed source fact selects the Customer.
+    """
+    if candidate_id:
+        confirmed = identity_link.active_facts_for_identifier(
+            conn, 'source', f'{_SELA_PROSPECT_SOURCE}:{candidate_id}')
+        confirmed_ids = {int(fact['customer_id']) for fact in confirmed
+                         if fact.get('customer_id') is not None}
+        if len(confirmed_ids) == 1:
+            chosen = next(iter(confirmed_ids))
+            row = conn.execute(
+                'SELECT * FROM trosa.customer_records WHERE id=? AND deleted_at IS NULL',
+                (chosen,),
+            ).fetchone()
+            if row:
+                item = dict(row)
+                item['matched_by'] = ['confirmed_source']
+                return None, item
+    contact_rows = []
+    condition, params = _sela_contact_identity_condition('', wanted_email, wanted_phones)
+    if condition:
+        contact_rows = [dict(row) for row in conn.execute(
+            'SELECT customer_id, email, phone, whatsapp FROM trosa.customer_contacts WHERE ' + condition,
+            params,
+        ).fetchall()]
+    hit_ids = sorted({int(row['customer_id']) for row in contact_rows
+                      if row.get('customer_id') is not None})
+    company_condition, company_params = _sela_company_candidate_condition(
+        _sync_name_key(payload.get('company') or payload.get('name')), wanted_domain, candidate_id)
+    where, query_params = ['deleted_at IS NULL'], []
+    if company_condition:
+        selectors, selector_params = [company_condition], list(company_params)
+        if hit_ids:
+            selectors.append('id IN (' + ','.join('?' for _ in hit_ids) + ')')
+            selector_params.extend(hit_ids)
+        where.append('(' + ' OR '.join(selectors) + ')')
+        query_params = selector_params
+    rows = [dict(row) for row in conn.execute(
+        'SELECT * FROM trosa.customer_records WHERE ' + ' AND '.join(where) +
+        ' ORDER BY updated_at DESC, id DESC',
+        query_params,
+    ).fetchall()]
+    active_ids = {int(row['id']) for row in rows}
+    contact_rows = [row for row in contact_rows if int(row['customer_id']) in active_ids]
+    return rows, contact_rows
+
+
 def _sela_match_customers(conn, payload):
     """Resolve one sela candidate using auditable identity keys.
 
@@ -3504,32 +3625,34 @@ def _sela_match_customers(conn, payload):
     }
     wanted_domain = _canonical_website_domain(payload.get('website'))
 
-    rows = (_active_customers(conn) if postgres_mode() else [dict(row) for row in conn.execute(
-        "SELECT * FROM customers WHERE (is_deleted=0 OR is_deleted IS NULL)"
-    ).fetchall()])
-    if not rows:
-        return [], ''
-
-    customer_ids = [row['id'] for row in rows]
-    # A human-confirmed source identity fact wins over fuzzy company/domain
-    # matching.  This is what makes a same/different Inbox decision reusable:
-    # the next sync resolves deterministically instead of asking again.
-    if candidate_id:
-        confirmed = identity_link.active_facts_for_identifier(
-            conn, 'source', f'{_SELA_PROSPECT_SOURCE}:{candidate_id}')
-        confirmed_ids = {int(fact['customer_id']) for fact in confirmed
-                         if fact.get('customer_id') is not None}
-        if len(confirmed_ids) == 1:
-            chosen = next(iter(confirmed_ids))
-            row = next((item for item in rows if int(item['id']) == chosen), None)
-            if row:
-                item = dict(row)
-                item['matched_by'] = ['confirmed_source']
-                return [item], ''
     if postgres_mode():
-        contact_rows = [contact for customer_id in customer_ids
-                        for contact in _customer_contacts(conn, customer_id)]
+        rows, contact_rows = _sela_match_candidate_rows(
+            conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain)
+        if rows is None:
+            item = contact_rows
+            return [item], ''
     else:
+        rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM customers WHERE (is_deleted=0 OR is_deleted IS NULL)"
+        ).fetchall()]
+        if not rows:
+            return [], ''
+        customer_ids = [row['id'] for row in rows]
+        # A human-confirmed source identity fact wins over fuzzy company/domain
+        # matching.  This is what makes a same/different Inbox decision reusable:
+        # the next sync resolves deterministically instead of asking again.
+        if candidate_id:
+            confirmed = identity_link.active_facts_for_identifier(
+                conn, 'source', f'{_SELA_PROSPECT_SOURCE}:{candidate_id}')
+            confirmed_ids = {int(fact['customer_id']) for fact in confirmed
+                             if fact.get('customer_id') is not None}
+            if len(confirmed_ids) == 1:
+                chosen = next(iter(confirmed_ids))
+                row = next((item for item in rows if int(item['id']) == chosen), None)
+                if row:
+                    item = dict(row)
+                    item['matched_by'] = ['confirmed_source']
+                    return [item], ''
         placeholders = ','.join('?' for _ in customer_ids)
         contact_rows = conn.execute(
             f"SELECT customer_id, lower(trim(email)) AS email, phone, whatsapp FROM contacts "
@@ -3618,13 +3741,17 @@ def _sela_canonical_duplicate_match(conn, matches, source_id, company=''):
         return None
     wanted_name = _sync_name_key(company)
 
+    contact_counts = collections.Counter()
+    try:
+        for contact_row in _customer_contacts(
+                conn, None, customer_ids=[int(row['id']) for row in pool]):
+            contact_counts[int(contact_row['customer_id'])] += 1
+    except Exception:
+        contact_counts = collections.Counter()
+
     def rank(row):
         name_match = 0 if wanted_name and _sync_name_key(row.get('company') or row.get('name')) == wanted_name else 1
-        try:
-            contacts = len(_customer_contacts(conn, int(row['id'])))
-        except Exception:
-            contacts = 0
-        return (name_match, -contacts, int(row['id']))
+        return (name_match, -contact_counts[int(row['id'])], int(row['id']))
 
     return min(pool, key=rank)
 
@@ -3650,17 +3777,27 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
         ) if phone
     }
     if postgres_mode():
-        customer_rows = {int(row['id']): row for row in _active_customers(conn)}
+        # Only the contacts that can duplicate this one, with their Customer's
+        # names, in one statement (the whole contact table used to be read per
+        # upsert).  The Python comparison below still decides.
         existing_contacts = []
-        for existing_customer_id in customer_rows:
-            customer = customer_rows[existing_customer_id]
-            for contact_row in _customer_contacts(conn, existing_customer_id):
-                existing_contacts.append({
-                    **contact_row,
-                    'company': customer.get('company', ''),
-                    'customer_name': customer.get('name', ''),
-                    'is_deleted': 0,
-                })
+        condition, condition_params = _sela_contact_identity_condition(
+            'ct.', contact['email'], phone_keys)
+        if condition:
+            for contact_row in conn.execute(
+                '''SELECT ct.id, ct.customer_id, ct.name, ct.title, ct.email, ct.phone,
+                          ct.whatsapp, ct.linkedin, ct.preferred_channel, ct.contact_type,
+                          ct.is_primary, ct.notes, ct.created_at,
+                          c.company AS company, c.name AS customer_name
+                     FROM trosa.customer_contacts ct
+                     JOIN trosa.customer_records c ON c.id=ct.customer_id
+                    WHERE c.deleted_at IS NULL AND ''' + condition + '''
+                    ORDER BY ct.is_primary DESC, ct.created_at DESC, ct.id DESC''',
+                condition_params,
+            ).fetchall():
+                row = dict(contact_row)
+                row['is_deleted'] = 0
+                existing_contacts.append(row)
     else:
         existing_contacts = conn.execute(
             '''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted

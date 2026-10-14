@@ -1,0 +1,572 @@
+{
+  "label": "before-small",
+  "tree": "/private/tmp/claude-501/-Users-luoxin-Desktop-Trosa--claude-worktrees-customer-followup-review-e7ce5a/b9a312e8-4213-417f-b82e-2fe7174d1f56/scratchpad/baseline",
+  "results": [
+    {
+      "customers_at_least": 100,
+      "probes": [
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.0531,
+          "sql": 240,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              202
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.0517,
+          "sql": 242,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              204
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.05,
+          "sql": 244,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              206
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.0519,
+          "sql": 246,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              208
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.0524,
+          "sql": 248,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              210
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.0305,
+          "sql": 115,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.0305,
+          "sql": 115,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.0333,
+          "sql": 115,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.0314,
+          "sql": 115,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.0317,
+          "sql": 115,
+          "body_status": "REVIEW"
+        }
+      ],
+      "sql_new": [
+        240,
+        242,
+        244,
+        246,
+        248
+      ],
+      "median_seconds_new": 0.0519,
+      "max_seconds_new": 0.0531,
+      "last_new_top_tables": [
+        [
+          "trosa.customer_contacts",
+          210
+        ],
+        [
+          "trosa.account_legacy_refs",
+          5
+        ],
+        [
+          "trosa.customer_records",
+          4
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          3
+        ],
+        [
+          "audit.integration_receipts",
+          2
+        ],
+        [
+          "trosa.customer_states",
+          2
+        ],
+        [
+          "SELECT trosa.compat_uuid(?)",
+          2
+        ],
+        [
+          "core.contact_methods",
+          2
+        ]
+      ]
+    },
+    {
+      "customers_at_least": 1000,
+      "probes": [
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.2398,
+          "sql": 2050,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              2012
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.2412,
+          "sql": 2052,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              2014
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.2417,
+          "sql": 2054,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              2016
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.2472,
+          "sql": 2056,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              2018
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.2588,
+          "sql": 2058,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              2020
+            ],
+            [
+              "trosa.account_legacy_refs",
+              5
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.customer_states",
+              2
+            ],
+            [
+              "SELECT trosa.compat_uuid(?)",
+              2
+            ],
+            [
+              "core.contact_methods",
+              2
+            ]
+          ]
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.1252,
+          "sql": 1020,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.12,
+          "sql": 1020,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.1208,
+          "sql": 1020,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.1211,
+          "sql": 1020,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.1211,
+          "sql": 1020,
+          "body_status": "REVIEW"
+        }
+      ],
+      "sql_new": [
+        2050,
+        2052,
+        2054,
+        2056,
+        2058
+      ],
+      "median_seconds_new": 0.2417,
+      "max_seconds_new": 0.2588,
+      "last_new_top_tables": [
+        [
+          "trosa.customer_contacts",
+          2020
+        ],
+        [
+          "trosa.account_legacy_refs",
+          5
+        ],
+        [
+          "trosa.customer_records",
+          4
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          3
+        ],
+        [
+          "audit.integration_receipts",
+          2
+        ],
+        [
+          "trosa.customer_states",
+          2
+        ],
+        [
+          "SELECT trosa.compat_uuid(?)",
+          2
+        ],
+        [
+          "core.contact_methods",
+          2
+        ]
+      ]
+    }
+  ]
+}

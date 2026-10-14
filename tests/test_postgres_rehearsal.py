@@ -126,6 +126,58 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             module._customer_search_match_contexts(self.connection, ids, ['rehearsal'])
             self.assertEqual(execute.call_count, 5)
 
+    def test_sela_prospect_upsert_issues_the_same_statements_for_any_customer_count(self):
+        """Matching a prospect must not read contacts once per Customer.
+
+        The write path used to run one statement per active Customer
+        (``_sela_match_customers`` and ``_sela_upsert_contact``), so a bulk sync
+        was O(N^2).  The count of a brand-new prospect must be identical at two
+        very different table sizes and stay small.
+        """
+        import postgres_compat
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:10]
+        counted = []
+        original = postgres_compat.CompatCursor.execute
+
+        def counting(cursor, sql, params=None):
+            counted.append(str(sql))
+            return original(cursor, sql, params)
+
+        def body(index, kind):
+            sid = f'upsert-batch-{run}-{kind}-{index}'
+            return {
+                'source_id': sid, 'company': f'Upsert Batch {run} {kind} {index}',
+                'website': f'https://{sid}.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator',
+                'contact': {'name': f'Buyer {index}', 'email': f'buyer-{index}@{sid}.example'},
+                'status': 'qualified', 'research_status': 'complete', 'confidence': 'high',
+                'reason': 'rehearsal', 'source_urls': [f'https://{sid}.example/about'],
+            }
+
+        def probe(index, kind):
+            with mock.patch.object(postgres_compat.CompatCursor, 'execute', counting):
+                counted.clear()
+                response = client.post(
+                    '/api/integrations/sela/prospects',
+                    json={'prospect': body(index, kind), 'idempotency_key': f'upsert-batch-{run}-{kind}-{index}'},
+                )
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            self.assertEqual(response.get_json().get('status'), 'SYNCED')
+            return len(counted)
+
+        small = probe(0, 'small')
+        for index in range(1, 13):
+            probe(index, 'grow')
+        large = probe(99, 'large')
+        self.assertEqual(small, large)
+        # Creating the Customer aggregate is itself ~40 writes/reads; the bound
+        # only guards against a per-Customer read coming back.
+        self.assertLess(large, 60)
+
     def test_schema_contract_and_migration_ledger(self):
         import db
         from tools.unified_postgres_migration import SCHEMA_PATHS

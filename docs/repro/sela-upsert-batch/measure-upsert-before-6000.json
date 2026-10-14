@@ -1,0 +1,285 @@
+{
+  "label": "before-6000",
+  "tree": "/private/tmp/claude-501/-Users-luoxin-Desktop-Trosa--claude-worktrees-customer-followup-review-e7ce5a/b9a312e8-4213-417f-b82e-2fe7174d1f56/scratchpad/baseline",
+  "results": [
+    {
+      "customers_at_least": 6000,
+      "probes": [
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.6587,
+          "sql": 6040,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              6016
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "trosa.account_legacy_refs",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.contact_legacy_refs",
+              2
+            ],
+            [
+              "trosa.inbox_items",
+              2
+            ],
+            [
+              "BEGIN IMMEDIATE",
+              1
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.6498,
+          "sql": 6040,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              6016
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "trosa.account_legacy_refs",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.contact_legacy_refs",
+              2
+            ],
+            [
+              "trosa.inbox_items",
+              2
+            ],
+            [
+              "BEGIN IMMEDIATE",
+              1
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.6606,
+          "sql": 6040,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              6016
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "trosa.account_legacy_refs",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.contact_legacy_refs",
+              2
+            ],
+            [
+              "trosa.inbox_items",
+              2
+            ],
+            [
+              "BEGIN IMMEDIATE",
+              1
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.6553,
+          "sql": 6040,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              6016
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "trosa.account_legacy_refs",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.contact_legacy_refs",
+              2
+            ],
+            [
+              "trosa.inbox_items",
+              2
+            ],
+            [
+              "BEGIN IMMEDIATE",
+              1
+            ]
+          ]
+        },
+        {
+          "kind": "new",
+          "status": 200,
+          "seconds": 0.6412,
+          "sql": 6040,
+          "top_tables": [
+            [
+              "trosa.customer_contacts",
+              6016
+            ],
+            [
+              "trosa.customer_records",
+              4
+            ],
+            [
+              "trosa.agent_prospect_profiles",
+              3
+            ],
+            [
+              "trosa.account_legacy_refs",
+              3
+            ],
+            [
+              "audit.integration_receipts",
+              2
+            ],
+            [
+              "trosa.contact_legacy_refs",
+              2
+            ],
+            [
+              "trosa.inbox_items",
+              2
+            ],
+            [
+              "BEGIN IMMEDIATE",
+              1
+            ]
+          ]
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.634,
+          "sql": 6025,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.6336,
+          "sql": 6025,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.6509,
+          "sql": 6025,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.6353,
+          "sql": 6025,
+          "body_status": "REVIEW"
+        },
+        {
+          "kind": "email_match",
+          "status": 200,
+          "seconds": 0.6473,
+          "sql": 6025,
+          "body_status": "REVIEW"
+        }
+      ],
+      "sql_new": [
+        6040
+      ],
+      "median_seconds_new": 0.6553,
+      "max_seconds_new": 0.6606,
+      "last_new_top_tables": [
+        [
+          "trosa.customer_contacts",
+          6016
+        ],
+        [
+          "trosa.customer_records",
+          4
+        ],
+        [
+          "trosa.agent_prospect_profiles",
+          3
+        ],
+        [
+          "trosa.account_legacy_refs",
+          3
+        ],
+        [
+          "audit.integration_receipts",
+          2
+        ],
+        [
+          "trosa.contact_legacy_refs",
+          2
+        ],
+        [
+          "trosa.inbox_items",
+          2
+        ],
+        [
+          "BEGIN IMMEDIATE",
+          1
+        ]
+      ]
+    }
+  ]
+}

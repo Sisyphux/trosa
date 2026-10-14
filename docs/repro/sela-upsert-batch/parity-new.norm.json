@@ -1,0 +1,849 @@
+[
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:exact_email",
+   "prospect_api": "sela-v2",
+   "source_id": "par-1",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 1,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 1,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "exact_email",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:exact_phone_format",
+   "prospect_api": "sela-v2",
+   "source_id": "par-2",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 2,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 2,
+     "matched_by": [
+      "phone"
+     ]
+    }
+   ]
+  },
+  "probe": "exact_phone_format",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:phone_without_plus",
+   "prospect_api": "sela-v2",
+   "source_id": "par-2b",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100017,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "phone_without_plus",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:whatsapp_vs_phone",
+   "prospect_api": "sela-v2",
+   "source_id": "par-3",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 3,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 3,
+     "matched_by": [
+      "phone"
+     ]
+    }
+   ]
+  },
+  "probe": "whatsapp_vs_phone",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:same_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "par-4",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 4,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 4,
+     "matched_by": [
+      "domain"
+     ]
+    }
+   ]
+  },
+  "probe": "same_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:same_name_no_web_on_customer",
+   "prospect_api": "sela-v2",
+   "source_id": "par-5",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 5,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 5,
+     "matched_by": [
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "same_name_no_web_on_customer",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:same_name_other_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "par-6",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100018,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "same_name_other_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:same_name_same_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "par-7",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 6,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 6,
+     "matched_by": [
+      "domain",
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "same_name_same_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Plastic World ZA",
+     "customer_id": 100018,
+     "matched_by": [
+      "company"
+     ],
+     "website": "https://plasticworld-au.example"
+    },
+    {
+     "company": "Plastic World ZA",
+     "customer_id": 6,
+     "matched_by": [
+      "company"
+     ],
+     "website": "https://plasticworld-za.example"
+    }
+   ],
+   "idempotency_key": "par:name_only_with_web_on_customer",
+   "prospect_api": "sela-v2",
+   "reason": "MULTIPLE_TROSA_MATCHES",
+   "source_id": "par-8",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_ids": [
+    100018,
+    6
+   ]
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 100018,
+     "matched_by": [
+      "company"
+     ]
+    },
+    {
+     "id": 6,
+     "matched_by": [
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "name_only_with_web_on_customer",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:multiple_hits",
+   "prospect_api": "sela-v2",
+   "source_id": "par-9",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 7,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 7,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "multiple_hits",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:deleted_customer_email",
+   "prospect_api": "sela-v2",
+   "source_id": "par-10",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100019,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "deleted_customer_email",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:additional_email_second",
+   "prospect_api": "sela-v2",
+   "source_id": "par-11",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 10,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 10,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "additional_email_second",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Many Contacts Inc",
+     "customer_id": 10,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://many-contacts.example"
+    }
+   ],
+   "idempotency_key": "par:additional_email_case",
+   "matched_by": [
+    "email"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_HAS_SELA_PROSPECT",
+   "source_id": "par-12",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 10
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 10,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "additional_email_case",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Many Contacts Inc",
+     "customer_id": 10,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://many-contacts.example"
+    }
+   ],
+   "idempotency_key": "par:additional_phone",
+   "matched_by": [
+    "phone"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_HAS_SELA_PROSPECT",
+   "source_id": "par-13",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 10
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 10,
+     "matched_by": [
+      "phone"
+     ]
+    }
+   ]
+  },
+  "probe": "additional_phone",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:shared_account_email",
+   "prospect_api": "sela-v2",
+   "source_id": "par-14",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 11,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 11,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "shared_account_email",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:shared_account_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "par-15",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100016,
+   "warnings": [
+    "同一官网域名存在 2 条重复客户记录（已复用 #100016，重复：#11）；系统按同一公司处理，建议后续合并重复客户。"
+   ]
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 100016,
+     "matched_by": [
+      "domain"
+     ]
+    },
+    {
+     "id": 11,
+     "matched_by": [
+      "domain"
+     ]
+    }
+   ]
+  },
+  "probe": "shared_account_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:canonical_duplicate_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "par-16",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 13,
+   "warnings": [
+    "同一官网域名存在 2 条重复客户记录（已复用 #13，重复：#12）；系统按同一公司处理，建议后续合并重复客户。"
+   ]
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 13,
+     "matched_by": [
+      "domain",
+      "company"
+     ]
+    },
+    {
+     "id": 12,
+     "matched_by": [
+      "domain"
+     ]
+    }
+   ]
+  },
+  "probe": "canonical_duplicate_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:duplicate_domain_other_name",
+   "prospect_api": "sela-v2",
+   "source_id": "par-17",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 12,
+   "warnings": [
+    "同一官网域名存在 2 条重复客户记录（已复用 #12，重复：#13）；系统按同一公司处理，建议后续合并重复客户。"
+   ]
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 13,
+     "matched_by": [
+      "domain"
+     ]
+    },
+    {
+     "id": 12,
+     "matched_by": [
+      "domain"
+     ]
+    }
+   ]
+  },
+  "probe": "duplicate_domain_other_name",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:amp_name",
+   "prospect_api": "sela-v2",
+   "source_id": "par-18",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 14,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 14,
+     "matched_by": [
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "amp_name",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:unicode_email",
+   "prospect_api": "sela-v2",
+   "source_id": "par-19",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 15,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 15,
+     "matched_by": [
+      "email"
+     ]
+    }
+   ]
+  },
+  "probe": "unicode_email",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Müller Kunststoffe GmbH",
+     "customer_id": 15,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://mueller-kunststoffe.example"
+    }
+   ],
+   "idempotency_key": "par:unicode_phone",
+   "matched_by": [
+    "phone"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_HAS_SELA_PROSPECT",
+   "source_id": "par-20",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 15
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 15,
+     "matched_by": [
+      "phone"
+     ]
+    }
+   ]
+  },
+  "probe": "unicode_phone",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:unicode_name",
+   "prospect_api": "sela-v2",
+   "source_id": "par-21",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100020,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "unicode_name",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "External Owned",
+     "customer_id": 16,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://external-owned.example"
+    }
+   ],
+   "idempotency_key": "par:external_id_again_same_domain",
+   "matched_by": [
+    "domain",
+    "company"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_LINKED",
+   "source_id": "ext-1",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 16
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 16,
+     "matched_by": [
+      "domain",
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "external_id_again_same_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:external_id_other_domain",
+   "prospect_api": "sela-v2",
+   "source_id": "ext-1",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100021,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "external_id_other_domain",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:external_id_with_other_email",
+   "prospect_api": "sela-v2",
+   "source_id": "ext-1",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100021,
+   "warnings": [
+    "CONTACT_EMAIL_ALREADY_ASSIGNED"
+   ]
+  },
+  "decision": {
+   "error": "EXTERNAL_IDENTITY_CONFLICT",
+   "matches": [
+    {
+     "id": 100021,
+     "matched_by": []
+    }
+   ]
+  },
+  "probe": "external_id_with_other_email",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:no_contact_no_web",
+   "prospect_api": "sela-v2",
+   "source_id": "par-22",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100022,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "no_contact_no_web",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:brand_new_with_contact",
+   "prospect_api": "sela-v2",
+   "source_id": "par-23",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100023,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "brand_new_with_contact",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": true,
+   "idempotency_key": "par:percent_underscore_name",
+   "prospect_api": "sela-v2",
+   "source_id": "par-24",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100024,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": []
+  },
+  "probe": "percent_underscore_name",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "created": false,
+   "idempotency_key": "par:repeat_of_new",
+   "prospect_api": "sela-v2",
+   "source_id": "par-23",
+   "status": "SYNCED",
+   "success": true,
+   "trosa_id": 100023,
+   "warnings": []
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 100023,
+     "matched_by": [
+      "external_id"
+     ]
+    }
+   ]
+  },
+  "probe": "repeat_of_new",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Exact Email Plastics",
+     "customer_id": 1,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://exact-email.example"
+    }
+   ],
+   "idempotency_key": "par:contact_only_email_same_company",
+   "matched_by": [
+    "domain",
+    "company"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_HAS_SELA_PROSPECT",
+   "source_id": "par-25",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 1
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 1,
+     "matched_by": [
+      "domain",
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "contact_only_email_same_company",
+  "status_code": 200
+ },
+ {
+  "body": {
+   "candidates": [
+    {
+     "company": "Exact Email Plastics",
+     "customer_id": 1,
+     "matched_by": [
+      "external_id"
+     ],
+     "website": "https://exact-email.example"
+    }
+   ],
+   "idempotency_key": "par:company_name_only_suffixes",
+   "matched_by": [
+    "company"
+   ],
+   "prospect_api": "sela-v2",
+   "reason": "CUSTOMER_ALREADY_HAS_SELA_PROSPECT",
+   "source_id": "par-26",
+   "status": "REVIEW",
+   "success": true,
+   "trosa_id": 1
+  },
+  "decision": {
+   "error": "",
+   "matches": [
+    {
+     "id": 1,
+     "matched_by": [
+      "company"
+     ]
+    }
+   ]
+  },
+  "probe": "company_name_only_suffixes",
+  "status_code": 200
+ }
+]
