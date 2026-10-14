@@ -243,3 +243,36 @@ svg.hi.hi-illus.hi-draw .s:nth-of-type(n+4){animation-delay:.3s}
 #trosa .ld-st svg.hi.hi-illus{display:block;margin:0 0 10px}
 #trosa .room-note .hand-empty{padding:6px 0}
 #trosa #customerEditModal .cw-empty .hand-empty{padding:8px 0}
+
+/* ---- 动作回应与每页点睛（三期）---------------------------------------------
+   下划线 / 划掉 / 墨迹都是“被画出来一次”：.hand-ul 路径 pathLength=100，
+   基础态是画满的终态，动画只在入场播一次；减少动态与 motion-reduced 时不播。
+   每页只有一处点睛，规则见 design/DESIGN_WORLD.md §2.7。 */
+.hand-under{position:relative;display:inline-block;max-width:100%}
+.hand-ul{position:absolute;left:-2px;bottom:-.3em;width:calc(100% + 4px);height:.34em;overflow:visible;fill:none;
+  stroke:currentColor;stroke-width:1.6;stroke-linecap:round;pointer-events:none}
+.hand-ul path,.hand-strike path{stroke-dasharray:100 200}
+.hand-ul path{animation:handStroke var(--dl-dur-slow,.55s) var(--dl-ease,cubic-bezier(.16,1,.3,1)) .12s backwards}
+@keyframes handStroke{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+.hand-struck{position:relative}
+.hand-strike{position:absolute;left:-3px;top:50%;width:calc(100% + 6px);height:.5em;margin-top:-.25em;overflow:visible;fill:none;
+  stroke:currentColor;stroke-width:1.6;stroke-linecap:round;pointer-events:none}
+.hand-strike path{animation:handStroke var(--dl-dur,.28s) var(--dl-ease,cubic-bezier(.16,1,.3,1)) backwards}
+.hand-struck{color:var(--dl-ink-3,#595959);transition:color var(--dl-dur,.28s) var(--dl-ease,ease) .2s}
+#trosa #customerEditModal .cw-rows .cw-row{position:relative}
+.hand-ink{position:absolute;left:0;right:0;bottom:-8px;height:8px;pointer-events:none}
+.hand-ink .hand-ul{left:0;width:100%;bottom:0;height:8px}
+.hand-ink .hand-ul path{animation:handInk 1.9s var(--dl-ease,cubic-bezier(.16,1,.3,1)) both}
+@keyframes handInk{0%{stroke-dashoffset:100;opacity:1}30%{stroke-dashoffset:0;opacity:1}70%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:0;opacity:0}}
+/* 按钮里的笔与勾：只有线，和文字同高 */
+.wait-pen-btn,svg.hi.hi-btn{width:16px;height:16px;margin-right:6px;vertical-align:-3px}
+svg.hi.hi-btn{stroke-width:2}
+/* Inbox：sela 处理中，笔在写 */
+.dialogue-msg--writing{padding:6px 2px;color:var(--dl-ink-3,#595959);font-size:.86rem}
+.dialogue-msg--writing .wait{gap:8px}
+@media (prefers-reduced-motion:reduce){
+  .hand-ul path,.hand-strike path,.hand-ink .hand-ul path{animation:none !important}
+  .hand-ink{display:none}
+}
+html.motion-reduced :is(.hand-ul path,.hand-strike path){animation:none !important}
+html.motion-reduced .hand-ink{display:none}

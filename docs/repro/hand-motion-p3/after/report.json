@@ -1,0 +1,178 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18204",
+  "checks": [
+    {
+      "name": "wide: 今天焦点客户名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 台账书眉分段名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: “一句下一步”下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 新记录下出现墨迹",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 墨迹淡去后被移除",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 点“标记完成”立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 按钮处理中是笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 保存失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 按钮成功时是画出来的勾",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: sela 处理中显示“笔在写”",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 今天焦点客户名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 台账书眉分段名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: “一句下一步”下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 新记录下出现墨迹",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 墨迹淡去后被移除",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 点“标记完成”立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 按钮处理中是笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 保存失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 按钮成功时是画出来的勾",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "iphone: sela 处理中显示“笔在写”",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "iphone: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 今天焦点客户名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 今天的下划线不动画",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "reduced: 台账书眉分段名下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: “一句下一步”下有一笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 新记录不出现墨迹",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 点“标记完成”立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 按钮处理中是笔",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 保存失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 按钮成功时是画出来的勾",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: sela 处理中显示“笔在写”",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "全程无页面错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "failed": 0
+}

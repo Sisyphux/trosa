@@ -85,6 +85,49 @@ var _WAIT_PAGE = '<svg class="wait-page-art" viewBox="160 36 200 206" aria-hidde
   '<path class="line l3" pathLength="100" d="M192 158c8-5 16 5 24 0s16 5 24 0"/></g>' +
   '<g class="quill"><path class="leaf" d="M0 0c7-1 15-7 24-14 7-5 15-4 15 2 0 9-11 17-24 17-6 0-10-2-15-5z"/><path class="shaft" d="M1 -1L34 -13"/></g></svg>';
 
+// ---- 动作回应与点睛（三期）：一笔下划线 / 划掉 / 墨迹 ---------------------------
+// 都是被画出来一次、之后静止（墨迹淡去）；减少动态时下划线与划掉直接是终态，墨迹不出现。
+var _HAND_UL = '<svg class="hand-ul" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path pathLength="100" d="M1 5c16-3 33-2 50-1s33 1 48-2"/></svg>';
+var _HAND_STRIKE = '<svg class="hand-strike" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path pathLength="100" d="M1 4.6c18-1.6 36-.6 52-1.2S84 3 99 2.6"/></svg>';
+
+// 文字下面一笔：用于页面里“此刻该做的事”。返回包好的 HTML。
+function handUnderlined(html) {
+  return '<span class="hand-under">' + html + _HAND_UL + '</span>';
+}
+
+// 新记录被写进时间线：行下方描一道墨迹再淡去（不依赖定时器之外的状态）。
+function inkUnderNode(node) {
+  if (!node || !node.appendChild || !shouldAnimateLists()) return;
+  // 墨迹画在文字块下面（不是行的底边：只有一条记录时行会被拉满整列）。
+  var host = node.querySelector(':scope > .cw-rmain') || node;
+  if (host.querySelector(':scope > .hand-ink')) return;
+  var inlinePosition = host.style.position;
+  if (window.getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  var ink = document.createElement('span');
+  ink.className = 'hand-ink';
+  ink.setAttribute('aria-hidden', 'true');
+  ink.innerHTML = _HAND_UL;
+  host.appendChild(ink);
+  window.setTimeout(function() {
+    if (ink.parentNode) ink.parentNode.removeChild(ink);
+    host.style.position = inlinePosition;
+  }, 2000);
+}
+
+// 标记完成：一笔划掉。返回撤回函数（保存失败时调用，不留下假的“已完成”）。
+function strikeThrough(el) {
+  if (!el || !el.appendChild || el.querySelector(':scope > .hand-strike')) return function() {};
+  el.classList.add('hand-struck');
+  var holder = document.createElement('span');
+  holder.innerHTML = _HAND_STRIKE;
+  var mark = holder.firstChild;
+  el.appendChild(mark);
+  return function undoStrike() {
+    el.classList.remove('hand-struck');
+    if (mark.parentNode) mark.parentNode.removeChild(mark);
+  };
+}
+
 // ---- 统一空状态：一张纸 + 一句话 ------------------------------------------------
 // 文案回答三件事：这里是什么（title）、为什么空（hint 前半）、下一步做什么（hint 后半 / action），
 // 不超过两句。action 是调用方已经拼好的按钮 HTML（需自行 escape）。
@@ -3458,7 +3501,7 @@ function extractInboxReplyImage(input) {
   if (file.size > 8 * 1024 * 1024) { showToast('图片请控制在 8MB 以内', 'warning'); input.value = ''; return; }
   var panel = document.getElementById('inboxReplyAnalysis');
   panel.hidden = false;
-  panel.innerHTML = '<div class="quick-analysis-loading">正在识别截图文字…</div>';
+  panel.innerHTML = '<div class="quick-analysis-loading">' + waitHtml('正在识别截图文字…', 'block') + '</div>';
   var reader = new FileReader();
   reader.onload = async function() {
     try {
@@ -3484,8 +3527,8 @@ async function analyzeInboxReply(force, options) {
   var panel = document.getElementById('inboxReplyAnalysis');
   var token = ++_inboxReplyAnalysisToken;
   panel.hidden = false;
-  if (!autoOptions.autoFillSummary) panel.innerHTML = '<div class="quick-analysis-loading">AI 正在识别客户和关键信息…</div>';
-  else panel.innerHTML = '<div class="quick-analysis-loading">AI 正在整理这次沟通的摘要…</div>';
+  if (!autoOptions.autoFillSummary) panel.innerHTML = '<div class="quick-analysis-loading">' + waitHtml('AI 正在识别客户和关键信息…', 'block') + '</div>';
+  else panel.innerHTML = '<div class="quick-analysis-loading">' + waitHtml('AI 正在整理这次沟通的摘要…', 'block') + '</div>';
   try {
     var context = _communicationConfirmContext || {};
     var directionOverride = inboxReplyDirectionValue();
@@ -5353,7 +5396,7 @@ function renderTodayWideDetail(r, name, meta, website) {
   el.dataset.customerId = r.customer_id;
   el.dataset.customerName = name;
   el.innerHTML =
-    '<div class="room-ident"><h3 class="room-company">' + escapeHtml(name) + '</h3>' +
+    '<div class="room-ident"><h3 class="room-company">' + handUnderlined(escapeHtml(name)) + '</h3>' +
       (meta ? '<p class="room-lines">' + escapeHtml(meta) + '</p>' : '') +
       '<div class="tide-dock-clock" id="todayDockClock"></div></div>' +
     '<section class="room-panel" aria-label="最近沟通">' +
@@ -6975,11 +7018,14 @@ function ledgerRunning() {
   var totals = ledgerEl('ledgerRunningTotals');
   var position = ledgerEl('ledgerRunningPosition');
   if (!label) return;
-  if (!LD.items.length) { label.textContent = '—'; totals.textContent = ''; position.textContent = ''; return; }
+  if (!LD.items.length) { label.textContent = '—'; delete label.dataset.segment; totals.textContent = ''; position.textContent = ''; return; }
   var scroll = ledgerEl('ledgerScroll');
   var itemIndex = ledgerFind(scroll.scrollTop + 4);
   var segment = LD.segments[LD.segOfItem[itemIndex]];
-  label.textContent = segment.label;
+  if (label.dataset.segment !== segment.label) {
+    label.dataset.segment = segment.label;
+    label.innerHTML = '<span class="hand-under">' + escapeHtml(segment.label) + _HAND_UL + '</span>';
+  }
   var bits = [segment.count + ' 家'];
   if (segment.overdue) bits.push('逾期 ' + segment.overdue);
   if (segment.waiting) bits.push('等待回复 ' + segment.waiting);
@@ -8404,7 +8450,7 @@ function renderCustomerNextTask(reminders) {
     return;
   }
   var title = next.title || next.content || '联系客户';
-  el.innerHTML = '<h2 class="cw-h2">' + escapeHtml(title) + '</h2>' +
+  el.innerHTML = '<h2 class="cw-h2">' + handUnderlined(escapeHtml(title)) + '</h2>' +
     '<p class="cw-when tnum">' + escapeHtml(cwWhen(next.remind_date)) + '</p>' +
     (next.reason ? '<p class="cw-reason">' + escapeHtml(next.reason) + '</p>' : '');
   if (actions) actions.innerHTML =
@@ -8993,6 +9039,9 @@ function setActionFeedback(button, state, label) {
   button.classList.toggle('is-pending', state === 'pending');
   button.classList.toggle('is-confirmed', state === 'success');
   button.textContent = label || original;
+  // 处理中是笔在写，成功是画出来的勾（按钮里只有线，不加浅灰片）。
+  if (state === 'pending') button.insertAdjacentHTML('afterbegin', _WAIT_PEN.replace('class="wait-pen"', 'class="wait-pen wait-pen-btn"'));
+  else if (state === 'success' && typeof handIcon === 'function') button.insertAdjacentHTML('afterbegin', handIcon('check', { cls: 'hi-draw hi-btn' }));
   return function resetActionFeedback(delay) {
     setTimeout(function() {
       button.disabled = false;
@@ -9054,6 +9103,11 @@ async function completeCustomerNextTask(button, taskId) {
   if (!next) return;
   var scope = beginCustomerScope();
   var reset = setActionFeedback(button, 'pending', '处理中…');
+  // 点下去就划掉（不等服务端）；保存失败会撤回。操作本身不等动画。
+  var undoStrikes = [
+    strikeThrough(document.querySelector('#customerNextTask .cw-h2 .hand-under') || document.querySelector('#customerNextTask .cw-h2')),
+    strikeThrough(document.querySelector('#customerTasksList .cw-prow[data-motion-key="' + customerTaskMotionKey(next) + '"] .cw-pmain > b'))
+  ];
   try {
     var saved = await api('/api/reminders/' + next.id, { method: 'PUT', body: JSON.stringify({ result: '已完成', activity_type: 'task_completed' }) });
     var cache = liveCustomerCache(scope);
@@ -9084,6 +9138,7 @@ async function completeCustomerNextTask(button, taskId) {
     reset();
     showCompleteUndoToast(saved, '已标记完成');
   } catch (e) {
+    undoStrikes.forEach(function(undo) { undo(); });
     setActionFeedback(button, 'error', '保存失败');
     showToast('完成操作未保存，请重试', 'error');
     reset(1800);
@@ -9889,7 +9944,10 @@ function markCustomerFactConfirmed(key) {}
 function markTimelineEntryConfirmed(key) {
   var list = document.getElementById('outreachList');
   if (!list || !key) return;
-  markElementConfirmed(list.querySelector('.cw-row[data-motion-key="' + key + '"]'));
+  var row = list.querySelector('.cw-row[data-motion-key="' + key + '"]');
+  markElementConfirmed(row);
+  // 刚保存的这一条：下方描一道墨迹再淡去（时间线原本为空时第一条也走这里）。
+  inkUnderNode(row);
 }
 
 function syncCustomerLatestContact(cache) {
@@ -10195,6 +10253,8 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
       // A brand-new record already slides in; only the confirmation tint is
       // added on top so "this is the record I just saved" stays readable.
       if (isNew || changed[item.motionKey]) markElementConfirmed(node);
+      // 只给“刚写进来”的那一条：行下描一道墨迹再淡去（首屏渲染不会走到这里）。
+      if (isNew && changed[item.motionKey]) inkUnderNode(node);
     }
   });
   renderCustomerTimelineMore(_customerDetailCache && _customerDetailCache.timeline_pagination);
@@ -14184,6 +14244,7 @@ function renderDialogueThreadHtml() {
   var body = '<div class="dialogue-messages" id="dialogueMessages" role="log" aria-live="polite" aria-relevant="additions">' +
       (messages.length ? messages.map(renderDialogueMessageHtml).join('')
         : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
+      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('sela 处理中…', 'inline') + '</div>' : '') +
     '</div>';
   var composer = closed
     ? '<div class="dialogue-closed-note" role="status">这条对话已结束。</div>'
