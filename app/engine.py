@@ -12,6 +12,9 @@ import urllib.error
 import ssl
 import subprocess
 import tempfile
+import threading
+import time
+from contextlib import contextmanager
 from urllib.parse import urljoin, urlparse
 from html.parser import HTMLParser
 
@@ -21,6 +24,42 @@ import requests
 EXA_MCP_URL = 'https://mcp.exa.ai/mcp'
 EXA_MCP_PROTOCOL_VERSION = '2025-06-18'
 _WEBSITE_SSL_CONTEXT = None
+
+# Cloudflare drops an origin that stays silent for about 100 seconds (error 524).
+# A web request shares one budget for its model, website and Exa calls, so a
+# slow provider falls back instead of holding the request open.  Background
+# jobs open no budget and keep their own, longer timeouts.
+_OUTBOUND_BUDGET = threading.local()
+
+
+@contextmanager
+def outbound_budget(seconds):
+    """Cap the outbound calls made inside the block to ``seconds`` in total.
+
+    Blocks nest, and an inner block can only tighten the deadline.  The state is
+    per thread, so concurrent Waitress requests never share a budget.
+    """
+    previous = getattr(_OUTBOUND_BUDGET, 'deadline', None)
+    deadline = time.monotonic() + float(seconds)
+    if previous is not None:
+        deadline = min(previous, deadline)
+    _OUTBOUND_BUDGET.deadline = deadline
+    try:
+        yield
+    finally:
+        _OUTBOUND_BUDGET.deadline = previous
+
+
+def budget_timeout(timeout):
+    """Return ``timeout`` capped by what is left of the open budget.
+
+    With no budget open the value passes through unchanged.  An exhausted budget
+    yields a near-zero timeout, so the call fails through its normal timeout path.
+    """
+    deadline = getattr(_OUTBOUND_BUDGET, 'deadline', None)
+    if deadline is None:
+        return timeout
+    return max(0.1, min(float(timeout), deadline - time.monotonic()))
 
 
 def _website_ssl_context():
@@ -65,6 +104,7 @@ def _read_with_windows_curl(url: str, timeout: int) -> str:
     """Read an HTTPS page through Windows Schannel while retaining TLS checks."""
     if os.name != 'nt':
         raise OSError('Windows Schannel is unavailable')
+    timeout = budget_timeout(timeout)
     completed = subprocess.run(
         [
             'curl.exe', '--fail', '--location', '--silent', '--show-error',
@@ -93,7 +133,7 @@ def _read_with_web_reader(url: str, timeout: int) -> str:
             'Accept': 'text/markdown, text/plain;q=0.9, */*;q=0.8',
             'User-Agent': 'Trade-OS website reader/1.0',
         },
-        timeout=max(timeout, 20),
+        timeout=budget_timeout(max(timeout, 20)),
     )
     response.raise_for_status()
     return response.text
@@ -621,7 +661,7 @@ def _call_lm_studio(prompt: str, model: str = None) -> str:
         "max_tokens": 2048,
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=180)
+        resp = requests.post(url, headers=headers, json=payload, timeout=budget_timeout(180))
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
     except requests.exceptions.ConnectionError:
@@ -640,7 +680,7 @@ def _call_ollama(prompt: str, model: str = None) -> str:
         "options": {"temperature": 0.3, "num_predict": 2048},
     }
     try:
-        resp = requests.post(url, json=payload, timeout=180)
+        resp = requests.post(url, json=payload, timeout=budget_timeout(180))
         resp.raise_for_status()
         return resp.json().get("response", "")
     except requests.exceptions.ConnectionError:
@@ -665,7 +705,7 @@ def _call_openai(prompt: str, model: str = None) -> str:
         "max_tokens": 2048,
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        resp = requests.post(url, headers=headers, json=payload, timeout=budget_timeout(60))
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
     except Exception as e:
@@ -699,7 +739,7 @@ def extract_text_from_image(image_data_url: str) -> str:
                     'stream': False,
                     'options': {'temperature': 0, 'num_predict': 3000},
                 },
-                timeout=120,
+                timeout=budget_timeout(120),
             )
             response.raise_for_status()
             payload = response.json()
@@ -725,7 +765,7 @@ def extract_text_from_image(image_data_url: str) -> str:
                     'max_tokens': 3000,
                     **_provider_payload_options(provider),
                 },
-                timeout=120,
+                timeout=budget_timeout(120),
             )
             response.raise_for_status()
             payload = response.json()
@@ -804,7 +844,7 @@ def _call_deepseek(prompt: str, model: str = None) -> str:
         **_provider_payload_options('deepseek'),
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=180)
+        resp = requests.post(url, headers=headers, json=payload, timeout=budget_timeout(180))
         resp.raise_for_status()
         content, reason = _chat_message_content(resp.json())
         if content:
@@ -836,7 +876,7 @@ def _call_qwen(prompt: str, model: str = None) -> str:
         "max_tokens": 3072,
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=180)
+        resp = requests.post(url, headers=headers, json=payload, timeout=budget_timeout(180))
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
     except requests.exceptions.ConnectionError:
@@ -861,7 +901,7 @@ def _call_glm(prompt: str, model: str = None) -> str:
         "max_tokens": 3072,
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=180)
+        resp = requests.post(url, headers=headers, json=payload, timeout=budget_timeout(180))
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"]
     except requests.exceptions.ConnectionError:
@@ -1150,7 +1190,7 @@ def _browser_tools_content(url: str, timeout: int = 30):
     try:
         completed = subprocess.run(
             ['node', script, url], capture_output=True, text=True,
-            timeout=max(5, min(int(timeout), 30)), check=False,
+            timeout=budget_timeout(max(5, min(int(timeout), 30))), check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return '', {'attempted': True, 'error': str(exc)[:160]}
@@ -1226,7 +1266,7 @@ def _exa_mcp_call(tool_name: str, arguments: dict, timeout: int = 20):
             EXA_MCP_URL,
             headers=base_headers,
             json=initialize_payload,
-            timeout=timeout_seconds,
+            timeout=budget_timeout(timeout_seconds),
         )
         initialize_response.raise_for_status()
         initialize_message = _mcp_response_message(initialize_response)
@@ -1243,7 +1283,7 @@ def _exa_mcp_call(tool_name: str, arguments: dict, timeout: int = 20):
             EXA_MCP_URL,
             headers=session_headers,
             json={'jsonrpc': '2.0', 'method': 'notifications/initialized'},
-            timeout=timeout_seconds,
+            timeout=budget_timeout(timeout_seconds),
         )
         initialized_response.raise_for_status()
 
@@ -1256,7 +1296,7 @@ def _exa_mcp_call(tool_name: str, arguments: dict, timeout: int = 20):
                 'method': 'tools/call',
                 'params': {'name': tool_name, 'arguments': arguments},
             },
-            timeout=timeout_seconds,
+            timeout=budget_timeout(timeout_seconds),
         )
         call_response.raise_for_status()
         call_message = _mcp_response_message(call_response)
@@ -1438,7 +1478,7 @@ def fetch_website_content(url: str, timeout: int = 15, return_meta: bool = False
             }
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout, context=_website_ssl_context()) as response:
+            with urllib.request.urlopen(req, timeout=budget_timeout(timeout), context=_website_ssl_context()) as response:
                 html = response.read().decode('utf-8', errors='replace')
                 status = getattr(response, 'status', None)
         except urllib.error.HTTPError as exc:

@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import gzip
+import functools
 import logging
 import time
 import threading
@@ -61,6 +62,7 @@ from app.engine import (
     clear_ai_config,
     test_ai_connection,
     list_ai_models,
+    outbound_budget,
 )
 from config import EMAIL_VERIFICATION_CONFIG
 from communication_text import (
@@ -14178,8 +14180,23 @@ def _infer_communication_direction(content, user_aliases, customer_aliases):
     return summary_direction, summary_confidence, []
 
 
+# Web routes that call a model, a website or Exa share one outbound budget that
+# stays well inside Cloudflare's ~100 second origin window (error 524).  When the
+# budget runs out, each call takes the same fallback it takes when no AI is set up.
+WEB_OUTBOUND_BUDGET_SECONDS = 60
+
+
+def _with_outbound_budget(view):
+    @functools.wraps(view)
+    def bounded_view(*args, **kwargs):
+        with outbound_budget(WEB_OUTBOUND_BUDGET_SECONDS):
+            return view(*args, **kwargs)
+    return bounded_view
+
+
 @app.route('/api/inbox/analyze-reply', methods=['POST'])
 @login_required
+@_with_outbound_budget
 def analyze_inbox_reply():
     """Extract a concise relationship note and rank likely CRM matches."""
     data = request.get_json(silent=True) or {}
@@ -14303,6 +14320,7 @@ WhatsApp 原文中 `[time] 姓名: 正文` 的“姓名”是发言人；发言�
 
 @app.route('/api/inbox/extract-image', methods=['POST'])
 @login_required
+@_with_outbound_budget
 def extract_inbox_image():
     data = request.get_json(silent=True) or {}
     image = data.get('image') or ''
@@ -17839,7 +17857,9 @@ def _summarize_raw_communication(content, direction='unknown', activity_type='')
               '涉及的产品/规格/数量/价格/交期要写清。这封邮件是' + who + '的。不要抄原文、签名、保密声明或引用历史，'
               '不得编造原文没有的信息，不要 Markdown，只输出摘要文字。\n原文：\n' + body)
     try:
-        raw = (quick_chat(prompt) or '').strip()
+        # This runs inside record-save requests too, so it shares the web budget.
+        with outbound_budget(WEB_OUTBOUND_BUDGET_SECONDS):
+            raw = (quick_chat(prompt) or '').strip()
     except Exception:
         logger.exception('raw communication summary failed')
         return fallback
@@ -20109,6 +20129,7 @@ def _country_from_text(value):
 
 @app.route('/api/customers/smart-import', methods=['POST'])
 @login_required
+@_with_outbound_budget
 def smart_import_customer():
     data = request.get_json(silent=True) or {}
     company_input = str(data.get('company') or '').strip()
