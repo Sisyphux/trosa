@@ -3380,7 +3380,7 @@ def _modern_inbox_rows(conn, *, status=None, item_type=None, customer_id=None, i
     return [dict(row) for row in rows]
 
 
-def _modern_outreach_rows(conn, *, customer_id=None, source_id=None):
+def _modern_outreach_rows(conn, *, customer_id=None, source_id=None, source_ids=None):
     """Project canonical Outreach Messages into the current API vocabulary."""
     if not postgres_mode():
         return []
@@ -3393,9 +3393,17 @@ def _modern_outreach_rows(conn, *, customer_id=None, source_id=None):
     if customer_id is not None:
         where.append('account_ref.legacy_customer_id=?')
         params.append(customer_id)
-    if source_id is not None:
-        where.append("COALESCE(message.legacy_payload->>'external_id', message.provider_message_id)=?")
-        params.append(source_id)
+    # ``source_ids`` batches a whole worklist page into one statement; the
+    # single ``source_id`` path keeps its exact one-row contract.
+    source_keys = [str(value) for value in source_ids] if source_ids else (
+        [str(source_id)] if source_id is not None else []
+    )
+    if source_keys:
+        marks = ','.join('?' for _ in source_keys)
+        where.append(
+            "COALESCE(message.legacy_payload->>'external_id', message.provider_message_id) IN (" + marks + ")"
+        )
+        params.extend(source_keys)
     rows = conn.execute(
         '''SELECT ref.legacy_id AS id, account_ref.legacy_customer_id AS customer_id,
                   message.subject, message.body AS content,
@@ -4940,19 +4948,7 @@ def _sela_latest_reply_event(conn, customer_id):
                ORDER BY follow_date DESC, created_at DESC, id DESC LIMIT 50''',
             (customer_id,),
         ).fetchall()
-    pattern = re.compile(
-        r'(?:事件|意图|outcome)\s*[:：]\s*(NOT_INTERESTED|INTERESTED|REPLIED|BOUNCED)\b',
-        re.IGNORECASE,
-    )
-    for row in rows:
-        result = str(row['result'] or '').strip()
-        content = str(row['content'] or '').strip()
-        match = pattern.search(result) or pattern.search(content)
-        if match:
-            return match.group(1).upper()
-        if result.upper() in {'NOT_INTERESTED', 'INTERESTED', 'REPLIED', 'BOUNCED'}:
-            return result.upper()
-    return ''
+    return _sela_reply_event_from_rows(rows)
 
 
 def _sela_first_touch_at_sqlite(conn, outreach_email_id):
@@ -4985,45 +4981,18 @@ def _sela_first_touch_at_sqlite(conn, outreach_email_id):
     return min(timestamps).date().isoformat() if timestamps else ''
 
 
-def _sela_prospect_revision(conn, profile, customer=None):
+def _sela_prospect_revision(conn, profile, customer=None, context=None):
     """Hash the Agent-visible CRM facts used for optimistic update checks."""
     profile = dict(profile)
+    context = context or _SelaProspectContext(conn)
     customer = dict(customer) if customer else _sela_profile_customer(conn, int(profile['customer_id']))
     if not customer:
         return ''
-    contact = _sela_profile_contact(conn, int(customer['id']))
-    contact = dict(contact) if contact else {}
+    contacts = context.contacts(int(customer['id']))
+    contact = dict(contacts[0]) if contacts else {}
     email = _canonical_email(contact.get('email'))
-    if postgres_mode():
-        verification = conn.execute(
-            '''SELECT email, deliverability_status, checked_at::text AS checked_at,
-                      expires_at::text AS expires_at
-                 FROM trosa.email_verifications
-                WHERE organization_id=trosa.compat_org_id()
-                  AND legacy_user_id=trosa.compat_current_user()
-                  AND lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
-            (email,),
-        ).fetchone() if email else None
-        outreach_rows = _modern_outreach_rows(conn, source_id=profile['source_id'])
-        outreach = outreach_rows[0] if outreach_rows else None
-    else:
-        verification = conn.execute(
-            '''SELECT email, deliverability_status, checked_at, expires_at FROM email_verifications
-               WHERE lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
-            (email,),
-        ).fetchone() if email else None
-        outreach = conn.execute(
-            '''SELECT outreach.id, outreach.subject, outreach.content, outreach.sent_date,
-                      outreach.reply_status, outreach.reply_content, outreach.reply_date,
-                      outreach.message_id, outreach.external_updated_at
-               FROM outreach_emails outreach
-              WHERE outreach.external_source=? AND outreach.external_id=?
-              ORDER BY outreach.id DESC LIMIT 1''',
-            (_SELA_PROSPECT_SOURCE, profile['source_id']),
-        ).fetchone()
-        outreach = dict(outreach) if outreach else None
-        if outreach:
-            outreach['first_touch_at'] = _sela_first_touch_at_sqlite(conn, outreach['id'])
+    verification = context.revision_verification(email)
+    outreach = context.revision_outreach(profile['source_id'])
     return _sela_hash({
         'profile': {
             key: profile.get(key) for key in (
@@ -5482,17 +5451,385 @@ def _sela_upsert_prospect(conn, prospect):
     }
 
 
-def _sela_prospect_view(conn, profile):
+_SELA_REPLY_EVENT_PATTERN = re.compile(
+    r'(?:事件|意图|outcome)\s*[:：]\s*(NOT_INTERESTED|INTERESTED|REPLIED|BOUNCED)\b',
+    re.IGNORECASE,
+)
+
+
+def _sela_reply_event_from_rows(rows):
+    """Latest reply outcome marker in an already date-ordered interaction list."""
+    for row in rows:
+        result = str(row['result'] or '').strip()
+        content = str(row['content'] or '').strip()
+        match = _SELA_REPLY_EVENT_PATTERN.search(result) or _SELA_REPLY_EVENT_PATTERN.search(content)
+        if match:
+            return match.group(1).upper()
+        if result.upper() in {'NOT_INTERESTED', 'INTERESTED', 'REPLIED', 'BOUNCED'}:
+            return result.upper()
+    return ''
+
+
+def _sela_first_touch_map_sqlite(conn, outreach_ids):
+    """Earliest sent-event date per outreach id in the CRM business timezone.
+
+    The batch form of :func:`_sela_first_touch_at_sqlite`: one statement for a
+    whole worklist page instead of one statement per prospect.
+    """
+    ids = [int(value) for value in outreach_ids if value not in (None, '')]
+    if not ids:
+        return {}
+    marks = ','.join('?' for _ in ids)
+    rows = conn.execute(
+        f'''SELECT outreach_email_id, occurred_at FROM email_delivery_events
+             WHERE event_type='sent' AND outreach_email_id IN ({marks})''',
+        ids,
+    ).fetchall()
+    best = {}
+    for row in rows:
+        raw = str(row['occurred_at'] or '').strip()
+        if not raw:
+            continue
+        try:
+            value = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=_CALENDAR_TZ)
+        value = value.astimezone(_CALENDAR_TZ)
+        outreach_id = int(row['outreach_email_id'])
+        current = best.get(outreach_id)
+        if current is None or value < current:
+            best[outreach_id] = value
+    return {outreach_id: value.date().isoformat() for outreach_id, value in best.items()}
+
+
+def _sela_verification_row(conn, email):
+    """Latest Email Verification row for one address, or ``None``."""
+    if not email:
+        return None
+    if postgres_mode():
+        return conn.execute(
+            '''SELECT * FROM trosa.email_verifications
+               WHERE organization_id=trosa.compat_org_id()
+                 AND legacy_user_id=trosa.compat_current_user()
+                 AND lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
+            (email,),
+        ).fetchone()
+    return conn.execute(
+        '''SELECT * FROM email_verifications
+           WHERE lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
+        (email,),
+    ).fetchone()
+
+
+def _sela_source_outreach_row(conn, source_id):
+    """Latest outreach row recorded for one sela source id, or ``None``."""
+    if postgres_mode():
+        rows = _modern_outreach_rows(conn, source_id=source_id)
+        return dict(rows[0]) if rows else None
+    row = conn.execute(
+        '''SELECT * FROM outreach_emails
+           WHERE external_source=? AND external_id=?
+           ORDER BY id DESC LIMIT 1''',
+        (_SELA_PROSPECT_SOURCE, source_id),
+    ).fetchone()
+    if not row:
+        return None
+    row = dict(row)
+    row['first_touch_at'] = _sela_first_touch_at_sqlite(conn, row['id'])
+    return row
+
+
+def _sela_revision_verification_row(conn, email):
+    """The Email Verification columns the prospect revision hash covers."""
+    if not email:
+        return None
+    if postgres_mode():
+        return conn.execute(
+            '''SELECT email, deliverability_status, checked_at::text AS checked_at,
+                      expires_at::text AS expires_at
+                 FROM trosa.email_verifications
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
+            (email,),
+        ).fetchone()
+    return conn.execute(
+        '''SELECT email, deliverability_status, checked_at, expires_at FROM email_verifications
+           WHERE lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
+        (email,),
+    ).fetchone()
+
+
+def _sela_revision_outreach_row(conn, source_id):
+    """The outreach columns the prospect revision hash covers, or ``None``."""
+    if postgres_mode():
+        rows = _modern_outreach_rows(conn, source_id=source_id)
+        return rows[0] if rows else None
+    outreach = conn.execute(
+        '''SELECT outreach.id, outreach.subject, outreach.content, outreach.sent_date,
+                  outreach.reply_status, outreach.reply_content, outreach.reply_date,
+                  outreach.message_id, outreach.external_updated_at
+           FROM outreach_emails outreach
+          WHERE outreach.external_source=? AND outreach.external_id=?
+          ORDER BY outreach.id DESC LIMIT 1''',
+        (_SELA_PROSPECT_SOURCE, source_id),
+    ).fetchone()
+    outreach = dict(outreach) if outreach else None
+    if outreach:
+        outreach['first_touch_at'] = _sela_first_touch_at_sqlite(conn, outreach['id'])
+    return outreach
+
+
+class _SelaProspectContext:
+    """The facts one prospect view reads, fetched row by row.
+
+    This is the default for single-prospect callers.  A worklist page uses
+    :class:`_SelaProspectPage`, which preloads the same facts with set queries
+    so a page read stops issuing one query per prospect.
+    """
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def customer(self, customer_id):
+        return _sela_profile_customer(self.conn, int(customer_id))
+
+    def contacts(self, customer_id):
+        return _dialogue_fact_contacts(self.conn, int(customer_id))
+
+    def verification(self, email):
+        return _sela_verification_row(self.conn, email)
+
+    def outreach(self, source_id):
+        return _sela_source_outreach_row(self.conn, source_id)
+
+    def reply_event(self, customer_id):
+        return _sela_latest_reply_event(self.conn, int(customer_id))
+
+    def relationship(self, customer_id):
+        return _customer_relationship_facts(self.conn, {int(customer_id)}).get(int(customer_id), {})
+
+    def revision_verification(self, email):
+        return _sela_revision_verification_row(self.conn, email)
+
+    def revision_outreach(self, source_id):
+        return _sela_revision_outreach_row(self.conn, source_id)
+
+
+class _SelaProspectPage(_SelaProspectContext):
+    """Set-based facts for one page of prospect profiles.
+
+    Every relation ``_sela_prospect_view`` needs for a page is loaded once,
+    keyed exactly the way the per-row queries keyed it, so the view returns the
+    same rows with a fixed number of statements instead of ~12 per prospect.
+    """
+
+    _REVISION_OUTREACH_COLUMNS = (
+        'id', 'subject', 'content', 'sent_date', 'reply_status', 'reply_content',
+        'reply_date', 'message_id', 'external_updated_at',
+    )
+    _REPLY_EVENT_ROWS_PER_CUSTOMER = 50
+
+    def __init__(self, conn, profiles):
+        super().__init__(conn)
+        rows = [dict(profile) for profile in profiles if profile]
+        self._customer_ids = sorted({
+            int(profile['customer_id']) for profile in rows
+            if profile.get('customer_id') not in (None, '')
+        })
+        self._source_ids = sorted({str(profile['source_id']) for profile in rows if profile.get('source_id')})
+        self._customers = self._load_customers()
+        self._contacts = self._load_contacts()
+        emails = sorted({
+            _canonical_email(row.get('email'))
+            for group in self._contacts.values() for row in group
+            if _canonical_email(row.get('email'))
+        })
+        self._verifications = self._load_verifications(emails)
+        self._revision_verifications = self._load_revision_verifications(emails)
+        self._outreach = self._load_outreach()
+        self._revision_outreach = self._load_revision_outreach()
+        self._reply_events = self._load_reply_events()
+        self._relationships = (
+            _customer_relationship_facts(conn, self._customer_ids) if self._customer_ids else {}
+        )
+
+    @staticmethod
+    def _marks(values):
+        return ','.join('?' for _ in values)
+
+    def _load_customers(self):
+        if not self._customer_ids:
+            return {}
+        marks = self._marks(self._customer_ids)
+        if postgres_mode():
+            rows = self.conn.execute(
+                f'SELECT * FROM trosa.customer_records WHERE id IN ({marks})', self._customer_ids,
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f'''SELECT * FROM customers WHERE id IN ({marks})
+                    AND (is_deleted=0 OR is_deleted IS NULL)''', self._customer_ids,
+            ).fetchall()
+        return {int(row['id']): dict(row) for row in rows}
+
+    def _load_contacts(self):
+        if not self._customer_ids:
+            return {}
+        if postgres_mode():
+            rows = _customer_contacts(self.conn, 0, customer_ids=self._customer_ids)
+        else:
+            marks = self._marks(self._customer_ids)
+            rows = self.conn.execute(
+                f'''SELECT * FROM contacts WHERE customer_id IN ({marks})
+                    ORDER BY is_primary DESC, created_at ASC, id ASC''', self._customer_ids,
+            ).fetchall()
+        grouped: dict = {}
+        for row in rows:
+            grouped.setdefault(int(row['customer_id']), []).append(dict(row))
+        return grouped
+
+    def _load_verifications(self, emails):
+        if not emails:
+            return {}
+        marks = self._marks(emails)
+        if postgres_mode():
+            rows = self.conn.execute(
+                f'''SELECT * FROM trosa.email_verifications
+                    WHERE organization_id=trosa.compat_org_id()
+                      AND legacy_user_id=trosa.compat_current_user()
+                      AND lower(trim(email)) IN ({marks})
+                    ORDER BY id DESC''', emails,
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f'''SELECT * FROM email_verifications
+                    WHERE lower(trim(email)) IN ({marks})
+                    ORDER BY id DESC''', emails,
+            ).fetchall()
+        found = {}
+        for row in rows:
+            found.setdefault(_canonical_email(row['email']), row)
+        return found
+
+    def _load_revision_verifications(self, emails):
+        if not emails:
+            return {}
+        marks = self._marks(emails)
+        if postgres_mode():
+            rows = self.conn.execute(
+                f'''SELECT email, deliverability_status, checked_at::text AS checked_at,
+                           expires_at::text AS expires_at
+                      FROM trosa.email_verifications
+                     WHERE organization_id=trosa.compat_org_id()
+                       AND legacy_user_id=trosa.compat_current_user()
+                       AND lower(trim(email)) IN ({marks})
+                     ORDER BY id DESC''', emails,
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                f'''SELECT email, deliverability_status, checked_at, expires_at
+                      FROM email_verifications
+                     WHERE lower(trim(email)) IN ({marks})
+                     ORDER BY id DESC''', emails,
+            ).fetchall()
+        found = {}
+        for row in rows:
+            found.setdefault(_canonical_email(row['email']), row)
+        return found
+
+    def _load_outreach(self):
+        if not self._source_ids:
+            return {}
+        chosen = {}
+        if postgres_mode():
+            for row in _modern_outreach_rows(self.conn, source_ids=self._source_ids):
+                chosen.setdefault(str(row.get('external_id') or ''), row)
+            return chosen
+        marks = self._marks(self._source_ids)
+        rows = self.conn.execute(
+            f'''SELECT * FROM outreach_emails
+                 WHERE external_source=? AND external_id IN ({marks})
+                 ORDER BY id DESC''', [_SELA_PROSPECT_SOURCE, *self._source_ids],
+        ).fetchall()
+        for row in rows:
+            chosen.setdefault(str(row['external_id']), dict(row))
+        touch = _sela_first_touch_map_sqlite(self.conn, [row['id'] for row in chosen.values()])
+        for row in chosen.values():
+            row['first_touch_at'] = touch.get(int(row['id']), '')
+        return chosen
+
+    def _load_revision_outreach(self):
+        if postgres_mode():
+            return None  # the revision hash covers the same columns as the view row
+        found = {}
+        for key, row in self._outreach.items():
+            subset = {column: row.get(column) for column in self._REVISION_OUTREACH_COLUMNS}
+            subset['first_touch_at'] = row.get('first_touch_at', '')
+            found[key] = subset
+        return found
+
+    def _load_reply_events(self):
+        if not self._customer_ids:
+            return {}
+        marks = self._marks(self._customer_ids)
+        if postgres_mode():
+            rows = _customer_interactions(self.conn, 0, customer_ids=self._customer_ids)
+        else:
+            rows = self.conn.execute(
+                f'''SELECT customer_id, result, content FROM follow_up_logs
+                     WHERE customer_id IN ({marks})
+                       AND (is_deleted=0 OR is_deleted IS NULL)
+                       AND direction IN ('inbound', 'two_way')
+                     ORDER BY follow_date DESC, created_at DESC, id DESC''', self._customer_ids,
+            ).fetchall()
+        grouped: dict = {}
+        for row in rows:
+            grouped.setdefault(int(row['customer_id']), []).append(row)
+        limit = self._REPLY_EVENT_ROWS_PER_CUSTOMER
+        return {cid: _sela_reply_event_from_rows(items[:limit]) for cid, items in grouped.items()}
+
+    def customer(self, customer_id):
+        return self._customers.get(int(customer_id))
+
+    def contacts(self, customer_id):
+        return self._contacts.get(int(customer_id), [])
+
+    def verification(self, email):
+        return self._verifications.get(_canonical_email(email))
+
+    def outreach(self, source_id):
+        return self._outreach.get(str(source_id))
+
+    def reply_event(self, customer_id):
+        return self._reply_events.get(int(customer_id), '')
+
+    def relationship(self, customer_id):
+        return self._relationships.get(int(customer_id), {})
+
+    def revision_verification(self, email):
+        return self._revision_verifications.get(_canonical_email(email))
+
+    def revision_outreach(self, source_id):
+        if self._revision_outreach is None:
+            return self._outreach.get(str(source_id))
+        return self._revision_outreach.get(str(source_id))
+
+
+def _sela_prospect_view(conn, profile, context=None):
     """Build the compact candidate projection from Trosa's canonical facts."""
     profile = dict(profile)
-    customer = _sela_profile_customer(conn, int(profile['customer_id']))
+    context = context or _SelaProspectContext(conn)
+    customer = context.customer(int(profile['customer_id']))
     if not customer:
         return None
     customer = dict(customer)
     research = _sela_json_value(profile.get('research_json'), {})
     transport = _sela_json_value(profile.get('transport_json'), {})
     agent_state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
-    contacts = _dialogue_fact_contacts(conn, int(customer['id']))
+    contacts = context.contacts(int(customer['id']))
     contact = contacts[0] if contacts else {}
     email = _canonical_email(contact.get('email'))
     additional_emails = []
@@ -5509,36 +5846,9 @@ def _sela_prospect_view(conn, profile):
     contact_label = ' — '.join(part for part in (
         str(contact.get('name') or '').strip(), str(contact.get('title') or '').strip(),
     ) if part) or email
-    verification = None
-    if email:
-        if postgres_mode():
-            verification = conn.execute(
-                '''SELECT * FROM trosa.email_verifications
-                   WHERE organization_id=trosa.compat_org_id()
-                     AND legacy_user_id=trosa.compat_current_user()
-                     AND lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
-                (email,),
-            ).fetchone()
-        else:
-            verification = conn.execute(
-                '''SELECT * FROM email_verifications
-                   WHERE lower(trim(email))=? ORDER BY id DESC LIMIT 1''',
-                (email,),
-            ).fetchone()
+    verification = context.verification(email)
     verification = dict(verification) if verification else {}
-    if postgres_mode():
-        outreach = (_modern_outreach_rows(conn, source_id=profile['source_id']) or [None])[0]
-    else:
-        outreach = conn.execute(
-            '''SELECT * FROM outreach_emails
-               WHERE external_source=? AND external_id=?
-               ORDER BY id DESC LIMIT 1''',
-            (_SELA_PROSPECT_SOURCE, profile['source_id']),
-        ).fetchone()
-        outreach = dict(outreach) if outreach else None
-        if outreach:
-            outreach['first_touch_at'] = _sela_first_touch_at_sqlite(conn, outreach['id'])
-    outreach = outreach or {}
+    outreach = context.outreach(profile['source_id']) or {}
     permission = str(profile.get('contact_permission') or 'allowed')
     delivery = str(verification.get('deliverability_status') or '').lower()
     if delivery == 'likely_deliverable':
@@ -5550,7 +5860,7 @@ def _sela_prospect_view(conn, profile):
     else:
         route_status = 'UNVERIFIED'
     reply_status = str(outreach.get('reply_status') or '').lower()
-    stored_event = _sela_latest_reply_event(conn, int(customer['id']))
+    stored_event = context.reply_event(int(customer['id']))
     # A bounce is a delivery failure, not an inbound customer reply. Its
     # timestamp and body must never feed the inbound-reply lifecycle signals,
     # otherwise a bounced prospect would look like an engaged lead.
@@ -5584,7 +5894,7 @@ def _sela_prospect_view(conn, profile):
     # ``customer_linked=false`` even though every synced lead has a trosa_id.
     # Bounce text is stored for the record but is not inbound customer evidence.
     observed_inbound_body = '' if reply_status == 'bounced' else (outreach.get('reply_content') or '')
-    relationship = _customer_relationship_facts(conn, {int(customer['id'])}).get(int(customer['id']), {})
+    relationship = context.relationship(int(customer['id']))
     real_interaction = bool(relationship.get('real_interaction'))
     lead_stage = _sela_prospect_lifecycle_facts({
         'business_stage': str(customer.get('business_stage') or ''),
@@ -5657,7 +5967,7 @@ def _sela_prospect_view(conn, profile):
         'gmail_draft_url': str(transport.get('gmail_draft_url') or ''),
         'imported_at': str(profile.get('created_at') or ''),
         'updated_at': str(profile.get('updated_at') or ''),
-        'trosa_revision': _sela_prospect_revision(conn, profile, customer),
+        'trosa_revision': _sela_prospect_revision(conn, profile, customer, context=context),
     }
     for key in _SELA_PROSPECT_AGENT_STATE_TEXT_FIELDS:
         if agent_state.get(key) not in (None, ''):
@@ -5739,9 +6049,10 @@ def sela_integration_prospects():
         ).fetchall()
         has_more = len(rows) > limit
         rows = rows[:limit]
+        page = _SelaProspectPage(conn, rows) if rows else None
         prospects = [
             view for row in rows
-            if (view := _sela_prospect_view(conn, row)) is not None
+            if (view := _sela_prospect_view(conn, row, context=page)) is not None
         ]
         next_after = int(rows[-1]['id']) if has_more and rows else None
     finally:

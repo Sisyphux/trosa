@@ -329,6 +329,43 @@ def single_page(client, headers):
     return f"{len(response.get_json()['prospects'])} rows"
 
 
+def verify_equivalence(app_module, *, sample_pages=3, limit=100):
+    """The batched page view must equal the per-row view, field for field.
+
+    Returns the number of prospects compared.  The batching change is only
+    legitimate if it returns the same rows, so this is asserted rather than
+    assumed.
+    """
+    with app_module.app.app_context():
+        db.set_db_user("hamid")
+        conn = app_module.get_db()
+        try:
+            relation = "trosa.agent_prospect_profiles" if db.postgres_mode() else "agent_prospect_profiles"
+            scope = "organization_id=trosa.compat_org_id() AND " if db.postgres_mode() else ""
+            profiles = conn.execute(
+                f"SELECT * FROM {relation} WHERE {scope}legacy_user_id=? AND source=? ORDER BY id",
+                ("hamid", "sela"),
+            ).fetchall()
+            checked = 0
+            for start in range(0, min(len(profiles), sample_pages * limit), limit):
+                page_rows = profiles[start:start + limit]
+                page = app_module._SelaProspectPage(conn, page_rows)
+                for row in page_rows:
+                    batched = app_module._sela_prospect_view(conn, row, context=page)
+                    lazy = app_module._sela_prospect_view(conn, row)
+                    if batched != lazy:
+                        keys = sorted(set(batched or {}) | set(lazy or {}))
+                        differing = [k for k in keys if (batched or {}).get(k) != (lazy or {}).get(k)]
+                        raise SystemExit(
+                            f"page view differs from per-row view at profile "
+                            f"{dict(row).get('source_id')}: {differing}"
+                        )
+                    checked += 1
+            return checked
+        finally:
+            conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rows", type=int, default=1500)
@@ -360,6 +397,7 @@ def main():
             seed_pool_postgres(args.rows)
             os.environ["SELA_BENCH_SEEDED_ROWS"] = str(args.rows)
         app_module = load_app()
+        checked = verify_equivalence(app_module)
         scenarios = [
             ("full_read", full_read),
             ("single_page_50", single_page),
@@ -373,6 +411,7 @@ def main():
 
     header = f"{'scenario':<18}{'p50(ms)':>10}{'p95(ms)':>10}{'queries':>10}  observation"
     print(f"backend={args.backend} rows_seeded={args.rows} repeats={args.repeats}")
+    print(f"equivalence: {checked} prospects identical between batched and per-row view")
     print(header)
     print("-" * len(header))
     for name, row in results.items():
