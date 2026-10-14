@@ -6351,6 +6351,97 @@ def _sela_prospect_filtered_page(conn, *, after, limit, needs, due_on_or_before,
     return prospects, next_after
 
 
+def _sela_prospect_feed_total(conn):
+    """Number of prospects in the sela feed (the caller's worklist size)."""
+    profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    profile_scope = ('organization_id=trosa.compat_org_id() AND ' if postgres_mode() else '')
+    row = conn.execute(
+        f'''SELECT COUNT(*) AS count FROM {profile_relation}
+           WHERE {profile_scope}legacy_user_id=? AND source=?''',
+        (_sela_prospect_user(), _SELA_PROSPECT_SOURCE),
+    ).fetchone()
+    return int(row['count'] or 0)
+
+
+def _sela_prospect_data_version(conn):
+    """Cheap fingerprint of the facts the prospect read surface exposes.
+
+    Counts and latest change stamps are enough for change detection: the
+    caller re-reads only when this digest moves, so the version must change
+    whenever a prospect, its customer, a contact, a verification or outbound
+    mail changes.
+    """
+    profile_relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    profile_scope = 'organization_id=trosa.compat_org_id() AND ' if postgres_mode() else ''
+    profiles = conn.execute(
+        f'''SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS stamp
+              FROM {profile_relation}
+             WHERE {profile_scope}legacy_user_id=? AND source=?''',
+        (_sela_prospect_user(), _SELA_PROSPECT_SOURCE),
+    ).fetchone()
+    if postgres_mode():
+        customers = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at)::text, '') AS stamp "
+            "FROM trosa.customer_records WHERE deleted_at IS NULL").fetchone()
+        contacts = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at)::text, '') AS stamp "
+            "FROM trosa.contact_legacy_refs WHERE organization_id=trosa.compat_org_id() "
+            "AND legacy_user_id=trosa.compat_current_user()").fetchone()
+        verifications = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(checked_at::text), '') AS stamp "
+            "FROM trosa.email_verifications WHERE organization_id=trosa.compat_org_id() "
+            "AND legacy_user_id=trosa.compat_current_user()").fetchone()
+        outreach = conn.execute(
+            "SELECT COUNT(*) AS count, "
+            "COALESCE(MAX(COALESCE(message.legacy_payload->>'external_updated_at', "
+            "message.created_at::text)), '') AS stamp "
+            "FROM trosa.outreach_messages message "
+            "JOIN trosa.account_legacy_refs ref ON ref.account_id=message.account_id "
+            "WHERE ref.organization_id=trosa.compat_org_id() "
+            "AND ref.legacy_user_id=trosa.compat_current_user()").fetchone()
+    else:
+        customers = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(updated_at), '') AS stamp FROM customers "
+            "WHERE (is_deleted=0 OR is_deleted IS NULL)").fetchone()
+        contacts = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(created_at), '') AS stamp FROM contacts").fetchone()
+        verifications = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(checked_at), '') AS stamp FROM email_verifications").fetchone()
+        outreach = conn.execute(
+            "SELECT COUNT(*) AS count, "
+            "COALESCE(MAX(COALESCE(external_updated_at, created_at)), '') AS stamp "
+            "FROM outreach_emails").fetchone()
+    return _sela_hash({
+        'profiles': [int(profiles['count'] or 0), profiles['stamp'] or ''],
+        'customers': [int(customers['count'] or 0), customers['stamp'] or ''],
+        'contacts': [int(contacts['count'] or 0), contacts['stamp'] or ''],
+        'verifications': [int(verifications['count'] or 0), verifications['stamp'] or ''],
+        'outreach': [int(outreach['count'] or 0), outreach['stamp'] or ''],
+    })
+
+
+def _sela_read_headers(version):
+    """ETag response headers for a version, matching the exclusion surface."""
+    return {
+        'ETag': '"' + version + '"',
+        'X-Trosa-Sync-Version': version,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    }
+
+
+def _sela_not_modified(version):
+    etag = '"' + version + '"'
+    supplied = str(request.headers.get('If-None-Match') or '').strip()
+    return supplied in {etag, version}
+
+
+def _sela_json_response(body, headers):
+    response = Response(json.dumps(body, ensure_ascii=False), mimetype='application/json')
+    for key, value in headers.items():
+        response.headers[key] = value
+    return response
+
+
 def _sela_unsupported_params(allowed):
     return sorted(set(request.args.keys()) - set(allowed))
 
@@ -6437,16 +6528,21 @@ def sela_integration_prospects():
         conn = get_db()
         try:
             prospects, missing = _sela_prospects_by_ids(conn, ids)
+            version = _sela_prospect_data_version(conn)
         finally:
             conn.close()
-        return jsonify({
+        headers = _sela_read_headers(version)
+        if _sela_not_modified(version):
+            return Response(status=304, headers=headers)
+        return _sela_json_response({
             'success': True,
             'prospect_api': 'sela-v2',
             'prospects': [_sela_project_view(view, fields) for view in prospects],
             'missing': missing,
             'next_after': None,
+            'data_version': version,
             'server_time': _sela_now(),
-        })
+        }, headers)
     try:
         after = max(0, int(request.args.get('after', 0)))
         limit = max(1, min(100, int(request.args.get('limit', 50))))
@@ -6468,6 +6564,8 @@ def sela_integration_prospects():
     updated_after = str(request.args.get('updated_after') or '').strip()
     conn = get_db()
     try:
+        version = _sela_prospect_data_version(conn)
+        total = _sela_prospect_feed_total(conn)
         if needs or updated_after:
             prospects, next_after = _sela_prospect_filtered_page(
                 conn, after=after, limit=limit, needs=needs,
@@ -6491,13 +6589,18 @@ def sela_integration_prospects():
             next_after = int(rows[-1]['id']) if has_more and rows else None
     finally:
         conn.close()
-    return jsonify({
+    headers = _sela_read_headers(version)
+    if _sela_not_modified(version):
+        return Response(status=304, headers=headers)
+    return _sela_json_response({
         'success': True,
         'prospect_api': 'sela-v2',
         'prospects': [_sela_project_view(view, fields) for view in prospects],
+        'total': total,
         'next_after': next_after,
+        'data_version': version,
         'server_time': _sela_now(),
-    })
+    }, headers)
 
 
 @app.route('/api/integrations/sela/prospects/<source_id>', methods=['GET'])
@@ -6526,16 +6629,21 @@ def sela_integration_prospect(source_id):
     try:
         profile = _sela_profile_by_source(conn, source_id)
         view = _sela_prospect_view(conn, profile) if profile else None
+        version = _sela_prospect_data_version(conn)
     finally:
         conn.close()
     if view is None:
         return jsonify({'success': False, 'error': '未找到该 Prospect'}), 404
-    return jsonify({
+    headers = _sela_read_headers(version)
+    if _sela_not_modified(version):
+        return Response(status=304, headers=headers)
+    return _sela_json_response({
         'success': True,
         'prospect_api': 'sela-v2',
         'prospect': _sela_project_view(view, fields),
+        'data_version': version,
         'server_time': _sela_now(),
-    })
+    }, headers)
 
 
 @app.route('/api/integrations/sela/prospects', methods=['POST'])

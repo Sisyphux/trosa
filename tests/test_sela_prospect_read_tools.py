@@ -415,6 +415,70 @@ class SelaProspectReadToolsTest(unittest.TestCase):
             '/api/integrations/sela/prospects?ids=combo&needs=verify', headers=self.headers)
         self.assertEqual(response.status_code, 400)
 
+    # ---- change detection (T9) -------------------------------------------
+    def list_response(self, query=''):
+        response = self.client.get(
+            '/api/integrations/sela/prospects' + (('?' + query) if query else ''),
+            headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response
+
+    def test_list_reports_total_and_a_data_version(self):
+        self.upsert('one', 'One GmbH')
+        self.upsert('two', 'Two GmbH')
+
+        response = self.list_response('limit=100')
+        body = response.get_json()
+        self.assertEqual(body['total'], 2)
+        version = body['data_version']
+        self.assertTrue(version)
+        self.assertEqual(response.headers['ETag'], '"' + version + '"')
+        self.assertEqual(response.headers['X-Trosa-Sync-Version'], version)
+
+    def test_matching_etag_returns_304(self):
+        self.upsert('cached', 'Cached GmbH')
+        version = self.list_response('limit=100').get_json()['data_version']
+
+        quoted = self.client.get('/api/integrations/sela/prospects?limit=100',
+                                 headers={**self.headers, 'If-None-Match': '"' + version + '"'})
+        self.assertEqual(quoted.status_code, 304)
+        self.assertEqual(quoted.get_data(), b'')
+
+        raw = self.client.get('/api/integrations/sela/prospects?limit=100',
+                              headers={**self.headers, 'If-None-Match': version})
+        self.assertEqual(raw.status_code, 304)
+
+    def test_data_version_moves_when_the_feed_changes(self):
+        self.upsert('first', 'First GmbH')
+        version = self.list_response('limit=100').get_json()['data_version']
+
+        self.upsert('second', 'Second GmbH')
+        stale = self.client.get('/api/integrations/sela/prospects?limit=100',
+                                headers={**self.headers, 'If-None-Match': '"' + version + '"'})
+        self.assertEqual(stale.status_code, 200)
+        self.assertNotEqual(stale.get_json()['data_version'], version)
+
+    def test_ids_and_single_reads_carry_the_version(self):
+        self.upsert('alpha', 'Alpha GmbH')
+
+        ids_body = self.client.get(
+            '/api/integrations/sela/prospects?ids=alpha', headers=self.headers).get_json()
+        self.assertTrue(ids_body['data_version'])
+
+        single = self.client.get(
+            '/api/integrations/sela/prospects/alpha', headers=self.headers)
+        self.assertTrue(single.get_json()['data_version'])
+
+    def test_single_read_honours_if_none_match(self):
+        self.upsert('alpha', 'Alpha GmbH')
+        response = self.client.get('/api/integrations/sela/prospects/alpha', headers=self.headers)
+        etag = response.headers['ETag']
+
+        cached = self.client.get('/api/integrations/sela/prospects/alpha',
+                                 headers={**self.headers, 'If-None-Match': etag})
+        self.assertEqual(cached.status_code, 304)
+        self.assertEqual(cached.get_data(), b'')
+
 
 if __name__ == '__main__':
     unittest.main()
