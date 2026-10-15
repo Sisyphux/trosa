@@ -210,7 +210,9 @@ class InboxQuestionModelTest(unittest.TestCase):
         self.assertEqual(stats['self_resolved'], 2)
         self.assertEqual(self.client.get('/api/inbox').get_json()['counts']['all'], 0)
 
-    def test_multiple_matches_identity_review_stays(self):
+    def test_multiple_matches_identity_review_is_closed_not_asked(self):
+        # Identity ambiguity goes back to sela only; a leftover "same entity?"
+        # item from before must not keep a tab alive in the Inbox.
         conn = self._conn()
         try:
             conn.execute(
@@ -223,11 +225,15 @@ class InboxQuestionModelTest(unittest.TestCase):
                 (json.dumps({'source_id': 'p3', 'reason': 'MULTIPLE_TROSA_MATCHES'}),),
             )
             conn.commit()
+            stats = inbox_reconcile.reconcile_inbox_connection(conn)
+            status = conn.execute(
+                "SELECT status FROM inbox_items WHERE dedupe_key='sela:prospect-review:p3'"
+            ).fetchone()['status']
         finally:
             conn.close()
-        payload = self.client.get('/api/inbox').get_json()
-        self.assertEqual(payload['counts']['all'], 1)
-        self.assertEqual(payload['questions'][0]['kind'], 'identity_review')
+        self.assertEqual(stats['self_resolved'], 1)
+        self.assertEqual(status, 'resolved')
+        self.assertEqual(self.client.get('/api/inbox').get_json()['counts']['all'], 0)
 
     def test_identity_review_evidence_shows_stored_matched_candidates(self):
         conn = self._conn()

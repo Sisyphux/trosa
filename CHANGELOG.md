@@ -1,3 +1,10 @@
+## 2026-10-15 — sela 的身份歧义不再进 Inbox「其他事项」（只回给 sela）
+
+- 现象：「其他事项」里出现 4 条「潜在客户身份待确认」（Adhue、Jigar Plast、VP Polyfab、Gavrieli），一直没人能答：匹配到的两条记录是同名的 sela 历史占位行与真实客户，人无法分辨，也没有要做的判断。
+- 修改：sela 写入 prospect 时遇到的任何身份歧义（多个客户匹配等）只作为 `REVIEW` 回给 sela，不再创建 `sela_identity_review` Inbox 项；sela 对该来源不关联、不发信，需要人时由 sela 自己在对话里提问。启动与写入时的 Inbox 重新判定会把遗留的 `sela_identity_review` 一律自动关闭（`resolution_source='auto'`，原文保留）。
+- 影响范围：`app.py`（`_sela_review_needs_human`）、`inbox_reconcile.py`。排除项待确认（`sela_exclusion_review`）与客户回复捕获不变。不改数据结构。
+- 验证：`tests/test_sela_prospect_api.py`、`tests/test_inbox_question_model.py`。
+
 ## 2026-10-15 — 「一笔」图标优先第二版：状态符号、分区图标、悬停名称（五期）
 
 - 需求：文字再少一些，图标和动效更积极；但图标必须能读到名称。

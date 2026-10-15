@@ -292,7 +292,7 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_ambiguous_identity_becomes_trosa_inbox_review_not_a_local_queue(self):
+    def test_ambiguous_identity_goes_back_to_sela_and_never_enters_the_inbox(self):
         conn = self.hamid_db()
         for name in ('Existing A', 'Existing B'):
             customer_id = conn.execute(
@@ -309,7 +309,7 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.get_json()['status'], 'REVIEW')
         self.assertEqual(response.get_json()['reason'], 'MULTIPLE_TROSA_MATCHES')
-        # 人工判断"是否同一主体"前必须看到具体匹配到哪些客户及依据。
+        # sela 需要看到具体匹配到哪些客户及依据。
         candidates = response.get_json()['candidates']
         self.assertEqual([candidate['company'] for candidate in candidates], ['Existing A', 'Existing B'])
         self.assertTrue(all('email' in candidate['matched_by'] for candidate in candidates))
@@ -317,15 +317,10 @@ class SelaProspectApiTest(unittest.TestCase):
         conn = self.hamid_db()
         try:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_prospect_profiles').fetchone()[0], 0)
-            inbox = conn.execute(
-                "SELECT item_type, status FROM inbox_items WHERE dedupe_key='sela:prospect-review:ambiguous-prospect'"
-            ).fetchone()
-            self.assertEqual(tuple(inbox), ('sela_identity_review', 'open'))
-            stored = json.loads(conn.execute(
-                "SELECT content FROM inbox_items WHERE dedupe_key='sela:prospect-review:ambiguous-prospect'"
-            ).fetchone()['content'])
-            self.assertEqual([item['company'] for item in stored['candidates']],
-                             ['Existing A', 'Existing B'])
+            # 身份歧义只回给 sela：Inbox 里没有任何"其他事项"。
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0], 0)
         finally:
             conn.close()
 
@@ -362,8 +357,8 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_same_name_without_domain_still_requires_review(self):
-        # 只有名称相同、没有域名证据时仍必须人工判断，不能自动合并。
+    def test_same_name_without_domain_is_review_for_sela_only(self):
+        # 只有名称相同、没有域名证据时不能自动合并，回给 sela（不进 Inbox）。
         self.add_customer('Shared Plastics')
         self.add_customer('Shared Plastics')
         body = prospect('name-only-prospect')

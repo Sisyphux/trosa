@@ -242,8 +242,18 @@ def reconcile_inbox_connection(conn):
             stats['later_fact'] += 1
             continue
 
-        # 自动关闭：身份 review 的结论系统已经知道（技术冲突 / 已关联），不该问人。
-        if item_type in ('sela_identity_review', 'sela_exclusion_review'):
+        # 自动关闭：身份 review 不再是 Inbox 项。Sela 的 REVIEW 只回给 sela；
+        # 同名的 sela 占位行与真实客户没有人能分辨，问人没有意义。
+        if item_type == 'sela_identity_review':
+            resolve_inbox_item(
+                conn, inbox_item_id=row['id'], resolved_at=now,
+                resolution_reason='identity_not_a_human_question',
+                resolution_note='身份歧义只回给 sela 处理，不再进入 Inbox；原始证据保留用于审计。',
+                resolution_source='auto',
+            )
+            stats['self_resolved'] += 1
+            continue
+        if item_type == 'sela_exclusion_review':
             self_resolving = _SELF_RESOLVING_REVIEW_REASONS.get(
                 _identity_review_reason(row.get('content')))
             if self_resolving:

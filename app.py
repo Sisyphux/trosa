@@ -4612,33 +4612,19 @@ _SELA_STRONG_IDENTITY_KEYS = {'domain', 'email', 'phone'}
 def _sela_review_needs_human(result):
     """Whether an upsert REVIEW is a question only a person can answer.
 
-    Three REVIEW outcomes have a known answer and go back to Sela only:
-    ``TROSA_REVISION_CONFLICT`` is a technical retry signal;
-    ``SOURCE_IDENTITY_CONFLICT`` is Sela's own prospect arriving with another
-    website than the one it was created with (Sela's data to fix, Trosa never
-    overwrites it); a Customer that Sela already develops
-    (``CUSTOMER_ALREADY_HAS_SELA_PROSPECT``) or that another source already
-    owns (``CUSTOMER_ALREADY_LINKED``), matched by a strong key (domain, email,
-    phone), is a company the CRM already has, so Sela stops.
+    Never.  A REVIEW is an answer for Sela: it stops linking this source and
+    sends nothing until the CRM data is fixed.  An identity question Sela cannot
+    settle is raised by Sela itself in an Inbox dialogue (``needs_human``), not
+    as a form-style Inbox item here: the Inbox holds only dialogue, and a
+    "same entity?" form between records no person can tell apart (typically a
+    Sela placeholder row and the real customer with the same name) is noise.
     """
-    if result.get('status') != 'REVIEW':
-        return False
-    reason = str(result.get('reason') or '')
-    if reason in ('TROSA_REVISION_CONFLICT', 'SOURCE_IDENTITY_CONFLICT'):
-        return False
-    if reason in ('CUSTOMER_ALREADY_HAS_SELA_PROSPECT', 'CUSTOMER_ALREADY_LINKED') and (
-            set(result.get('matched_by') or []) & _SELA_STRONG_IDENTITY_KEYS):
-        return False
-    return True
+    return False
 
 
 def _sela_review_answer_is_settled(result):
-    """The sync settled this source's identity (so an older open question is moot)."""
-    if result.get('status') != 'REVIEW':
-        return True
-    return str(result.get('reason') or '') in (
-        'CUSTOMER_ALREADY_HAS_SELA_PROSPECT', 'CUSTOMER_ALREADY_LINKED',
-    ) and not _sela_review_needs_human(result)
+    """A REVIEW goes back to Sela only, so an older open question is moot."""
+    return True
 
 
 def _sela_close_moot_identity_review(conn, source_id, now):
