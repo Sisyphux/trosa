@@ -5590,32 +5590,29 @@ _SELA_ADDITIONAL_EMAILS_MAX = 9
 def _sela_upsert_additional_emails(conn, customer_id, values, now):
     """Store a prospect's further public contact emails next to its primary one.
 
-    Sela sends one outreach to every contact email, so this is capped; an address
-    that cannot be saved (invalid, or owned by another customer) is a warning,
-    never a failed upsert.
+    Sela sends one outreach to every contact email, so this is capped.  An
+    address that is invalid or owned by another customer is skipped: an extra
+    address never fails or flags the prospect write.
     """
     if not isinstance(values, list):
         return []
-    warnings = []
     seen = set()
     for raw in values:
+        if len(seen) >= _SELA_ADDITIONAL_EMAILS_MAX:
+            break
         try:
             email = _canonical_email(validate_email_address(
                 _sela_prospect_text(raw, 320), check_deliverability=False).normalized)
         except EmailNotValidError:
-            warnings.append(f'额外邮箱无效，已忽略：{_sela_prospect_text(raw, 80)}')
             continue
         if not email or email in seen:
             continue
-        if len(seen) >= _SELA_ADDITIONAL_EMAILS_MAX:
-            warnings.append('额外邮箱超过上限，其余已忽略')
-            break
         seen.add(email)
         try:
             _sela_resolve_contact_email(conn, customer_id, email, now, actor='sela', additional=True)
-        except CrmWriteError as error:
-            warnings.append(f'额外邮箱未保存 {email}：{error.message}')
-    return warnings
+        except CrmWriteError:
+            continue
+    return []
 
 
 def _sela_upsert_prospect(conn, prospect):
