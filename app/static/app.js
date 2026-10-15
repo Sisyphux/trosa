@@ -14343,9 +14343,26 @@ async function selectDialogueThread(id, options) {
   if (data === null) { dialogueThreadError = loadAuthError(); renderDialogueThread(); return; }
   dialogueThread = data.thread || null;
   if (!options.keepConflict) dialogueConflictNote = null;
+  reconcileDialogueListEntry(dialogueThread);
   renderDialogueThread();
   if (options.focusList) focusDialogueRow(id);
   else if (!options.keepList) focusDialogueReply();
+}
+
+// The list is a snapshot; the opened thread is the truth.  When sela has
+// already closed or moved a thread since the list loaded, bring the row (and
+// the counts) in line instead of showing it as "等你" next to a closed thread.
+function reconcileDialogueListEntry(thread) {
+  if (!thread || !Array.isArray(dialogueThreads)) return;
+  var entry = null;
+  for (var i = 0; i < dialogueThreads.length; i++) {
+    if (dialogueThreads[i].id === thread.id) { entry = dialogueThreads[i]; break; }
+  }
+  if (!entry || (entry.status === thread.status && entry.awaiting === thread.awaiting)) return;
+  entry.status = thread.status;
+  entry.awaiting = thread.awaiting;
+  renderDialogueList();
+  refreshDialogueBadge();
 }
 
 function renderDialogueThread() {
