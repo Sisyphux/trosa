@@ -72,7 +72,9 @@
       "Bash(python -m unittest:*)",
       "Bash(python3 -m unittest:*)",
       "Bash(.venv/bin/python -m unittest:*)",
-      "Bash(node --check:*)"
+      "Bash(node --check:*)",
+      "Bash(python3 tools/trosa_maint_read.py:*)",
+      "Bash(.venv/bin/python tools/trosa_maint_read.py:*)"
     ],
     "deny": [
       "Bash(deploy/cloud/agent-worktree.sh publish:*)",
@@ -83,7 +85,9 @@
       "Bash(*revoke-token*)",
       "Bash(*workbench.env*)",
       "Read(~/.config/trosa/workbench.env)",
-      "Read(~/.config/trosa/*.env)"
+      "Read(~/.config/trosa/*.env)",
+      "Read(~/.config/trosa-maint/**)",
+      "Bash(*trosa-maint/readonly.json*)"
     ]
   },
   "hooks": {
