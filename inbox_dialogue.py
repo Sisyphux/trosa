@@ -34,7 +34,7 @@ import db
 
 # ``trosa.compat_org_id()`` always returns this fixed organisation in this repo.
 ORG_ID = '859a998d-1b48-589b-8035-34dc65c01440'
-DAILY_NEW_THREAD_CAP = 50
+DAILY_NEW_THREAD_CAP = 200
 IRREVERSIBLE_ACTIONS = ('stop_contact', 'merge_identity', 'overwrite_email')
 # Reversible facts the human gave in a conversation (contract §4.4B).
 FACT_KINDS = ('contact_email', 'additional_email', 'contact_person', 'contact_phone',
