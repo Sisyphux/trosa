@@ -837,6 +837,42 @@ def handle_exception(e):
 
 
 # ========== 用户上下文 ==========
+def _slow_request_threshold_ms():
+    """Requests at least this slow are logged (0 disables).  Default 1000 ms."""
+    raw = str(os.environ.get('TRADE_OS_SLOW_REQUEST_LOG_MS', '') or '').strip()
+    try:
+        value = int(raw) if raw else 1000
+    except ValueError:
+        return 1000
+    return value if value >= 0 else 1000
+
+
+@app.before_request
+def _slow_request_clock():
+    g._slow_request_started = time.monotonic()
+
+
+@app.after_request
+def _log_slow_request(response):
+    """One line per slow request: method, path (no query values), status, time.
+
+    Waitress writes no access log, so a queue-depth warning alone cannot say
+    which endpoint was slow.  Query values are never logged (they can hold
+    search terms); only the parameter names are.
+    """
+    started = getattr(g, '_slow_request_started', None)
+    threshold = _slow_request_threshold_ms()
+    if started is not None and threshold:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        if elapsed_ms >= threshold:
+            logger.warning(
+                'slow request %s %s status=%s ms=%d args=%s',
+                request.method, request.path, response.status_code, elapsed_ms,
+                ','.join(sorted(request.args.keys())) or '-',
+            )
+    return response
+
+
 @app.before_request
 def before_request():
     _maintenance_gate.enter_request()
