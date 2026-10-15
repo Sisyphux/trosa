@@ -5584,6 +5584,40 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
         return outreach_id
 
 
+_SELA_ADDITIONAL_EMAILS_MAX = 9
+
+
+def _sela_upsert_additional_emails(conn, customer_id, values, now):
+    """Store a prospect's further public contact emails next to its primary one.
+
+    Sela sends one outreach to every contact email, so this is capped; an address
+    that cannot be saved (invalid, or owned by another customer) is a warning,
+    never a failed upsert.
+    """
+    if not isinstance(values, list):
+        return []
+    warnings = []
+    seen = set()
+    for raw in values:
+        try:
+            email = _canonical_email(validate_email_address(
+                _sela_prospect_text(raw, 320), check_deliverability=False).normalized)
+        except EmailNotValidError:
+            warnings.append(f'额外邮箱无效，已忽略：{_sela_prospect_text(raw, 80)}')
+            continue
+        if not email or email in seen:
+            continue
+        if len(seen) >= _SELA_ADDITIONAL_EMAILS_MAX:
+            warnings.append('额外邮箱超过上限，其余已忽略')
+            break
+        seen.add(email)
+        try:
+            _sela_resolve_contact_email(conn, customer_id, email, now, actor='sela', additional=True)
+        except CrmWriteError as error:
+            warnings.append(f'额外邮箱未保存 {email}：{error.message}')
+    return warnings
+
+
 def _sela_upsert_prospect(conn, prospect):
     """Create or update a Trosa-owned Prospect before outreach happens."""
     if not isinstance(prospect, dict):
@@ -5758,6 +5792,7 @@ def _sela_upsert_prospect(conn, prospect):
         'name': prospect.get('contact'), 'email': prospect.get('email'),
     }
     warnings.extend(_sela_upsert_contact(conn, customer_id, raw_contact, now))
+    warnings.extend(_sela_upsert_additional_emails(conn, customer_id, prospect.get('additional_emails'), now))
     research = _sela_upsert_profile(conn, customer_id, source_id, prospect, now, profile)
     review = research.get('agent_state', {}).get('exclusion_review') if isinstance(research.get('agent_state'), dict) else None
     if isinstance(review, dict):

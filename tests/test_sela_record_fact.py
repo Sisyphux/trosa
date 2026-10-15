@@ -347,6 +347,17 @@ class SelaRecordFactTest(unittest.TestCase):
         self.assertTrue(same.get_json()['already_present'])
         self.assertEqual(self.prospect_view(source_id)['additional_emails'], ['info@fact-extra.example'])
 
+    def test_prospect_upsert_stores_discovered_additional_emails(self):
+        source_id = 'fact-extra-found'
+        extras = ['Info@fact-found.example', 'sales@fact-found.example', 'main@fact-found.example',
+                  'not-an-email', 'info@fact-found.example']
+        self.create_prospect(source_id, email='main@fact-found.example',
+                             contact={'email': 'main@fact-found.example'}, additional_emails=extras)
+        view = self.prospect_view(source_id)
+        self.assertEqual(view['email'], 'main@fact-found.example')
+        self.assertEqual(sorted(view['additional_emails']),
+                         ['info@fact-found.example', 'sales@fact-found.example'])
+
     def test_additional_email_without_a_primary_becomes_the_primary(self):
         source_id = 'fact-extra-2'
         self.create_prospect(source_id)
