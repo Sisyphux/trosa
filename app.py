@@ -5208,25 +5208,35 @@ def _sela_prospect_revision(conn, profile, customer=None, context=None):
     })
 
 
-def _complete_prospect_stage_tasks(conn, customer_id, *, completed_at):
+def _complete_prospect_stage_tasks(conn, customer_id, *, completed_at, sent_on=''):
     """Close open follow-ups that still belong to Sela's prospect development.
 
     The Today/Sela boundary is a content-based relationship fact, never a title
     keyword or ``customer_type``: a Customer with no customer-side signal at all
     (only our one-way development) is Sela's, so its open follow-ups are closed
     when Sela reports an outreach.  A Customer that is human-owned (engaged,
-    human_reminder or needs_info) is left untouched.  Idempotent: a later Sela
-    refresh finds no open prospect-stage task.
+    human_reminder or needs_info) is left untouched, except that a confirmed
+    send (``sent_on``) closes that Customer's follow-ups due on or before the
+    send date.  Idempotent: a later Sela refresh finds no open prospect-stage task.
     """
     try:
         customer_id = int(customer_id)
     except (TypeError, ValueError):
         return []
-    if customer_id in _human_owned_customer_ids(conn, {customer_id}):
+    # Sela only sends to a Customer its own lifecycle gate accepts as an
+    # unreplied cold prospect.  When Trosa's content classifier still calls the
+    # Customer human-owned (an old WhatsApp/Excel history), a confirmed send has
+    # nevertheless done the follow-up that was due, so close what is due on or
+    # before the send date and leave later human-scheduled tasks alone.
+    human_owned = customer_id in _human_owned_customer_ids(conn, {customer_id})
+    sent_on = str(sent_on or '').strip()[:10]
+    if human_owned and not sent_on:
         return []
     closed = []
     for task in _customer_tasks(conn, customer_id):
         if str(task.get('reminder_type') or '') != 'follow_up':
+            continue
+        if human_owned and str(task.get('remind_date') or '')[:10] > sent_on:
             continue
         try:
             _complete_task(conn, task_id=task['id'], completed_at=completed_at)
@@ -5357,7 +5367,8 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                      json.dumps({'source_id': source_id})),
                 )
             if status != 'BOUNCED':
-                _complete_prospect_stage_tasks(conn, customer_id, completed_at=now)
+                _complete_prospect_stage_tasks(
+                    conn, customer_id, completed_at=now, sent_on=sent_at or now)
         return outreach_id
     existing = conn.execute(
         '''SELECT * FROM outreach_emails
@@ -5447,7 +5458,8 @@ def _sela_v2_upsert_outreach(conn, customer_id, source_id, prospect, now):
                  _SELA_PROSPECT_INTEGRATION, sent_at or now),
             )
             if status != 'BOUNCED':
-                _complete_prospect_stage_tasks(conn, customer_id, completed_at=now)
+                _complete_prospect_stage_tasks(
+                    conn, customer_id, completed_at=now, sent_on=sent_at or now)
         return outreach_id
 
 

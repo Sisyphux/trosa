@@ -1205,6 +1205,25 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(self.reminder_done(future_task), 1)
         self.assertEqual(self.reminder_done(later_task), 1)
 
+    def test_confirmed_send_closes_due_todo_of_human_owned_customer(self):
+        created = self.post_prospect(prospect('owned-send-prospect'), 'sela-v2:owned-send:create')
+        self.assertEqual(created.status_code, 200, created.get_data(as_text=True))
+        customer_id = created.get_json()['trosa_id']
+        self.client.post('/api/auth/login', json={'user': 'hamid'})
+        # A real customer-side exchange makes Trosa treat the Customer as human-owned.
+        self.add_follow_log(customer_id, '客户询问价格和规格', direction='outbound')
+        due = self.add_reminder(customer_id, '回复客户问题', '2026-09-09')
+        later = self.add_reminder(customer_id, '人工约定的回访', '2026-09-20')
+
+        sent = prospect('owned-send-prospect')
+        sent.update({'outreach_status': 'SENT', 'sent_at': '2026-09-09 10:10:00',
+                     'gmail_message_id': 'owned-message-1'})
+        response = self.post_prospect(sent, 'sela-v2:owned-send:sent')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+        self.assertEqual(self.reminder_done(due), 1)
+        self.assertEqual(self.reminder_done(later), 0)
+
     def test_today_hides_prospect_tasks_until_a_real_interaction_exists(self):
         body = prospect('today-boundary-prospect')
         created = self.post_prospect(body, 'sela-v2:today-boundary:create')
