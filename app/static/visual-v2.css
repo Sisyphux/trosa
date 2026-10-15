@@ -93,6 +93,8 @@
 .ui-icon-today { --ui-icon: url("icons/hand/today-16.svg"); --ui-icon-md: url("icons/hand/today-20.svg"); --ui-icon-id: url("icons/hand/today.svg"); }
 .ui-icon-inbox { --ui-icon: url("icons/hand/inbox-16.svg"); --ui-icon-md: url("icons/hand/inbox-20.svg"); --ui-icon-id: url("icons/hand/inbox.svg"); }
 .ui-icon-tidy { --ui-icon: url("icons/hand/tidy-16.svg"); --ui-icon-md: url("icons/hand/tidy-20.svg"); --ui-icon-id: url("icons/hand/tidy.svg"); }
+.ui-icon-wait { --ui-icon: url("icons/hand/wait-16.svg"); --ui-icon-md: url("icons/hand/wait-20.svg"); --ui-icon-id: url("icons/hand/wait.svg"); }
+.ui-icon-none { --ui-icon: url("icons/hand/none-16.svg"); --ui-icon-md: url("icons/hand/none-20.svg"); --ui-icon-id: url("icons/hand/none.svg"); }
 .ui-icon-batch { --ui-icon: url("icons/hand/batch-16.svg"); --ui-icon-md: url("icons/hand/batch-20.svg"); --ui-icon-id: url("icons/hand/batch.svg"); }
 .ui-icon.ui-icon-md { --ui-icon: var(--ui-icon-md); }
 .ui-icon.ui-icon-id { --ui-icon: var(--ui-icon-id); }

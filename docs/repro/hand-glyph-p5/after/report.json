@@ -1,0 +1,263 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18207",
+  "checks": [
+    {
+      "name": "wide: 悬停“搜索”图标显示名称",
+      "ok": true,
+      "detail": "搜索客户"
+    },
+    {
+      "name": "wide: 原生 title 已被接管（不出现两层提示）",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "wide: 移开后提示消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 键盘聚焦图标按钮时也显示名称",
+      "ok": true,
+      "detail": "{\"name\":\"搜索客户\",\"tip\":\"搜索客户\"}"
+    },
+    {
+      "name": "wide: Today 行状态是符号",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 悬停状态符号显示名称",
+      "ok": true,
+      "detail": "时区未知"
+    },
+    {
+      "name": "wide: 五个分区标签都有可访问名称",
+      "ok": true,
+      "detail": "[\"最近沟通\",\"资料\",\"联系人\",\"文件\",\"待办\"]"
+    },
+    {
+      "name": "wide: 当前分区显示名称",
+      "ok": true,
+      "detail": "47"
+    },
+    {
+      "name": "wide: 其余分区只留图标",
+      "ok": true,
+      "detail": "[1,1,1,1]"
+    },
+    {
+      "name": "wide: 悬停分区图标显示名称",
+      "ok": true,
+      "detail": "联系人"
+    },
+    {
+      "name": "wide: 悬停读数图标显示名称",
+      "ok": true,
+      "detail": "沟通记录"
+    },
+    {
+      "name": "wide: 悬停导出图标显示名称",
+      "ok": true,
+      "detail": "导出邮箱：复制该客户全部去重联系人邮箱"
+    },
+    {
+      "name": "wide: 悬停关闭显示名称",
+      "ok": true,
+      "detail": "关闭（Esc）"
+    },
+    {
+      "name": "wide: 数字变化被写上去",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "wide: 点“明天”旧日期立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 推迟失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 归档确认后公司名立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 归档失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "wide: 台账状态符号都带名称",
+      "ok": true,
+      "detail": "0 个"
+    },
+    {
+      "name": "wide: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 悬停“搜索”图标显示名称",
+      "ok": true,
+      "detail": "搜索客户"
+    },
+    {
+      "name": "reduced: 原生 title 已被接管（不出现两层提示）",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "name": "reduced: 移开后提示消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 键盘聚焦图标按钮时也显示名称",
+      "ok": true,
+      "detail": "{\"name\":\"搜索客户\",\"tip\":\"搜索客户\"}"
+    },
+    {
+      "name": "reduced: Today 行状态是符号",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 悬停状态符号显示名称",
+      "ok": true,
+      "detail": "时区未知"
+    },
+    {
+      "name": "reduced: 五个分区标签都有可访问名称",
+      "ok": true,
+      "detail": "[\"最近沟通\",\"资料\",\"联系人\",\"文件\",\"待办\"]"
+    },
+    {
+      "name": "reduced: 当前分区显示名称",
+      "ok": true,
+      "detail": "47"
+    },
+    {
+      "name": "reduced: 其余分区只留图标",
+      "ok": true,
+      "detail": "[1,1,1,1]"
+    },
+    {
+      "name": "reduced: 悬停分区图标显示名称",
+      "ok": true,
+      "detail": "联系人"
+    },
+    {
+      "name": "reduced: 悬停读数图标显示名称",
+      "ok": true,
+      "detail": "沟通记录"
+    },
+    {
+      "name": "reduced: 悬停导出图标显示名称",
+      "ok": true,
+      "detail": "导出邮箱：复制该客户全部去重联系人邮箱"
+    },
+    {
+      "name": "reduced: 悬停关闭显示名称",
+      "ok": true,
+      "detail": "关闭（Esc）"
+    },
+    {
+      "name": "reduced: 数字变化不播动画",
+      "ok": true,
+      "detail": "false"
+    },
+    {
+      "name": "reduced: 点“明天”旧日期立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 推迟失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 归档确认后公司名立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 归档失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "reduced: 台账状态符号都带名称",
+      "ok": true,
+      "detail": "0 个"
+    },
+    {
+      "name": "reduced: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 五个分区标签都有可访问名称",
+      "ok": true,
+      "detail": "[\"最近沟通\",\"资料\",\"联系人\",\"文件\",\"待办\"]"
+    },
+    {
+      "name": "iphone: 当前分区显示名称",
+      "ok": true,
+      "detail": "47"
+    },
+    {
+      "name": "iphone: 触屏保留所有名称",
+      "ok": true,
+      "detail": "[24,36,24,24]"
+    },
+    {
+      "name": "iphone: 数字变化被写上去",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "name": "iphone: 点“明天”旧日期立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 推迟失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 归档确认后公司名立刻划掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "iphone: 归档失败后撤回划线",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "iphone: 台账状态符号都带名称",
+      "ok": true,
+      "detail": "0 个"
+    },
+    {
+      "name": "iphone: 无横向滚动",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "name": "全程无页面错误",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": [],
+  "failed": 0
+}

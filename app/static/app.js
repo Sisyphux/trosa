@@ -128,6 +128,108 @@ function strikeThrough(el) {
   };
 }
 
+// ---- 状态符号：图标 + 数字，悬停显示名称（五期）-----------------------------------
+// 同一个状态在全站只用一个符号；名称在 data-tip（悬停 / 聚焦显示）和 aria-label（读屏）。
+function statusGlyph(icon, label, text) {
+  var art = typeof handIcon === 'function' ? handIcon(icon, { cls: 'hi-st' }) : '';
+  if (!art) return escapeHtml(label);
+  return '<span class="st st-' + icon + '" data-tip="' + escapeHtml(label) + '" role="img" aria-label="' + escapeHtml(label) + '">' + art +
+    (text ? '<b class="st-n tnum">' + escapeHtml(text) + '</b>' : '') + '</span>';
+}
+
+// 数字变化：新值被“写上去”（左到右揭开）。第一次赋值与相同值不动。减少动态时只换文字。
+function setWritten(el, value) {
+  if (!el) return;
+  var next = String(value);
+  var changed = el.textContent !== next && el.textContent !== '' && el.textContent !== '—';
+  el.textContent = next;
+  if (!changed || !shouldAnimateLists()) return;
+  el.classList.remove('hand-write');
+  void el.offsetWidth;
+  el.classList.add('hand-write');
+  window.setTimeout(function() { el.classList.remove('hand-write'); }, 420);
+}
+
+// 悬停（或键盘聚焦）显示名称：自己的提示层，比原生 title 快，样式一致。
+// 来源是 data-tip，或图标按钮上的 title / aria-label；原生 title 被接管，避免出现两层。
+var _handTipEl = null, _handTipTimer = null, _handTipOwner = null;
+function handTipText(el) {
+  if (!el || el.nodeType !== 1) return '';
+  if (el.dataset && el.dataset.tip) return el.dataset.tip;
+  var title = el.getAttribute('title');
+  var visible = (el.textContent || '').replace(/\s+/g, '');
+  if (title) {
+    el.dataset.tip = title;
+    el.removeAttribute('title');
+    if (!visible && !el.getAttribute('aria-label')) el.setAttribute('aria-label', title);
+    return title;
+  }
+  if (!visible && el.getAttribute('aria-label') && el.matches('button,[role="button"],a,[role="tab"]')) return el.getAttribute('aria-label');
+  return '';
+}
+function hideHandTip() {
+  window.clearTimeout(_handTipTimer);
+  _handTipTimer = null;
+  _handTipOwner = null;
+  if (_handTipEl) _handTipEl.classList.remove('is-on');
+}
+function showHandTip(el) {
+  var text = handTipText(el);
+  if (!text || !el.isConnected) return;
+  if (!_handTipEl) {
+    _handTipEl = document.createElement('div');
+    _handTipEl.className = 'hand-tip';
+    _handTipEl.setAttribute('role', 'tooltip');
+    _handTipEl.id = 'handTip';
+    document.body.appendChild(_handTipEl);
+  }
+  _handTipOwner = el;
+  _handTipEl.textContent = text;
+  _handTipEl.style.left = '0px';
+  _handTipEl.style.top = '0px';
+  var rect = el.getBoundingClientRect();
+  var w = _handTipEl.offsetWidth, h = _handTipEl.offsetHeight;
+  var top = rect.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, rect.top - h - 8);
+  var left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left + rect.width / 2 - w / 2));
+  _handTipEl.style.left = Math.round(left) + 'px';
+  _handTipEl.style.top = Math.round(top) + 'px';
+  _handTipEl.classList.add('is-on');
+}
+function initHandTips() {
+  if (window.__handTipsReady) return;
+  window.__handTipsReady = true;
+  var SKIP = 'input,textarea,select,iframe';
+  document.addEventListener('mouseover', function(event) {
+    var owner = event.target.closest && event.target.closest('[data-tip],[title]');
+    if (!owner || owner.matches(SKIP)) { if (_handTipOwner) hideHandTip(); return; }
+    if (owner === _handTipOwner) return;
+    hideHandTip();
+    if (!handTipText(owner)) return;
+    _handTipOwner = owner;
+    _handTipTimer = window.setTimeout(function() { showHandTip(owner); }, 140);
+  }, true);
+  document.addEventListener('mouseout', function(event) {
+    if (!_handTipOwner) return;
+    var to = event.relatedTarget;
+    if (!to || !_handTipOwner.contains(to)) hideHandTip();
+  }, true);
+  document.addEventListener('focusin', function(event) {
+    var owner = event.target.closest && event.target.closest('[data-tip],[title]');
+    if (!owner || owner.matches(SKIP)) return;
+    var keyboard = true;
+    try { keyboard = event.target.matches(':focus-visible'); } catch (ignore) {}
+    if (keyboard && handTipText(owner)) showHandTip(owner);
+  });
+  document.addEventListener('focusout', hideHandTip);
+  document.addEventListener('mousedown', hideHandTip, true);
+  document.addEventListener('keydown', function(event) { if (event.key === 'Escape') hideHandTip(); }, true);
+  window.addEventListener('scroll', hideHandTip, true);
+  window.addEventListener('blur', hideHandTip);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initHandTips);
+else initHandTips();
+
 // ---- 统一空状态：一张纸 + 一句话 ------------------------------------------------
 // 文案回答三件事：这里是什么（title）、为什么空（hint 前半）、下一步做什么（hint 后半 / action），
 // 不超过两句。action 是调用方已经拼好的按钮 HTML（需自行 escape）。
@@ -1443,7 +1545,7 @@ function setInboxOtherCount(count) {
 function updateInboxNavCount() {
   var nav = document.getElementById('inboxNavCount');
   var total = _inboxOtherCount + (typeof dialogueAwaitingCount === 'function' ? dialogueAwaitingCount() : 0);
-  if (nav) nav.textContent = total || '';
+  if (nav) setWritten(nav, total || '');
 }
 
 // The index's "Inbox" always opens the dialogue with sela.
@@ -4385,7 +4487,9 @@ function tideTrackHtml(r, t) {
 }
 function tideC3Html(r, t) {
   var info = tideStatusInfo(r, t);
-  return '<b class="tide-status ' + info.cls + '">' + escapeHtml(info.main) + '</b>' +
+  var glyph = { '时区未知': 'globe', '开窗中': 'today', '今天没有窗口': 'none' }[info.main];
+  var mainHtml = glyph ? statusGlyph(glyph, info.main) : (/ 开窗$/.test(info.main) ? statusGlyph('clock', info.main, info.main.replace(/ 开窗$/, '')) : escapeHtml(info.main));
+  return '<b class="tide-status ' + info.cls + '">' + mainHtml + '</b>' +
     (info.sub ? '<span class="tide-count">' + escapeHtml(info.sub) + '</span>' : '');
 }
 function tideWorkingCount(t) {
@@ -4829,7 +4933,7 @@ function buildTodayTaskRow(r, index, selected) {
           '<input type="checkbox" class="table-checkbox today-task-checkbox" data-id="' + customerId + '" onclick="event.stopPropagation()" onchange="updateTodaySelection()"' + (isMultiSelected ? ' checked' : '') + ' aria-label="选择 ' + escapeHtml(name) + '">' +
         '</span>' +
         '<span class="tide-name"><button type="button" title="' + escapeHtml(name) + '" onclick="event.stopPropagation();openEditModal(' + customerId + ')">' + escapeHtml(name) + '</button></span>' +
-        (overdueLabel ? '<span class="tide-overdue">' + escapeHtml(overdueLabel) + '</span>' : '') +
+        (overdueLabel ? '<span class="tide-overdue">' + statusGlyph('alert', overdueLabel, overdueDays + ' 天') + '</span>' : '') +
       '</div>' +
       '<div class="tide-c1-bot"><span class="tide-action">' + escapeHtml(action) + '</span></div>' +
     '</div>' +
@@ -6797,10 +6901,10 @@ function ledgerDue(row) {
 
 function ledgerGroupHtml(segment) {
   var parts = ['<b>' + segment.count + ' 家</b>'];
-  if (segment.overdue) parts.push('<span class="ld-over">逾期 ' + segment.overdue + '</span>');
-  if (segment.waiting) parts.push('等待回复 ' + segment.waiting);
-  if (segment.no_next) parts.push('尚无下一步 ' + segment.no_next);
-  if (segment.silent) parts.push('长期未联系 ' + segment.silent);
+  if (segment.overdue) parts.push('<span class="ld-over">' + statusGlyph('alert', '逾期 ' + segment.overdue + ' 家', segment.overdue) + '</span>');
+  if (segment.waiting) parts.push(statusGlyph('wait', '等待回复 ' + segment.waiting + ' 家', segment.waiting));
+  if (segment.no_next) parts.push(statusGlyph('none', '尚无下一步 ' + segment.no_next + ' 家', segment.no_next));
+  if (segment.silent) parts.push(statusGlyph('clock', '长期未联系 ' + segment.silent + ' 家', segment.silent));
   return '<span class="ld-gl">' + escapeHtml(segment.label) + '</span><span class="ld-gr">' + parts.join(' · ') + '</span>';
 }
 
@@ -6816,7 +6920,7 @@ function ledgerRowHtml(row) {
   var due = ledgerDue(row);
   var query = LD.query;
   var company = row.company || '未命名公司';
-  var what = row.days === null ? '' : (row.waiting_reply ? '等待回复' : (row.has_contact ? '已有联系' : '未获回复'));
+  var what = row.days === null ? '' : (row.waiting_reply ? statusGlyph('wait', '等待回复') : (row.has_contact ? statusGlyph('done', '已有联系') : statusGlyph('none', '未获回复')));
   var cf = [row.country, row.field, customerSourceLabel(row.source)].filter(Boolean).join(' · ') || '—';
   var dup = ledgerDuplicateHtml(row.id);
   var snippet;
@@ -6825,8 +6929,10 @@ function ledgerRowHtml(row) {
   else if (row.activity_snippet || row.activity_kind) snippet = escapeHtml([row.activity_kind, row.activity_snippet].filter(Boolean).join(' · '));
   else snippet = '尚无沟通记录';
   var next = row.next_task_date
-    ? '<span class="ld-nx ' + (due.cls === 'over' ? 'is-over' : '') + '"><em>' + escapeHtml(due.text) + '</em> · ' + escapeHtml(row.next_task_title || '已安排') + '</span>'
-    : '<span class="ld-nx is-none">尚无下一步</span>';
+    ? '<span class="ld-nx ' + (due.cls === 'over' ? 'is-over' : '') + '"><em>' +
+        (due.cls === 'over' ? statusGlyph('alert', due.text, (-row.next_task_days) + ' 天') : escapeHtml(due.text)) +
+        '</em> · ' + escapeHtml(row.next_task_title || '已安排') + '</span>'
+    : '<span class="ld-nx is-none">' + statusGlyph('none', '尚无下一步') + '</span>';
   return '<i class="ld-lit"></i>' +
     '<div class="ld-l1"><span class="ld-co" title="' + escapeHtml(company) + '">' + highlightSearchText(company, query) + '</span>' + dup + '<i class="ld-lead"></i>' +
     '<span class="ld-wh" title="' + escapeHtml(row.event_date || '尚无沟通记录') + '">' + escapeHtml(ledgerRelative(row.days)) + (what ? '<i>' + what + '</i>' : '') + '</span></div>' +
@@ -7039,11 +7145,11 @@ function ledgerRunning() {
     label.dataset.segment = segment.label;
     label.innerHTML = '<span class="hand-under">' + escapeHtml(segment.label) + _HAND_UL + '</span>';
   }
-  var bits = [segment.count + ' 家'];
-  if (segment.overdue) bits.push('逾期 ' + segment.overdue);
-  if (segment.waiting) bits.push('等待回复 ' + segment.waiting);
-  if (segment.no_next) bits.push('尚无下一步 ' + segment.no_next);
-  totals.innerHTML = bits.map(escapeHtml).join('<br>');
+  var bits = [escapeHtml(segment.count + ' 家')];
+  if (segment.overdue) bits.push(statusGlyph('alert', '逾期 ' + segment.overdue + ' 家', segment.overdue));
+  if (segment.waiting) bits.push(statusGlyph('wait', '等待回复 ' + segment.waiting + ' 家', segment.waiting));
+  if (segment.no_next) bits.push(statusGlyph('none', '尚无下一步 ' + segment.no_next + ' 家', segment.no_next));
+  totals.innerHTML = bits.join('<br>');
   var item = LD.items[itemIndex];
   var at = LD.cur != null ? LD.pos[LD.cur] : (item.p != null ? item.p : segment.start);
   position.innerHTML = '第 ' + (at + 1) + ' 条 <i>/ ' + LD.total + '</i>';
@@ -8478,7 +8584,7 @@ function renderCustomerNextTask(reminders) {
 // not been read yet is "—" (or "1+" when at least one is certain), never a guess.
 function renderCustomerRoomCounts() {
   var c = _customerDetailCache;
-  function set(id, value) { var el = document.getElementById(id); if (el) el.textContent = value; }
+  function set(id, value) { setWritten(document.getElementById(id), value); }
   if (!c) return;
   var pagination = c.timeline_pagination || {};
   var loadedFacts = (c.timeline_items || []).length;
@@ -8491,6 +8597,11 @@ function renderCustomerRoomCounts() {
   set('cwCountTasks', taskCount);
   set('cwCountFiles', String(fileCount));
   set('cwCountContacts', String(contactCount));
+  // 分区标签里的计数：只给有数量的分区（联系人 / 文件 / 待办）
+  [['editTabContacts', contactCount], ['editTabFiles', fileCount], ['editTabTasks', taskCount]].forEach(function(pair) {
+    var badge = document.querySelector('[data-tab-count="' + pair[0] + '"]');
+    if (badge) badge.textContent = String(pair[1]) === '0' ? '' : String(pair[1]);
+  });
   var modal = document.getElementById('customerEditModal');
   var section = modal && modal.dataset.section;
   var meta = {
@@ -8514,14 +8625,14 @@ function customerTaskHtml(task) {
   var first = _customerDetailCache && (_customerDetailCache.reminders || [])[0];
   var isNext = !done && first && Number(first.id) === Number(task.id);
   var id = Number(task.id) || 0;
-  var sub = [formatChineseDate(date) || '未安排日期', isNext ? '下一步' : '', overdue ? '已逾期' : ''].filter(Boolean).join(' · ');
+  var sub = [escapeHtml(formatChineseDate(date) || '未安排日期'), isNext ? '下一步' : '', overdue ? statusGlyph('alert', '已逾期') : ''].filter(Boolean).join(' · ');
   var acts = done || !id ? '' : '<span class="cw-row-acts">' +
     '<button type="button" class="cw-link" onclick="completeCustomerNextTask(this, ' + id + ')">完成</button><i>·</i>' +
     '<button type="button" class="cw-link" onclick="postponeCustomerNextTask(1, this, ' + id + ')">明天</button><i>·</i>' +
     '<button type="button" class="cw-link" onclick="openCustomerTaskModal(\'edit\', ' + id + ')">编辑</button></span>';
   return '<div class="cw-prow lit-row' + (done ? ' is-done' : '') + (overdue ? ' is-overdue' : '') + '" tabindex="0">' +
     '<div class="cw-pmain"><b>' + escapeHtml(task.title || task.content || '待办') + '</b>' +
-    '<span class="cw-sm">' + escapeHtml(sub) + '</span>' +
+    '<span class="cw-sm">' + sub + '</span>' +
     (task.reason ? '<span class="cw-sm2">' + escapeHtml(task.reason) + '</span>' : '') + acts + '</div>' +
     '<time class="tnum">' + escapeHtml(cwMonthDay(date)) + '</time></div>';
 }
@@ -9165,6 +9276,8 @@ async function postponeCustomerNextTask(days, button, taskId) {
   var due = new Date();
   due.setDate(due.getDate() + days);
   var reset = setActionFeedback(button, 'pending', '正在调整…');
+  // 旧日期被划掉，新日期稍后写上去；保存失败则撤回划线。
+  var undoPostponeStrike = strikeThrough(document.querySelector('#customerNextTask .cw-when'));
   try {
     var saved = await api('/api/reminders/' + next.id + '/reschedule', { method: 'POST', body: JSON.stringify({ remind_date: localDateString(due) }) });
     var cache = liveCustomerCache(scope);
@@ -9178,6 +9291,7 @@ async function postponeCustomerNextTask(days, button, taskId) {
       });
       if (!updatedTask.is_done) remaining.push(updatedTask);
       applyCustomerTaskSnapshot(remaining, customerTaskMotionKey(updatedTask));
+      writeNewDate();
     }
     Promise.all([refreshCustomerWorkspace(), refreshCustomerTimeline()]).catch(function() {});
     // 客户详情会覆盖在今日待办之上；延后后同步刷新底层列表，
@@ -9187,10 +9301,20 @@ async function postponeCustomerNextTask(days, button, taskId) {
     // local to the button and let the changed card be the confirmation.
     reset();
   } catch (e) {
+    undoPostponeStrike();
     setActionFeedback(button, 'error', '保存失败');
     showToast('日期没有保存，请检查网络后重试', 'error');
     reset(1800);
   }
+}
+
+// 新日期“写上去”：重新渲染后的日期自左向右揭开一次。
+function writeNewDate() {
+  if (!shouldAnimateLists()) return;
+  var when = document.querySelector('#customerNextTask .cw-when');
+  if (!when) return;
+  when.classList.add('hand-write');
+  window.setTimeout(function() { when.classList.remove('hand-write'); }, 450);
 }
 
 async function createCustomerTask(button) {
@@ -9344,12 +9468,16 @@ async function saveCustomer() {
 
 async function deleteCustomer(id) {
   if (!await showAppConfirm({ title: '归档客户', message: '将这个客户归档？之后仍可恢复。', submitLabel: '归档' })) return;
+  // 确认之后立刻划掉这一行的公司名（账页里）；保存失败撤回。
+  var archiveButton = document.querySelector('[data-ld-archive="' + id + '"]');
+  var archiveRow = archiveButton && archiveButton.closest('.ld-ent');
+  var undoArchiveStrike = strikeThrough(archiveRow && archiveRow.querySelector('.ld-co'));
   try {
     await api('/api/customers/' + id, { method: 'DELETE' });
     showToast('客户已归档', 'success');
     if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else loadDashboard();
-  } catch(e) {}
+  } catch(e) { undoArchiveStrike(); }
 }
 
 // Contacts
@@ -14549,7 +14677,7 @@ function updateTodayDialogueEntry() {
   var count = dialogueAwaitingCount();
   var countEl = document.getElementById('todayDialogueCount');
   var labelEl = document.getElementById('todayDialogueLabel');
-  if (countEl) countEl.textContent = count;
+  if (countEl) setWritten(countEl, count);
   if (labelEl) labelEl.textContent = '条对话等你回复';
   // 没有等你回复的对话时整块不出现：没在用对话的成员看到的就是普通 CRM。
   entry.hidden = !count;
