@@ -279,6 +279,44 @@ class SelaIrreversibleCustomerIdTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(self.prospect_email(source_id), 'new@irr-num.example')
 
+    def prospect_view(self, source_id):
+        payload = self.client.get('/api/integrations/sela/prospects?limit=100',
+                                  headers=self.headers('irr:view')).get_json()
+        return next(row for row in payload['prospects'] if row['id'] == source_id)
+
+    def test_overwrite_email_promotes_an_existing_additional_address_and_clears_the_bounce(self):
+        # Production 2026-10-15: the human said "send to both", so the new address
+        # was added as an additional contact; "换" then answered already_present
+        # and left the dead primary (and its BOUNCED status) in place.
+        source_id = 'irr-over-promote'
+        customer_id = self.create_prospect(source_id, email='dead@irr-promote.example',
+                                           contact={'email': 'dead@irr-promote.example'})
+        conn = self.hamid_db()
+        try:
+            for email in ('sales@irr-promote.example', 'tech@irr-promote.example'):
+                conn.execute(
+                    "INSERT INTO contacts (customer_id, name, email, preferred_channel, contact_type, is_primary, notes, created_at) "
+                    "VALUES (?, '', ?, 'email', 'person', 0, '', datetime('now', 'localtime'))", (customer_id, email))
+            conn.execute(
+                "INSERT INTO outreach_emails (customer_id, subject, content, sent_date, reply_status, external_source, external_id) "
+                "VALUES (?, 's', 'c', '2026-08-31', 'bounced', ?, ?)",
+                (customer_id, self.module._SELA_PROSPECT_SOURCE, source_id))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(self.prospect_view(source_id)['outreach_status'], 'BOUNCED')
+        response, _confirm = self.irreversible(
+            source_id, 'irr:over:promote', 'overwrite_email',
+            {'customer_id': customer_id, 'email': 'sales@irr-promote.example'})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()['result']
+        self.assertFalse(result['already_present'])
+        self.assertTrue(result['primary_changed'])
+        view = self.prospect_view(source_id)
+        self.assertEqual(view['email'], 'sales@irr-promote.example')
+        self.assertEqual(view['additional_emails'], ['tech@irr-promote.example'])
+        self.assertNotEqual(view['outreach_status'], 'BOUNCED')
+
 
 if __name__ == '__main__':
     unittest.main()

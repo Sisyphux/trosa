@@ -7769,12 +7769,19 @@ def _dialogue_irreversible_handler(action):
                 conn, customer_id, 'customer_id')
             try:
                 saved = _sela_resolve_contact_email(
-                    conn, customer_id, email, now, actor='sela')
+                    conn, customer_id, email, now, actor='sela', replace=True)
             except CrmWriteError as error:
                 raise _dialogue.DialogueError(
                     'guardrail_rejected', error.message, error.status)
+            # A bounce belongs to the address that failed.  Once the primary
+            # email is replaced the old bounce no longer describes the contact.
+            cleared = 0
+            if saved.get('primary_changed'):
+                cleared = _sela_clear_bounce_after_email_change(conn, customer_id, now)
             return {'contact_id': saved.get('contact_id'),
-                    'already_present': bool(saved.get('already_present'))}
+                    'already_present': bool(saved.get('already_present')),
+                    'primary_changed': bool(saved.get('primary_changed')),
+                    'bounce_cleared': cleared}
         return handler
     return None
 
@@ -14876,7 +14883,27 @@ def _sela_linked_prospect(conn, source_id):
     return dict(profile), _sela_prospect_view(conn, profile)
 
 
-def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', additional=False):
+def _sela_clear_bounce_after_email_change(conn, customer_id, now):
+    """Reset bounced outreach records of a customer whose primary email changed."""
+    customer_id = int(customer_id)
+    cleared = 0
+    if postgres_mode():
+        for row in _modern_outreach_rows(conn, customer_id=customer_id):
+            if str(row.get('reply_status') or '').lower() == 'bounced':
+                _update_outreach_message(conn, outreach_id=int(row['id']), reply_status='pending',
+                                         reply_content='', reply_on='')
+                cleared += 1
+    else:
+        cleared = conn.execute(
+            "UPDATE outreach_emails SET reply_status='pending', reply_content='', reply_date='' "
+            "WHERE customer_id=? AND reply_status='bounced'", (customer_id,)).rowcount or 0
+    if cleared:
+        _record_operation_log(conn, 'UPDATE', 'outreach', customer_id,
+                              '主邮箱已更换，原退信标记清除', now)
+    return int(cleared)
+
+
+def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', additional=False, replace=False):
     """Create or refresh one contact email on the prospect's Trosa customer.
 
     This is the single audited write path for a human-confirmed Sela email; the
@@ -14886,6 +14913,11 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
     ``additional`` keeps the existing primary email and adds the address as a
     further contact; Sela sends its outreach to every contact email of a cold
     prospect (``additional_emails`` in the prospect view).
+
+    ``replace`` is the confirmed ``overwrite_email``: the address must end up
+    as the primary email.  When it is already a further contact, it replaces the
+    primary's address and the duplicate row is dropped, so the replaced address
+    leaves the recipient list instead of staying behind as an additional one.
     """
     try:
         email = _canonical_email(validate_email_address(email, check_deliverability=False).normalized)
@@ -14899,6 +14931,18 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
             'SELECT * FROM contacts WHERE customer_id=? '
             'ORDER BY is_primary DESC, created_at ASC, id ASC', (customer_id,)).fetchall()]
     same = next((row for row in contacts if _canonical_email(row.get('email')) == email), None)
+    if same and replace and contacts and int(contacts[0]['id']) != int(same['id']):
+        primary = contacts[0]
+        primary_id = int(primary['id'])
+        before = _snapshot_entity(conn, 'contacts', primary_id)
+        values = dict(before); values['email'] = email
+        _delete_contact(conn, contact_id=int(same['id']))
+        _update_contact(conn, contact_id=primary_id, values=values)
+        after = _snapshot_entity(conn, 'contacts', primary_id)
+        _record_operation_log(conn, 'UPDATE', 'contact', primary_id,
+                              f'Sela Inbox 人工回答确认邮箱 {email}（原为附加邮箱，提为主邮箱）', now)
+        return {'contact_id': primary_id, 'created': False, 'already_present': False,
+                'primary_changed': True, 'undo': ('UPDATE_CONTACT', primary_id, before, after)}
     if same:
         return {'contact_id': int(same['id']), 'created': False, 'already_present': True}
     duplicate = None
@@ -14932,7 +14976,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
         _record_operation_log(conn, 'UPDATE', 'contact', contact_id,
                               f'Sela Inbox 人工回答确认邮箱 {email}', now)
         return {'contact_id': contact_id, 'created': False, 'already_present': False,
-                'undo': ('UPDATE_CONTACT', contact_id, before, after)}
+                'primary_changed': True, 'undo': ('UPDATE_CONTACT', contact_id, before, after)}
     contact_id = int(_create_contact(conn, customer_id=customer_id, values={
         'name': '', 'email': email, 'preferred_channel': 'email',
         'contact_type': 'person', 'is_primary': 0,
