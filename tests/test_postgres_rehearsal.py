@@ -3823,6 +3823,60 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(foreign['index'], [])
         self.assertEqual(other.get('/api/customers/ledger/rows?ids=' + ','.join(map(str, order))).get_json()['rows'], [])
 
+    def test_multi_word_search_and_same_name_collapse_on_real_postgres(self):
+        """多词搜索要求每个词都命中；同名记录折叠时保留有沟通的那条并说明还有几条。"""
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        today = module._calendar_today()
+        mark = uuid.uuid4().hex[:8]
+        word_acrylic = 'Acrylic' + mark
+        word_sourcing = 'Sourcing' + mark
+        twins_a = 'Twins' + mark
+        twins_b = 'Plastics' + mark
+
+        def create(company):
+            response = client.post('/api/customers', json={
+                'name': company + ' Buyer', 'company': company, 'country': 'US', 'field': 'search pg',
+            })
+            self.assertEqual(response.status_code, 201, response.get_json())
+            return response.get_json()['id']
+
+        # 1) Every word of a multi-word query must match the same customer.
+        both_words = create(f'Alpha{mark} {word_acrylic} {word_sourcing}')
+        one_word = create(f'Beta{mark} {word_acrylic}')
+        try:
+            narrowed = client.get('/api/customers/ledger',
+                                  query_string={'search': f'{word_acrylic} {word_sourcing}'}).get_json()
+            self.assertEqual([entry[0] for entry in narrowed['index']], [both_words])
+            broad = client.get('/api/customers/ledger', query_string={'search': word_acrylic}).get_json()
+            self.assertEqual(sorted(entry[0] for entry in broad['index']), sorted([both_words, one_word]))
+
+            # 2) A same-name pair shows one row: the one holding the communication.
+            silent = create(f'{twins_a} {twins_b}')
+            talking = create(f'{twins_a} {twins_b}')
+            self.assertEqual(client.post(f'/api/customers/{talking}/follow_history', json={
+                'activity_content': f'Twins reply {mark}', 'activity_type': 'customer_reply',
+                'direction': 'inbound', 'follow_date': today.isoformat(),
+                'source': 'postgres-rehearsal-search',
+            }).status_code, 200)
+            payload = client.get('/api/customers/ledger',
+                                 query_string={'search': f'{twins_a} {twins_b}'}).get_json()
+            self.assertEqual(payload['total'], 1)
+            self.assertEqual([entry[0] for entry in payload['index']], [talking])
+            self.assertEqual(payload['same_name_hints'], {str(talking): {'count': 1, 'has_activity': False}})
+            legacy = client.get('/api/customers',
+                                query_string={'search': f'{twins_a} {twins_b}'}).get_json()
+            self.assertEqual([item['id'] for item in legacy['customers']], [talking])
+            rows = client.get('/api/customers/ledger/rows',
+                              query_string={'ids': str(talking)}).get_json()['rows']
+            self.assertEqual([row['id'] for row in rows], [talking])
+            self.assertTrue(rows[0]['activity_snippet'])
+        finally:
+            for customer_id in (both_words, one_word, silent, talking):
+                client.delete(f'/api/customers/{customer_id}')
+
     # -------------------------------------------- Agent gateway undo in PG
     #
     # Undo conflict detection compares the snapshot's business columns.  These

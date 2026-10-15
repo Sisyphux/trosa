@@ -2085,6 +2085,13 @@ html[data-room-page="customers"][data-customer-mode="ledger"] #trosa #page-custo
 #trosa .ld-lead { flex: 1 1 1.5rem; min-width: 1.5rem; align-self: flex-end; height: .82em; margin-bottom: .1em; border-bottom: 1px dotted var(--dl-hair-strong); }
 #trosa .ld-wh { flex: none; font-size: .84rem; color: var(--dl-ink); white-space: nowrap; }
 #trosa .ld-wh i { margin-left: .5rem; font-style: normal; font-size: .76rem; color: var(--dl-ink-3); }
+/* A search row stands for every same-name record; say how many without shouting. */
+#trosa .ld-dup {
+  flex: none; align-self: center; padding: 0 .5rem;
+  border: 1px solid var(--dl-hair-strong); border-radius: 999px;
+  font-size: .68rem; letter-spacing: .02em; color: var(--dl-ink-3); white-space: nowrap;
+}
+#trosa .ld-dup em { font-style: normal; color: var(--dl-ink-2); }
 #trosa .ld-l2 { display: grid; grid-template-columns: 190px minmax(0, 1fr) 232px; gap: 0 1.2rem; margin-top: .15rem; font-size: .78rem; line-height: 1.45; }
 #trosa .ld-l2 > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #trosa .ld-sn { color: var(--dl-ink-3); }

@@ -6443,7 +6443,7 @@ var LEDGER_BLOCK = 50;
 var LEDGER_WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 var LD = {
   ready: false, state: 'loading', error: null, view: 'all', query: '', token: 0,
-  total: 0, counts: null, segments: [], today: '',
+  total: 0, counts: null, segments: [], today: '', hints: {},
   order: [], flags: [], days: [], pos: {},
   items: [], offs: new Float64Array(1), itemOfPos: [], segOfItem: [],
   rows: {}, blocks: {}, cur: null, nodes: {}, erow: 70, hrow: 76,
@@ -6673,6 +6673,7 @@ function ledgerApply(data, keep) {
   LD.total = Number(data.total || 0);
   LD.today = data.today || '';
   LD.segments = data.segments || [];
+  LD.hints = data.same_name_hints || {};
   var index = data.index || [];
   LD.order = index.map(function(entry) { return entry[0]; });
   LD.days = index.map(function(entry) { return entry[1]; });
@@ -6803,12 +6804,21 @@ function ledgerGroupHtml(segment) {
   return '<span class="ld-gl">' + escapeHtml(segment.label) + '</span><span class="ld-gr">' + parts.join(' · ') + '</span>';
 }
 
+function ledgerDuplicateHtml(id) {
+  // A search shows one row per same-name company; say what it stands for.
+  var hint = LD.hints[id];
+  if (!hint || !hint.count) return '';
+  var tail = hint.has_activity ? '<em>（含沟通）</em>' : '';
+  return '<span class="ld-dup">另有 ' + hint.count + ' 条同名记录' + tail + '</span>';
+}
+
 function ledgerRowHtml(row) {
   var due = ledgerDue(row);
   var query = LD.query;
   var company = row.company || '未命名公司';
   var what = row.days === null ? '' : (row.waiting_reply ? '等待回复' : (row.has_contact ? '已有联系' : '未获回复'));
   var cf = [row.country, row.field, customerSourceLabel(row.source)].filter(Boolean).join(' · ') || '—';
+  var dup = ledgerDuplicateHtml(row.id);
   var snippet;
   // A company-name hit is already shown (and marked) on the line above; say where else it matched.
   if (row.match && query && row.match.indexOf('公司名称 · ') !== 0) snippet = '命中 · ' + highlightSearchText(row.match, query);
@@ -6818,7 +6828,7 @@ function ledgerRowHtml(row) {
     ? '<span class="ld-nx ' + (due.cls === 'over' ? 'is-over' : '') + '"><em>' + escapeHtml(due.text) + '</em> · ' + escapeHtml(row.next_task_title || '已安排') + '</span>'
     : '<span class="ld-nx is-none">尚无下一步</span>';
   return '<i class="ld-lit"></i>' +
-    '<div class="ld-l1"><span class="ld-co" title="' + escapeHtml(company) + '">' + highlightSearchText(company, query) + '</span><i class="ld-lead"></i>' +
+    '<div class="ld-l1"><span class="ld-co" title="' + escapeHtml(company) + '">' + highlightSearchText(company, query) + '</span>' + dup + '<i class="ld-lead"></i>' +
     '<span class="ld-wh" title="' + escapeHtml(row.event_date || '尚无沟通记录') + '">' + escapeHtml(ledgerRelative(row.days)) + (what ? '<i>' + what + '</i>' : '') + '</span></div>' +
     '<div class="ld-l2"><span class="ld-cf">' + highlightSearchText(cf, query) + '</span><span class="ld-sn">' + snippet + '</span>' + next + '</div>' +
     '<div class="ld-row-acts"><button class="ld-open" type="button" tabindex="-1" data-ld-open="' + row.id + '">打开 <kbd>↵</kbd></button>' +
@@ -6865,7 +6875,10 @@ function ledgerFillRow(node, id) {
     return;
   }
   var due = ledgerDue(row);
-  node.setAttribute('aria-label', [row.company, row.country, ledgerRelative(row.days), due.text].filter(Boolean).join('，'));
+  var hint = LD.hints[row.id];
+  node.setAttribute('aria-label', [row.company,
+    hint && hint.count ? '另有 ' + hint.count + ' 条同名记录' : '',
+    row.country, ledgerRelative(row.days), due.text].filter(Boolean).join('，'));
   node.innerHTML = ledgerRowHtml(row);
 }
 

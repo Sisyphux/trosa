@@ -295,6 +295,49 @@ class CustomerLedgerTest(unittest.TestCase):
         row = self.client.get(f'/api/customers/ledger/rows?ids={customer_id}&search=独特唯一暗号').get_json()['rows'][0]
         self.assertIn('独特唯一暗号', row['match'])
 
+    def test_same_name_records_show_one_row_that_holds_the_communication(self):
+        """Searching a duplicated company must not hide the record with the facts."""
+        self._add('hamid', 'Twin Plastics')
+        talking = self._add('hamid', 'Twin Plastics', reply_days=3, snippet='确认了样品与报价')
+        payload = self._ledger('?search=Twin+Plastics')
+        self.assertEqual(payload['total'], 1)
+        self.assertEqual([entry[0] for entry in payload['index']], [talking])
+        # The shown row is the one holding the communication; the hidden shell adds nothing.
+        self.assertEqual(payload['same_name_hints'][str(talking)], {'count': 1, 'has_activity': False})
+        self.assertEqual([entry[0] for entry in self._ledger('?search=Plastics')['index']], [talking])
+        row = self.client.get(f'/api/customers/ledger/rows?ids={talking}&search=Twin+Plastics').get_json()['rows'][0]
+        self.assertEqual(set(row), ROW_KEYS)
+        self.assertEqual(row['activity_snippet'], '确认了样品与报价')
+
+    def test_hidden_same_name_record_with_its_own_communication_is_flagged(self):
+        self._add('hamid', 'Both Talk', reply_days=9, snippet='第一次沟通')
+        self._add('hamid', 'Both Talk', reply_days=3, snippet='第二次沟通')
+        payload = self._ledger('?search=Both+Talk')
+        self.assertEqual(payload['total'], 1)
+        self.assertEqual(len(payload['same_name_hints']), 1)
+        self.assertEqual(list(payload['same_name_hints'].values())[0], {'count': 1, 'has_activity': True})
+
+    def test_same_name_without_any_communication_still_says_how_many(self):
+        self._add('hamid', 'Quiet Twins')
+        self._add('hamid', 'Quiet Twins')
+        payload = self._ledger('?search=Quiet+Twins')
+        self.assertEqual(payload['total'], 1)
+        self.assertEqual(len(payload['same_name_hints']), 1)
+        self.assertEqual(list(payload['same_name_hints'].values())[0], {'count': 1, 'has_activity': False})
+
+    def test_search_without_duplicates_reports_no_same_name_hints(self):
+        self._add('hamid', 'Solo Plastics', reply_days=2)
+        payload = self._ledger('?search=Solo')
+        self.assertEqual(payload['total'], 1)
+        self.assertEqual(payload['same_name_hints'], {})
+
+    def test_multi_word_search_needs_every_word(self):
+        both = self._add('hamid', 'Zeta Acrylic Sheets', reply_days=2)
+        self._add('hamid', 'Zeta Trading', reply_days=1)
+        payload = self._ledger('?search=Zeta+Acrylic')
+        self.assertEqual([entry[0] for entry in payload['index']], [both])
+        self.assertEqual(self._ledger('?search=Zeta')['total'], 2)
+
     def test_legacy_customer_list_keeps_its_shape(self):
         self._seed_spread()
         payload = self.client.get('/api/customers?page=1&per_page=5').get_json()
@@ -385,6 +428,14 @@ class CustomerLedgerContractTest(unittest.TestCase):
         self.assertIn('.ld-dock { display: flex', narrow)
         self.assertIn('.ld-row-acts { display: none !important; }', narrow)
         self.assertIn('data-ld-act="open"', self.ledger_js)
+
+    def test_same_name_collapse_is_disclosed_not_silently_hidden(self):
+        """A search row stands for every same-name record, and says so."""
+        self.assertIn('same_name_hints', self.ledger_js)
+        self.assertIn('function ledgerDuplicateHtml(id)', self.ledger_js)
+        self.assertIn('条同名记录', self.ledger_js)
+        self.assertIn('（含沟通）', self.ledger_js)
+        self.assertIn('.ld-dup {', self.ledger_css)
 
     def test_customer_time_zone_filter_is_not_built(self):
         self.assertNotIn('此刻可联系', self.ledger_js)

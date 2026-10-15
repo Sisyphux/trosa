@@ -9497,17 +9497,29 @@ def _reliable_contacts_by_customer(cursor, customer_ids):
     return result
 
 
-def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
-    """Find one bounded, explainable match per customer for the global search."""
+def _customer_search_match_contexts(cursor, customer_ids, search_tokens, coverage=None):
+    """Find one bounded, explainable match per customer for the global search.
+
+    ``coverage`` is an optional accumulator.  When it is passed, every token
+    that hit anything for a customer (its own fields or one of its related
+    records) is added to ``coverage[customer_id]``.  Callers use that to require
+    all tokens of a multi-word query to match before keeping a customer.
+    """
     if not customer_ids or not search_tokens:
         return {}
+
+    normalized_tokens = [normalized for normalized in
+                         (_search_normalize(token) for token in search_tokens) if normalized]
 
     if postgres_mode():
         contexts = {}
 
-        def matches(values):
-            haystack = ' '.join(str(value or '') for value in values).casefold()
-            return any(str(token).casefold() in haystack for token in search_tokens)
+        def matches(values, customer_id=None):
+            haystack = _search_normalize(' '.join(str(value or '') for value in values))
+            hits = {token for token in normalized_tokens if token in haystack}
+            if hits and coverage is not None and customer_id is not None:
+                coverage.setdefault(customer_id, set()).update(hits)
+            return bool(hits)
 
         def add_context(customer_id, context):
             if customer_id and customer_id not in contexts:
@@ -9515,7 +9527,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
 
         for item in _modern_inbox_rows(cursor):
             customer_id = item.get('customer_id')
-            if customer_id in customer_ids and matches((item.get('title'), item.get('content'))):
+            if customer_id in customer_ids and matches((item.get('title'), item.get('content')), customer_id):
                 add_context(customer_id, {
                     'type': 'inbox', 'label': 'Inbox 条目', 'id': item.get('id'),
                     'item_type': item.get('item_type') or '', 'title': item.get('title') or '',
@@ -9541,7 +9553,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
             tasks_by_customer[item['customer_id']].append(item)
         for customer_id in customer_ids:
             for item in interactions_by_customer[customer_id]:
-                if matches((item.get('content'), item.get('result'), item.get('next_plan'), item.get('activity_type'))):
+                if matches((item.get('content'), item.get('result'), item.get('next_plan'), item.get('activity_type')), customer_id):
                     add_context(customer_id, {
                         'type': 'communication', 'label': '沟通记录', 'id': item.get('id'),
                         'content': (item.get('content') or item.get('result') or item.get('next_plan') or '')[:240],
@@ -9553,7 +9565,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'contact_id': item.get('contact_id'), 'contact_name': '', 'action': 'view',
                     })
             for item in outreach_by_customer[customer_id]:
-                if matches((item.get('subject'), item.get('content'), item.get('reply_content'))):
+                if matches((item.get('subject'), item.get('content'), item.get('reply_content')), customer_id):
                     add_context(customer_id, {
                         'type': 'communication', 'label': '开发邮件', 'id': item.get('id'),
                         'content': (item.get('subject') or item.get('reply_content') or item.get('content') or '')[:240],
@@ -9562,7 +9574,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'activity_type': 'email', 'contact_id': item.get('contact_id'), 'contact_name': '', 'action': 'view',
                     })
             for item in contacts_by_customer[customer_id]:
-                if matches((item.get('name'), item.get('email'), item.get('phone'), item.get('whatsapp'), item.get('linkedin'))):
+                if matches((item.get('name'), item.get('email'), item.get('phone'), item.get('whatsapp'), item.get('linkedin')), customer_id):
                     add_context(customer_id, {
                         'type': 'contact', 'label': '联系人', 'id': item.get('id'),
                         'contact_name': item.get('name') or '', 'contact_email': item.get('email') or '',
@@ -9570,7 +9582,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens):
                         'action': 'view',
                     })
             for item in tasks_by_customer[customer_id]:
-                if matches((item.get('title'), item.get('content'), item.get('reason'))):
+                if matches((item.get('title'), item.get('content'), item.get('reason')), customer_id):
                     add_context(customer_id, {
                         'type': 'task', 'label': '待办', 'id': item.get('id'),
                         'title': item.get('title') or item.get('content') or '',
@@ -9853,18 +9865,48 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None):
     return ranked
 
 
+def _customer_search_has_recorded_activity(customer):
+    """True when a search row carries recorded work (a communication or a reply)."""
+    return bool(customer.get('latest_activity')) or bool(customer.get('latest_communication_date'))
+
+
 def _deduplicate_customer_search_results(customers):
-    """Keep one stable customer row per normalized company in search results."""
-    unique_customers = []
-    seen_companies = set()
+    """Keep one customer row per normalized company in search results.
+
+    Same-name records read as one company, so one row is shown.  The shown row is
+    the one that carries recorded work when any of them does, and the others are
+    reported on it through ``same_name_duplicates``: the collapse stays visible
+    instead of silently hiding the record that holds the communication.
+    """
+    order = []
+    groups = {}
     for customer in customers:
         company_key = _search_normalize(customer.get('company') or customer.get('name'))
         if not company_key:
             company_key = 'customer:' + str(customer.get('id'))
-        if company_key in seen_companies:
+        group = groups.get(company_key)
+        if group is None:
+            groups[company_key] = {'kept': customer, 'hidden': []}
+            order.append(company_key)
             continue
-        seen_companies.add(company_key)
-        unique_customers.append(customer)
+        if (_customer_search_has_recorded_activity(customer)
+                and not _customer_search_has_recorded_activity(group['kept'])):
+            group['hidden'].append(group['kept'])
+            group['kept'] = customer
+        else:
+            group['hidden'].append(customer)
+    unique_customers = []
+    for company_key in order:
+        group = groups[company_key]
+        hidden = group['hidden']
+        kept = group['kept']
+        if hidden:
+            kept['same_name_duplicates'] = {
+                'count': len(hidden),
+                'ids': [item.get('id') for item in hidden],
+                'has_activity': any(_customer_search_has_recorded_activity(item) for item in hidden),
+            }
+        unique_customers.append(kept)
     return unique_customers
 
 
@@ -9922,7 +9964,13 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         customers.append(customer)
 
     if cleaned_search:
-        normalized_tokens = [_search_normalize(token) for token in search_tokens if token]
+        # Every word of a multi-word query must match the same customer.  The
+        # SQLite path ANDs one clause per token; PostgreSQL filters in Python, so
+        # it needs the same union-of-evidence rule: a token may hit the customer
+        # fields or one of its related records (communication, development email,
+        # contact, task, Inbox entry), but every token must hit something.
+        normalized_tokens = [token for token in (_search_normalize(token) for token in search_tokens) if token]
+        related_hits = {}
         for customer in list(customers):
             values = (
                 customer.get('name'), customer.get('company'), customer.get('country'),
@@ -9931,11 +9979,18 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                 customer.get('source'), customer.get('source_detail'),
                 customer_source_display(customer.get('source')),
             )
-            field_hit = any(token and token in ' '.join(str(value or '') for value in values).casefold()
-                            for token in normalized_tokens)
-            customer['_search_field_hit'] = field_hit
-        contexts = _customer_search_match_contexts(conn, [item['id'] for item in customers], search_tokens)
-        customers = [item for item in customers if item.pop('_search_field_hit', False) or item['id'] in contexts]
+            haystack = _search_normalize(' '.join(str(value or '') for value in values))
+            customer['_search_field_hits'] = {token for token in normalized_tokens if token in haystack}
+        contexts = _customer_search_match_contexts(
+            conn, [item['id'] for item in customers], search_tokens, coverage=related_hits)
+        wanted_tokens = set(normalized_tokens)
+        kept_customers = []
+        for item in customers:
+            covered = set(item.pop('_search_field_hits', None) or ())
+            covered |= related_hits.get(item['id'], set())
+            if wanted_tokens <= covered:
+                kept_customers.append(item)
+        customers = kept_customers
     else:
         contexts = {}
 
@@ -10587,9 +10642,20 @@ def get_customer_ledger():
         current['waiting'] += 1 if facts['flags'] & LEDGER_FLAG_WAITING else 0
         current['no_next'] += 1 if facts['flags'] & LEDGER_FLAG_NO_NEXT else 0
         current['silent'] += 1 if facts['flags'] & LEDGER_FLAG_SILENT else 0
+    # A search shows one row per same-name company.  Say how many same-name
+    # records a shown row stands for, so the collapse is never silent.
+    same_name_hints = {}
+    for customer in payload['customers']:
+        duplicates = customer.get('same_name_duplicates') or {}
+        if duplicates.get('count'):
+            same_name_hints[str(customer.get('id'))] = {
+                'count': int(duplicates.get('count') or 0),
+                'has_activity': bool(duplicates.get('has_activity')),
+            }
     return jsonify({
         'view': view, 'today': today.isoformat(), 'total': len(index), 'counts': counts,
         'segments': segments, 'index': index, 'ranked': searching,
+        'same_name_hints': same_name_hints,
         'interpreted_filters': payload.get('interpreted_filters', []),
     })
 

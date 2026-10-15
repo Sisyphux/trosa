@@ -2691,6 +2691,46 @@ class PostgresCompatibilityRegressionTest(unittest.TestCase):
         ordered = [item['id'] for item in payload['customers']]
         self.assertEqual(ordered, [2, 1])
 
+    def test_postgres_multi_word_search_requires_every_word(self):
+        """PostgreSQL must AND the tokens of a query like the SQLite path does."""
+        spec = importlib.util.spec_from_file_location('crm_app_multi_token_search_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def customer(customer_id, company):
+            return {'id': customer_id, 'company': company, 'name': company, 'is_pinned': False, 'pinned_order': 0,
+                    'updated_at': '2026-09-18 09:00:00', 'customer_type': '', 'tags': '', 'level': '',
+                    'notes': '', 'profile': '', 'field': '', 'industry': '', 'website': '',
+                    'business_stage': '', 'business_role': '', 'customer_judgment': '',
+                    'country': '', 'status': '', 'created_at': '2026-09-18 09:00:00',
+                    'is_deleted': 0, 'deleted_at': None, 'last_interaction_on': '', 'next_task_on': ''}
+
+        customers = [customer(1, 'Zeta Acrylic Sheets'), customer(2, 'Zeta Trading')]
+        facts = {item['id']: {'next_task_date': '', 'next_task_title': '',
+                              'latest_communication_date': '', 'latest_email_date': '',
+                              'latest_email_status': '', 'has_contact': False,
+                              'contact_state': 'uncontacted', 'waiting_reply': False,
+                              'latest_activity': ''} for item in customers}
+        ranks = {1: {'score': 5, 'matches': ['zeta'], 'reasons': [], 'context': None},
+                 2: {'score': 5, 'matches': ['zeta'], 'reasons': [], 'context': None}}
+        kwargs = dict(business_stage='', level='', sort='updated_at', order='desc', include_deleted='0',
+                      view='all', country_filter='', business_role='', field_filter='', judgment_filter='',
+                      next_state='', source_filter='', last_from='', last_to='', tag_filter='',
+                      days_min=0, days_max=0, page_value='', page=1, per_page=30,
+                      interpreted_filters=[], silent_days=45, regular_days=75)
+        empty_conn = mock.Mock()
+        with mock.patch.object(module, '_active_customers', return_value=[dict(item) for item in customers]), \
+             mock.patch.object(module, '_customer_business_facts', return_value=facts), \
+             mock.patch.object(module, '_customer_contacts', return_value=[]), \
+             mock.patch.object(module, '_customer_search_rank_data', return_value=ranks), \
+             mock.patch.object(module, '_customer_search_match_contexts', return_value={}):
+            narrowed = module._get_customers_postgres(
+                empty_conn, cleaned_search='zeta acrylic', search_tokens=['zeta', 'acrylic'], **kwargs)
+            broad = module._get_customers_postgres(
+                empty_conn, cleaned_search='zeta', search_tokens=['zeta'], **kwargs)
+        self.assertEqual([item['id'] for item in narrowed['customers']], [1])
+        self.assertEqual(sorted(item['id'] for item in broad['customers']), [1, 2])
+
     def test_sqlite_empty_string_literals_are_not_used_in_postgres_sql(self):
         source = (ROOT / 'app.py').read_text(encoding='utf-8')
         self.assertNotIn('deleted_at = ""', source)

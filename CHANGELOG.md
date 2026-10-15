@@ -1,3 +1,10 @@
+## 2026-10-15 — 搜索同名公司时不再藏住有沟通记录的那条
+
+- 现象：同一家公司在客户台账里只有一行，页面不说明还有另一条。搜「Garima Impex」时显示的正是没有沟通记录的空壳，带 2026-08-20 外联事实的那条被藏住；同一搜索还会带出只含「Impex」的其他公司。
+- 原因：PostgreSQL 的多词搜索是「任一词命中」（SQLite 是逐词 AND），两个后端行为不一致；搜索把同名公司折叠成一行时保留的是排序里的第一条，两条同名记录分数相同，于是可能正好留下空壳，且没有任何提示。
+- 修改：PostgreSQL 多词搜索改成「每个词都要命中」（与 SQLite 一致），词可以命中客户字段或它的沟通、开发邮件、联系人、待办；折叠同名公司时优先留下有沟通记录的那条，并在行里说明「另有 N 条同名记录」，被折叠的那条自己也有沟通时标「（含沟通）」。
+- 影响范围：`app.py`（`_customer_search_match_contexts`、`_deduplicate_customer_search_results`、`_get_customers_postgres`、`/api/customers/ledger` 新增 `same_name_hints`）、`app/static/app.js`、`app/static/visual-v5.css`。行负载键不变，不改表结构。
+- 验证：`tools/repro_customer_search_dup.cjs` 真实浏览器重现，修复前退出 20（显示空壳、无提示），修复后 5/5 通过，证据在 `docs/repro/customer-search-dup/`；`tests/test_customer_ledger.py`、`tests/test_risk_regressions.py`、`tests/test_postgres_rehearsal.py`（真实 PostgreSQL）通过。
 ## 2026-10-14 — Web 应用的数据库连接加语句超时
 
 - 现象：10-14 两段故障里，被 Cloudflare 放弃的请求在数据库里继续执行，占着为数不多的服务线程；数据库侧 `statement_timeout` 为 0，没有任何上限。

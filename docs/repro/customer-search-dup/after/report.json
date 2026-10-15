@@ -1,0 +1,49 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18191",
+  "generatedAt": "2026-10-15T01:11:22.552Z",
+  "checks": [
+    {
+      "id": "search-shows-one-row",
+      "title": "搜索同名公司只出现一行（同一家公司折叠成一条）",
+      "pass": true,
+      "detail": "行数：1"
+    },
+    {
+      "id": "same-name-disclosed",
+      "title": "这一行说明还有 1 条同名记录",
+      "pass": true,
+      "detail": "提示：另有 1 条同名记录"
+    },
+    {
+      "id": "shown-row-holds-the-communication",
+      "title": "显示的是有沟通记录的那条，不是空壳",
+      "pass": true,
+      "detail": "摘要：客户回复 · 客户回信：确认样品与报价，下周下单。"
+    },
+    {
+      "id": "row-label-names-the-duplicate",
+      "title": "这一行的无障碍名称也说明还有同名记录",
+      "pass": true,
+      "detail": "名称：同名复现公司1792026682808，另有 1 条同名记录，China，今天，尚无下一步"
+    },
+    {
+      "id": "unique-company-has-no-hint",
+      "title": "没有同名的公司不出现同名提示",
+      "pass": true,
+      "detail": "行数：1；提示：没有"
+    }
+  ],
+  "screenshots": [
+    "01-search-duplicate-1440.png",
+    "02-search-unique-1440.png"
+  ],
+  "pageErrors": [],
+  "browser": "chromium 153.0.8010.12",
+  "measurements": {
+    "company": "同名复现公司1792026682808",
+    "unique": "唯一对照公司1792026682808",
+    "shell_id": 1,
+    "talking_id": 2
+  }
+}
