@@ -986,6 +986,70 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertTrue(record['contacted'])
         self.assertEqual(record['contact_evidence'], 'recorded_communication')
 
+    def _add_member_customer(self, member, name, *, website='', contacted=True):
+        db.set_db_user(member)
+        conn = db.get_db()
+        try:
+            conn.execute('INSERT INTO customers (name, company, website, country) VALUES (?, ?, ?, ?)',
+                         (name, name, website, 'Colombia'))
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            if contacted:
+                conn.execute(
+                    """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction, activity_type, created_at)
+                       VALUES (?, '已电话沟通', '2026-09-10', 'outbound', 'follow_up', '2026-09-10 10:00:00')""",
+                    (customer_id,),
+                )
+            conn.commit()
+            return customer_id
+        finally:
+            conn.close()
+            db.set_db_user('hamid')
+
+    def test_company_contacted_by_another_member_is_excluded_for_hamid(self):
+        kelley_id = self._add_member_customer(
+            'kelley', 'Cross Member Acrylics', website='https://www.crossmember.example/contacto')
+        self._add_member_customer('kelley', 'Quiet Member Co', website='https://quiet-member.example/', contacted=False)
+        records = self.exclusion_records()
+        record = next(r for r in records if r.get('record_id') == f'trosa-member-contact:kelley:{kelley_id}')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertEqual(record['domains'], ['crossmember.example'])
+        self.assertTrue(record['contacted'])
+        # Only the contact fact crosses members: no notes, profile, contacts or content.
+        self.assertFalse({'notes', 'profile', 'contacts', 'content', 'email', 'name', 'company'} & set(record))
+        self.assertFalse(any('Quiet Member' in str(r.get('canonical_name')) for r in records))
+
+    def test_member_contact_is_not_duplicated_when_hamid_already_covers_the_company(self):
+        own = self.add_customer('Shared Plastics', website='https://shared-plastics.example/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction, activity_type, created_at)
+                   VALUES (?, '客户回复', '2026-09-10', 'inbound', 'customer_reply', '2026-09-10 10:00:00')""",
+                (own,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._add_member_customer('amy', 'Shared Plastics Ltd', website='https://www.shared-plastics.example/')
+        records = self.exclusion_records()
+        matching = [r for r in records if 'shared-plastics.example' in (r.get('domains') or [])]
+        self.assertEqual([r['record_id'] for r in matching], [f'trosa-customer:{own}'])
+
+    def test_multi_url_website_is_split_into_separate_hosts(self):
+        domains = self.module._canonical_website_domains(
+            'https://www.bold.net\nhttps://institucional.bold.net/')
+        self.assertEqual(domains, ['bold.net', 'institucional.bold.net'])
+        self.assertEqual(self.module._canonical_website_domain('https://www.bold.net\nhttps://x.bold.net/'), 'bold.net')
+        self.assertEqual(self.module._canonical_website_domains('bold.net.co, https://bold.net.co/contacto'), ['bold.net.co'])
+        self.assertEqual(self.module._canonical_website_domains(''), [])
+
+    def test_fused_stored_domain_is_repaired_in_the_exclusion_view(self):
+        view = self.module._sela_business_exclusion_view({
+            'id': 167, 'canonical_name': 'Bold Participacoes Sa',
+            'domains_json': json.dumps(['bold.nethttps']), 'is_active': 1,
+        })
+        self.assertEqual(view['domains'], ['bold.net'])
+
     def test_imported_outreach_date_alone_does_not_establish_contact(self):
         customer_id = self.add_customer('Legacy Import Co', website='https://legacy-import.example/')
         conn = self.hamid_db()

@@ -2065,20 +2065,57 @@ def normalize_website(value):
     return website
 
 
-def _canonical_website_domain(value):
-    """Return a host-only website identity for integration matching.
-
-    The normal customer-create path historically used a substring SQL match,
-    so ``acrilicos.com`` incorrectly collided with
-    ``totalacrilicos.com.br``. Integrations must compare canonical hosts, not
-    arbitrary URL text.
-    """
+def _single_website_domain(value):
     website = normalize_website(value)
     if not website:
         return ''
     parsed = urlparse(website if '://' in website else 'https://' + website)
     host = (parsed.hostname or '').strip().casefold().removeprefix('www.')
     return host.rstrip('.')
+
+
+def _canonical_website_domains(value):
+    """Return every distinct host in a website field, in order.
+
+    A website field can hold several URLs separated by newlines, spaces or
+    commas.  ``urlparse`` silently drops control characters, so two URLs used
+    to fuse into one bogus host such as ``bold.nethttps``.  Split first, then
+    canonicalise each URL on its own.
+    """
+    text = str(value or '').strip()
+    if not text:
+        return []
+    domains = []
+    for token in re.split(r'[\s,;，；]+|(?=https?://)', text):
+        token = token.strip().strip('()（）<>"\'')
+        if not token or '.' not in token:
+            continue
+        host = _single_website_domain(token)
+        if host and '.' in host and host not in domains:
+            domains.append(host)
+    return domains
+
+
+def _canonical_website_domain(value):
+    """Return a host-only website identity for integration matching.
+
+    The normal customer-create path historically used a substring SQL match,
+    so ``acrilicos.com`` incorrectly collided with
+    ``totalacrilicos.com.br``. Integrations must compare canonical hosts, not
+    arbitrary URL text.  A multi-URL field yields its first host; use
+    ``_canonical_website_domains`` when every host matters.
+    """
+    domains = _canonical_website_domains(value)
+    return domains[0] if domains else ''
+
+
+_GLUED_SCHEME_DOMAIN = re.compile(r'^(?P<host>[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})https?$')
+
+
+def _repair_glued_domain(domain):
+    """Undo ``<host>https`` left by earlier multi-URL imports (``bold.nethttps``)."""
+    match = _GLUED_SCHEME_DOMAIN.match(str(domain or '').strip().casefold())
+    return match.group('host') if match else str(domain or '').strip().casefold()
 
 
 def _sync_name_key(value):
@@ -4142,9 +4179,9 @@ def _sela_business_exclusion_payload(value):
         aliases.insert(0, canonical_name)
     domains = []
     for raw_domain in _sela_exclusion_string_list(value.get('domains'), 80, 2000):
-        domain = _canonical_website_domain(raw_domain)
-        if domain and domain not in domains:
-            domains.append(domain)
+        for domain in _canonical_website_domains(raw_domain):
+            if domain and domain not in domains:
+                domains.append(domain)
     policy = _sela_prospect_text(value.get('match_policy'), 40).lower()
     if policy not in {'hard', 'review_name_only'}:
         policy = 'hard'
@@ -4165,6 +4202,17 @@ def _sela_business_exclusion_payload(value):
     }
 
 
+def _sela_exclusion_domains_view(domains):
+    """Hosts of a stored exclusion, repairing earlier fused multi-URL values."""
+    result = []
+    for raw in _sela_exclusion_string_list(domains, 80, 2000):
+        repaired = _repair_glued_domain(raw)
+        for host in _canonical_website_domains(repaired) or [repaired]:
+            if host and host not in result:
+                result.append(host)
+    return result
+
+
 def _sela_business_exclusion_view(row):
     """Project a persistent exclusion into the single Agent-readable form."""
     row = dict(row)
@@ -4179,7 +4227,7 @@ def _sela_business_exclusion_view(row):
         'canonical_name': canonical_name,
         'normalized_name': str(row.get('normalized_name') or _sync_name_key(canonical_name)),
         'aliases': aliases,
-        'domains': _sela_exclusion_string_list(domains, 80, 2000),
+        'domains': _sela_exclusion_domains_view(domains),
         'country': str(row.get('country') or ''),
         'status': str(row.get('status') or 'confirmed_exclude'),
         'match_policy': str(row.get('match_policy') or 'hard'),
@@ -4358,6 +4406,77 @@ def _sela_customer_contact_evidence(conn):
     return evidence
 
 
+def _sela_other_member_contact_records(own_records):
+    """Companies other active members have really contacted.
+
+    Exclusions are otherwise built from the caller's own data, so a company
+    another member already talked to stayed open for development.  Only the
+    fact "this company was contacted" crosses members: name, host, country and
+    an opaque id — never communication content, contacts or notes.  Companies
+    the caller's own records already cover are skipped to keep the list small.
+    """
+    current = get_current_user()
+    covered_names = {str(r.get('normalized_name') or '') for r in own_records}
+    covered_names.discard('')
+    covered_domains = set()
+    for record in own_records:
+        covered_domains.update(str(d).casefold() for d in record.get('domains') or [])
+    extra = []
+    for member, info in list(USERS.items()):
+        if member == current or not info.get('active', True):
+            continue
+        try:
+            set_db_user(member)
+            member_conn = get_db()
+            try:
+                evidence = _sela_customer_contact_evidence(member_conn)
+                if not evidence:
+                    continue
+                if postgres_mode():
+                    rows = member_conn.execute(
+                        '''SELECT id, name, company, website, country, updated_at
+                             FROM trosa.customer_records WHERE deleted_at IS NULL''').fetchall()
+                else:
+                    rows = member_conn.execute(
+                        '''SELECT id, name, company, website, country, updated_at
+                             FROM customers WHERE is_deleted=0 OR is_deleted IS NULL''').fetchall()
+            finally:
+                member_conn.close()
+        except Exception:
+            logger.exception('sela exclusion: 读取成员 %s 的联系事实失败', member)
+            continue
+        finally:
+            set_db_user(current)
+        for row in rows:
+            item = dict(row)
+            customer_id = int(item['id'])
+            if customer_id not in evidence:
+                continue
+            canonical_name = str(item.get('company') or item.get('name') or '').strip()
+            name_key = _sync_name_key(canonical_name)
+            domains = _canonical_website_domains(item.get('website'))
+            if not canonical_name or not (domains or name_key):
+                continue
+            if (name_key and name_key in covered_names) or any(d in covered_domains for d in domains):
+                continue
+            covered_names.add(name_key)
+            covered_domains.update(domains)
+            extra.append({
+                'record_id': f'trosa-member-contact:{member}:{customer_id}',
+                'canonical_name': canonical_name,
+                'normalized_name': name_key,
+                'aliases': [],
+                'domains': domains,
+                'country': str(item.get('country') or ''),
+                'status': 'member_contacted', 'match_policy': 'hard',
+                'source': 'trosa_member_contact', 'source_id': f'{member}:{customer_id}',
+                'updated_at': str(item.get('updated_at') or ''),
+                'contacted': True,
+                'contact_evidence': evidence[customer_id],
+            })
+    return extra
+
+
 def _sela_exclusion_snapshot_records(conn):
     """Return the one authoritative exclusion projection owned by Trosa.
 
@@ -4379,7 +4498,7 @@ def _sela_exclusion_snapshot_records(conn):
             'canonical_name': canonical_name,
             'normalized_name': _sync_name_key(canonical_name),
             'aliases': aliases,
-            'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
+            'domains': _canonical_website_domains(item.get('website')),
             'country': str(item.get('country') or ''),
             'status': 'trosa_customer', 'match_policy': 'hard',
             'source': 'trosa_customer', 'source_id': str(customer_id),
@@ -4453,7 +4572,7 @@ def _sela_exclusion_snapshot_records(conn):
                 'canonical_name': canonical_name,
                 'normalized_name': _sync_name_key(canonical_name),
                 'aliases': [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else [],
-                'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
+                'domains': _canonical_website_domains(item.get('website')),
                 'country': str(item.get('country') or ''),
                 'status': 'do_not_contact', 'match_policy': 'hard',
                 'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),
@@ -4467,6 +4586,7 @@ def _sela_exclusion_snapshot_records(conn):
                 ORDER BY id''',
         ).fetchall()
         records.extend(_sela_business_exclusion_view(row) for row in business_rows)
+        records.extend(_sela_other_member_contact_records(records))
         return records
     records = []
     rows = conn.execute(
@@ -4506,7 +4626,7 @@ def _sela_exclusion_snapshot_records(conn):
             'canonical_name': canonical_name,
             'normalized_name': _sync_name_key(canonical_name),
             'aliases': [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else [],
-            'domains': [domain] if (domain := _canonical_website_domain(item.get('website'))) else [],
+            'domains': _canonical_website_domains(item.get('website')),
             'country': str(item.get('country') or ''),
             'status': 'do_not_contact', 'match_policy': 'hard',
             'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),
@@ -4519,6 +4639,7 @@ def _sela_exclusion_snapshot_records(conn):
         (_sela_prospect_user(),),
     ).fetchall()
     records.extend(_sela_business_exclusion_view(row) for row in business_rows)
+    records.extend(_sela_other_member_contact_records(records))
     return records
 
 

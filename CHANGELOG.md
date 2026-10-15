@@ -1,3 +1,10 @@
+## 2026-10-15 — 排除清单带上其他成员已联系过的公司，并修多网址域名拼接
+
+- 现象：Sela 的排除清单只按调用账号自己的客户和沟通生成，别的成员（如 Kelley、Amy）已经联系过的公司，Hamid 这边仍然可以开发；另外客户网站字段里写了两个网址（换行分隔）时被拼成一个错误域名（如 `bold.nethttps`），这条排除永远匹配不到。
+- 修改：排除清单额外返回「其他启用成员已有真实沟通」的公司（`trosa-member-contact:<成员>:<客户id>`，硬排除）。只带公司名、域名、国家和已联系标记，不带沟通内容、联系人或备注；调用账号自己已覆盖的公司不重复返回。网站字段按每个网址分别取域名；已存的 `…https` 粘连域名在输出时还原。
+- 影响范围：`app.py`（`_canonical_website_domains`、`_sela_other_member_contact_records`、`_sela_exclusion_snapshot_records`、`_sela_business_exclusion_view`）。不改表结构、不改 Sela 接口契约（新增记录沿用同一字段形状）。
+- 验证：`tests/test_sela_prospect_api.py` 新增 4 项（跨成员排除、不重复、多网址拆分、粘连域名还原）。
+
 ## 2026-10-15 — sela 的身份歧义不再进 Inbox「其他事项」（只回给 sela）
 
 - 现象：「其他事项」里出现 4 条「潜在客户身份待确认」（Adhue、Jigar Plast、VP Polyfab、Gavrieli），一直没人能答：匹配到的两条记录是同名的 sela 历史占位行与真实客户，人无法分辨，也没有要做的判断。
