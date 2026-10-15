@@ -144,7 +144,7 @@ function emptyStateHtml(kind, title, hint, action, opts) {
   var art = opts.noArt ? '' : emptyIllustration(kind);
   return '<div class="hand-empty' + (opts.compact ? ' is-compact' : '') + '" data-state="empty" data-empty-kind="' + escapeHtml(kind) + '" role="status">' +
     art + '<h3 class="hand-empty-title">' + escapeHtml(title) + '</h3>' +
-    (hint ? '<p>' + escapeHtml(hint) + '</p>' : '') + (action || '') + '</div>';
+    (hint && !opts.compact ? '<p>' + escapeHtml(hint) + '</p>' : '') + (action || '') + '</div>';
 }
 
 function waitHtml(text, tier) {
@@ -5249,11 +5249,11 @@ function renderTodayFocus(r) {
   // The room holds one sentence and one solid button: what happens next, and the
   // way to record that it happened. Everything else is a quiet secondary action.
   el.innerHTML = '<div class="room-acts">' +
-      '<button type="button" class="room-act primary" onclick="openTodayCommunicationConfirm()">记录沟通</button>' +
+      '<button type="button" class="room-act primary" onclick="openTodayCommunicationConfirm()" title="确认记录后，这条待办会一并完成，也可以顺手安排下一步">记录沟通</button>' +
       '<button type="button" class="room-act" onclick="openEditModal(' + Number(r.customer_id) + ')">查看客户</button>' +
       (website ? '<a class="room-act" href="' + escapeHtml(website) + '" target="_blank" rel="noopener">访问网站</a>' : '') +
     '</div>' +
-    '<p class="room-hint">确认记录后，这条待办会一并完成，也可以顺手安排下一步。' + (contact ? ' 联系人：' + escapeHtml(contact) : '') + '</p>';
+    (contact ? '<p class="room-hint">联系人：' + escapeHtml(contact) + '</p>' : '');
   renderTodayWideDetail(r, name, meta, website);
   updateTodayFocusClock(r);
   updateTodayRoomStatus();
@@ -11738,7 +11738,7 @@ async function loadHistory() {
     if (token !== _historyLoadToken) return;
     // GET 命中 401 时 apiOnce 返回 null：那是登录过期，不是“暂无沟通记录”。
     if (history === null) throw loadAuthError();
-    if (!history || history.length === 0) { el.innerHTML = emptyStateHtml('log', '暂无沟通记录', '在客户页记录沟通后，会按时间排在这里。'); return; }
+    if (!history || history.length === 0) { el.innerHTML = emptyStateHtml('log', '暂无沟通记录', ''); return; }
     _followTimelineCache = {};
     var html = '<div class="timeline">';
     history.forEach(function(h) {
@@ -12066,7 +12066,7 @@ async function loadLogs(action) {
     if (logs === null) throw loadAuthError();
     var html = filterHtml;
     if (!logs || logs.length === 0) {
-      html += emptyStateHtml('log', '暂无操作日志', '新增、修改、完成等操作会自动记在这里。');
+      html += emptyStateHtml('log', '暂无操作日志', '');
       el.innerHTML = html;
       return;
     }
@@ -14228,7 +14228,7 @@ function renderDialogueThread() {
     return;
   }
   if (!dialogueSelectedId) {
-    pane.innerHTML = emptyStateHtml('inbox', '现在没有等你回复的对话', 'sela 有事需要你决定时，会出现在这里。');
+    pane.innerHTML = emptyStateHtml('inbox', '现在没有等你回复的对话', '');
     return;
   }
   if (!dialogueThread) { pane.innerHTML = loadLoadingHtml('正在打开对话…'); return; }
