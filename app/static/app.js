@@ -8221,11 +8221,16 @@ function customerWebsiteParts(customer) {
 
 // The identity reads as two quiet lines under the company name. A field that
 // is not recorded is simply left out, never padded with "未记录".
-// The stored source value stays canonical ('Sela'); the interface shows the
-// plain business wording instead.
+// sela is a tool, never a customer source. Unknown channels read as the Google /
+// website search the owner standardised on; raw import tags get plain wording.
+var CW_IMPORT_SOURCE_LABELS = {
+  sela: 'Google / 官网搜索', 'sela-v2': 'Google / 官网搜索', manual: '手动录入',
+  excel: 'Excel / 历史导入', daily_recommendation: '每日推荐', gmail: '邮件', 'chat-attachment': '聊天附件'
+};
 function customerSourceLabel(value) {
   var raw = String(value == null ? '' : value).trim();
-  return raw === 'Sela' ? '自动开发' : raw;
+  if (/^(sela|自动开发)$/i.test(raw)) return 'Google / 官网搜索';
+  return CW_IMPORT_SOURCE_LABELS[raw.toLowerCase()] || raw;
 }
 
 function updateCustomerWorkspaceIdentity(customer) {
@@ -14125,7 +14130,7 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
   var websiteUrl = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
   var facts = [
     ['归属成员', customer.owner_label || customer.owner], ['国家 / 地区', customer.country], ['行业 / 领域', customer.industry || customer.field],
-    ['业务角色', customer.business_role || '未标记'], ['业务阶段', customer.business_stage || '未标记'], ['来源', customerSourceLabel(customer.source) || customer.import_source], ['建立日期', customer.created_at ? formatDate(customer.created_at) : ''],
+    ['业务角色', customer.business_role || '未标记'], ['业务阶段', customer.business_stage || '未标记'], ['来源', customerSourceLabel(customer.source || customer.import_source)], ['建立日期', customer.created_at ? formatDate(customer.created_at) : ''],
     ['最近实际联系', customer.last_actual_contact]
   ].filter(function(item) { return item[1]; });
   var h = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace"><div class="modal-header ov-customer-header"><div><div class="workspace-kicker">客户详情 · 只读</div><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3><div class="workspace-meta">' +

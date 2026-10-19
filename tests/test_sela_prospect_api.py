@@ -191,7 +191,7 @@ class SelaProspectApiTest(unittest.TestCase):
             ).fetchone()
         finally:
             conn.close()
-        self.assertEqual(created['source'], 'Sela')
+        self.assertEqual(created['source'], 'Google / 官网搜索')
 
         repeat = self.post_prospect(body)
         self.assertEqual(repeat.status_code, 200)

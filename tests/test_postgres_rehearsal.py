@@ -1180,7 +1180,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             self.assertEqual(own.execute('SHOW statement_timeout').fetchone()[0], '0')
 
     def test_customer_search_matches_display_source_label(self):
-        """客户列表把来源显示成“自动开发”，搜索这个显示词也要能命中。"""
+        """sela 不是客户来源：旧的 Sela 来源显示成真实渠道，搜索这个词也要能命中。"""
         module = self._app_module()
         module._INBOX_CACHE.clear()
         client = module.app.test_client()
@@ -1195,9 +1195,9 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(created.status_code, 201, created.get_json())
         customer_id = created.get_json()['id']
         try:
-            # 存储值仍是规范值 'Sela'，界面显示成“自动开发”。
-            self.assertEqual(module.customer_source_display('Sela'), '自动开发')
-            listed = client.get('/api/customers', query_string={'search': '自动开发'})
+            # 旧客户端写入的 'Sela' 按未知渠道处理：存成并显示为 Google / 官网搜索。
+            self.assertEqual(module.customer_source_display('Sela'), 'Google / 官网搜索')
+            listed = client.get('/api/customers', query_string={'search': 'Google'})
             self.assertEqual(listed.status_code, 200, listed.get_json())
             payload = listed.get_json()
             self.assertIn(customer_id, [row['id'] for row in payload['customers']])

@@ -228,14 +228,17 @@ _SELA_PROSPECT_SOURCE = 'sela'
 # customers keep an empty source unless a person records one; nothing infers or
 # backfills it.
 CUSTOMER_SOURCE_OPTIONS = (
-    '展会', '海关数据', 'LinkedIn', 'Google / 官网搜索', 'Sela',
+    '展会', '海关数据', 'LinkedIn', 'Google / 官网搜索',
     '客户转介绍', '老客户 / 已有资源', 'Excel / 历史导入', '其他',
 )
 CUSTOMER_SOURCE_OPTION_SET = frozenset(CUSTOMER_SOURCE_OPTIONS)
-# Sela knows the concrete acquisition channel for some prospects.  Map only
-# unambiguous aliases to a canonical option; anything else stays "Sela" rather
-# than guessing a specific source.
+# sela is a tool, never a customer source.  Map only unambiguous aliases to a
+# canonical option; when the real channel is unknown it is recorded as a
+# Google / website search (the owner's standing decision), and the retired
+# 'Sela' option is read as that too.
+CUSTOMER_SOURCE_UNKNOWN_CHANNEL = 'Google / 官网搜索'
 CUSTOMER_SOURCE_ALIASES = {
+    'sela': CUSTOMER_SOURCE_UNKNOWN_CHANNEL, '自动开发': CUSTOMER_SOURCE_UNKNOWN_CHANNEL,
     'exhibition': '展会', 'expo': '展会', 'trade show': '展会', 'fair': '展会',
     'customs': '海关数据', 'customs data': '海关数据', 'importgenius': '海关数据',
     'linkedin': 'LinkedIn', 'linked in': 'LinkedIn',
@@ -247,9 +250,11 @@ CUSTOMER_SOURCE_ALIASES = {
     'other': '其他',
 }
 _MAX_CUSTOMER_SOURCE_DETAIL = 200
-# The stored option stays canonical ('Sela'); screens and copied context show
-# the plain business wording instead.
-CUSTOMER_SOURCE_DISPLAY_LABELS = {'Sela': '自动开发'}
+# A stale 'Sela' value (old client, old row) is shown as the real channel.
+CUSTOMER_SOURCE_DISPLAY_LABELS = {
+    'Sela': CUSTOMER_SOURCE_UNKNOWN_CHANNEL, 'sela': CUSTOMER_SOURCE_UNKNOWN_CHANNEL,
+    '自动开发': CUSTOMER_SOURCE_UNKNOWN_CHANNEL,
+}
 
 
 def customer_source_display(value):
@@ -5737,7 +5742,7 @@ def _sela_upsert_prospect(conn, prospect):
                 'import_source': _SELA_PROSPECT_INTEGRATION,
                 'external_source': _SELA_PROSPECT_SOURCE,
                 'external_id': source_id,
-                'source': sela_source or 'Sela',
+                'source': sela_source or CUSTOMER_SOURCE_UNKNOWN_CHANNEL,
                 'source_detail': _normalize_customer_source_detail(
                     prospect.get('campaign') or prospect.get('source_run')
                 ),
@@ -15455,7 +15460,7 @@ def _sela_create_review_prospect_customer(conn, review, now):
             'name': company, 'company': company, 'website': website, 'level': 'C',
             'field': 'PMMA / Acrylic', 'import_source': _SELA_PROSPECT_INTEGRATION,
             'external_source': _SELA_PROSPECT_SOURCE, 'external_id': source_id,
-            'source': 'Sela', 'notes': notes,
+            'source': CUSTOMER_SOURCE_UNKNOWN_CHANNEL, 'notes': notes,
         }))
     else:
         # SQLite keeps its local aggregate adapter; mirror the prospect creation
@@ -15467,7 +15472,7 @@ def _sela_create_review_prospect_customer(conn, review, now):
                 external_id, source, source_detail, created_at, updated_at)
                VALUES (?, ?, ?, 'C', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (company, company, '', website, '', 'PMMA / Acrylic', notes, '',
-             _SELA_PROSPECT_INTEGRATION, _SELA_PROSPECT_SOURCE, source_id, 'Sela', '', now, now),
+             _SELA_PROSPECT_INTEGRATION, _SELA_PROSPECT_SOURCE, source_id, CUSTOMER_SOURCE_UNKNOWN_CHANNEL, '', now, now),
         )
         customer_id = int(cursor.lastrowid)
     email = _canonical_email(review.get('email'))
