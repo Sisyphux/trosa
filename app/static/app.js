@@ -14006,6 +14006,7 @@ async function loadWeeklyMember(uid, loadToken) {
     writeWeeklyLocalCache(uid, ws, data);
     OV._weeklyMembers[uid] = data;
     renderWeeklyMember(uid, data, null);
+    loadRemainingWeeklyMembers(uid, loadToken);
   } catch (e) {
     if (loadToken !== OV._weeklyLoadToken) return;
     if (cached) renderWeeklyMember(uid, cached, e, { staleData: true });
@@ -14013,21 +14014,34 @@ async function loadWeeklyMember(uid, loadToken) {
   }
 }
 
-async function loadMoreWeeklyMembers(uid) {
+async function loadRemainingWeeklyMembers(uid, loadToken) {
+  // 周报应完整显示：首屏渲染后自动接着取完剩余客户；失败时保留“显示更多客户”按钮兜底。
+  for (var i = 0; i < 50; i++) {
+    var cur = OV._weeklyMembers[uid];
+    if (loadToken !== OV._weeklyLoadToken || !cur || !cur.reported_customer_pagination || !cur.reported_customer_pagination.has_next) return;
+    var before = (cur.reported_customers || []).length;
+    if (!(await loadMoreWeeklyMembers(uid, true))) return;
+    var after = OV._weeklyMembers[uid];
+    if (!after || (after.reported_customers || []).length <= before) return;
+  }
+}
+
+async function loadMoreWeeklyMembers(uid, silent) {
   var current = OV._weeklyMembers[uid];
-  if (!current || !current.reported_customer_pagination || !current.reported_customer_pagination.has_next) return;
+  if (!current || !current.reported_customer_pagination || !current.reported_customer_pagination.has_next) return false;
   var ws = getWeekStart(overviewWeekOffset);
   var offset = (current.reported_customers || []).length;
   try {
     var next = await api('/api/weekly-summary/' + encodeURIComponent(uid) + '?week_start=' + encodeURIComponent(ws) + '&limit=10&offset=' + offset);
-    if (ws !== getWeekStart(overviewWeekOffset) || !next) return;
+    if (ws !== getWeekStart(overviewWeekOffset) || !next || OV._weeklyMembers[uid] !== current) return false;
     current.reported_customers = (current.reported_customers || []).concat(next.reported_customers || []);
     current.reported_customer_count = next.reported_customer_count;
     current.reported_customer_pagination = next.reported_customer_pagination || {};
     current.cache_status = next.cache_status || current.cache_status;
     OV._weeklyMembers[uid] = current;
     renderWeeklyMember(uid, current, null);
-  } catch (e) { showToast('更多周报客户暂时无法加载', 'error'); }
+    return true;
+  } catch (e) { if (!silent) showToast('更多周报客户暂时无法加载', 'error'); return false; }
 }
 
 async function loadOverview() {
