@@ -10364,7 +10364,7 @@ function renderFollowTimeline(followLogs, outreachEmails, changedKeys) {
   (outreachEmails || []).forEach(function(o) {
     items.push({
       motionKey: 'outreach-' + o.id,
-      type: 'email', id: o.id, date: o.sent_date || '', title: o.subject || '开发信',
+      type: 'email', id: o.id, date: o.sent_date || '', title: (!o.subject || /^历史\s*sela\s*外联$/i.test(String(o.subject).trim())) ? '发送开发信' : o.subject,
       content: o.content || '', reply_status: o.reply_status || 'pending', is_reported: o.is_reported || false,
       meta_text: o.content ? o.content.substring(0, 100) + (o.content.length > 100 ? '...' : '') : ''
     });

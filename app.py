@@ -67,7 +67,7 @@ from app.engine import (
 from config import EMAIL_VERIFICATION_CONFIG
 from communication_text import (
     fallback_message_fact, looks_like_quoted_email, looks_like_raw_message,
-    message_body_for_summary, strip_quoted_email_text, strip_system_notes,
+    message_body_for_summary, plain_outreach_subject, plain_reply_result, strip_quoted_email_text, strip_system_notes,
 )
 from gmail_sync import (
     GmailConfigurationError,
@@ -21814,8 +21814,11 @@ def _build_weekly_summary(user, week_start, week_end):
             if event_key in group['_seen_events']:
                 continue
             group['_seen_events'].add(event_key)
-            group['_actual_work'].append(item.get('content', ''))
-            group['_result'].append(item.get('result', ''))
+            work_text = item.get('content', '')
+            if item.get('kind') == 'email':
+                work_text = plain_outreach_subject(work_text)
+            group['_actual_work'].append(work_text)
+            group['_result'].append(plain_reply_result(item.get('result', '')))
             group['_next_steps'].append(item.get('next_plan', ''))
 
         reported_customers = []

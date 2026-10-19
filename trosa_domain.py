@@ -21,7 +21,7 @@ import re
 import uuid
 from typing import Any, Iterable
 
-from communication_text import clean_legacy_sela_content, looks_like_legacy_sela_content
+from communication_text import clean_legacy_sela_content, looks_like_legacy_sela_content, plain_outreach_subject, plain_reply_result
 from db import postgres_mode
 
 
@@ -1836,13 +1836,15 @@ def _add_compatibility_aliases(items: list[dict]) -> None:
             value = item.get(field)
             if isinstance(value, str) and value and looks_like_legacy_sela_content(value):
                 item[field] = clean_legacy_sela_content(value)
+        if isinstance(item.get('result'), str):
+            item['result'] = plain_reply_result(item['result'])
         item['type'] = 'follow' if item['kind'] == 'communication' else 'outreach'
         item['date'] = item['occurred_on']
         if item['kind'] == 'communication':
             item['follow_date'] = item['occurred_on']
         else:
             item['sent_date'] = item['occurred_on']
-            item['subject'] = item.get('content') or ''
+            item['subject'] = plain_outreach_subject(item.get('content'))
             item['reply_status'] = item.get('delivery_status') or ''
 
 

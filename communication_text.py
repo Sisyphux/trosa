@@ -395,3 +395,31 @@ _SYSTEM_NOTE_SENTENCE = re.compile(r'[^。；;\n]*(?:CRM|crm)[^。；;\n]*(?:未
 def strip_system_notes(value):
     """Drop machine commentary a summary model sometimes appends ("CRM 中未找到…")."""
     return _SYSTEM_NOTE_SENTENCE.sub('', str(value or '')).strip()
+
+
+_PLACEHOLDER_OUTREACH_SUBJECTS = {'历史 sela 外联', '历史sela外联'}
+
+
+def plain_outreach_subject(value):
+    """Plain wording for an outreach row whose stored subject is an import placeholder.
+
+    Early outreach was imported without a subject and tagged "历史 sela 外联";
+    people only need to know a development email was sent.
+    """
+    text = str(value or '').strip()
+    if not text or text.lower() in {item.lower() for item in _PLACEHOLDER_OUTREACH_SUBJECTS}:
+        return '发送开发信'
+    return text
+
+
+_PLAIN_REPLY_RESULTS = {
+    'REPLIED': '已收到客户回复，待人工跟进', 'REPLY': '已收到客户回复，待人工跟进',
+    'INTERESTED': '客户有意向，待人工跟进', 'NOT_INTERESTED': '客户暂无意向',
+    'BOUNCED': '邮箱无效，待换邮箱',
+}
+
+
+def plain_reply_result(value):
+    """A bare integration code in a result column, said the way a person would note it."""
+    text = str(value or '').strip()
+    return _PLAIN_REPLY_RESULTS.get(text, value) if text.isupper() else value

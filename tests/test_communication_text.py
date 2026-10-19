@@ -219,7 +219,8 @@ class CompatibilityAliasesTest(unittest.TestCase):
         self.assertNotIn('Sela Feedback ID', items[0]['content'])
         self.assertNotIn('Gmail 同步', items[0]['content'])
         self.assertNotIn('Sela Feedback ID', items[1]['result'])
-        self.assertEqual(items[1]['subject'], '历史 sela 外联')
+        self.assertEqual(items[1]['subject'], '发送开发信')
+        self.assertEqual(items[0]['result'], '客户有意向，待人工跟进')
         self.assertEqual(items[1]['reply_status'], 'replied')
 
 
