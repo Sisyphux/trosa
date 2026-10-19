@@ -1,0 +1,38 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18190",
+  "generatedAt": "2026-10-19T05:29:46.148Z",
+  "checks": [
+    {
+      "id": "chromium:menu-appears",
+      "title": "选中文字后出现标色菜单",
+      "pass": true,
+      "detail": "菜单可见：true"
+    },
+    {
+      "id": "chromium:text-gets-marked",
+      "title": "点黄色后选中文字被标色",
+      "pass": false,
+      "detail": "mark.hl-yellow 数量：0"
+    },
+    {
+      "id": "webkit:menu-appears",
+      "title": "选中文字后出现标色菜单",
+      "pass": true,
+      "detail": "菜单可见：true"
+    },
+    {
+      "id": "webkit:text-gets-marked",
+      "title": "点黄色后选中文字被标色",
+      "pass": false,
+      "detail": "mark.hl-yellow 数量：0"
+    }
+  ],
+  "screenshots": [
+    "chromium-01-selected.png",
+    "chromium-02-after-click.png",
+    "webkit-01-selected.png",
+    "webkit-02-after-click.png"
+  ],
+  "pageErrors": []
+}

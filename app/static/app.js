@@ -12557,6 +12557,8 @@ function syncModalInert() {
   Array.prototype.forEach.call(document.body.children, function(child) {
     if (child === top) return;
     if (_modalInertSkipTags[child.tagName]) return;
+    // 标色菜单为弹窗里的选区服务，不属于“背后的页面”。
+    if (child.hasAttribute('data-modal-exempt')) return;
     child.setAttribute('inert', '');
     _modalInerted.push(child);
   });
