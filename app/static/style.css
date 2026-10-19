@@ -855,6 +855,10 @@ select.form-control {
 .quick-reply-analysis > p { margin: 7px 0; color: var(--text-600); font-size: .79rem; line-height: 1.55; }
 .quick-analysis-facts { display: flex; flex-wrap: wrap; gap: 5px; }
 .quick-analysis-facts span { padding: 3px 7px; border-radius: 7px; background: #fff; color: var(--text-500); font-size: .67rem; }
+.quick-analysis-next { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-100); }
+.quick-analysis-next small { color: var(--text-400); font-size: .67rem; }
+.quick-analysis-next p { margin: 3px 0 0; color: var(--text-600); font-size: .79rem; line-height: 1.5; }
+.quick-analysis-next .text-action { margin-top: 6px; }
 .quick-analysis-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
 
 

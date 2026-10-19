@@ -3668,23 +3668,32 @@ function renderInboxReplyAnalysis(result) {
   var analysis = result.analysis || {};
   var facts = (analysis.key_facts || []).concat(analysis.needs || []).slice(0, 6);
   var candidates = (_communicationConfirmContext && _communicationConfirmContext.customerId) ? [] : (result.candidates || []);
-  var directionLabel = ['outbound', 'inbound', 'two_way'].indexOf(analysis.direction) >= 0 ? ' · ' + communicationDirectionLabel(analysis.direction) : '';
-  var html = '<div class="quick-analysis-head"><strong>AI 整理' + escapeHtml(directionLabel) + '</strong><span>' + escapeHtml(analysis.intent || '未知') + '</span></div>';
+  var hasKnownCustomer = !!((_communicationConfirmContext && _communicationConfirmContext.customerId) ||
+    (document.getElementById('inboxReplyCustomer') || {}).value);
+  var html = '<div class="quick-analysis-head"><strong>AI 整理</strong>' + communicationIntentBadgeHtml(analysis.intent) + '</div>';
   html += '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>';
   if (facts.length) html += '<div class="quick-analysis-facts">' + facts.map(function(f) { return '<span>' + escapeHtml(f) + '</span>'; }).join('') + '</div>';
   var nextSection = document.getElementById('communicationConfirmNext');
   if (analysis.suggested_next_action && nextSection && !nextSection.hidden) {
-    html += '<div class="quick-analysis-actions"><button type="button" class="text-action" onclick="applyInboxReplyNextSuggestion()">采用下一步建议</button></div>';
+    html += '<div class="quick-analysis-next"><small>建议下一步</small><p>' + escapeHtml(analysis.suggested_next_action) + '</p>' +
+      '<button type="button" class="text-action" onclick="applyInboxReplyNextSuggestion()">填入下一步</button></div>';
   }
   if (candidates.length) {
     html += '<div class="quick-analysis-matches"><small>可能对应</small>' + candidates.map(function(c) {
       return '<button type="button" onclick="chooseInboxReplyCandidate(' + c.id + ')"><strong>' + escapeHtml(c.company || c.name) + '</strong><span>' + escapeHtml([c.contact_name, c.country, c.reason].filter(Boolean).join(' · ')) + '</span><em>' + c.score + '%</em></button>';
     }).join('') + '</div>';
-  } else html += '<div class="quick-analysis-no-match">未从原文找到明确客户，请手动搜索确认。</div>';
+  } else if (!hasKnownCustomer) html += '<div class="quick-analysis-no-match">未从原文找到明确客户，请手动搜索确认。</div>';
   panel.innerHTML = html;
 }
 
 var _communicationAnalyses = {};
+
+// 只有 AI 真的看出客户倾向时才露出标签；“未知/中性”对业务员没有信息量。
+function communicationIntentBadgeHtml(intent) {
+  var value = String(intent || '').trim();
+  if (value !== '积极' && value !== '消极') return '';
+  return '<span title="AI 根据客户是否明确表示要买或拒绝判断">客户倾向：' + escapeHtml(value) + '</span>';
+}
 
 function selectedCommunicationDirection(context) {
   var select = document.getElementById(context === 'complete' ? 'completeDirectionOverride' : 'followHistoryDirectionOverride');
@@ -3873,11 +3882,12 @@ async function analyzeCommunication(context) {
     var resolvedDirection = analysis.direction || resolvedCommunicationDirection(context);
     updateAutoDirectionPreview(context);
     var facts = (analysis.key_facts || []).concat(analysis.needs || []).filter(Boolean);
-    panel.innerHTML = '<div class="quick-analysis-head"><strong>AI 整理草稿 · ' + escapeHtml(communicationDirectionLabel(resolvedDirection)) + '</strong><span>' + escapeHtml(analysis.intent || '未知') + '</span></div>' +
+    panel.innerHTML = '<div class="quick-analysis-head"><strong>AI 整理草稿 · ' + escapeHtml(communicationDirectionLabel(resolvedDirection)) + '</strong>' + communicationIntentBadgeHtml(analysis.intent) + '</div>' +
       '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>' +
       (facts.length ? '<div class="quick-analysis-facts">' + facts.map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('') + '</div>' : '') +
+      (analysis.suggested_next_action ? '<div class="quick-analysis-next"><small>建议下一步</small><p>' + escapeHtml(analysis.suggested_next_action) + '</p></div>' : '') +
       '<div class="quick-analysis-actions"><button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'summary\')">采用摘要</button>' +
-      (analysis.suggested_next_action ? '<button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'next\')">采用下一步建议</button>' : '') + '</div>' +
+      (analysis.suggested_next_action ? '<button type="button" class="text-action" onclick="applyCommunicationAnalysis(\'' + context + '\',\'next\')">填入下一步</button>' : '') + '</div>' +
       (isComplete ? completeDirectionRowHtml() : '');
     if (isComplete) updateAutoDirectionPreview(context);
   } catch (e) {
