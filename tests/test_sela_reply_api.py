@@ -192,7 +192,7 @@ class SelaReplyApiTest(unittest.TestCase):
             self.assertNotIn('Please contact me next month.', activity['content'])
             self.assertNotIn('正文', activity['content'])
             self.assertEqual(activity['content'], '客户回复了邮件：Acrylic sheet supply')
-            self.assertEqual(activity['result'], '客户有意向，待人工跟进')
+            self.assertEqual(activity['result'], '客户有意向')
             self.assertEqual(self.module._sela_reply_event_from_rows([activity]), 'INTERESTED')
             self.assertEqual(activity['follow_date'], '2026-08-17')
             self.assertEqual(activity['direction'], 'inbound')
@@ -534,7 +534,7 @@ class SelaReplyApiTest(unittest.TestCase):
         finally:
             conn.close()
         self.assertEqual(log['content'], '客户回复了邮件：客户询问规格。')
-        self.assertEqual(log['result'], '已收到客户回复，待人工跟进')
+        self.assertEqual(log['result'], '已收到客户回复')
         for code in ('REPLY', 'REPLIED', 'UNKNOWN', '自动处理'):
             self.assertNotIn(code, log['result'])
 

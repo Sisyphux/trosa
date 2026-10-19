@@ -220,7 +220,7 @@ class CompatibilityAliasesTest(unittest.TestCase):
         self.assertNotIn('Gmail 同步', items[0]['content'])
         self.assertNotIn('Sela Feedback ID', items[1]['result'])
         self.assertEqual(items[1]['subject'], '发送开发信')
-        self.assertEqual(items[0]['result'], '客户有意向，待人工跟进')
+        self.assertEqual(items[0]['result'], '客户有意向')
         self.assertEqual(items[1]['reply_status'], 'replied')
 
 
@@ -239,3 +239,13 @@ class RawMessageGateTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FillerReplyResultTest(unittest.TestCase):
+    def test_wait_for_human_filler_is_not_shown(self):
+        from communication_text import plain_reply_result
+        for stored in ('REPLIED', 'REPLY', '已收到客户回复', '已收到客户回复，待人工跟进'):
+            self.assertEqual(plain_reply_result(stored), '')
+        self.assertEqual(plain_reply_result('客户有意向，待人工跟进'), '客户有意向')
+        self.assertEqual(plain_reply_result('INTERESTED'), '客户有意向')
+        self.assertEqual(plain_reply_result('已收到客户回复，并已回复发送资料'), '已收到客户回复，并已回复发送资料')

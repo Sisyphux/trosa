@@ -9318,9 +9318,9 @@ def sela_integration_reply():
     # The result column is read by people (weekly report, timeline): write it
     # the way a person would note it, never the integration's internal codes.
     activity_result = {
-        'INTERESTED': '客户有意向，待人工跟进',
+        'INTERESTED': '客户有意向',
         'NOT_INTERESTED': '客户暂无意向',
-    }.get(reply_event, '已收到客户回复，待人工跟进')
+    }.get(reply_event, '已收到客户回复')
     outbound = action.get('outbound') if isinstance(action.get('outbound'), dict) else {}
     if outbound.get('message_id'):
         activity_result = '已收到客户回复，并已回复发送资料'

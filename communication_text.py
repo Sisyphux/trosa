@@ -412,14 +412,23 @@ def plain_outreach_subject(value):
     return text
 
 
+# "Replied, a person should follow up" restates what the work line already
+# says and what every reply implies, so it is shown as no result at all.
 _PLAIN_REPLY_RESULTS = {
-    'REPLIED': '已收到客户回复，待人工跟进', 'REPLY': '已收到客户回复，待人工跟进',
-    'INTERESTED': '客户有意向，待人工跟进', 'NOT_INTERESTED': '客户暂无意向',
+    'REPLIED': '', 'REPLY': '',
+    'INTERESTED': '客户有意向', 'NOT_INTERESTED': '客户暂无意向',
     'BOUNCED': '邮箱无效，待换邮箱',
 }
+_FILLER_REPLY_RESULTS = {'已收到客户回复', '已收到客户回复，待人工跟进', '已收到客户回复,待人工跟进'}
 
 
 def plain_reply_result(value):
     """A bare integration code in a result column, said the way a person would note it."""
     text = str(value or '').strip()
-    return _PLAIN_REPLY_RESULTS.get(text, value) if text.isupper() else value
+    if text.isupper():
+        return _PLAIN_REPLY_RESULTS.get(text, value)
+    if text in _FILLER_REPLY_RESULTS:
+        return ''
+    if text.endswith('，待人工跟进'):
+        return text[:-len('，待人工跟进')]
+    return value
