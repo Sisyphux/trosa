@@ -451,6 +451,65 @@ class SelaReplyApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _post_bounce_for(self, candidate_id, message_id, email='ana@acrilicos.com'):
+        payload = {
+            'candidate_id': candidate_id,
+            'reply': {'from': '', 'subject': '外联邮件退信',
+                      'body': f'外联邮件退信：{email}，原因：暂时无法投递（4.4.4）',
+                      'received_at': '2026-09-10T09:00:00+08:00', 'message_id': message_id},
+            'action': {'event': 'BOUNCED', 'bounced_email': email, 'bounce_reason': '暂时无法投递',
+                       'smtp_status': '4.4.4', 'weekly_work': False},
+            'idempotency_key': f'sela:gmail-bounce:{message_id}',
+        }
+        response = self.client.post('/api/integrations/sela/reply', json=payload,
+                                    headers=self.headers(payload['idempotency_key']))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'SYNCED')
+        return response
+
+    def test_bounce_is_not_weekly_work_and_has_plain_result(self):
+        outbound = outbound_payload('candidate-bounce-weekly')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-w1')
+        conn = self.hamid_db()
+        try:
+            log = conn.execute(
+                "SELECT content, result, is_reported FROM follow_up_logs "
+                "WHERE customer_id=? AND activity_type='outreach_bounced'", (trosa_id,)).fetchone()
+            self.assertEqual(log['is_reported'], 0)
+            self.assertEqual(log['result'], '邮箱无效，待换邮箱')
+            self.assertIn('ana@acrilicos.com', log['content'])
+            self.assertNotIn('BOUNCED', log['result'])
+            # Even when a bounce is flagged as reported, the weekly view drops it.
+            conn.execute("UPDATE follow_up_logs SET is_reported=1 WHERE customer_id=?", (trosa_id,))
+            conn.commit()
+            rows = self.module._weekly_interactions(conn, from_date='2026-01-01', to_date='2026-12-31')
+            self.assertFalse([r for r in rows if r['customer_id'] == trosa_id
+                              and r['activity_type'] == 'outreach_bounced'])
+        finally:
+            conn.close()
+
+    def test_second_bounce_of_same_mailbox_on_same_day_is_not_recorded_again(self):
+        outbound = outbound_payload('candidate-bounce-dup')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        first = self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-d1').get_json()
+        second = self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-d2').get_json()
+        self.assertTrue(second.get('duplicate_bounce'))
+        self.assertEqual(second['activity_id'], first['activity_id'])
+        # A different mailbox is a separate fact.
+        self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-d3', email='info@acrilicos.com')
+        conn = self.hamid_db()
+        try:
+            count = conn.execute(
+                "SELECT count(*) FROM follow_up_logs WHERE customer_id=? AND activity_type='outreach_bounced'",
+                (trosa_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 2)
+        # Replaying the duplicate's idempotency key stays a no-op.
+        again = self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-d2').get_json()
+        self.assertEqual(again['activity_id'], first['activity_id'])
+
     def test_bounce_does_not_engage_the_prospect(self):
         # Regression (E1): a bounce's timestamp/body must not feed the inbound
         # lifecycle signals, so the prospect stays a cold prospect.

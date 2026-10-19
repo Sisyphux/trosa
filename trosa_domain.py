@@ -464,7 +464,10 @@ def active_customers(conn: Any, *, include_deleted: bool = False) -> list[dict]:
 
 
 def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict]:
-    """Return reportable Interaction facts; weekly is a view, never its own history."""
+    """Return reportable Interaction facts; weekly is a view, never its own history.
+
+    A bounce is a delivery fact, never weekly work, whatever its flag says.
+    """
     if postgres_mode():
         rows = conn.execute(
             '''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country AS customer_country,
@@ -472,6 +475,7 @@ def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict
                  FROM trosa.customer_interactions i
                  JOIN trosa.customer_records c ON c.id=i.customer_id
                 WHERE i.occurred_on>=? AND i.occurred_on<=? AND i.is_reported=true
+                  AND coalesce(i.activity_type,'')<>'outreach_bounced'
                   AND c.deleted_at IS NULL
                 ORDER BY i.occurred_on DESC, i.created_at DESC, i.id DESC''',
             (from_date, to_date),
@@ -485,6 +489,7 @@ def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict
                     f.direction, f.source, f.is_reported
                FROM follow_up_logs f WHERE f.follow_date>=? AND f.follow_date<=?
                     AND f.is_reported=1 AND (f.is_deleted=0 OR f.is_deleted IS NULL)
+                    AND COALESCE(f.activity_type,'')<>'outreach_bounced'
              UNION ALL
              SELECT 'email', o.id, o.customer_id, o.sent_date, o.created_at, o.content,
                     o.reply_content, '', 'outreach_email', 'outbound', 'gmail_delivery', o.is_reported

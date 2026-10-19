@@ -9162,6 +9162,20 @@ def _sela_record_outbound_reply(cursor, customer_id, outbound, action_name, now)
     return int(cursor.lastrowid)
 
 
+def _sela_duplicate_bounce(customer_id, bounced_email, follow_date):
+    """Id of an existing bounce timeline entry for the same mailbox on the same day."""
+    conn = get_db()
+    try:
+        for item in _customer_interactions(conn, customer_id, limit=200):
+            if (str(item.get('activity_type') or '') == 'outreach_bounced'
+                    and str(item.get('occurred_on') or '')[:10] == follow_date
+                    and bounced_email in str(item.get('content') or '').lower()):
+                return item.get('id')
+    finally:
+        conn.close()
+    return None
+
+
 @app.route('/api/integrations/sela/reply', methods=['POST'])
 @login_required
 def sela_integration_reply():
@@ -9370,21 +9384,55 @@ def sela_integration_reply():
     # record it as an outbound delivery event so it is never mistaken for a
     # customer response (which would make the prospect look engaged).
     if reply_event == 'BOUNCED':
-        communication = {
-            'activity_content': (
+        bounced_email = str(action.get('bounced_email') or '').strip().lower()[:320]
+        bounce_reason = str(action.get('bounce_reason') or '').strip()[:200]
+        smtp_status = str(action.get('smtp_status') or '').strip()[:20]
+        # A bounce is a delivery fact (which mailbox is unusable and why), not
+        # weekly work: it stays on the timeline for the mailbox decision but
+        # never enters the weekly report, and carries no internal status codes.
+        bounce_fact = f'邮件被退信：{bounced_email or "未知邮箱"}'
+        if bounce_reason:
+            bounce_fact += f'，原因：{bounce_reason}'
+        if smtp_status:
+            bounce_fact += f'（{smtp_status}）'
+        if not bounced_email and not bounce_reason:
+            bounce_fact = (
                 '外联邮件退信\n'
                 f'主题：{subject}\n'
                 f'发件人：{str(reply.get("from") or "").strip()}\n'
                 f'消息 ID：{str(reply.get("message_id") or "").strip()}\n'
                 f'正文：\n{body}'
-            )[:30000],
-            'activity_result': activity_result,
+            )[:30000]
+        if bounced_email:
+            duplicate = _sela_duplicate_bounce(trosa_id, bounced_email, follow_date)
+            if duplicate:
+                conn = get_db()
+                try:
+                    response_body = {
+                        'success': True, 'status': 'SYNCED', 'schema_version': _SELA_SCHEMA_VERSION,
+                        'candidate_id': candidate_id, 'trosa_id': trosa_id,
+                        'activity_id': duplicate, 'task_id': None, 'route': route,
+                        'intent': intent, 'action': action_name,
+                        'idempotency_key': idempotency_key, 'duplicate_bounce': True,
+                    }
+                    _sela_receipt_write(
+                        conn, _SELA_INTEGRATION, idempotency_key, request_hash,
+                        candidate_id=candidate_id, customer_id=trosa_id,
+                        response=response_body, now=_sela_now(),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+                return jsonify(response_body)
+        communication = {
+            'activity_content': bounce_fact,
+            'activity_result': '邮箱无效，待换邮箱',
             'activity_type': 'outreach_bounced',
             'direction': 'outbound',
             'follow_date': follow_date,
             'source': 'sela_reply_engine',
             'source_reference': str(reply.get('message_id') or '').strip()[:1000],
-            'is_reported': True,
+            'is_reported': False,
         }
     else:
         communication = {

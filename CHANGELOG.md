@@ -12,6 +12,13 @@
 - 影响范围：`app.py`（`_sela_review_needs_human`）、`inbox_reconcile.py`。排除项待确认（`sela_exclusion_review`）与客户回复捕获不变。不改数据结构。
 - 验证：`tests/test_sela_prospect_api.py`、`tests/test_inbox_question_model.py`。
 
+## 2026-10-19 — 退信不再进入周报，同邮箱重复退信合并
+
+- 现象：周报「实际工作」里出现外联退信，「结果」显示“自动处理：REPLY；事件：BOUNCED；意图：UNKNOWN”；同一邮箱同一天退信两次出现两条。
+- 根因：sela 的退信同步带了 `weekly_work: false`，但 Trosa 从未读取，写入时固定 `is_reported=true`；退信正文以“外联邮件退信”开头被当作原始邮件重新摘要，结果字段直接是内部状态码。
+- 变更：退信写入 `is_reported=false`，内容为确定性的“邮件被退信：邮箱，原因（状态码）”，结果为“邮箱无效，待换邮箱”；`weekly_interactions` 无论标记如何都排除 `outreach_bounced`；同一客户同一邮箱同一天的重复退信只保留一条（仍写幂等回执）。
+- 存量：迁移 `0118` 把已有退信移出周报并改写结果，同客户同邮箱同日的重复退信软删除（可恢复），不物理删除。
+
 ## 2026-10-15 — 「一笔」图标优先第二版：状态符号、分区图标、悬停名称（五期）
 
 - 需求：文字再少一些，图标和动效更积极；但图标必须能读到名称。
