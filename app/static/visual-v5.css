@@ -3456,7 +3456,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 .wk-fact li { position: relative; padding-left: 14px; }
 .wk-fact li + li { margin-top: 6px; }
 .wk-fact li::before { content: ""; position: absolute; left: 0; top: .95em; width: 6px; height: 1px; background: var(--dl-hair-strong); }
-.wk-fact.is-result p, .wk-fact.is-result li { color: var(--dl-ink); }
 .wk-fact.is-next h4 { color: var(--dl-gold-ink); }
 .wk-fact.is-next p, .wk-fact.is-next li { color: var(--dl-ink); font-weight: 500; }
 

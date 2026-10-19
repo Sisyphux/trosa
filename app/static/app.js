@@ -13982,7 +13982,6 @@ function renderWeeklyMember(uid, data, error, options) {
     html += '<p class="wk-when"><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(formatChineseDate(r.date || '')) + '</time><span>本周 ' + count + ' 次活动</span></p></header>';
     html += '<div class="wk-facts">';
     html += weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), '', '实际工作');
-    html += weeklyFactBlock(weeklyCustomerText(r, 'result'), 'is-result', '结果');
     html += weeklyFactBlock(r.next_step || '', 'is-next', '下一步');
     if (canOpen) html += '<button type="button" class="wk-open" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">查看详情 ' + uiIcon('right') + '</button>';
     html += '</div></article>';
