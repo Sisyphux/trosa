@@ -9306,8 +9306,39 @@ def sela_integration_reply():
     received_at = str(reply.get('received_at') or '').strip()
     follow_date = _sela_reply_follow_date(received_at)
     reply_event = str(action.get('event') or '').strip().upper()
-    if reply_event not in {'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED'}:
+    if reply_event not in {'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'BOUNCE_CLEARED'}:
         reply_event = intent if intent in {'INTERESTED', 'NOT_INTERESTED'} else 'REPLIED'
+    if reply_event == 'BOUNCE_CLEARED':
+        # Undo a wrongly recorded bounce (e.g. a transient 4.x failure). Only
+        # the latest outreach record is touched, and only while it is bounced.
+        conn = get_db()
+        try:
+            if postgres_mode():
+                latest = next(iter(_modern_outreach_rows(
+                    conn, customer_id=trosa_id, source_id=candidate_id)), None)
+            else:
+                latest = conn.execute(
+                    '''SELECT id, reply_status FROM outreach_emails
+                       WHERE external_source=? AND external_id=? ORDER BY id DESC LIMIT 1''',
+                    (_SELA_PROSPECT_SOURCE, candidate_id),
+                ).fetchone()
+            if not latest or str(latest['reply_status'] or '').lower() != 'bounced':
+                response_body = {
+                    'success': True, 'status': 'SYNCED', 'schema_version': _SELA_SCHEMA_VERSION,
+                    'candidate_id': candidate_id, 'trosa_id': trosa_id, 'activity_id': None,
+                    'task_id': None, 'route': route, 'intent': intent, 'action': action_name,
+                    'idempotency_key': idempotency_key, 'bounce_cleared': False,
+                    'reason': 'NOT_BOUNCED',
+                }
+                _sela_receipt_write(
+                    conn, _SELA_INTEGRATION, idempotency_key, request_hash,
+                    candidate_id=candidate_id, customer_id=trosa_id,
+                    response=response_body, now=_sela_now(),
+                )
+                conn.commit()
+                return jsonify(response_body)
+        finally:
+            conn.close()
     activity_content = (
         '客户通过 Gmail 回复\n'
         f'主题：{subject}\n'
@@ -9346,7 +9377,27 @@ def sela_integration_reply():
         }
         now = _sela_now()
 
-        if postgres_mode():
+        if reply_event == 'BOUNCE_CLEARED':
+            response_body['bounce_cleared'] = True
+            if postgres_mode():
+                outreach_row = next(iter(_modern_outreach_rows(
+                    transaction, customer_id=trosa_id, source_id=candidate_id
+                )), None)
+                if outreach_row:
+                    _update_outreach_message(
+                        transaction, outreach_id=outreach_row['id'],
+                        reply_status='pending', reply_content='', reply_on='',
+                    )
+            else:
+                cursor.execute(
+                    '''UPDATE outreach_emails
+                       SET reply_status='pending', reply_content='', reply_date='', external_updated_at=?
+                       WHERE id=(SELECT id FROM outreach_emails
+                                  WHERE external_source=? AND external_id=?
+                                  ORDER BY id DESC LIMIT 1) AND reply_status='bounced' ''',
+                    (now, _SELA_PROSPECT_SOURCE, candidate_id),
+                )
+        elif postgres_mode():
             outreach_row = next(iter(_modern_outreach_rows(
                 transaction, customer_id=trosa_id, source_id=candidate_id
             )), None)
@@ -9397,7 +9448,20 @@ def sela_integration_reply():
     # A bounce is not an inbound customer reply. Keep the timeline entry, but
     # record it as an outbound delivery event so it is never mistaken for a
     # customer response (which would make the prospect look engaged).
-    if reply_event == 'BOUNCED':
+    if reply_event == 'BOUNCE_CLEARED':
+        clear_reason = reason or str(action.get('bounce_reason') or '').strip()[:200]
+        communication = {
+            'activity_content': '退信记录已撤销：此前的退信是暂时性投递故障，不是邮箱无效'
+                                + (f'（{clear_reason}）' if clear_reason else ''),
+            'activity_result': '邮箱可继续使用',
+            'activity_type': 'follow_up',
+            'direction': 'outbound',
+            'follow_date': datetime.now().date().isoformat(),
+            'source': 'sela_reply_engine',
+            'source_reference': str(reply.get('message_id') or idempotency_key).strip()[:1000],
+            'is_reported': False,
+        }
+    elif reply_event == 'BOUNCED':
         bounced_email = str(action.get('bounced_email') or '').strip().lower()[:320]
         bounce_reason = str(action.get('bounce_reason') or '').strip()[:200]
         smtp_status = str(action.get('smtp_status') or '').strip()[:20]
@@ -9473,7 +9537,7 @@ def sela_integration_reply():
         return jsonify({'success': False, 'error': '回复时间线事务失败，请稍后重试'}), 500
 
     schedule_safety_backup('sela_integration_reply')
-    return jsonify({
+    final_body = {
         'success': True,
         'status': 'SYNCED',
         'schema_version': _SELA_SCHEMA_VERSION,
@@ -9485,7 +9549,10 @@ def sela_integration_reply():
         'intent': intent,
         'action': action_name,
         'idempotency_key': idempotency_key,
-    })
+    }
+    if reply_event == 'BOUNCE_CLEARED':
+        final_body['bounce_cleared'] = True
+    return jsonify(final_body)
 
 
 

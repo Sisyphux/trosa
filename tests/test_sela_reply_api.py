@@ -537,6 +537,74 @@ class SelaReplyApiTest(unittest.TestCase):
         self.assertEqual(log['result'], '已收到客户回复')
         for code in ('REPLY', 'REPLIED', 'UNKNOWN', '自动处理'):
             self.assertNotIn(code, log['result'])
+    def _post_bounce_cleared(self, candidate_id, key, reason='4.x 暂时性故障'):
+        payload = {
+            'candidate_id': candidate_id,
+            'reply': {'from': '', 'subject': '退信撤销', 'body': '暂时性故障，邮箱可继续使用',
+                      'received_at': '2026-10-19T10:00:00+08:00', 'message_id': key},
+            'action': {'event': 'BOUNCE_CLEARED', 'reason': reason},
+            'idempotency_key': key,
+        }
+        response = self.client.post('/api/integrations/sela/reply', json=payload,
+                                    headers=self.headers(key))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return response
+
+    def _outreach_status(self, candidate_id):
+        listed = self.client.get('/api/integrations/sela/prospects?limit=100', headers=self.headers())
+        rows = {row['id']: row for row in listed.get_json()['prospects']}
+        return rows[candidate_id]['outreach_status']
+
+    def test_bounce_cleared_restores_a_wrongly_bounced_prospect_idempotently(self):
+        outbound = outbound_payload('candidate-bounce-cleared')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-c1')
+        self.assertEqual(self._outreach_status(outbound['candidate_id']), 'BOUNCED')
+
+        first = self._post_bounce_cleared(outbound['candidate_id'], 'sela:bounce-cleared:1').get_json()
+        self.assertEqual(first['status'], 'SYNCED')
+        self.assertTrue(first['bounce_cleared'])
+        self.assertEqual(self._outreach_status(outbound['candidate_id']), 'SENT')
+        conn = self.hamid_db()
+        try:
+            row = conn.execute('SELECT reply_status, reply_content FROM outreach_emails').fetchone()
+            self.assertEqual(row['reply_status'], 'pending')
+            self.assertEqual(row['reply_content'], '')
+            logs = conn.execute(
+                "SELECT direction, activity_type, content, is_reported FROM follow_up_logs "
+                "WHERE customer_id=? AND content LIKE '退信记录已撤销%'", (trosa_id,)).fetchall()
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]['direction'], 'outbound')
+            self.assertEqual(logs[0]['is_reported'], 0)
+            self.assertIn('暂时性', logs[0]['content'])
+        finally:
+            conn.close()
+
+        replay = self._post_bounce_cleared(outbound['candidate_id'], 'sela:bounce-cleared:1').get_json()
+        self.assertEqual(replay['activity_id'], first['activity_id'])
+        conn = self.hamid_db()
+        try:
+            count = conn.execute(
+                "SELECT count(*) FROM follow_up_logs WHERE content LIKE '退信记录已撤销%'").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 1)
+
+    def test_bounce_cleared_does_nothing_when_not_bounced_and_is_never_a_reply(self):
+        outbound = outbound_payload('candidate-bounce-cleared-noop')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        result = self._post_bounce_cleared(outbound['candidate_id'], 'sela:bounce-cleared:noop').get_json()
+        self.assertFalse(result['bounce_cleared'])
+        self.assertEqual(result['reason'], 'NOT_BOUNCED')
+        self.assertEqual(self._outreach_status(outbound['candidate_id']), 'SENT')
+        conn = self.hamid_db()
+        try:
+            count = conn.execute(
+                "SELECT count(*) FROM follow_up_logs WHERE customer_id=? AND direction='inbound'",
+                (trosa_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 0)
 
     def test_bounce_does_not_engage_the_prospect(self):
         # Regression (E1): a bounce's timestamp/body must not feed the inbound
