@@ -192,7 +192,8 @@ class SelaReplyApiTest(unittest.TestCase):
             self.assertNotIn('Please contact me next month.', activity['content'])
             self.assertNotIn('正文', activity['content'])
             self.assertEqual(activity['content'], '客户回复了邮件：Acrylic sheet supply')
-            self.assertIn('事件：INTERESTED', activity['result'])
+            self.assertEqual(activity['result'], '客户有意向，待人工跟进')
+            self.assertEqual(self.module._sela_reply_event_from_rows([activity]), 'INTERESTED')
             self.assertEqual(activity['follow_date'], '2026-08-17')
             self.assertEqual(activity['direction'], 'inbound')
             self.assertEqual(activity['activity_type'], 'customer_reply')
@@ -509,6 +510,33 @@ class SelaReplyApiTest(unittest.TestCase):
         # Replaying the duplicate's idempotency key stays a no-op.
         again = self._post_bounce_for(outbound['candidate_id'], 'gmail-bounce-d2').get_json()
         self.assertEqual(again['activity_id'], first['activity_id'])
+
+    def test_reply_result_and_content_are_plain_words(self):
+        outbound = outbound_payload('candidate-plain')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        self.module.quick_chat = lambda prompt, *a, **k: '客户询问规格。CRM 中未找到该邮件涉及的产品、价格或交期信息。'
+        reply = {
+            'candidate_id': outbound['candidate_id'], 'trosa_id': trosa_id,
+            'reply': {'message_id': 'gmail-plain-1', 'from': 'info@acme.com', 'subject': 'Re: Quote',
+                      'received_at': '2026-09-10T09:00:00+08:00',
+                      'body': 'Tue, 25 Aug 2026 09:11:31 -0400 · info@acme.com Please send specs.'},
+            'action': {'name': 'REPLY', 'route': 'REVIEW', 'intent': 'UNKNOWN', 'event': 'REPLIED'},
+            'idempotency_key': 'sela-reply:plain-1',
+        }
+        response = self.client.post('/api/integrations/sela/reply', json=reply,
+                                    headers=self.headers(reply['idempotency_key']))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            log = conn.execute(
+                "SELECT content, result FROM follow_up_logs WHERE customer_id=? AND activity_type='customer_reply'",
+                (trosa_id,)).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(log['content'], '客户回复了邮件：客户询问规格。')
+        self.assertEqual(log['result'], '已收到客户回复，待人工跟进')
+        for code in ('REPLY', 'REPLIED', 'UNKNOWN', '自动处理'):
+            self.assertNotIn(code, log['result'])
 
     def test_bounce_does_not_engage_the_prospect(self):
         # Regression (E1): a bounce's timestamp/body must not feed the inbound

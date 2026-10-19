@@ -67,7 +67,7 @@ from app.engine import (
 from config import EMAIL_VERIFICATION_CONFIG
 from communication_text import (
     fallback_message_fact, looks_like_quoted_email, looks_like_raw_message,
-    message_body_for_summary, strip_quoted_email_text,
+    message_body_for_summary, strip_quoted_email_text, strip_system_notes,
 )
 from gmail_sync import (
     GmailConfigurationError,
@@ -5816,6 +5816,15 @@ _SELA_REPLY_EVENT_PATTERN = re.compile(
 )
 
 
+# The result column is written for people; the outcome marker is its plain wording.
+_SELA_PLAIN_REPLY_RESULTS = (
+    ('客户有意向', 'INTERESTED'),
+    ('客户暂无意向', 'NOT_INTERESTED'),
+    ('已收到客户回复', 'REPLIED'),
+    ('邮箱无效', 'BOUNCED'),
+)
+
+
 def _sela_reply_event_from_rows(rows):
     """Latest reply outcome marker in an already date-ordered interaction list."""
     for row in rows:
@@ -5826,6 +5835,10 @@ def _sela_reply_event_from_rows(rows):
             return match.group(1).upper()
         if result.upper() in {'NOT_INTERESTED', 'INTERESTED', 'REPLIED', 'BOUNCED'}:
             return result.upper()
+        # Plain-words results written by the reply handoff (see _SELA_PLAIN_REPLY_RESULTS).
+        for prefix, event in _SELA_PLAIN_REPLY_RESULTS:
+            if result.startswith(prefix):
+                return event
     return ''
 
 
@@ -9148,7 +9161,7 @@ def _sela_record_outbound_reply(cursor, customer_id, outbound, action_name, now)
             cursor.connection, customer_id=customer_id, content=sanitize_mark_html(content),
             occurred_on=_sela_reply_follow_date(sent_at), direction='outbound',
             source='sela_reply_engine', activity_type='email',
-            result=str(action_name or 'REPLY').strip()[:120], is_reported=True,
+            result='已回复客户', is_reported=True,
             source_reference=message_id,
         )
     cursor.execute(
@@ -9157,7 +9170,7 @@ def _sela_record_outbound_reply(cursor, customer_id, outbound, action_name, now)
             direction, source, is_reported, created_at)
            VALUES (?, ?, ?, ?, '', 'email', 'outbound', 'sela_reply_engine', 1, ?)''',
         (customer_id, sanitize_mark_html(content), _sela_reply_follow_date(sent_at),
-         str(action_name or 'REPLY').strip()[:120], now),
+         '已回复客户', now),
     )
     return int(cursor.lastrowid)
 
@@ -9301,15 +9314,15 @@ def sela_integration_reply():
         f'消息 ID：{str(reply.get("message_id") or "").strip()}\n'
         f'正文：\n{body}'
     )[:30000]
-    activity_result = (
-        f'自动处理：{action_name or route or "REPLY"}；'
-        f'事件：{reply_event}；意图：{intent or "UNKNOWN"}'
-    )
-    if reason:
-        activity_result += f'；{reason}'
+    # The result column is read by people (weekly report, timeline): write it
+    # the way a person would note it, never the integration's internal codes.
+    activity_result = {
+        'INTERESTED': '客户有意向，待人工跟进',
+        'NOT_INTERESTED': '客户暂无意向',
+    }.get(reply_event, '已收到客户回复，待人工跟进')
     outbound = action.get('outbound') if isinstance(action.get('outbound'), dict) else {}
     if outbound.get('message_id'):
-        activity_result += f'；已发送资料回复 Gmail message_id：{str(outbound.get("message_id"))[:200]}'
+        activity_result = '已收到客户回复，并已回复发送资料'
 
     def before_commit(transaction, cursor, result):
         existing = _sela_receipt_read(transaction, _SELA_INTEGRATION, idempotency_key)
@@ -18098,11 +18111,11 @@ def _summarize_raw_communication(content, direction='unknown', activity_type='')
     who = {'outbound': '我方发给客户', 'inbound': '客户发给我方'}.get(direction, '客户发给我方')
     prompt = ('请把下面这封邮件整理成 1-2 句中文事实摘要，只写发生了什么：对方回复、询问、确认或拒绝了什么，'
               '涉及的产品/规格/数量/价格/交期要写清。这封邮件是' + who + '的。不要抄原文、签名、保密声明或引用历史，'
-              '不得编造原文没有的信息，不要 Markdown，只输出摘要文字。\n原文：\n' + body)
+              '不得编造原文没有的信息；原文没提到的内容直接不写，不要写“未找到”“CRM 中没有”之类的说明；像业务员记录自己的工作那样平实表达；不要 Markdown，只输出摘要文字。\n原文：\n' + body)
     try:
         # This runs inside record-save requests too, so it shares the web budget.
         with outbound_budget(WEB_OUTBOUND_BUDGET_SECONDS):
-            raw = (quick_chat(prompt) or '').strip()
+            raw = strip_system_notes((quick_chat(prompt) or '').strip())
     except Exception:
         logger.exception('raw communication summary failed')
         return fallback

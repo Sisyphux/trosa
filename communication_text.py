@@ -387,3 +387,11 @@ def fallback_message_fact(value, direction='inbound', activity_type=''):
         label = '客户回复了邮件'
     subject = raw_message_subject(text)
     return label + ('：' + subject if subject else '')
+
+
+_SYSTEM_NOTE_SENTENCE = re.compile(r'[^。；;\n]*(?:CRM|crm)[^。；;\n]*(?:未找到|没有找到|未发现|无相关)[^。；;\n]*[。；;]?')
+
+
+def strip_system_notes(value):
+    """Drop machine commentary a summary model sometimes appends ("CRM 中未找到…")."""
+    return _SYSTEM_NOTE_SENTENCE.sub('', str(value or '')).strip()
