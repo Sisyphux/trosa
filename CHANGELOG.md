@@ -5,6 +5,12 @@
 - 影响范围：`app.py`（`_canonical_website_domains`、`_sela_other_member_contact_records`、`_sela_exclusion_snapshot_records`、`_sela_business_exclusion_view`）。不改表结构、不改 Sela 接口契约（新增记录沿用同一字段形状）。
 - 验证：`tests/test_sela_prospect_api.py` 新增 4 项（跨成员排除、不重复、多网址拆分、粘连域名还原）。
 
+## 2026-10-19 — 回信记录用人话：结果不再是内部状态码，摘要不含 CRM 说明语
+
+- 现象：周报/时间线里回信记录的「结果」是“自动处理：REPLY；事件：REPLIED；意图：UNKNOWN”，「实际工作」末尾带“CRM 中未找到该邮件涉及的产品…”。
+- 变更：回信结果改为人话（“已收到客户回复，待人工跟进”/“客户有意向，待人工跟进”/“客户暂无意向”/“已收到客户回复，并已回复发送资料”），自动回复记录结果为“已回复客户”；摘要提示词禁止“未找到/CRM 中没有”类说明并对输出做过滤；回信事件判断（`_sela_reply_event_from_rows`）同时认新的人话结果，旧状态码仍兼容。
+- 存量：迁移 `0119` 改写已有 sela 回信记录的结果与内容。
+
 ## 2026-10-15 — sela 的身份歧义不再进 Inbox「其他事项」（只回给 sela）
 
 - 现象：「其他事项」里出现 4 条「潜在客户身份待确认」（Adhue、Jigar Plast、VP Polyfab、Gavrieli），一直没人能答：匹配到的两条记录是同名的 sela 历史占位行与真实客户，人无法分辨，也没有要做的判断。

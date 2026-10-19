@@ -418,7 +418,7 @@ class SelaProspectApiTest(unittest.TestCase):
             activity = conn.execute(
                 'SELECT result FROM follow_up_logs WHERE customer_id=?', (created.get_json()['trosa_id'],)
             ).fetchone()
-            self.assertIn('事件：REPLIED', activity['result'])
+            self.assertEqual(activity['result'], '已收到客户回复，待人工跟进')
             profile = conn.execute(
                 'SELECT contact_permission, suppression_reason, research_json FROM agent_prospect_profiles'
             ).fetchone()
