@@ -3666,7 +3666,7 @@ async function analyzeInboxReply(force, options) {
 function renderInboxReplyAnalysis(result) {
   var panel = document.getElementById('inboxReplyAnalysis');
   var analysis = result.analysis || {};
-  var facts = (analysis.key_facts || []).concat(analysis.needs || []).slice(0, 6);
+  var facts = communicationAnalysisFacts(analysis).slice(0, 12);
   var candidates = (_communicationConfirmContext && _communicationConfirmContext.customerId) ? [] : (result.candidates || []);
   var hasKnownCustomer = !!((_communicationConfirmContext && _communicationConfirmContext.customerId) ||
     (document.getElementById('inboxReplyCustomer') || {}).value);
@@ -3688,11 +3688,20 @@ function renderInboxReplyAnalysis(result) {
 
 var _communicationAnalyses = {};
 
+// 面板标签：事实、客户顾虑、待答复问题合在一起显示，顾虑和问题带前缀好区分。
+function communicationAnalysisFacts(analysis) {
+  var tag = function(prefix) { return function(item) { return prefix + item; }; };
+  return (analysis.key_facts || [])
+    .concat((analysis.concerns || []).map(tag('顾虑：')))
+    .concat((analysis.needs || []).map(tag('待答复：')))
+    .filter(Boolean);
+}
+
 // 只有 AI 真的看出客户倾向时才露出标签；“未知/中性”对业务员没有信息量。
 function communicationIntentBadgeHtml(intent) {
   var value = String(intent || '').trim();
-  if (value !== '积极' && value !== '消极') return '';
-  return '<span title="AI 根据客户是否明确表示要买或拒绝判断">客户倾向：' + escapeHtml(value) + '</span>';
+  if (value !== '积极' && value !== '消极' && value !== '谨慎') return '';
+  return '<span title="AI 根据客户是否明确要买、有顾虑或拒绝判断">客户倾向：' + escapeHtml(value) + '</span>';
 }
 
 function selectedCommunicationDirection(context) {
@@ -3881,7 +3890,7 @@ async function analyzeCommunication(context) {
     _communicationAnalyses[context] = analysis;
     var resolvedDirection = analysis.direction || resolvedCommunicationDirection(context);
     updateAutoDirectionPreview(context);
-    var facts = (analysis.key_facts || []).concat(analysis.needs || []).filter(Boolean);
+    var facts = communicationAnalysisFacts(analysis);
     panel.innerHTML = '<div class="quick-analysis-head"><strong>AI 整理草稿 · ' + escapeHtml(communicationDirectionLabel(resolvedDirection)) + '</strong>' + communicationIntentBadgeHtml(analysis.intent) + '</div>' +
       '<p>' + escapeHtml(analysis.summary || '已读取原文') + '</p>' +
       (facts.length ? '<div class="quick-analysis-facts">' + facts.map(function(item) { return '<span>' + escapeHtml(item) + '</span>'; }).join('') + '</div>' : '') +

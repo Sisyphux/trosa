@@ -970,6 +970,11 @@ def ask_llm(prompt: str) -> str:
     )
 
 
+def ask_ai_text(prompt: str) -> str:
+    """直接把完整提示词交给模型。整理类任务自带规则，不套 quick_chat 的“只读问答”外壳。"""
+    return ask_llm(prompt)
+
+
 def quick_chat(question: str, customer_context: str = "") -> str:
     """Evidence-bound CRM question answering; never invent a sales strategy."""
     context_section = ""
