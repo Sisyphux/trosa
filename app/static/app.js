@@ -9491,7 +9491,7 @@ async function saveCustomer() {
 }
 
 async function deleteCustomer(id) {
-  if (!await showAppConfirm({ title: '归档客户', message: '将这个客户归档？之后仍可恢复。', submitLabel: '归档' })) return;
+  if (!await showAppConfirm({ title: '归档客户', message: '将这个客户归档？之后仍可恢复。', submitLabel: '归档' })) return false;
   // 确认之后立刻划掉这一行的公司名（账页里）；保存失败撤回。
   var archiveButton = document.querySelector('[data-ld-archive="' + id + '"]');
   var archiveRow = archiveButton && archiveButton.closest('.ld-ent');
@@ -9501,7 +9501,16 @@ async function deleteCustomer(id) {
     showToast('客户已归档', 'success');
     if (currentPage === 'customers') loadCustomers({ preservePosition: true });
     else loadDashboard();
-  } catch(e) { undoArchiveStrike(); }
+    return true;
+  } catch(e) { undoArchiveStrike(); return false; }
+}
+
+// 客户详情顶部的归档：同一个确认与可恢复流程，成功后回到列表。
+async function archiveCurrentCustomer() {
+  var field = document.getElementById('editCustomerId');
+  var id = field && field.value;
+  if (!id) return;
+  if (await deleteCustomer(id)) closeModal('customerEditModal', true);
 }
 
 // Contacts
