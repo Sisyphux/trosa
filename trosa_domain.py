@@ -1397,7 +1397,13 @@ def create_outreach_message(conn: Any, *, customer_id: int, subject: str, conten
                               AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id=?''', (customer_id,)).fetchone()
     if not account: raise ValueError('customer is not visible to the current user')
     legacy_id = conn.execute("SELECT trosa.compat_next_id('outreach_emails', trosa.compat_current_user())").fetchone()[0]
-    message_id = conn.execute("SELECT trosa.compat_uuid('outreach:' || trosa.compat_current_user() || ':' || ?::text)", (legacy_id,)).fetchone()[0]
+    # A soft-deleted message keeps its row (delivery facts still reference it)
+    # but loses the member's legacy row ref, so ``compat_next_id`` may hand the
+    # same legacy id back.  The canonical UUID must not be derived from that
+    # reusable id alone, or the new record would collide with the retained row.
+    message_id = conn.execute(
+        "SELECT trosa.compat_uuid('outreach:' || trosa.compat_current_user() || ':' || ?::text || ':' || gen_random_uuid()::text)",
+        (legacy_id,)).fetchone()[0]
     conn.execute('''INSERT INTO trosa.outreach_messages (id,account_id,subject,body,sent_at,reply_status,created_at,legacy_payload)
                     VALUES (?,?,?,?,trosa.compat_time(?),?,coalesce(trosa.compat_time(?),now()),?::jsonb)''',
                  (message_id, account['account_id'], subject, content, sent_on, reply_status, created_at,
@@ -1425,8 +1431,24 @@ def delete_outreach_message(conn: Any, *, outreach_id: int) -> None:
                           AND legacy_user_id=trosa.compat_current_user() AND table_name='outreach_emails'
                           AND legacy_id=? RETURNING target_id''', (outreach_id,)).fetchone()
     if not ref: raise ValueError('outreach is not visible')
-    conn.execute('''DELETE FROM trosa.outreach_messages message WHERE id=?
-                    AND NOT EXISTS (SELECT 1 FROM trosa.legacy_row_refs WHERE target_id=message.id)''', (ref['target_id'],))
+    target_id = ref['target_id']
+    # Delivery events are provider facts (sent/bounced) and must survive the
+    # member deleting the timeline entry; they point at the message without an
+    # ON DELETE action. Keep the message row hidden instead of failing the
+    # delete, matching the compatibility view trigger's behaviour.
+    retained = conn.execute(
+        '''SELECT 1 FROM trosa.legacy_row_refs WHERE target_id=?
+           UNION ALL
+           SELECT 1 FROM trosa.email_delivery_events WHERE outreach_message_id=?
+           LIMIT 1''', (target_id, target_id)).fetchone()
+    if retained:
+        conn.execute(
+            '''UPDATE trosa.outreach_messages
+                  SET legacy_payload=coalesce(legacy_payload,'{}'::jsonb)
+                      || jsonb_build_object('is_deleted','1','deleted_at',now()::text)
+                WHERE id=?''', (target_id,))
+    else:
+        conn.execute('DELETE FROM trosa.outreach_messages WHERE id=?', (target_id,))
 
 
 def set_outreach_reported(conn: Any, *, outreach_id: int, reported: bool) -> None:

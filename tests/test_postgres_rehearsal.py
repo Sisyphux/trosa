@@ -3362,6 +3362,82 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(orphans, 0)
         module._INBOX_CACHE.clear()
 
+    def test_delete_outreach_keeps_delivery_fact_and_hides_record(self):
+        """Deleting a sent record must not fail because delivery facts remain.
+
+        Regression: ``delete_outreach_message`` hard-deleted the message while
+        provider delivery events still referenced it, so the FK violation
+        turned every retry into a 500 and the record stayed visible.
+        """
+        from tools.postgres_rehearsal import load_fixture
+
+        load_fixture()
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        created = client.post('/api/customers', json={
+            'name': 'Delivery Fact Delete Customer', 'company': 'Delivery Fact Delete Co',
+            'country': 'US',
+            'contacts': [{'name': 'Delivery Buyer', 'email': 'buyer@delete-outreach.example'}],
+        })
+        self.assertEqual(created.status_code, 201, created.get_json())
+        customer_id = created.get_json()['id']
+        added = client.post(f'/api/customers/{customer_id}/outreach', json={
+            'subject': 'Sent before delete', 'content': 'Body',
+            'sent_date': '2026-10-01', 'reply_status': 'pending',
+        })
+        self.assertEqual(added.status_code, 201, added.get_json())
+        outreach_id = added.get_json()['outreach']['id']
+
+        target = self.connection.execute(
+            '''SELECT ref.target_id, message.contact_method_id
+                 FROM trosa.legacy_row_refs ref
+                 JOIN trosa.outreach_messages message ON message.id=ref.target_id
+                WHERE ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id='hamid'
+                  AND ref.table_name='outreach_emails' AND ref.legacy_id=?''',
+            (outreach_id,),
+        ).fetchone()
+        self.assertIsNotNone(target)
+        self.connection.execute(
+            '''INSERT INTO trosa.email_delivery_events
+                   (id, organization_id, contact_method_id, outreach_message_id, event_type, occurred_at)
+               VALUES (trosa.compat_uuid(?), trosa.compat_org_id(), ?, ?, 'delivered', now())''',
+            (f'delivery-delete-{outreach_id}', target['contact_method_id'], target['target_id']),
+        )
+        self.connection.commit()
+
+        deleted = client.delete(f'/api/outreach/{outreach_id}')
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        self.assertEqual(self.connection.execute(
+            '''SELECT count(*) FROM trosa.legacy_row_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'
+                  AND table_name='outreach_emails' AND legacy_id=?''',
+            (outreach_id,),
+        ).fetchone()[0], 0)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.email_delivery_events WHERE outreach_message_id=?',
+            (target['target_id'],),
+        ).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute(
+            "SELECT legacy_payload->>'is_deleted' FROM trosa.outreach_messages WHERE id=?",
+            (target['target_id'],),
+        ).fetchone()[0], '1')
+
+        detail = client.get(f'/api/customers/{customer_id}')
+        self.assertEqual(detail.status_code, 200, detail.get_json())
+        self.assertEqual(
+            [row['id'] for row in detail.get_json()['outreach_emails']], [],
+        )
+
+        # The legacy id may be reused after a soft delete; the canonical row
+        # must still be a new one instead of colliding with the retained row.
+        again = client.post(f'/api/customers/{customer_id}/outreach', json={
+            'subject': 'Sent after delete', 'content': 'Body',
+            'sent_date': '2026-10-02', 'reply_status': 'pending',
+        })
+        self.assertEqual(again.status_code, 201, again.get_json())
+
     def test_permanent_delete_clears_contact_linked_communication_and_receipts(self):
         """Permanent delete must remove every child the contact method/account anchors.
 
