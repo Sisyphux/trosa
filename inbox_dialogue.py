@@ -809,8 +809,18 @@ def get_thread(conn, *, thread_id):
     return {'success': True, 'thread': _thread_dict(conn, row)}
 
 
-def _counts(conn):
+def _exclude_clause(exclude_subjects):
+    subjects = [str(item) for item in (exclude_subjects or ())][:1000]
+    if not subjects:
+        return '', []
+    return ' AND subject NOT IN (' + ','.join('?' * len(subjects)) + ')', subjects
+
+
+def _counts(conn, exclude_subjects=None):
     where, params = _scope()
+    clause, extra_params = _exclude_clause(exclude_subjects)
+    where += clause
+    params = params + extra_params
 
     def count(extra):
         row = conn.execute(
@@ -827,7 +837,7 @@ def _counts(conn):
 
 
 def list_threads(conn, *, awaiting=None, status='open', subject=None,
-                 updated_after=None, limit=50, cursor=None):
+                 updated_after=None, limit=50, cursor=None, exclude_subjects=None):
     if awaiting not in (None, 'human', 'sela', 'none'):
         raise DialogueError('invalid_request', 'awaiting 无效')
     if status not in ('open', 'closed', 'all'):
@@ -838,6 +848,9 @@ def list_threads(conn, *, awaiting=None, status='open', subject=None,
         raise DialogueError('invalid_request', 'limit 无效')
     limit = max(1, min(limit, 200))
     where, params = _scope()
+    clause, extra_params = _exclude_clause(exclude_subjects)
+    where += clause
+    params = params + extra_params
     if status in ('open', 'closed'):
         where += ' AND status=?'
         params.append(status)
@@ -877,7 +890,7 @@ def list_threads(conn, *, awaiting=None, status='open', subject=None,
         'success': True,
         'threads': [_summary_dict(conn, row) for row in rows],
         'next_cursor': next_cursor,
-        'counts': _counts(conn),
+        'counts': _counts(conn, exclude_subjects),
     }
 
 

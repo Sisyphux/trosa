@@ -159,6 +159,24 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertEqual(human_body['thread']['customer_id'], 4321)
         self.assertNotIn('customer_id', sela_body['thread'])
 
+    def test_human_list_hides_threads_of_archived_prospect_customer(self):
+        thread_id = self._create_thread()
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        original = (self.module._sela_profile_by_source, self.module._sela_profile_customer)
+        try:
+            self.module._sela_profile_by_source = lambda conn, source_id: (
+                {'customer_id': 4321} if source_id == 'route' else None)
+            self.module._sela_profile_customer = lambda conn, cid: {'id': cid, 'is_deleted': 0}
+            shown = human.get('/api/inbox/threads').get_json()
+            self.module._sela_profile_customer = lambda conn, cid: None
+            hidden = human.get('/api/inbox/threads').get_json()
+        finally:
+            self.module._sela_profile_by_source, self.module._sela_profile_customer = original
+        self.assertIn(thread_id, [t['id'] for t in shown['threads']])
+        self.assertNotIn(thread_id, [t['id'] for t in hidden['threads']])
+        self.assertEqual(hidden['counts']['open'], shown['counts']['open'] - 1)
+
     def test_human_close_requires_login(self):
         thread_id = self._create_thread()
         anon = self.module.app.test_client()

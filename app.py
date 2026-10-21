@@ -8344,6 +8344,35 @@ def inbox_thread_user_close(thread_id):
         conn.close()
 
 
+def _dialogue_orphan_prospect_subjects(conn):
+    """``prospect:<id>`` subjects whose customer was archived or removed.
+
+    Their conversations have nothing left to open, so the human Inbox hides them.
+    """
+    where, params = _dialogue._scope()
+    rows = conn.execute(
+        f"SELECT DISTINCT subject FROM {_dialogue._t('inbox_threads')} "
+        f"WHERE {where} AND status='open' AND subject LIKE 'prospect:%'",
+        params,
+    ).fetchall()
+    hidden = []
+    for row in rows:
+        subject = str(dict(row).get('subject') or '')
+        source_id = subject[len('prospect:'):].strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+            continue
+        profile = _sela_profile_by_source(conn, source_id)
+        customer_id = dict(profile).get('customer_id') if profile else None
+        if not customer_id:
+            continue
+        customer = _sela_profile_customer(conn, int(customer_id))
+        customer = dict(customer) if customer else None
+        if (not customer or customer.get('is_deleted')
+                or customer.get('deleted_at')):
+            hidden.append(subject)
+    return hidden
+
+
 @app.route('/api/inbox/threads', methods=['GET'])
 @login_required
 def inbox_threads_list():
@@ -8362,6 +8391,7 @@ def inbox_threads_list():
             updated_after=request.args.get('updated_after'),
             limit=request.args.get('limit') or 50,
             cursor=request.args.get('cursor'),
+            exclude_subjects=_dialogue_orphan_prospect_subjects(conn),
         )
         return jsonify(body)
     except _dialogue.DialogueError as error:
