@@ -8372,13 +8372,31 @@ def inbox_threads_list():
         conn.close()
 
 
+def _dialogue_attach_customer_id(conn, thread):
+    """Let the human UI open the customer a ``prospect:<id>`` thread is about.
+
+    Display-only: the sela contract body is untouched (only the human route calls this).
+    """
+    subject = str((thread or {}).get('subject') or '')
+    if not subject.startswith('prospect:'):
+        return
+    source_id = subject[len('prospect:'):].strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', source_id):
+        return
+    profile = _sela_profile_by_source(conn, source_id)
+    if profile and dict(profile).get('customer_id'):
+        thread['customer_id'] = int(dict(profile)['customer_id'])
+
+
 @app.route('/api/inbox/threads/<thread_id>', methods=['GET'])
 @login_required
 def inbox_thread_get(thread_id):
     """Human read of one Inbox conversation (S3 dialogue window)."""
     conn = get_db()
     try:
-        return jsonify(_dialogue.get_thread(conn, thread_id=thread_id))
+        body = _dialogue.get_thread(conn, thread_id=thread_id)
+        _dialogue_attach_customer_id(conn, body.get('thread'))
+        return jsonify(body)
     except _dialogue.DialogueError as error:
         return _dialogue_error_response(error)
     except Exception:

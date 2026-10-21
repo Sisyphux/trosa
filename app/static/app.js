@@ -14424,7 +14424,7 @@ function renderDialogueThreadHtml() {
   var messages = Array.isArray(thread.messages) ? thread.messages : [];
   var closed = thread.status === 'closed';
   var group = dialogueGroup(thread);
-  var titleCustomerId = dialogueCustomerId();
+  var titleCustomerId = dialogueLinkCustomerId();
   var titleHtml = titleCustomerId
     ? '<a href="#" class="dialogue-thread-title-link" title="打开客户详情"' +
         ' onclick="return openDialogueCustomer(event)">' + escapeHtml(thread.title || '对话') + '</a>'
@@ -14464,6 +14464,11 @@ function dialogueSuggestions() {
   return [];
 }
 
+function dialogueLinkCustomerId() {
+  if (dialogueThread && /^\d+$/.test(String(dialogueThread.customer_id || ''))) return String(dialogueThread.customer_id);
+  return dialogueCustomerId();
+}
+
 function dialogueCustomerId() {
   if (!dialogueThread || !Array.isArray(dialogueThread.messages)) return null;
   for (var i = dialogueThread.messages.length - 1; i >= 0; i--) {
@@ -14478,7 +14483,7 @@ function dialogueCustomerId() {
 
 function openDialogueCustomer(event) {
   if (event) event.preventDefault();
-  var customerId = dialogueCustomerId();
+  var customerId = dialogueLinkCustomerId();
   if (!customerId) return false;
   switchPage('customers');
   setTimeout(function() { openEditModal(customerId); }, 0);

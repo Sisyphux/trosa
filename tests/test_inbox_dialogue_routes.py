@@ -142,6 +142,23 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertEqual(body['thread']['awaiting'], 'sela')
         self.assertEqual(body['message']['role'], 'human')
 
+    def test_human_thread_read_names_the_prospect_customer(self):
+        thread_id = self._create_thread()
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        original = self.module._sela_profile_by_source
+        try:
+            self.module._sela_profile_by_source = lambda conn, source_id: (
+                {'customer_id': 4321} if source_id == 'route' else None)
+            human_body = human.get(f'/api/inbox/threads/{thread_id}').get_json()
+            sela_body = self.service.get(
+                f'/api/integrations/sela/threads/{thread_id}',
+                headers=self.service_headers).get_json()
+        finally:
+            self.module._sela_profile_by_source = original
+        self.assertEqual(human_body['thread']['customer_id'], 4321)
+        self.assertNotIn('customer_id', sela_body['thread'])
+
     def test_human_close_requires_login(self):
         thread_id = self._create_thread()
         anon = self.module.app.test_client()
