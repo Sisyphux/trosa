@@ -14424,10 +14424,15 @@ function renderDialogueThreadHtml() {
   var messages = Array.isArray(thread.messages) ? thread.messages : [];
   var closed = thread.status === 'closed';
   var group = dialogueGroup(thread);
+  var titleCustomerId = dialogueCustomerId();
+  var titleHtml = titleCustomerId
+    ? '<a href="#" class="dialogue-thread-title-link" title="打开客户详情"' +
+        ' onclick="return openDialogueCustomer(event)">' + escapeHtml(thread.title || '对话') + '</a>'
+    : escapeHtml(thread.title || '对话');
   var header = '<header class="dialogue-thread-head">' +
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
-        '<div class="dialogue-thread-title">' + escapeHtml(thread.title || '对话') + '</div>' +
+        '<div class="dialogue-thread-title">' + titleHtml + '</div>' +
         '<div class="dialogue-thread-sub">' +
           (thread.subject ? '<span>' + escapeHtml(thread.subject) + '</span>' : '') +
           '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
@@ -14469,6 +14474,15 @@ function dialogueCustomerId() {
     }
   }
   return null;
+}
+
+function openDialogueCustomer(event) {
+  if (event) event.preventDefault();
+  var customerId = dialogueCustomerId();
+  if (!customerId) return false;
+  switchPage('customers');
+  setTimeout(function() { openEditModal(customerId); }, 0);
+  return false;
 }
 
 function dialogueComposerHtml() {
