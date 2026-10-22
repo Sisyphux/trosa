@@ -13966,7 +13966,8 @@ function weeklyDateLabel(dateStr) {
   var parts = String(dateStr || '').split('-');
   if (parts.length < 3) return '';
   var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
-  return '周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + (d.getMonth() + 1) + '/' + d.getDate();
+  var year = d.getFullYear() !== new Date().getFullYear() ? d.getFullYear() + ' ' : '';
+  return year + '周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + (d.getMonth() + 1) + '/' + d.getDate();
 }
 
 // Sela writes “客户回复了邮件：……” in front of every captured reply. Say who spoke
@@ -14269,6 +14270,75 @@ function showOverviewCustomerError(message, custId, owner, timelinePage) {
   body.innerHTML = '<div class="ov-customer-loading ov-customer-loading-error" role="alert"><strong>客户详情加载失败</strong><p>' + escapeHtml(message || '请检查连接后重试。') + '</p><button class="btn btn-sm btn-primary" type="button" onclick="overviewShowCustDetail(' + Number(custId) + ',\'' + escapeHtml(owner) + '\',' + Number(timelinePage || 1) + ')">重试</button></div>';
 }
 
+// ---- Customer dossier (opened from the weekly board): the same language as the board.
+function weeklyDossierMeta(customer) {
+  var nm = customer.company || customer.name || '';
+  return [customer.name && customer.name !== nm ? customer.name : '', customer.country, customer.industry_zh || customer.industry || customer.field].filter(Boolean).join(' · ');
+}
+
+function weeklyDossierHeadHtml(customer) {
+  var specs = [];
+  var add = function(label, value) { if (value) specs.push('<div><dt>' + label + '</dt><dd>' + value + '</dd></div>'); };
+  var site = String(customer.website || '').trim();
+  if (site) {
+    var url = /^https?:\/\//i.test(site) ? site : 'https://' + site;
+    var host = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/.*$/, '');
+    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) add('官网', '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(host) + '</a>');
+  }
+  add('归属', escapeHtml(customer.owner_label || customer.owner || ''));
+  add('来源', escapeHtml([customerSourceLabel(customer.source || customer.import_source), String(customer.source_detail || '').trim()].filter(Boolean).join(' · ')));
+  add('规模', escapeHtml(customer.company_size || ''));
+  add('年营收', escapeHtml(customer.annual_revenue || ''));
+  add('角色', escapeHtml(customer.business_role || ''));
+  add('阶段', escapeHtml(customer.business_stage || ''));
+  add('建档', escapeHtml(customer.created_at ? formatDate(customer.created_at) : ''));
+  add('最近联系', escapeHtml(customer.last_actual_contact ? formatDate(customer.last_actual_contact) : ''));
+  var profile = customer.profile_zh || customer.profile || '';
+  return '<header class="wk-dossier-head"><p class="wk-dossier-kicker">客户详情 · 只读</p><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3>' +
+    '<p class="wk-record-meta" data-dossier-meta>' + escapeHtml(weeklyDossierMeta(customer)) + '</p>' +
+    (profile ? '<p class="wk-record-profile wk-dossier-profile" data-dossier-profile' + (customer.profile_zh ? ' title="原文：' + escapeHtml(customer.profile) + '"' : '') + '>' + escapeHtml(profile) + '</p>' : '') +
+    (specs.length ? '<dl class="wk-spec">' + specs.join('') + '</dl>' : '') + '</header>';
+}
+
+// What is open right now. Only what exists is shown; no “暂无” placeholders.
+function weeklyDossierNowHtml(customer, tasks) {
+  var items = [];
+  if (customer.current_waiting) items.push('<div><dt>当前等待</dt><dd>' + escapeHtml(customer.current_waiting) + '</dd></div>');
+  if (customer.next_confirmed_action) items.push('<div><dt>下一步</dt><dd>' + escapeHtml(customer.next_confirmed_action) + '</dd></div>');
+  var open = (tasks || []).map(function(t) {
+    return escapeHtml(t.title || t.content || '待办') + (t.remind_date ? '<span> · ' + escapeHtml(formatDate(t.remind_date)) + '</span>' : '');
+  });
+  if (open.length) items.push('<div><dt>待办</dt><dd>' + open.join('<br>') + '</dd></div>');
+  return items.length ? '<dl class="wk-dossier-now">' + items.join('') + '</dl>' : '';
+}
+
+function weeklyDossierItemHtml(item) {
+  var raw = communicationDisplayText(item.result || item.content || '已记录工作', item.activity_type, item.direction);
+  var fromReply = /^客户回复了邮件[:：]/.test(String(raw).trim());
+  var kind = item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type);
+  return '<article class="wk-dossier-item"><time datetime="' + escapeHtml(item.date || '') + '">' + escapeHtml(weeklyDateLabel(item.date)) + '</time><div>' +
+    (!fromReply && kind ? '<p class="wk-dossier-kind">' + escapeHtml(kind) + '</p>' : '') +
+    '<div class="wk-record-text is-open">' + weeklyTextLines(raw) + '</div>' +
+    (item.next_plan ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(item.next_plan) + '</p>' : '') + '</div></article>';
+}
+
+// One timeline. This week's records are the first group; they are no longer
+// printed a second time under “earlier”.
+function weeklyDossierTimelineHtml(c, custId, owner, timelinePage) {
+  var key = function(item) { return (item.type || '') + ':' + (item.id == null ? item.date + (item.content || '') : item.id); };
+  var week = (c.week_activity || []).slice();
+  var weekKeys = {};
+  week.forEach(function(item) { weekKeys[key(item)] = true; });
+  var earlier = (c.recent_timeline || []).filter(function(item) { return !weekKeys[key(item)]; });
+  var pagination = c.timeline_pagination || {};
+  var html = '';
+  if (week.length) html += '<section class="wk-dossier-group"><h4>本周</h4>' + week.map(weeklyDossierItemHtml).join('') + '</section>';
+  if (earlier.length) html += '<section class="wk-dossier-group"><h4>更早</h4>' + earlier.map(weeklyDossierItemHtml).join('') +
+    (pagination.has_next ? '<button class="wk-more" type="button" onclick="overviewShowCustDetail(' + Number(custId) + ',\'' + escapeHtml(owner) + '\',' + (timelinePage + 1) + ')">查看更早记录</button>' : '') + '</section>';
+  if (!html) html = '<p class="wk-person-empty">还没有可展示的沟通记录</p>';
+  return '<div class="wk-dossier-timeline">' + html + '</div>';
+}
+
 async function overviewShowCustDetail(custId, owner, timelinePage) {
   custId = Number(custId);
   timelinePage = Math.max(1, Number(timelinePage) || 1);
@@ -14296,24 +14366,10 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
   if (detailToken !== OV._detailToken) return;
   
   var customer = c.customer || {};
-  var website = (customer.website || '').trim();
-  var websiteUrl = website && !/^https?:\/\//i.test(website) ? 'https://' + website : website;
-  var facts = [
-    ['归属成员', customer.owner_label || customer.owner], ['国家 / 地区', customer.country], ['行业 / 领域', customer.industry || customer.field],
-    ['业务角色', customer.business_role || '未标记'], ['业务阶段', customer.business_stage || '未标记'], ['来源', customerSourceLabel(customer.source || customer.import_source)], ['建立日期', customer.created_at ? formatDate(customer.created_at) : ''],
-    ['最近实际联系', customer.last_actual_contact]
-  ].filter(function(item) { return item[1]; });
-  var h = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace"><div class="modal-header ov-customer-header"><div><div class="workspace-kicker">客户详情 · 只读</div><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3><div class="workspace-meta">' +
-    (customer.name && customer.company && customer.name !== customer.company ? '<span>' + escapeHtml(customer.name) + '</span>' : '') +
-    (websiteUrl ? '<a href="' + escapeHtml(websiteUrl) + '" target="_blank" rel="noopener">访问官网 ↗</a>' : '') +
-    '</div></div><button type="button" class="modal-close" aria-label="返回本周工作" onclick="event.preventDefault();event.stopPropagation();overviewCloseCustDetail()">' + uiIcon('close') + '</button></div><div class="modal-body ov-customer-body">';
-  h += '<section class="ov-customer-facts">' + facts.map(function(item) { return '<div><span>' + item[0] + '</span><strong>' + escapeHtml(String(item[1])) + '</strong></div>'; }).join('') + '</section>';
-  h += '<div class="ov-customer-columns"><div class="ov-customer-main">';
-  h += '<section class="ov-customer-section"><h4>本周发生了什么</h4><div class="ov-customer-timeline">' + ((c.week_activity || []).length ? c.week_activity.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(communicationDisplayText(item.result || item.content || '已记录工作', item.activity_type, item.direction)) + '</p>' + (item.next_plan ? '<small>已记录下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">本周没有更多已上报记录。</p>') + '</div></section>';
-  var pagination = c.timeline_pagination || {};
-  h += '<section class="ov-customer-section"><h4>此前发生过什么</h4><div class="ov-customer-timeline">' + ((c.recent_timeline || []).length ? c.recent_timeline.map(function(item) { return '<article><time>' + escapeHtml(formatDate(item.date || '')) + '</time><div><span>' + escapeHtml(item.type === 'outreach' ? '开发邮件' : communicationTypeLabel(item.activity_type)) + '</span><p>' + renderRichText(communicationDisplayText(item.result || item.content || '已记录工作', item.activity_type, item.direction)) + '</p>' + (item.next_plan ? '<small>下一步：' + renderRichText(item.next_plan) + '</small>' : '') + '</div></article>'; }).join('') : '<p class="ov-customer-empty">暂无可展示的历史记录。</p>') + '</div>' + (pagination.has_next ? '<button class="ov-timeline-more" type="button" onclick="overviewShowCustDetail(' + custId + ',\'' + escapeHtml(owner) + '\',' + (timelinePage + 1) + ')">查看更早记录</button>' : '') + '</section></div><aside class="ov-customer-side"><section class="ov-customer-section"><h4>当前状态</h4><div class="ov-customer-copy"><span>当前等待</span><p>' + escapeHtml(customer.current_waiting || '当前未记录明确等待事项') + '</p></div><div class="ov-customer-copy"><span>已确认下一步</span><p>' + escapeHtml(customer.next_confirmed_action || '本周未记录明确下一步') + '</p></div></section>';
-  h += '<section class="ov-customer-section"><h4>未完成待办</h4>' + ((c.open_tasks || []).length ? c.open_tasks.map(function(item) { return '<div class="ov-customer-task"><time>' + escapeHtml(formatDate(item.remind_date || '')) + '</time><strong>' + escapeHtml(item.title || item.content || '待办') + '</strong>' + (item.reason ? '<p>' + escapeHtml(item.reason) + '</p>' : '') + '</div>'; }).join('') : '<p class="ov-customer-empty">暂无未完成待办。</p>') + '</section></aside></div></div></div></div>';
-  
+  var h = '<div class="modal-overlay show" id="ovDetailModal" role="dialog" aria-modal="true" aria-labelledby="ovDetailTitle" onclick="if(event.target===this)overviewCloseCustDetail()"><div class="modal ov-customer-workspace wk-dossier">' +
+    '<button type="button" class="modal-close" aria-label="返回本周工作" onclick="event.preventDefault();event.stopPropagation();overviewCloseCustDetail()">' + uiIcon('close') + '</button>' +
+    '<div class="modal-body wk-dossier-body">' + weeklyDossierHeadHtml(customer) + weeklyDossierNowHtml(customer, c.open_tasks) + weeklyDossierTimelineHtml(c, custId, owner, timelinePage) + '</div></div></div>';
+
   var div = document.createElement('div');
   div.innerHTML = h;
   // showOverviewCustomerLoading() already put a placeholder with the same id in
@@ -14325,6 +14381,26 @@ async function overviewShowCustDetail(custId, owner, timelinePage) {
   if (placeholder) placeholder.remove();
   document.body.appendChild(div.firstElementChild);
   document.getElementById('ovDetailModal').querySelector('.modal-close').focus({preventScroll:true});
+  if (customer.translation_pending) refreshDossierTranslation(custId, owner, timelinePage, detailToken, 0);
+}
+
+// The Chinese reading of an English profile arrives a few seconds later; patch just those lines.
+function refreshDossierTranslation(custId, owner, timelinePage, detailToken, tries) {
+  if (tries >= 2) return;
+  setTimeout(async function() {
+    if (detailToken !== OV._detailToken) return;
+    try {
+      var fresh = await api('/api/overview/customers/' + encodeURIComponent(owner) + '/' + Number(custId) + '?week_start=' + encodeURIComponent(getWeekStart(overviewWeekOffset)) + '&timeline_page=' + timelinePage, { silentError: true });
+      if (detailToken !== OV._detailToken || !fresh || !fresh.customer) return;
+      var cu = fresh.customer, modal = document.getElementById('ovDetailModal');
+      if (!modal) return;
+      var meta = modal.querySelector('[data-dossier-meta]'), prof = modal.querySelector('[data-dossier-profile]');
+      if (meta) meta.textContent = weeklyDossierMeta(cu);
+      if (prof && cu.profile_zh) { prof.textContent = cu.profile_zh; prof.title = '原文：' + (cu.profile || ''); }
+      if (!cu.translation_pending) return;
+    } catch (e) { return; }
+    refreshDossierTranslation(custId, owner, timelinePage, detailToken, tries + 1);
+  }, 5000);
 }
 
 function overviewCloseCustDetail() {

@@ -22281,6 +22281,20 @@ def overview_all_customers():
     return jsonify({'customers': all_customers, 'total': len(all_customers)})
 
 
+def _attach_detail_translations(customer):
+    """Add the Chinese reading of an English profile / industry, if known."""
+    rows, pending = _attach_weekly_translations([{
+        'customer_profile': (customer.get('profile') or '').strip()[:400],
+        'customer_industry': (customer.get('industry') or customer.get('field') or '').strip(),
+    }])
+    customer['profile'] = rows[0]['customer_profile']
+    if rows[0].get('customer_profile_zh'):
+        customer['profile_zh'] = rows[0]['customer_profile_zh']
+    if rows[0].get('customer_industry_zh'):
+        customer['industry_zh'] = rows[0]['customer_industry_zh']
+    customer['translation_pending'] = pending
+
+
 @app.route('/api/overview/customers/<user>/<int:customer_id>', methods=['GET'])
 @login_required
 def overview_customer_detail(user, customer_id):
@@ -22314,6 +22328,7 @@ def overview_customer_detail(user, customer_id):
                         'id', 'name', 'company', 'country', 'website', 'industry',
                         'field', 'business_role', 'business_stage', 'import_source',
                         'source', 'source_detail', 'created_at',
+                        'profile', 'company_size', 'annual_revenue',
                     )
                 }
                 tasks = _customer_tasks(conn, customer_id)
@@ -22365,6 +22380,7 @@ def overview_customer_detail(user, customer_id):
             conn.close()
             if customer is None:
                 return jsonify({'error': '客户不存在'}), 404
+            _attach_detail_translations(customer)
             return jsonify({
                 'customer': {key: value for key, value in customer.items()
                              if key not in ('week_activity', 'recent_timeline', 'open_tasks', 'timeline_pagination')},
@@ -22379,6 +22395,7 @@ def overview_customer_detail(user, customer_id):
         row = conn.execute('''SELECT id, name, company, country, website, industry,
                                      field, business_role, business_stage, import_source,
                                      source, source_detail, created_at,
+                                     profile, company_size, annual_revenue,
                                      last_contact, next_follow_up
                               FROM customers
                               WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''',
@@ -22455,6 +22472,7 @@ def overview_customer_detail(user, customer_id):
         set_db_user(previous_user)
     if customer is None:
         return jsonify({'error': '客户不存在'}), 404
+    _attach_detail_translations(customer)
     return jsonify({'customer': customer, 'week_activity': customer.pop('week_activity'),
                     'recent_timeline': customer.pop('recent_timeline'),
                     'open_tasks': customer.pop('open_tasks'),

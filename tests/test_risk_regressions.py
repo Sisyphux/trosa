@@ -394,9 +394,9 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertTrue(payload['timeline_pagination']['has_next'])
         self.assertEqual(payload['customer']['owner'], 'amy')
         serialized = str(payload)
-        for forbidden in ('contacts', 'private@example.com', 'research_reports', '不应返回的总结', '系统字段'):
+        for forbidden in ('contacts', 'private@example.com', 'research_reports', '系统字段'):
             self.assertNotIn(forbidden, serialized)
-        self.assertNotIn('profile', payload['customer'])
+        self.assertEqual(payload['customer']['profile'], '不应返回的总结')
         self.assertNotIn('notes', payload['customer'])
         summary = client.get('/api/weekly-summary?week_start=2026-08-03').get_json()
         summary_text = str(summary)
