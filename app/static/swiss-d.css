@@ -368,3 +368,18 @@ html.motion-reduced .hand-tip{transition:none !important}
 #trosa .ld-wh{font-size:.9rem}
 #trosa .ld-l2{font-size:.8rem}
 @media (min-width:1280px){#trosa .ld-l2{font-size:.86rem;grid-template-columns:210px minmax(0,1fr) 250px}}
+/* 今天页小幅整理（2026-10-22）：只修真缺陷，不动排版、配色与字体。
+   1) 顶栏页面名原为装饰灰 --dl-faint（对比约 2:1）、9px，属于信息，改用阅读灰并放大；
+   2) 页头小标签（日期行）、“对方的今天”、底栏标签 9–10px 过小，统一到 11px；
+   3) 桌面端页节顶部 72px 历史空白去掉（矮屏早已如此），首屏让给内容；
+   4) 页头四个图标按钮 34px 小于鼠标目标下限 36px，补到 36px。
+   规则限定 ≥821px 的只有 3、4，手机端沿用原有规则。 */
+#trosa .room-page{font-size:11px;color:var(--dl-ink-3)}
+#trosa .today-tide .today-eyebrow,
+#trosa .today-tide .tide-chart-title .micro,
+#trosa #roomBotLabel{font-size:11px}
+@media (min-width:821px){
+  #trosa #roomMain > #page-dashboard.page-section{padding-top:12px !important}
+  #trosa .today-page-header .command-shelf.command-shelf.command-shelf .command-icon.command-icon{
+    width:36px !important;min-width:36px !important;max-width:36px !important;height:36px !important;min-height:36px !important}
+}
