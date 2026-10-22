@@ -28,7 +28,7 @@ await openIndex();
 await page.locator('#roomIndex').getByRole('button', {name:'设置', exact:true}).click();
 await page.locator('#page-settings.active').waitFor();
 await page.locator('#preferenceInterfacePerformance').selectOption('performance');
-await page.getByRole('button', {name:'保存设置', exact:true}).click();
+await page.getByRole('button', {name:'保存设置', exact:true}).first().click();
 await page.waitForFunction(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'), null, {timeout:15000});
 await openIndex();
 await page.locator('#roomIndex [data-page="inbox"]').first().click();
