@@ -14011,7 +14011,6 @@ function weeklyCustomerFacts(r) {
   if (source) add('来源', escapeHtml(source));
   if (r.customer_company_size) add('规模', escapeHtml(r.customer_company_size));
   if (r.customer_annual_revenue) add('年营收', escapeHtml(r.customer_annual_revenue));
-  if (r.customer_created_on) add('建档', escapeHtml(r.customer_created_on));
   return facts.length ? '<dl class="wk-spec">' + facts.join('') + '</dl>' : '';
 }
 
@@ -14291,7 +14290,6 @@ function weeklyDossierHeadHtml(customer) {
   add('年营收', escapeHtml(customer.annual_revenue || ''));
   add('角色', escapeHtml(customer.business_role || ''));
   add('阶段', escapeHtml(customer.business_stage || ''));
-  add('建档', escapeHtml(customer.created_at ? formatDate(customer.created_at) : ''));
   add('最近联系', escapeHtml(customer.last_actual_contact ? formatDate(customer.last_actual_contact) : ''));
   var profile = customer.profile_zh || customer.profile || '';
   return '<header class="wk-dossier-head"><p class="wk-dossier-kicker">客户详情 · 只读</p><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3>' +
