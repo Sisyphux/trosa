@@ -91,6 +91,12 @@ from customer_timezone import (
     infer_timezone as _infer_customer_timezone,
     normalize_timezone as _normalize_customer_timezone,
 )
+from customer_country_search import (
+    country_alias_keys as _country_alias_keys,
+    country_alias_sql_values as _country_alias_sql_values,
+    country_aliases_for_tokens as _country_aliases_for_tokens,
+    country_matches as _country_matches,
+)
 from trosa_domain import (
     active_customers as _active_customers,
     customer_contacts as _customer_contacts,
@@ -10145,10 +10151,16 @@ def _search_match_level(value, token):
     return 0
 
 
-def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None):
-    """Return deterministic scores and bounded explanations for customer rows."""
+def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None, country_aliases=None):
+    """Return deterministic scores and bounded explanations for customer rows.
+
+    ``country_aliases`` maps a token to the country spellings it names (see
+    ``customer_country_search``); a stored country in that set counts as an
+    exact country hit even when it is written in the other language.
+    """
     if not customers or not search_tokens:
         return {}
+    country_aliases = country_aliases or {}
 
     if contexts is None:
         customer_ids = [customer['id'] for customer in customers]
@@ -10173,6 +10185,8 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None):
                 continue
             for token in search_tokens:
                 level = _search_match_level(value, token)
+                if not level and field == 'country' and _country_matches(value, country_aliases.get(token)):
+                    level = 3
                 if not level:
                     continue
                 score = weight + _CUSTOMER_SEARCH_MATCH_BONUS[level]
@@ -10320,7 +10334,8 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
             continue
         if level and customer.get('level', '') != level:
             continue
-        if country_filter and country_filter.casefold() not in str(customer.get('country') or '').casefold():
+        if country_filter and country_filter.casefold() not in str(customer.get('country') or '').casefold() \
+                and not _country_matches(customer.get('country'), _country_alias_keys(country_filter)):
             continue
         if business_role and customer.get('business_role', '') != business_role:
             continue
@@ -10348,6 +10363,11 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         # fields or one of its related records (communication, development email,
         # contact, task, Inbox entry), but every token must hit something.
         normalized_tokens = [token for token in (_search_normalize(token) for token in search_tokens) if token]
+        # A token that names a country also matches that country written in
+        # another language ("瑞典" <-> "Sweden").  Only an exact country name
+        # expands, so every other hit stays the plain substring match.
+        country_aliases = _country_aliases_for_tokens(cleaned_search, search_tokens)
+        country_token_keys = {_search_normalize(token): keys for token, keys in country_aliases.items()}
         related_hits = {}
         for customer in list(customers):
             values = (
@@ -10359,6 +10379,9 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
             )
             haystack = _search_normalize(' '.join(str(value or '') for value in values))
             customer['_search_field_hits'] = {token for token in normalized_tokens if token in haystack}
+            for token, keys in country_token_keys.items():
+                if _country_matches(customer.get('country'), keys):
+                    customer['_search_field_hits'].add(token)
         contexts = _customer_search_match_contexts(
             conn, [item['id'] for item in customers], search_tokens, coverage=related_hits)
         wanted_tokens = set(normalized_tokens)
@@ -10371,6 +10394,7 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         customers = kept_customers
     else:
         contexts = {}
+        country_aliases = {}
 
     if not customers:
         return {'customers': [], 'total': 0, 'page': page, 'per_page': per_page,
@@ -10490,7 +10514,8 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         interpreted_filters.append('来源：' + customer_source_display(source_filter))
 
     if cleaned_search:
-        ranks = _customer_search_rank_data(conn, customers, search_tokens, contexts=contexts)
+        ranks = _customer_search_rank_data(conn, customers, search_tokens, contexts=contexts,
+                                           country_aliases=country_aliases)
         for item in customers:
             rank = ranks.get(item['id'], {})
             item['search_matches'] = rank.get('matches', [])
@@ -10653,9 +10678,13 @@ def _customer_list_payload(args, only_ids=None):
         query = 'SELECT * FROM customers WHERE (is_deleted = 0 OR is_deleted IS NULL)'
     params = []
     search_tokens = []
+    country_aliases = {}
 
     if cleaned_search:
         search_tokens = [token for token in re.split(r'\s+', cleaned_search) if token]
+        # A token that names a country also matches that country written in
+        # another language ("瑞典" <-> "Sweden"), compared by whole value.
+        country_aliases = _country_aliases_for_tokens(cleaned_search, search_tokens)
         for token in search_tokens:
             query += ''' AND (name LIKE ? OR company LIKE ? OR country LIKE ? OR field LIKE ? OR industry LIKE ?
                          OR type LIKE ? OR tags LIKE ? OR notes LIKE ? OR profile LIKE ?
@@ -10669,9 +10698,15 @@ def _customer_list_payload(args, only_ids=None):
                          OR EXISTS (SELECT 1 FROM outreach_emails oe WHERE oe.customer_id = customers.id
                                     AND (oe.subject LIKE ? OR oe.content LIKE ? OR oe.reply_content LIKE ?))
                          OR EXISTS (SELECT 1 FROM inbox_items ix WHERE ix.customer_id = customers.id
-                                    AND (ix.title LIKE ? OR ix.content LIKE ?)))'''
+                                    AND (ix.title LIKE ? OR ix.content LIKE ?))'''
             like = f'%{token}%'
             params.extend([like] * 25)
+            country_values = _country_alias_sql_values(country_aliases.get(token) or ())
+            if country_values:
+                query += (" OR lower(trim(COALESCE(country, ''))) IN ("
+                          + ','.join('?' for _ in country_values) + ')')
+                params.extend(country_values)
+            query += ')'
     if business_stage:
         query += ' AND business_stage = ?'
         params.append(business_stage)
@@ -10679,8 +10714,15 @@ def _customer_list_payload(args, only_ids=None):
         query += ' AND level = ?'
         params.append(level)
     if country_filter:
-        query += ' AND country LIKE ?'
-        params.append(f'%{country_filter}%')
+        country_filter_values = _country_alias_sql_values(_country_alias_keys(country_filter))
+        if country_filter_values:
+            query += (" AND (country LIKE ? OR lower(trim(COALESCE(country, ''))) IN ("
+                      + ','.join('?' for _ in country_filter_values) + '))')
+            params.append(f'%{country_filter}%')
+            params.extend(country_filter_values)
+        else:
+            query += ' AND country LIKE ?'
+            params.append(f'%{country_filter}%')
         interpreted_filters.append('国家：' + country_filter)
     if business_role:
         query += ' AND business_role = ?'
@@ -10852,7 +10894,8 @@ def _customer_list_payload(args, only_ids=None):
 
         interpreted_filters = list(dict.fromkeys(interpreted_filters))
         if cleaned_search:
-            search_rank_data = _customer_search_rank_data(c, customers, search_tokens)
+            search_rank_data = _customer_search_rank_data(c, customers, search_tokens,
+                                                          country_aliases=country_aliases)
             for cust in customers:
                 rank_data = search_rank_data.get(cust['id'], {})
                 cust['search_matches'] = rank_data.get('matches', [])
@@ -22217,6 +22260,8 @@ def overview_all_customers():
     """获取所有用户的所有客户（带归属人信息），用于总览"""
     all_customers = []
     search = request.args.get('search', '').strip().lower()
+    # "瑞典" also finds a country stored as "Sweden" (and the other way round).
+    search_country_keys = _country_alias_keys(search) if search else frozenset()
     
     for user in USERS:
         try:
@@ -22234,7 +22279,8 @@ def overview_all_customers():
                     searchable = ' '.join(str(raw.get(key) or '') for key in (
                         'name', 'company', 'country', 'field', 'industry',
                     )).casefold()
-                    if search and search not in searchable:
+                    if search and search not in searchable \
+                            and not _country_matches(raw.get('country'), search_country_keys):
                         continue
                     cust = {
                         'id': raw.get('id'), 'name': raw.get('name') or '',
@@ -22259,9 +22305,12 @@ def overview_all_customers():
                            FROM customers WHERE (is_deleted = 0 OR is_deleted IS NULL)'''
                 params = []
                 if search:
-                    query += ' AND (name LIKE ? OR company LIKE ? OR country LIKE ? OR field LIKE ?)'
                     like = f'%{search}%'
-                    params.extend([like, like, like, like])
+                    country_values = _country_alias_sql_values(search_country_keys)
+                    country_clause = (" OR lower(trim(COALESCE(country, ''))) IN ("
+                                      + ','.join('?' for _ in country_values) + ')') if country_values else ''
+                    query += ' AND (name LIKE ? OR company LIKE ? OR country LIKE ? OR field LIKE ?' + country_clause + ')'
+                    params.extend([like, like, like, like] + country_values)
                 query += ' ORDER BY updated_at DESC'
                 c.execute(query, params)
                 rows = [dict(row) for row in c.fetchall()]

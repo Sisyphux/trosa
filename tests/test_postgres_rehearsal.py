@@ -3953,6 +3953,47 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             for customer_id in (both_words, one_word, silent, talking):
                 client.delete(f'/api/customers/{customer_id}')
 
+    def test_country_search_understands_chinese_and_english_on_real_postgres(self):
+        """搜“瑞典”能找到存为 Sweden 的客户，反之亦然；“瑞”不扩展，公司名命中不变。"""
+        module = self._app_module()
+        module._INBOX_CACHE.clear()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        mark = 'Ctry' + uuid.uuid4().hex[:8]
+
+        def create(company, country):
+            response = client.post('/api/customers', json={
+                'name': company + ' Buyer', 'company': company, 'country': country, 'field': 'country pg',
+            })
+            self.assertEqual(response.status_code, 201, response.get_json())
+            return response.get_json()['id']
+
+        sweden_en = create(f'{mark} Nordic', 'Sweden')
+        sweden_zh = create(f'{mark} Stockholm', '瑞典')
+        united_states = create(f'{mark} Liberty', 'USA')  # saved as 美国 by normalize_country
+        created = (sweden_en, sweden_zh, united_states)
+        try:
+            def ids(path, query):
+                payload = client.get(path, query_string={'search': query}).get_json()
+                if 'index' in payload:
+                    return {entry[0] for entry in payload['index']} & set(created)
+                return {item['id'] for item in payload['customers']} & set(created)
+
+            for path in ('/api/customers', '/api/customers/ledger'):
+                for query in ('瑞典', 'Sweden', 'sweden', f'{mark} 瑞典', f'{mark} Sweden'):
+                    self.assertEqual(ids(path, query), {sweden_en, sweden_zh}, (path, query))
+                for query in ('美国', 'USA', 'United States', f'{mark} usa'):
+                    self.assertEqual(ids(path, query), {united_states}, (path, query))
+                self.assertEqual(ids(path, f'{mark} 瑞'), {sweden_zh}, path)
+                self.assertEqual(ids(path, f'{mark} Nordic'), {sweden_en}, path)
+            row = client.get('/api/customers/ledger/rows',
+                             query_string={'ids': str(sweden_en), 'search': '瑞典'}).get_json()['rows']
+            self.assertEqual([item['id'] for item in row], [sweden_en])
+            self.assertEqual(row[0]['country'], 'Sweden')
+        finally:
+            for customer_id in created:
+                client.delete(f'/api/customers/{customer_id}')
+
     # -------------------------------------------- Agent gateway undo in PG
     #
     # Undo conflict detection compares the snapshot's business columns.  These
