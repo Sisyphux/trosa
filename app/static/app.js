@@ -13882,7 +13882,7 @@ function defaultWeeklyMember() {
 }
 
 function weeklyLocalCacheKey(uid, weekStart) {
-  return 'tradeos.weekly-summary.v4:' + weekStart + ':' + uid;
+  return 'tradeos.weekly-summary.v5:' + weekStart + ':' + uid;
 }
 
 function readWeeklyLocalCache(uid, weekStart) {
@@ -13999,13 +13999,14 @@ function weeklyCustomerFacts(r) {
 // One customer's communication this week: who they are, what was said, and the next step only when one was written.
 function weeklyRecordHtml(r, uid) {
   var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country, r.customer_industry].filter(Boolean).join(' · ');
+  var industry = r.customer_industry_zh || r.customer_industry;
+  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country, industry].filter(Boolean).join(' · ');
   var title = canOpen
     ? '<button type="button" class="wk-record-name" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">' + escapeHtml(nm) + '</button>'
     : '<span class="wk-record-name">' + escapeHtml(nm) + '</span>';
   return '<article class="wk-record"><header><h3>' + title + '</h3><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(weeklyDateLabel(r.date)) + '</time></header>' +
     (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
-    (r.customer_profile ? '<p class="wk-record-profile">' + escapeHtml(r.customer_profile) + '</p>' : '') +
+    (r.customer_profile ? '<p class="wk-record-profile"' + (r.customer_profile_zh ? ' title="原文：' + escapeHtml(r.customer_profile) + '"' : '') + '>' + escapeHtml(r.customer_profile_zh || r.customer_profile) + '</p>' : '') +
     weeklyCustomerFacts(r) +
     '<div class="wk-record-text">' + weeklyTextLines(weeklyCustomerText(r, 'actual_work')) + '</div>' +
     '<button type="button" class="wk-record-more" hidden onclick="toggleWeeklyRecord(this)">展开</button>' +
@@ -14066,7 +14067,7 @@ async function loadWeeklyMember(uid, ws, loadToken, options) {
     writeWeeklyLocalCache(uid, ws, data);
     bucket[uid] = data;
     if (showing()) { OV._status[uid] = ''; renderWeeklyBoard(); }
-    if (showing()) loadRemainingWeeklyMembers(uid, ws, loadToken);
+    if (showing()) { loadRemainingWeeklyMembers(uid, ws, loadToken); refreshWeeklyTranslations(uid, ws, loadToken, 0); }
   } catch (e) {
     if (!showing()) return;
     OV._status[uid] = 'error';
@@ -14079,6 +14080,39 @@ function retryWeeklyMember(uid) {
   OV._status[uid] = 'loading';
   renderWeeklyBoard();
   loadWeeklyMember(uid, ws, OV._weeklyLoadToken);
+}
+
+// Profiles written in English are translated in the background on the server.
+// Read again a few seconds later, and only copy the Chinese readings across.
+function weeklyHasUntranslated(data) {
+  if (!data || !data.translation_pending) return false;
+  var need = function(text) { return /[A-Za-z]{3}/.test(text || '') && !/[\u4e00-\u9fff]/.test(text || ''); };
+  return ((data && data.reported_customers) || []).some(function(r) {
+    return (need(r.customer_profile) && !r.customer_profile_zh) || (need(r.customer_industry) && !r.customer_industry_zh);
+  });
+}
+
+function refreshWeeklyTranslations(uid, ws, loadToken, tries) {
+  var cur = weeklyWeekBucket(ws)[uid];
+  if (tries >= 3 || !weeklyHasUntranslated(cur)) return;
+  setTimeout(async function() {
+    if (loadToken !== OV._weeklyLoadToken || ws !== getWeekStart(overviewWeekOffset)) return;
+    try {
+      var fresh = await api('/api/weekly-summary/' + encodeURIComponent(uid) + '?week_start=' + encodeURIComponent(ws) + '&limit=30&offset=0');
+      var now = weeklyWeekBucket(ws)[uid];
+      if (!fresh || !now || loadToken !== OV._weeklyLoadToken) return;
+      var byId = {};
+      (fresh.reported_customers || []).forEach(function(r) { byId[r.customer_id] = r; });
+      (now.reported_customers || []).forEach(function(r) {
+        var f = byId[r.customer_id];
+        if (f) { r.customer_profile_zh = f.customer_profile_zh; r.customer_industry_zh = f.customer_industry_zh; }
+      });
+      now.translation_pending = fresh.translation_pending;
+      writeWeeklyLocalCache(uid, ws, now);
+      renderWeeklyBoard();
+    } catch (e) { /* the original text stays; nothing to report */ }
+    refreshWeeklyTranslations(uid, ws, loadToken, tries + 1);
+  }, 5000);
 }
 
 async function loadRemainingWeeklyMembers(uid, ws, loadToken) {

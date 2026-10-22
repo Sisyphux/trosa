@@ -407,6 +407,37 @@ class CalendarAndAccessTest(unittest.TestCase):
         reported = [row for member in summary.values() if isinstance(member, dict) for row in member.get('reported_customers', [])]
         self.assertTrue(any(row.get('customer_website') == 'example.com' and row.get('customer_industry') == '包装' for row in reported))
 
+    def test_weekly_profile_translation_is_cached_and_never_blocks(self):
+        spec = importlib.util.spec_from_file_location('crm_app_weekly_zh_test', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        english = 'Cast acrylic sheet importer and sign-material supplier'
+        self.assertTrue(module._weekly_needs_zh(english))
+        self.assertFalse(module._weekly_needs_zh('亚克力板进口商'))
+        self.assertFalse(module._weekly_needs_zh('PMMA 板材'))
+        rows = [{'customer_profile': english, 'customer_industry': '亚克力'}]
+        calls = []
+        module.ask_ai_text = lambda prompt: calls.append(prompt) or '亚克力板进口商和标牌材料供应商'
+        module._WEEKLY_ZH_CACHE.clear()
+        # Before a translation exists the original is returned unchanged.
+        module.get_ai_config_status = lambda: {'configured': False}
+        self.assertNotIn('customer_profile_zh', module._attach_weekly_translations(rows)[0][0])
+        self.assertFalse(module._attach_weekly_translations(rows)[1])
+        self.assertEqual(calls, [])
+        # A model answer without Chinese is rejected and not cached.
+        module.ask_ai_text = lambda prompt: 'Cast acrylic importer'
+        self.assertEqual(module._translate_weekly_text(english), '')
+        self.assertNotIn(module._weekly_zh_key(english), module._WEEKLY_ZH_CACHE)
+        module._WEEKLY_ZH_FAILED.clear()
+        module.ask_ai_text = lambda prompt: calls.append(prompt) or '亚克力板进口商和标牌材料供应商'
+        self.assertEqual(module._translate_weekly_text(english), '亚克力板进口商和标牌材料供应商')
+        attached_rows, still_pending = module._attach_weekly_translations(rows)
+        attached = attached_rows[0]
+        self.assertFalse(still_pending)
+        self.assertEqual(attached['customer_profile_zh'], '亚克力板进口商和标牌材料供应商')
+        self.assertNotIn('customer_industry_zh', attached)
+        self.assertNotIn('customer_profile_zh', rows[0])
+
     def test_weekly_summary_merges_shared_company_fan_out_into_one_card(self):
         spec = importlib.util.spec_from_file_location('crm_app_weekly_dedupe_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)

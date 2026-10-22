@@ -21865,11 +21865,98 @@ def weekly_summary(user=None):
     return jsonify(result)
 
 
+# Customer profiles and industries are mostly written in English by Sela. The
+# weekly board shows a Chinese reading when one exists. Translation never blocks
+# a request: the first view returns the original and starts a background job,
+# a later view (the page re-reads a few seconds on) gets the Chinese text.
+# Only text already stored on the customer is sent, never request input.
+_WEEKLY_ZH_CACHE = {}
+_WEEKLY_ZH_FAILED = {}
+_WEEKLY_ZH_PENDING = set()
+_WEEKLY_ZH_LOCK = threading.Lock()
+_WEEKLY_ZH_RETRY_SECONDS = 600
+_WEEKLY_ZH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix='weekly-zh')
+_WEEKLY_ZH_FIELDS = (('customer_profile', 'customer_profile_zh'), ('customer_industry', 'customer_industry_zh'))
+_WEEKLY_ZH_PROMPT = (
+    '把下面这段客户公司资料翻译成简洁自然的中文。只输出译文，不要解释；'
+    '公司名、产品型号、数字、网址保持原样；不要增加或删减信息。\n\n{text}')
+
+
+def _weekly_needs_zh(text):
+    text = str(text or '')
+    return bool(re.search(r'[A-Za-z]{3}', text)) and not re.search(r'[\u4e00-\u9fff]', text)
+
+
+def _weekly_zh_key(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _translate_weekly_text(text):
+    """Translate one stored text; returns '' unless the model gave a Chinese reading."""
+    key = _weekly_zh_key(text)
+    try:
+        raw = (ask_ai_text(_WEEKLY_ZH_PROMPT.format(text=text)) or '').strip()
+        ok = bool(raw) and not raw.startswith('[ERROR_') and re.search(r'[\u4e00-\u9fff]', raw)
+        with _WEEKLY_ZH_LOCK:
+            if ok:
+                _WEEKLY_ZH_CACHE[key] = raw[:600]
+            else:
+                _WEEKLY_ZH_FAILED[key] = time.monotonic()
+        return raw[:600] if ok else ''
+    except Exception:
+        logger.warning('weekly profile translation failed', exc_info=True)
+        with _WEEKLY_ZH_LOCK:
+            _WEEKLY_ZH_FAILED[key] = time.monotonic()
+        return ''
+    finally:
+        with _WEEKLY_ZH_LOCK:
+            _WEEKLY_ZH_PENDING.discard(key)
+
+
+def _attach_weekly_translations(customers):
+    """Return (rows, pending): copies with any known Chinese reading attached.
+
+    ``pending`` is true while a translation is still being produced, so the
+    page knows whether reading again later can bring something new."""
+    out = []
+    pending_any = False
+    ai_ready = None
+    for row in customers:
+        row = dict(row)
+        for source_field, zh_field in _WEEKLY_ZH_FIELDS:
+            text = row.get(source_field) or ''
+            if not _weekly_needs_zh(text):
+                continue
+            key = _weekly_zh_key(text)
+            with _WEEKLY_ZH_LOCK:
+                known = _WEEKLY_ZH_CACHE.get(key)
+                failed_at = _WEEKLY_ZH_FAILED.get(key)
+                pending = key in _WEEKLY_ZH_PENDING
+                retry = failed_at is None or time.monotonic() - failed_at > _WEEKLY_ZH_RETRY_SECONDS
+            if known:
+                row[zh_field] = known
+            elif pending:
+                pending_any = True
+            elif retry:
+                if ai_ready is None:
+                    try:
+                        ai_ready = bool(get_ai_config_status().get('configured'))
+                    except Exception:
+                        ai_ready = False
+                if ai_ready:
+                    with _WEEKLY_ZH_LOCK:
+                        _WEEKLY_ZH_PENDING.add(key)
+                    _WEEKLY_ZH_POOL.submit(_translate_weekly_text, text)
+                    pending_any = True
+        out.append(row)
+    return out, pending_any
+
+
 def _page_weekly_summary(payload, limit, offset):
     """Keep a member's first paint bounded while retaining explicit paging."""
     response = dict(payload)
     customers = list(payload.get('reported_customers') or [])
-    response['reported_customers'] = customers[offset:offset + limit]
+    response['reported_customers'], response['translation_pending'] = _attach_weekly_translations(customers[offset:offset + limit])
     response['reported_customer_count'] = len(customers)
     response['reported_customer_pagination'] = {
         'offset': offset,
