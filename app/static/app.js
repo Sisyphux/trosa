@@ -13849,7 +13849,6 @@ var OV = {
   _weekData: {},
   _status: {},
   _usersLoaded: false,
-  _view: 'cols',
   _talkMember: ''
 };
 
@@ -13938,12 +13937,6 @@ function weeklyCurrentData(uid) {
   return bucket[uid] || null;
 }
 
-function weeklyCountFor(ws, uid) {
-  var data = (OV._weekData[ws] || {})[uid];
-  if (!data) return null;
-  return Number(data.reported_customer_count != null ? data.reported_customer_count : (data.reported_customers || []).length);
-}
-
 function weeklyShortRange(ws) {
   var parts = String(ws).split('-');
   var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
@@ -13969,57 +13962,25 @@ function renderWeekStrip() {
   if (label) label.textContent = formatWeekLabel(getWeekStart(overviewWeekOffset));
 }
 
-function renderWeeklyPulse() {
-  var root = document.getElementById('weeklyTeamOverview');
-  if (!root) return;
-  var ws = getWeekStart(overviewWeekOffset), prev = getWeekStart(overviewWeekOffset - 1);
-  var ids = weeklyMemberIds();
-  var counts = ids.map(function(uid) { return weeklyCountFor(ws, uid); });
-  var max = Math.max.apply(null, counts.map(function(c) { return c || 0; }).concat([1]));
-  root.innerHTML = ids.map(function(uid, i) {
-    var c = counts[i], p = weeklyCountFor(prev, uid), diff = '';
-    if (c != null && p != null) {
-      var d = c - p;
-      diff = '<small class="wk-diff' + (d > 0 ? ' is-up' : d < 0 ? ' is-down' : '') + '">' + (d > 0 ? '↑' + d : d < 0 ? '↓' + (-d) : '持平') + ' 对比上周</small>';
-    }
-    return '<div class="wk-pulse" style="--person-color:' + escapeHtml(OV.colors[uid] || '#8B7355') + '"><div class="wk-pulse-n">' + (c == null ? '—' : c) + diff + '</div><div class="wk-pulse-l">' + escapeHtml(OV.labels[uid]) + ' · 有进展的客户</div><div class="wk-pulse-bar"><i style="width:' + (c ? Math.round(c / max * 100) : 0) + '%"></i></div></div>';
-  }).join('');
+function weeklyDayLabel(dateStr) {
+  var parts = String(dateStr || '').split('-');
+  if (parts.length < 3) return '<b>' + escapeHtml(dateStr || '未记日期') + '</b>';
+  var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
+  return '<b>周' + '日一二三四五六'.charAt(d.getDay()) + '</b>' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
 }
 
-function weeklyDiffText(uid) {
-  var c = weeklyCountFor(getWeekStart(overviewWeekOffset), uid), p = weeklyCountFor(getWeekStart(overviewWeekOffset - 1), uid);
-  if (c == null || p == null) return '';
-  var d = c - p;
-  return ' · ' + (d > 0 ? '比上周多 ' + d : d < 0 ? '比上周少 ' + (-d) : '与上周持平');
-}
-
-function weeklyItemHtml(r, uid) {
+// One communication, as it was recorded: who, what happened, what comes next.
+function weeklyRecordHtml(r, uid) {
   var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean).join(' · ');
-  var work = String(r.actual_work || '').split(/\n+/).map(function(l) { return l.trim(); }).filter(Boolean);
+  var source = customerSourceLabel(r.customer_source);
+  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country, source].filter(Boolean).join(' · ');
   var open = canOpen ? ' role="button" tabindex="0" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')" onkeydown="if(event.key===\'Enter\'){overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')}"' : '';
-  return '<article class="wk-item"' + open + '><div class="wk-item-co"><span title="' + escapeHtml(nm) + '">' + escapeHtml(nm) + '</span><em>' + escapeHtml(meta) + '</em></div>' +
-    '<p class="wk-item-work">' + renderRichText(work.join('；')) + '</p>' +
-    (r.next_step ? '<p class="wk-item-next"><span>下一步</span>' + renderRichText(r.next_step) + '</p>' : '<p class="wk-item-next is-none"><span>下一步</span>暂无</p>') + '</article>';
+  return '<article class="wk-record"' + open + '><h3>' + escapeHtml(nm) + '</h3>' + (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
+    weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), 'wk-record-text', '') +
+    (r.next_step ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(r.next_step) + '</p>' : '') + '</article>';
 }
 
-function weeklyRowHtml(r, uid) {
-  var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean);
-  var count = Number(r.activity_count || 0);
-  var html = '<article class="wk-row"' + (canOpen ? ' role="button" tabindex="0" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')" onkeydown="if(event.key===\'Enter\'){overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')}"' : '') + '>';
-  html += '<header class="wk-who"><h3 title="' + escapeHtml(nm) + '">' + escapeHtml(nm) + '</h3>';
-  if (meta.length) html += '<p class="wk-meta">' + escapeHtml(meta.join(' · ')) + '</p>';
-  html += weeklySourceLine(r);
-  html += '<p class="wk-when"><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(formatChineseDate(r.date || '')) + '</time><span>本周 ' + count + ' 次活动</span></p></header>';
-  html += '<div class="wk-facts">';
-  html += weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), '', '实际工作');
-  html += weeklyFactBlock(r.next_step || '', 'is-next', '下一步');
-  if (canOpen) html += '<button type="button" class="wk-open" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">查看详情 ' + uiIcon('right') + '</button>';
-  return html + '</div></article>';
-}
-
-function weeklyBodyHtml(uid, data, status, itemFn) {
+function weeklyBodyHtml(uid, data, status) {
   if (!data) {
     if (status === 'error') return '<div class="wk-error" role="alert"><strong>这位成员的周报加载失败</strong><p>不是这周没有沟通，只是这次没读到。</p><button type="button" onclick="retryWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
     return '<div class="wk-state">' + waitHtml('正在读取', 'inline') + '</div>';
@@ -14027,7 +13988,16 @@ function weeklyBodyHtml(uid, data, status, itemFn) {
   var reps = data.reported_customers || [], html = '';
   if (status === 'error') html += '<div class="wk-error wk-error-inline" role="alert"><span>更新失败，已保留最近一次内容。</span><button type="button" onclick="retryWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
   if (!reps.length) html += '<div class="wk-empty">' + emptyStateHtml('week', '本周没有已确认的沟通', '在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。') + '</div>';
-  html += reps.map(function(r) { return itemFn(r, uid); }).join('');
+  var days = [];
+  reps.forEach(function(r) {
+    var last = days[days.length - 1];
+    if (last && last.date === r.date) last.items.push(r);
+    else days.push({ date: r.date, items: [r] });
+  });
+  html += days.map(function(day) {
+    return '<section class="wk-day"><h2 class="wk-day-label">' + weeklyDayLabel(day.date) + '</h2><div class="wk-records">' +
+      day.items.map(function(r) { return weeklyRecordHtml(r, uid); }).join('') + '</div></section>';
+  }).join('');
   var pg = data.reported_customer_pagination || {};
   if (pg.has_next) html += '<button class="wk-more" type="button" onclick="loadMoreWeeklyMembers(\'' + escapeHtml(uid) + '\')">显示更多客户</button>';
   return html;
@@ -14037,46 +14007,20 @@ function renderWeeklyBoard() {
   var host = document.getElementById('ovReports');
   if (!host) return;
   if (!host.querySelector('#weeklyMemberContent')) {
-    host.innerHTML = '<div class="wk-members" id="weeklyTeamOverview"></div><div class="wk-board" id="weeklyMemberContent"></div>';
+    host.innerHTML = '<div class="wk-members" id="weeklyTeamOverview" role="group" aria-label="负责人"></div><div class="wk-board" id="weeklyMemberContent"></div>';
   }
-  var board = document.getElementById('weeklyMemberContent');
   var ids = weeklyMemberIds();
-  var ws = getWeekStart(overviewWeekOffset);
-  renderWeeklyPulse();
-  board.className = 'wk-board wk-board-' + OV._view;
-  host.classList.toggle('is-talk', OV._view === 'talk');
   if (!OV.labels[OV._talkMember]) OV._talkMember = defaultWeeklyMember();
-  if (OV._view === 'talk') {
-    var rail = '<div class="wk-rail" role="group" aria-label="负责人">' + ids.map(function(uid, i) {
-      var c = weeklyCountFor(ws, uid), on = uid === OV._talkMember;
-      return '<button type="button" class="wk-rail-btn' + (on ? ' is-active' : '') + '" aria-pressed="' + on + '" onclick="setWeeklyTalkMember(\'' + escapeHtml(uid) + '\')"><span>' + escapeHtml(OV.labels[uid]) + '<kbd>' + (i + 1) + '</kbd></span><b>' + (c == null ? '—' : c) + '</b></button>';
-    }).join('') + '</div>';
-    var uid = OV._talkMember, data = weeklyCurrentData(uid), n = weeklyCountFor(ws, uid);
-    board.innerHTML = rail + '<section class="wk-stage" data-weekly-member="' + escapeHtml(uid) + '"><h2>' + escapeHtml(OV.labels[uid]) + '</h2>' +
-      '<p class="wk-stage-sum">' + (n == null ? '正在读取' : n + ' 位客户有进展') + weeklyDiffText(uid) + '</p>' + weeklyBodyHtml(uid, data, OV._status[uid], weeklyRowHtml) +
-      '<p class="wk-stage-pager"><kbd>空格</kbd> 下一位</p></section>';
-    return;
-  }
-  board.innerHTML = ids.map(function(uid) {
-    var data = weeklyCurrentData(uid), status = OV._status[uid], n = weeklyCountFor(ws, uid);
-    var busy = status === 'loading' ? ' is-loading' : '';
-    return '<section class="wk-col' + busy + '" data-weekly-member="' + escapeHtml(uid) + '" style="--person-color:' + escapeHtml(OV.colors[uid] || '#8B7355') + '">' +
-      '<h2 class="wk-col-head">' + escapeHtml(OV.labels[uid]) + '<span>' + (n == null ? '' : n + ' 位客户') + (data && status === 'loading' ? ' · 更新中' : '') + '</span></h2>' +
-      weeklyBodyHtml(uid, data, status, weeklyItemHtml) + '</section>';
+  var uid = OV._talkMember;
+  document.getElementById('weeklyTeamOverview').innerHTML = ids.map(function(id) {
+    var on = id === uid;
+    return '<button type="button" class="wk-member-tab' + (on ? ' is-active' : '') + '" aria-pressed="' + on + '" onclick="setWeeklyTalkMember(\'' + escapeHtml(id) + '\')">' + escapeHtml(OV.labels[id]) + '</button>';
   }).join('');
-}
-
-function setWeeklyView(view, event) {
-  // A mouse click leaves focus on the toggle, where Space would re-press it instead of stepping to the next member.
-  if (event && event.detail > 0 && event.currentTarget && event.currentTarget.blur) event.currentTarget.blur();
-  OV._view = view === 'talk' ? 'talk' : 'cols';
-  try { localStorage.setItem('tradeos.weekly-view', OV._view); } catch (e) {}
-  Array.from(document.querySelectorAll('[data-wk-view]')).forEach(function(b) {
-    var on = b.dataset.wkView === OV._view;
-    b.classList.toggle('is-active', on);
-    b.setAttribute('aria-pressed', on);
-  });
-  renderWeeklyBoard();
+  var board = document.getElementById('weeklyMemberContent');
+  var status = OV._status[uid];
+  board.classList.toggle('is-loading', status === 'loading' && !!weeklyCurrentData(uid));
+  board.setAttribute('data-weekly-member', uid);
+  board.innerHTML = weeklyBodyHtml(uid, weeklyCurrentData(uid), status);
 }
 
 function setWeeklyTalkMember(uid) {
@@ -14102,7 +14046,6 @@ async function loadWeeklyMember(uid, ws, loadToken, options) {
     writeWeeklyLocalCache(uid, ws, data);
     bucket[uid] = data;
     if (showing()) { OV._status[uid] = ''; renderWeeklyBoard(); }
-    else if (options.prefetch && ws === getWeekStart(overviewWeekOffset - 1)) renderWeeklyPulse();
     if (showing()) loadRemainingWeeklyMembers(uid, ws, loadToken);
   } catch (e) {
     if (!showing()) return;
@@ -14164,25 +14107,18 @@ function showWeek() {
   });
   renderWeeklyBoard();
   weeklyMemberIds().forEach(function(uid) { loadWeeklyMember(uid, ws, loadToken); });
-  // The previous week feeds the “对比上周” numbers and is the next likely click.
+  // The previous week is the next likely click; have it ready.
   var prev = getWeekStart(overviewWeekOffset - 1);
   weeklyMemberIds().forEach(function(uid) {
     if (weeklyWeekBucket(prev)[uid]) return;
     api('/api/weekly-summary/' + encodeURIComponent(uid) + '?week_start=' + encodeURIComponent(prev) + '&limit=30&offset=0').then(function(data) {
       if (!data || data.error) return;
       weeklyWeekBucket(prev)[uid] = data;
-      if (getWeekStart(overviewWeekOffset - 1) === prev) renderWeeklyPulse();
     }).catch(function() {});
   });
 }
 
 async function loadOverview() {
-  try { OV._view = localStorage.getItem('tradeos.weekly-view') === 'talk' ? 'talk' : 'cols'; } catch (e) {}
-  Array.from(document.querySelectorAll('[data-wk-view]')).forEach(function(b) {
-    var on = b.dataset.wkView === OV._view;
-    b.classList.toggle('is-active', on);
-    b.setAttribute('aria-pressed', on);
-  });
   if (!OV._usersLoaded) {
     try {
       var userData = await api('/api/auth/users');
@@ -14210,10 +14146,8 @@ document.addEventListener('keydown', function(event) {
   if (event.key === 'ArrowLeft') { event.preventDefault(); overviewPrevWeek(); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); overviewNextWeek(); }
   else if (event.key === 't' || event.key === 'T') { overviewGoWeek(0); }
-  else if (OV._view === 'talk' && event.key === ' ' && tag !== 'BUTTON') { event.preventDefault(); stepWeeklyTalkMember(1); }
-  else if (/^[1-9]$/.test(event.key) && weeklyMemberIds()[Number(event.key) - 1]) {
-    OV._view = 'talk'; setWeeklyView('talk'); setWeeklyTalkMember(weeklyMemberIds()[Number(event.key) - 1]);
-  }
+  else if (event.key === ' ' && tag !== 'BUTTON') { event.preventDefault(); stepWeeklyTalkMember(1); }
+  else if (/^[1-9]$/.test(event.key) && weeklyMemberIds()[Number(event.key) - 1]) setWeeklyTalkMember(weeklyMemberIds()[Number(event.key) - 1]);
 });
 
 function showOverviewCustomerLoading(owner) {
