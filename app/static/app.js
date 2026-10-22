@@ -1220,6 +1220,73 @@ function highlightSearchText(value, query) {
   return result + escapeHtml(text.slice(lastIndex));
 }
 
+// 搜索结果里的日期：同年写“10月16日”，跨年才带年份；完整日期留在悬停提示里。
+function searchDateLabel(value) {
+  var text = String(value || '').trim();
+  var match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return formatDate(value);
+  var label = formatChineseDate(text);
+  return Number(match[1]) === new Date().getFullYear() ? label : match[1] + '年' + label;
+}
+
+function searchDateHtml(value) {
+  return '<time title="' + escapeHtml(formatDate(value)) + '">' + escapeHtml(searchDateLabel(value)) + '</time>';
+}
+
+// 国家只在显示时统一成中文：存的值、接口和搜索都不变；对不上的原样显示。
+var COUNTRY_DISPLAY_NAMES = {
+  'us': '美国', 'usa': '美国', 'u.s.': '美国', 'u.s.a.': '美国', 'u.s.a': '美国', 'united states': '美国',
+  'united states of america': '美国', 'america': '美国',
+  'uae': '阿联酋', 'u.a.e.': '阿联酋', 'u.a.e': '阿联酋', 'united arab emirates': '阿联酋', 'emirates': '阿联酋', 'dubai': '阿联酋',
+  'saudi arabia': '沙特阿拉伯', 'ksa': '沙特阿拉伯', 'saudi': '沙特阿拉伯',
+  'uk': '英国', 'u.k.': '英国', 'united kingdom': '英国', 'great britain': '英国', 'britain': '英国', 'england': '英国',
+  'germany': '德国', 'deutschland': '德国', 'france': '法国', 'italy': '意大利', 'spain': '西班牙', 'españa': '西班牙',
+  'portugal': '葡萄牙', 'netherlands': '荷兰', 'holland': '荷兰', 'belgium': '比利时', 'luxembourg': '卢森堡',
+  'switzerland': '瑞士', 'austria': '奥地利', 'ireland': '爱尔兰', 'sweden': '瑞典', 'norway': '挪威',
+  'denmark': '丹麦', 'finland': '芬兰', 'iceland': '冰岛', 'poland': '波兰', 'czech republic': '捷克', 'czechia': '捷克',
+  'slovakia': '斯洛伐克', 'hungary': '匈牙利', 'romania': '罗马尼亚', 'bulgaria': '保加利亚', 'greece': '希腊',
+  'croatia': '克罗地亚', 'slovenia': '斯洛文尼亚', 'serbia': '塞尔维亚', 'lithuania': '立陶宛', 'latvia': '拉脱维亚',
+  'estonia': '爱沙尼亚', 'ukraine': '乌克兰', 'russia': '俄罗斯', 'russian federation': '俄罗斯', 'belarus': '白俄罗斯',
+  'cyprus': '塞浦路斯', 'malta': '马耳他', 'turkey': '土耳其', 'türkiye': '土耳其', 'turkiye': '土耳其',
+  'canada': '加拿大', 'mexico': '墨西哥', 'méxico': '墨西哥', 'brazil': '巴西', 'brasil': '巴西', 'argentina': '阿根廷',
+  'chile': '智利', 'peru': '秘鲁', 'perú': '秘鲁', 'colombia': '哥伦比亚', 'ecuador': '厄瓜多尔', 'venezuela': '委内瑞拉',
+  'uruguay': '乌拉圭', 'paraguay': '巴拉圭', 'bolivia': '玻利维亚', 'panama': '巴拿马', 'panamá': '巴拿马',
+  'costa rica': '哥斯达黎加', 'guatemala': '危地马拉', 'honduras': '洪都拉斯', 'el salvador': '萨尔瓦多',
+  'nicaragua': '尼加拉瓜', 'belize': '伯利兹', 'dominican republic': '多米尼加共和国', 'dominicana': '多米尼加共和国',
+  'puerto rico': '波多黎各', 'jamaica': '牙买加', 'trinidad and tobago': '特立尼达和多巴哥', 'trinidad': '特立尼达和多巴哥',
+  'barbados': '巴巴多斯', 'bahamas': '巴哈马', 'aruba': '阿鲁巴', 'grenada': '格林纳达', 'guyana': '圭亚那',
+  'suriname': '苏里南', 'saint lucia': '圣卢西亚', 'antigua and barbuda': '安提瓜和巴布达', 'cuba': '古巴', 'haiti': '海地',
+  'australia': '澳大利亚', 'new zealand': '新西兰', 'aotearoa': '新西兰', 'fiji': '斐济', 'papua new guinea': '巴布亚新几内亚',
+  'china': '中国', 'hong kong': '中国香港', 'macau': '中国澳门', 'macao': '中国澳门', 'taiwan': '中国台湾',
+  'japan': '日本', 'south korea': '韩国', 'korea': '韩国', 'republic of korea': '韩国', 'mongolia': '蒙古',
+  'india': '印度', 'pakistan': '巴基斯坦', 'bangladesh': '孟加拉国', 'sri lanka': '斯里兰卡', 'nepal': '尼泊尔',
+  'singapore': '新加坡', 'malaysia': '马来西亚', 'indonesia': '印度尼西亚', 'thailand': '泰国', 'vietnam': '越南',
+  'viet nam': '越南', 'philippines': '菲律宾', 'myanmar': '缅甸', 'cambodia': '柬埔寨', 'laos': '老挝', 'brunei': '文莱',
+  'kazakhstan': '哈萨克斯坦', 'uzbekistan': '乌兹别克斯坦', 'kyrgyzstan': '吉尔吉斯斯坦', 'azerbaijan': '阿塞拜疆',
+  'georgia': '格鲁吉亚', 'armenia': '亚美尼亚', 'afghanistan': '阿富汗',
+  'qatar': '卡塔尔', 'kuwait': '科威特', 'oman': '阿曼', 'bahrain': '巴林', 'iran': '伊朗', 'iraq': '伊拉克',
+  'israel': '以色列', 'jordan': '约旦', 'lebanon': '黎巴嫩', 'syria': '叙利亚', 'yemen': '也门',
+  'egypt': '埃及', 'morocco': '摩洛哥', 'algeria': '阿尔及利亚', 'tunisia': '突尼斯', 'libya': '利比亚', 'sudan': '苏丹',
+  'nigeria': '尼日利亚', 'ghana': '加纳', 'kenya': '肯尼亚', 'tanzania': '坦桑尼亚', 'uganda': '乌干达', 'ethiopia': '埃塞俄比亚',
+  'south africa': '南非', 'botswana': '博茨瓦纳', 'namibia': '纳米比亚', 'zambia': '赞比亚', 'zimbabwe': '津巴布韦',
+  'mozambique': '莫桑比克', 'angola': '安哥拉', 'senegal': '塞内加尔', 'cameroon': '喀麦隆',
+  "cote d'ivoire": '科特迪瓦', 'côte d’ivoire': '科特迪瓦', "côte d'ivoire": '科特迪瓦', 'ivory coast': '科特迪瓦'
+};
+
+function countryDisplayName(value) {
+  var raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  var key = raw.toLowerCase().replace(/\s+/g, ' ').replace(/^the /, '').replace(/[\s,;。]+$/, '');
+  return COUNTRY_DISPLAY_NAMES[key] || COUNTRY_DISPLAY_NAMES[key.replace(/\.$/, '')] || raw;
+}
+
+function countryCellHtml(value) {
+  var raw = String(value == null ? '' : value).trim();
+  if (!raw) return '-';
+  var shown = countryDisplayName(raw);
+  return shown === raw ? escapeHtml(raw) : '<span title="' + escapeHtml(raw) + '">' + escapeHtml(shown) + '</span>';
+}
+
 function renderGlobalSearchPreview(customers, total) {
   var preview = document.getElementById('globalSearchPreview');
   var input = document.getElementById('globalPageSearch');
@@ -1248,7 +1315,7 @@ function renderGlobalSearchPreview(customers, total) {
       button.setAttribute('aria-posinset', String(index + 1));
       button.setAttribute('aria-setsize', String(_globalSearchTotal || _globalSearchResults.length));
       var company = customer.company || customer.name || '未命名客户';
-      var secondary = customer.country || customer.field || '';
+      var secondary = customer.country ? countryDisplayName(customer.country) : (customer.field || '');
       var detail = [customer.field, customer.primary_contact_name, customer.primary_contact_email].filter(Boolean).join(' · ');
       var match = customer.match_context || {};
       var matchText = match.content || match.title || match.contact_name || detail;
@@ -1256,10 +1323,11 @@ function renderGlobalSearchPreview(customers, total) {
       name.innerHTML = highlightSearchText(company, input.value);
       var meta = document.createElement('span');
       meta.textContent = secondary;
+      if (customer.country && secondary !== String(customer.country).trim()) meta.title = customer.country;
       var small = document.createElement('small');
       var smallParts = [];
       if (matchText) smallParts.push(highlightSearchText(matchText, input.value));
-      if (match.date) smallParts.push(escapeHtml(formatDate(match.date)));
+      if (match.date) smallParts.push(searchDateHtml(match.date));
       small.innerHTML = smallParts.join(' · ') || '打开客户详情';
       button.appendChild(name);
       button.appendChild(meta);
@@ -2352,7 +2420,7 @@ function isInboxCommunicationCapture(item) {
 
 function inboxQuestionTypeLabel(question) {
   if (!question) return 'Inbox';
-  if (question.source_type === 'gmail') return 'Gmail';
+  if (question.source_type === 'gmail') return '邮件';
   if (question.source_type === 'browser') return '浏览器采集';
   if (question.source_type === 'sela') return '自动开发';
   return 'Inbox';
@@ -3171,7 +3239,7 @@ function renderInboxQuestionHtml(question) {
   var typeChip = '<span class="inbox-item-type-chip">' + escapeHtml(inboxQuestionTypeLabel(question)) + '</span>';
   var metaParts = [];
   if (customer) {
-    if (customer.country) metaParts.push(customer.country);
+    if (customer.country) metaParts.push(countryDisplayName(customer.country));
     if (customer.contact_name) metaParts.push(customer.contact_name);
   } else if (question.suggested_customer && question.suggested_customer.company) {
     metaParts.push('建议：' + question.suggested_customer.company);
@@ -6958,7 +7026,9 @@ function ledgerRowHtml(row) {
   var query = LD.query;
   var company = row.company || '未命名公司';
   var what = row.days === null ? '' : (row.waiting_reply ? statusGlyph('wait', '等待回复') : (row.has_contact ? statusGlyph('done', '已有联系') : statusGlyph('none', '未获回复')));
-  var cf = [row.country, row.field, customerSourceLabel(row.source)].filter(Boolean).join(' · ') || '—';
+  var shownCountry = countryDisplayName(row.country);
+  var cf = [shownCountry, row.field, customerSourceLabel(row.source)].filter(Boolean).join(' · ') || '—';
+  var cfTitle = row.country && shownCountry !== String(row.country).trim() ? ' title="' + escapeHtml(row.country) + '"' : '';
   var dup = ledgerDuplicateHtml(row.id);
   var snippet;
   // A company-name hit is already shown (and marked) on the line above; say where else it matched.
@@ -6973,7 +7043,7 @@ function ledgerRowHtml(row) {
   return '<i class="ld-lit"></i>' +
     '<div class="ld-l1"><span class="ld-co" title="' + escapeHtml(company) + '">' + highlightSearchText(company, query) + '</span>' + dup + '<i class="ld-lead"></i>' +
     '<span class="ld-wh" title="' + escapeHtml(row.event_date || '尚无沟通记录') + '">' + escapeHtml(ledgerRelative(row.days)) + (what ? '<i>' + what + '</i>' : '') + '</span></div>' +
-    '<div class="ld-l2"><span class="ld-cf">' + highlightSearchText(cf, query) + '</span><span class="ld-sn">' + snippet + '</span>' + next + '</div>' +
+    '<div class="ld-l2"><span class="ld-cf"' + cfTitle + '>' + highlightSearchText(cf, query) + '</span><span class="ld-sn">' + snippet + '</span>' + next + '</div>' +
     '<div class="ld-row-acts"><button class="ld-open" type="button" tabindex="-1" data-ld-open="' + row.id + '">打开 <kbd>↵</kbd></button>' +
     '<button class="ld-quiet" type="button" tabindex="-1" data-ld-archive="' + row.id + '">归档</button></div>';
 }
@@ -7021,7 +7091,7 @@ function ledgerFillRow(node, id) {
   var hint = LD.hints[row.id];
   node.setAttribute('aria-label', [row.company,
     hint && hint.count ? '另有 ' + hint.count + ' 条同名记录' : '',
-    row.country, ledgerRelative(row.days), due.text].filter(Boolean).join('，'));
+    countryDisplayName(row.country), ledgerRelative(row.days), due.text].filter(Boolean).join('，'));
   node.innerHTML = ledgerRowHtml(row);
 }
 
@@ -7199,7 +7269,7 @@ function ledgerDockUpdate() {
   if (!row || row.missing || LD.state !== 'ok') { dock.innerHTML = ''; return; }
   var due = ledgerDue(row);
   dock.innerHTML = '<div class="ld-dock-n"><b>' + escapeHtml(row.company || '未命名公司') + '</b><span>' +
-    escapeHtml([row.country, ledgerRelative(row.days), due.text].filter(Boolean).join(' · ')) + '</span></div>' +
+    escapeHtml([countryDisplayName(row.country), ledgerRelative(row.days), due.text].filter(Boolean).join(' · ')) + '</span></div>' +
     '<button class="ld-quiet" type="button" data-ld-act="archive" data-id="' + row.id + '">归档</button>' +
     '<button class="ld-open ld-open-dock" type="button" data-ld-act="open" data-id="' + row.id + '">打开客户</button>';
 }
@@ -7280,7 +7350,7 @@ function ledgerShowLens(position, offsetY) {
   if (offsetY !== null && offsetY !== undefined) lens.style.top = offsetY + 'px';
   if (row && !row.missing) {
     lens.innerHTML = '<b>' + escapeHtml((row.company || '').length > 46 ? row.company.slice(0, 44) + '…' : row.company) + '</b><i>' +
-      escapeHtml([row.country, ledgerRelative(row.days)].filter(Boolean).join(' · ')) + '</i>';
+      escapeHtml([countryDisplayName(row.country), ledgerRelative(row.days)].filter(Boolean).join(' · ')) + '</i>';
   } else {
     lens.innerHTML = '<i>' + escapeHtml(ledgerRelative(LD.days[position])) + ' · 第 ' + (position + 1) + ' 条</i>';
     clearTimeout(LD.lensTimer);
@@ -7405,8 +7475,11 @@ function renderCustomerTable(tbodyId, customers, type) {
     otherIssues.forEach(function(issue) { qualityBadges.push('<span>' + escapeHtml(issue) + '</span>'); });
     var issuesHtml = qualityBadges.length ? '<div class="customer-quality-issues">' + qualityBadges.join('') + '</div>' : '';
     var matchContext = c.match_context || {};
-    var matchContextDetail = [matchContext.content || matchContext.title || matchContext.contact_name, matchContext.date ? formatDate(matchContext.date) : ''].filter(Boolean).join(' · ');
-    var matchContextHtml = matchContextDetail ? '<div class="customer-match-context"><span>' + highlightSearchText(matchContextDetail, searchQuery) + '</span></div>' : '';
+    var matchContextText = matchContext.content || matchContext.title || matchContext.contact_name || '';
+    var matchContextParts = [];
+    if (matchContextText) matchContextParts.push(highlightSearchText(matchContextText, searchQuery));
+    if (matchContext.date) matchContextParts.push(searchDateHtml(matchContext.date));
+    var matchContextHtml = matchContextParts.length ? '<div class="customer-match-context"><span>' + matchContextParts.join(' · ') + '</span></div>' : '';
     var matchContextAction = matchContext.type === 'inbox' && matchContext.action === 'record'
       ? '<button type="button" class="text-action customer-search-context-action" onclick="openCustomerSearchContext(' + c.id + ')">记录进展</button>' : '';
     var selected = type === 'existing' && selectedCustomers.has(Number(c.id));
@@ -7420,7 +7493,7 @@ function renderCustomerTable(tbodyId, customers, type) {
     rows.push({ id: c.id, html: '<article class="customer-row-card' + (isPinned ? ' customer-row-priority customer-light-on' : ' customer-light-off') + '" data-customer-id="' + c.id + '" tabindex="0">' +
       selectCell +
       '<div class="customer-company-cell" data-label="客户"><div class="customer-company-heading">' + dragHandle + customerLightControl(c.id, isPinned, 'customer-list-light') + '<button class="customer-name-button" onclick="openEditModal(' + c.id + ')">' + companyHtml + '</button></div>' + relationshipBadge + (person ? '<small>' + (searchQuery ? highlightSearchText(person, searchQuery) : escapeHtml(person)) + '</small>' : '') + updatedText + tagsHtml + issuesHtml + matchReasons + matchContextHtml + matchContextAction + '</div>' +
-      '<div class="customer-muted" data-label="国家" data-customer-column="country">' + escapeHtml(c.country || '-') + '</div>' +
+      '<div class="customer-muted" data-label="国家" data-customer-column="country">' + countryCellHtml(c.country) + '</div>' +
       '<div class="customer-muted" data-label="类型" data-customer-column="type">' + escapeHtml(c.type || '-') + '</div>' +
       '<div class="customer-muted" data-label="行业" data-customer-column="field">' + escapeHtml(c.field || c.industry || '-') + '</div>' +
       '<div class="customer-muted" data-label="等级" data-customer-column="level">' + escapeHtml(c.level || '-') + '</div>' +

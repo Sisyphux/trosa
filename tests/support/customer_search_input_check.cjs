@@ -104,6 +104,22 @@ win.eval(script);
   assert.equal(win.highlightSearchText('Delta Silver GmbH', 'a si ta'),
     'Del<mark class="search-hit">ta</mark> <mark class="search-hit">Si</mark>lver GmbH');
   assert.equal(win.highlightSearchText('Alpha', 'a'), '<mark class="search-hit">A</mark>lph<mark class="search-hit">a</mark>');
+
+  // Search results show compact dates (year only when it differs) and Chinese country names;
+  // the stored value stays in the hover title and unknown values are shown as-is.
+  const year = new Date().getFullYear();
+  assert.equal(win.searchDateLabel(year + '-10-16'), '10月16日');
+  assert.equal(win.searchDateLabel((year - 1) + '-12-03 09:00:00'), (year - 1) + '年12月3日');
+  assert.equal(win.searchDateHtml(year + '-10-16'), '<time title="' + year + '-10-16">10月16日</time>');
+  assert.equal(win.countryDisplayName('Sweden'), '瑞典');
+  assert.equal(win.countryDisplayName(' the Netherlands '), '荷兰');
+  assert.equal(win.countryDisplayName('U.S.A.'), '美国');
+  assert.equal(win.countryDisplayName('Türkiye'), '土耳其');
+  assert.equal(win.countryDisplayName('墨西哥'), '墨西哥');
+  assert.equal(win.countryDisplayName('Atlantis'), 'Atlantis');
+  assert.equal(win.countryCellHtml('Poland'), '<span title="Poland">波兰</span>');
+  assert.equal(win.countryCellHtml('阿联酋'), '阿联酋');
+  assert.equal(win.countryCellHtml(''), '-');
   console.log('customer search input regression: OK');
   process.exit(0);
 })().catch((error) => {

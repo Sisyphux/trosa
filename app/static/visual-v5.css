@@ -339,6 +339,8 @@ html { scroll-padding-top: 72px; scroll-padding-bottom: 76px; }
   font-size: .78rem;
   color: var(--dl-mut);
 }
+/* 搜不到时这句是要读的话，不是附注：用正文字号和阅读灰。 */
+#trosa .room-index .global-search-empty { font-size: .875rem; color: var(--dl-ink-3); }
 
 /* pages: numbered serif rows; the light picks one and the rest step back */
 #trosa .room-index-nav { margin-top: clamp(1.6rem, 6vh, 3.4rem); }
