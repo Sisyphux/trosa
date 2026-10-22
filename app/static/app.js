@@ -8736,7 +8736,7 @@ function renderCustomerFactsBrief(customer) {
   var waitingText = customer.customer_judgment || '';
   var waitEl = document.getElementById('cwWaiting');
   if (waitEl) {
-    waitEl.textContent = waitingText || '还没有记录，点此填写';
+    waitEl.textContent = waitingText || '还没写在等什么，点此填写';
     waitEl.classList.toggle('is-empty', !waitingText);
   }
   var dateEl = document.getElementById('cwDate');

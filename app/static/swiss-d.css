@@ -342,3 +342,23 @@ html.motion-reduced .hand-tip{transition:none !important}
 /* 其他事项的日期（“10月21日”）不换行 */
 #trosa .inbox-question-side time,
 #trosa .inbox-item-date{white-space:nowrap}
+/* 客户工作区小幅优化（2026-10-22）：版式不变，只修可读性。
+   记录行按内容高度排列（原先 flex-grow 把两三条记录撑成满栏高）；日期与来源行提到可读对比度；
+   客户名与资料行放大，不再靠大写字距撑场面。 */
+#trosa #customerEditModal .cw-row{flex:0 0 auto}
+#trosa #customerEditModal .cw-list,#trosa #customerEditModal .cw-rows{justify-content:flex-start}
+#trosa #customerEditModal .cw-room{--cw-ink-dim:var(--dl-ink-2);--cw-date-dim:var(--dl-ink-3);--cw-sub-dim:var(--dl-ink-3)}
+#trosa #customerEditModal .cw-tx{font-size:.92em;line-height:1.6}
+#trosa #customerEditModal .cw-dt{font-size:.74em}
+#trosa #customerEditModal .cw-rs{font-size:.72em;letter-spacing:0}
+@media (min-width:821px){#trosa #customerEditModal .cw-panel{width:min(500px,36vw)}}
+#trosa #customerEditModal .cw-ident h1{font-size:clamp(1.5rem,2.2vw,2rem);font-weight:600}
+#trosa #customerEditModal .cw-lines{font-size:.82em;letter-spacing:0;line-height:1.7;text-transform:none;color:var(--dl-ink-3)}
+/* 客户工作区小幅优化（续）：联系人/待办行同样按内容高度；分区标题、资料标签提到可读大小；
+   联系人底部“添加联系人”与分区标题右侧的同名入口重复，只保留“批量导入邮箱”。 */
+#trosa #customerEditModal .cw-prow{flex:0 0 auto}
+#trosa #customerEditModal .cw-phead{font-size:.76em;letter-spacing:.04em;text-transform:none}
+#trosa #customerEditModal .cw-pmeta,#trosa #customerEditModal .cw-pact{color:var(--dl-ink-3);letter-spacing:.02em}
+#trosa #customerEditModal .cw-dlg dt,#trosa #customerEditModal .cw-subk{font-size:.74em;letter-spacing:.02em;text-transform:none;color:var(--dl-ink-3)}
+#trosa #customerEditModal #editTabContacts .cw-foot > .cw-link:first-child{display:none}
+@media (min-width:821px){#trosa #customerEditModal .cw-pbody{min-height:0;overflow-y:auto}#trosa #customerEditModal .cw-panel{bottom:11%}}
