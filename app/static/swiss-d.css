@@ -324,3 +324,21 @@ html.motion-reduced .hand-ink{display:none}
 @media (prefers-reduced-motion:reduce){.hand-write,.hand-tip{animation:none !important;transition:none !important}}
 html.motion-reduced .hand-write{animation:none !important}
 html.motion-reduced .hand-tip{transition:none !important}
+
+/* ---- Inbox 收口（对话 / 其他事项）-------------------------------------------
+   只收紧间距与手机上的返回按钮，不改色、字体和版式。 */
+/* 页节顶部历史遗留的 72px（顶栏早已在文档流内）加页头 45px 的顶部留白，
+   把对话和卡片挤到首屏以下；桌面端只收紧 Inbox 自己的两页。 */
+@media (min-width:821px){
+  #trosa #roomMain > #page-dialogue.page-section,
+  #trosa #roomMain > #page-inbox.page-section{padding-top:12px !important}
+  #trosa #page-dialogue .dialogue-page-header,
+  #trosa #page-inbox .inbox-page-header{padding-top:16px !important}
+}
+/* 手机：「← 列表」单行显示，触控区不小于 44px，不被标题挤成竖排 */
+@media (max-width:820px){
+  #trosa .dialogue-back{flex:none;white-space:nowrap;min-height:44px;min-width:44px;padding:0 10px;margin:-4px 0 0 -10px}
+}
+/* 其他事项的日期（“10月21日”）不换行 */
+#trosa .inbox-question-side time,
+#trosa .inbox-item-date{white-space:nowrap}

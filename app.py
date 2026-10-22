@@ -21896,7 +21896,7 @@ def _translate_weekly_text(text):
     key = _weekly_zh_key(text)
     try:
         raw = (ask_ai_text(_WEEKLY_ZH_PROMPT.format(text=text)) or '').strip()
-        ok = bool(raw) and not raw.startswith('[ERROR_') and re.search(r'[\u4e00-\u9fff]', raw)
+        ok = bool(raw) and not raw.startswith(('[ERROR', '[错误]')) and re.search(r'[\u4e00-\u9fff]', raw)
         with _WEEKLY_ZH_LOCK:
             if ok:
                 _WEEKLY_ZH_CACHE[key] = raw[:600]

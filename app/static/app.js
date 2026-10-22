@@ -2495,7 +2495,7 @@ function inboxQuestionFrameHtml(q, current) {
         '<strong>' + escapeHtml(q.headline || q.question) + '</strong>' +
         '<span class="inbox-question-subjectline">' + (subjectLabel ? escapeHtml(subjectLabel) + ' · ' : '') + escapeHtml(subject) + '</span>' +
       '</span>' +
-      '<span class="inbox-question-side"><span class="inbox-question-evidence">' + (q.evidence_count || 0) + ' 条证据</span><time>' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '</time><span class="inbox-question-go" aria-hidden="true">' + uiIcon('right') + '</span></span>' +
+      '<span class="inbox-question-side"><span class="inbox-question-evidence">' + (q.evidence_count || 0) + ' 条证据</span><time title="' + escapeHtml(formatDate(q.updated_at || q.created_at)) + '">' + escapeHtml(inboxDateLabel(q.updated_at || q.created_at)) + '</time><span class="inbox-question-go" aria-hidden="true">' + uiIcon('right') + '</span></span>' +
     '</button></article>';
 }
 
@@ -3212,7 +3212,7 @@ function renderInboxQuestionHtml(question) {
   return '<article class="inbox-item inbox-question inbox-' + escapeHtml(question.kind) +
     (expanded ? ' inbox-item-expanded' : ' inbox-item-collapsed') + '">' +
     '<div class="inbox-item-row">' +
-      '<span class="inbox-item-date">' + escapeHtml(formatDate(question.created_at)) + '</span>' +
+      '<span class="inbox-item-date" title="' + escapeHtml(formatDate(question.created_at)) + '">' + escapeHtml(inboxDateLabel(question.created_at)) + '</span>' +
       '<div class="inbox-item-main">' +
         '<h3 class="inbox-item-name">' + nameHtml + '</h3>' +
         '<div class="inbox-item-meta-row">' + kindChip + typeChip + meta + identitySpan + '</div>' +
@@ -4243,6 +4243,15 @@ function formatChineseDate(dateStr) {
     return (parsed.getMonth() + 1) + '月' + parsed.getDate() + '日';
   }
   return value;
+}
+
+// Inbox 其他事项的日期：同年写“10月21日”，跨年才带年份（完整日期留在悬停提示里）。
+function inboxDateLabel(value) {
+  var text = String(value || '').trim();
+  var match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return formatDate(value);
+  var label = formatChineseDate(text);
+  return Number(match[1]) === new Date().getFullYear() ? label : match[1] + '年' + label;
 }
 
 function formatChineseToday(date) {
@@ -14478,6 +14487,12 @@ function dialogueElapsed(value) {
   return Math.round(hours / 24) + ' 天前';
 }
 
+// sela 的线程键（如 prospect:…）是内部标识，不给人看；放进悬停提示里留作排障。
+function dialogueSubjectText(subject) {
+  var text = String(subject || '');
+  return /^[a-z][a-z0-9_-]*:/i.test(text) ? '' : text;
+}
+
 function dialogueGroup(thread) {
   if (!thread || thread.status === 'closed') return 'done';
   if (thread.awaiting === 'human') return 'awaiting';
@@ -14548,7 +14563,7 @@ async function loadDialogue(options) {
   else if (stillPresent) dialogueSelectedId = dialogueSelectedId;
   else dialogueSelectedId = dialogueNextAwaitingId(null) || (orderedDialogueThreads()[0] || {}).id || null;
   renderDialogueList();
-  if (dialogueSelectedId) await selectDialogueThread(dialogueSelectedId, { keepList: true });
+  if (dialogueSelectedId) await selectDialogueThread(dialogueSelectedId, { keepList: true, auto: true });
   else { dialogueThread = null; dialogueThreadError = null; renderDialogueThread(); }
 }
 
@@ -14591,12 +14606,12 @@ function dialogueRowHtml(thread) {
   var elapsed = dialogueElapsed(thread.updated_at);
   var selected = thread.id === dialogueSelectedId;
   var meta = [];
-  if (thread.subject) meta.push(thread.subject);
+  if (dialogueSubjectText(thread.subject)) meta.push(dialogueSubjectText(thread.subject));
   if (elapsed) meta.push(elapsed);
   return '<div class="dialogue-row' + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
       ' data-dialogue-id="' + escapeHtml(thread.id) + '" aria-current="' + (selected ? 'true' : 'false') + '"' +
       ' onclick="selectDialogueThread(\'' + thread.id + '\')">' +
-      '<div class="dialogue-row-top"><span class="dialogue-row-title">' + escapeHtml(thread.title || thread.subject || '对话') + '</span>' +
+      '<div class="dialogue-row-top"><span class="dialogue-row-title">' + escapeHtml(thread.title || dialogueSubjectText(thread.subject) || '对话') + '</span>' +
         '<span class="dialogue-row-turn dialogue-row-turn--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span></div>' +
       '<div class="dialogue-row-summary">' + escapeHtml(preview) + '</div>' +
       (meta.length ? '<div class="dialogue-row-meta">' + escapeHtml(meta.join(' · ')) + '</div>' : '') +
@@ -14608,9 +14623,13 @@ async function selectDialogueThread(id, options) {
   if (!id) return;
   if (id !== dialogueSelectedId) dialogueConflictNote = null;
   dialogueSelectedId = id;
-  dialogueMobileView = 'thread';
+  // 手机（单栏）上，列表加载完自动选中的那条只在右栏预备好，不替人点进去：先让人看到列表。
+  var autoOnPhone = options.auto && window.matchMedia && window.matchMedia('(max-width: 760px)').matches;
   var page = document.getElementById('page-dialogue');
-  if (page) page.classList.add('dialogue-thread-open');
+  if (!autoOnPhone) {
+    dialogueMobileView = 'thread';
+    if (page) page.classList.add('dialogue-thread-open');
+  }
   renderDialogueList();
   var token = ++dialogueThreadToken;
   dialogueThreadError = null;
@@ -14678,8 +14697,8 @@ function renderDialogueThreadHtml() {
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
         '<div class="dialogue-thread-title">' + titleHtml + '</div>' +
-        '<div class="dialogue-thread-sub">' +
-          (thread.subject ? '<span>' + escapeHtml(thread.subject) + '</span>' : '') +
+        '<div class="dialogue-thread-sub"' + (thread.subject ? ' title="' + escapeHtml(thread.subject) + '"' : '') + '>' +
+          (dialogueSubjectText(thread.subject) ? '<span>' + escapeHtml(dialogueSubjectText(thread.subject)) + '</span>' : '') +
           '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
         '</div>' +
       '</div>' +
@@ -14789,8 +14808,10 @@ function renderDialogueRefsHtml(refs) {
   return refs.map(function(ref) {
     if (!ref || !ref.type) return '';
     var id = ref.id == null ? '' : String(ref.id);
+    // 线索的编号是内部键，标签只写“线索”，编号留在悬停提示里。
+    var shownId = ref.type === 'prospect' ? '' : ' ' + id;
     return '<span class="dialogue-ref" title="' + escapeHtml(ref.type + ' · ' + id) + '">' +
-      escapeHtml(labels[ref.type] || ref.type) + ' ' + escapeHtml(id) + '</span>';
+      escapeHtml(labels[ref.type] || ref.type) + escapeHtml(shownId) + '</span>';
   }).join('');
 }
 

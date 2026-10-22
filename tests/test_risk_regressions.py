@@ -429,6 +429,13 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertEqual(module._translate_weekly_text(english), '')
         self.assertNotIn(module._weekly_zh_key(english), module._WEEKLY_ZH_CACHE)
         module._WEEKLY_ZH_FAILED.clear()
+        # An AI error string (even one written in Chinese) is a failure, not a translation.
+        for error_text in ('[错误] 无法连接到 LM Studio，请确认已启动', '[ERROR_UNREACHABLE] connect failed'):
+            module.ask_ai_text = lambda prompt, error_text=error_text: error_text
+            self.assertEqual(module._translate_weekly_text(english), '')
+            self.assertNotIn(module._weekly_zh_key(english), module._WEEKLY_ZH_CACHE)
+            self.assertIn(module._weekly_zh_key(english), module._WEEKLY_ZH_FAILED)
+            module._WEEKLY_ZH_FAILED.clear()
         module.ask_ai_text = lambda prompt: calls.append(prompt) or '亚克力板进口商和标牌材料供应商'
         self.assertEqual(module._translate_weekly_text(english), '亚克力板进口商和标牌材料供应商')
         attached_rows, still_pending = module._attach_weekly_translations(rows)
