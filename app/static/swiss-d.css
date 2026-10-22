@@ -457,3 +457,55 @@ html.motion-reduced .hand-tip{transition:none !important}
 /* 添加客户：“更多公司资料”是折叠入口，字号与输入框一致，触控区 ≥40px */
 #trosa #addCustomerModal .add-more-toggle,
 #trosa #addNewCustomerModal .add-more-toggle{font-size:.88rem;color:var(--dl-ink);min-height:40px;margin:4px 0 0}
+/* ---- 点击区域与小字（2026-10-22）-------------------------------------------
+   只补点击区与可读性，不改构图、配色、字体与文案。 */
+/* 1) 登录柱廊：构图不动。账号名竖排在窄桌面（如 iPad 1024）只有约 14.7px，
+      略放大到 ≥16px；整块色块本来就是按钮，点击区无需再改。
+      右上局域网地址原为 11px、半透明（对比约 2:1），提到 12.8px 并去掉半透明（阅读灰），
+      点击区用上下内边距 + 负外边距补到 ≥36px，文字位置不变。 */
+@media (min-width:821px){
+  #loginOverlay .entry-spine{font-size:clamp(1.05rem,1.3vw,1.25rem)}
+}
+#loginOverlay .entry-lan{font-size:.8rem;opacity:.9;padding:11px 0;margin-top:-11px}
+@media (pointer:coarse){
+  #loginOverlay .entry-lan{padding:15px 0;margin-top:-15px}
+}
+
+/* 2) 顶栏「搜索与导航」与 Inbox「对话 / 其他事项」标签：原高约 29px，补到 36px（触控 44px）。
+      标签用负上外边距抵消新增高度，下划线与文字位置不跳。 */
+#trosa .room-top .room-key{min-height:36px}
+#trosa .inbox-tabs .inbox-tab{padding-top:7px;margin-top:-7px}
+@media (pointer:coarse){
+  #trosa .room-top .room-key{min-height:44px}
+  #trosa .inbox-tabs .inbox-tab{padding-top:15px;margin-top:-15px}
+}
+
+/* 3) 本周工作：客户名按钮（约 26px）与官网链接（约 17px）点不准。
+      用上下内边距 + 等量负外边距扩大命中区到 ≥36px，排版不动。
+      Inbox 对话里的「归档」文字按钮（约 26×21）同样补到 36px。 */
+#trosa .wk-record h3 .wk-record-name{padding-block:5px;margin-block:-5px}
+#trosa .wk-record .wk-spec dd a{padding-block:10px}
+#trosa .dialogue-composer-actions .dialogue-close-btn{min-height:36px;min-width:36px;padding:0 6px;margin-block:-4px;margin-right:-6px}
+@media (pointer:coarse){
+  #trosa .wk-record h3 .wk-record-name{padding-block:9px;margin-block:-9px}
+  #trosa .wk-record .wk-spec dd a{padding-block:14px}
+  #trosa .dialogue-composer-actions .dialogue-close-btn{min-height:44px;margin-block:-8px}
+}
+
+/* 4) 日历：桌面端页节顶部 72px 历史空白 + 页头留白，标题上方约 120px 空白；
+      只收紧日历自己的页节，不动共用外壳（与今天、Inbox 同一做法）。 */
+@media (min-width:821px){
+  #trosa #roomMain > #page-calendar.page-section{padding-top:12px !important}
+  #trosa #page-calendar > .page-header.page-header{padding-top:16px !important}
+}
+
+/* 5) 手机客户列表的视图筛选条可横滑，但最右一项被硬截断、看不出还能滑。
+      右侧加一段渐隐（遮罩，不新增颜色）；右内边距与滚动内边距让最后一项和
+      键盘聚焦项滑到底时完整露出，不被渐隐盖住。 */
+@media (max-width:820px){
+  #trosa .ld-views-row{padding-right:2rem;scroll-padding-inline:0 2rem;
+    -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 2rem),transparent);
+            mask-image:linear-gradient(to right,#000 calc(100% - 2rem),transparent)}
+  /* 键盘在条内移动时取消渐隐，焦点环与当前项始终清晰 */
+  #trosa .ld-views-row:focus-within{-webkit-mask-image:none;mask-image:none}
+}
