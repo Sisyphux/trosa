@@ -3519,11 +3519,101 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 .wk-more:focus-visible,
 .wk-error button:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
 
+/* 周条：四周一排，选中墨底；右侧是呈现方式与键盘提示 */
+.wk-week-switch { gap: 0; padding: 0; border: 0; border-radius: 0; background: transparent; align-items: stretch; }
+.wk-week-switch button { min-height: 0; border-radius: 0; }
+.wk-week-switch .wk-week-nav { width: 36px; justify-content: center; padding: 0; border: 1px solid var(--dl-hair); }
+.wk-week-switch .wk-week-nav:disabled { opacity: .35; cursor: default; }
+.wk-week-switch .wk-week-cell {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 104px;
+  padding: 5px 12px;
+  border: 1px solid var(--dl-hair);
+  border-left: 0;
+  font-size: var(--dl-fs-caption);
+  color: var(--dl-ink-3);
+}
+.wk-week-switch .wk-week-cell b { font-size: var(--dl-fs-body-s); font-weight: 600; color: var(--dl-ink); }
+.wk-week-switch .wk-week-cell.wk-week-current span { color: var(--dl-focus); }
+.wk-week-switch .wk-week-cell.is-selected { background: var(--dl-ink); color: #ddd; border-color: var(--dl-ink); }
+.wk-week-switch .wk-week-cell.is-selected b { color: #fff; }
+.wk-week-switch .wk-week-cell.is-selected span { color: #ccc; }
+.wk-week-tools { display: flex; align-items: center; gap: 14px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+.wk-week-hint kbd, .wk-rail-btn kbd, .wk-stage-pager kbd {
+  margin: 0 2px; padding: 0 5px; border: 1px solid var(--dl-hair); border-radius: 2px; background: #fff; font: inherit; font-size: .75rem; color: var(--dl-ink-2);
+}
+.wk-view { display: inline-flex; }
+.wk-view-btn { min-height: 28px; padding: 0 12px; border: 1px solid var(--dl-hair); background: #fff; color: var(--dl-ink-2); font-size: var(--dl-fs-caption); cursor: pointer; }
+.wk-view-btn + .wk-view-btn { border-left: 0; }
+.wk-view-btn.is-active { background: var(--dl-ink); color: #fff; border-color: var(--dl-ink); }
+.wk-view-btn:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
+
+/* 团队概览：每人本周有进展的客户数，对比上周 */
+.wk-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0 24px; padding: 0; border-bottom: 1px solid var(--dl-hair); }
+.wk-pulse { padding: 14px 0 12px; min-width: 0; }
+.wk-pulse-n { font-size: 1.9rem; font-weight: 700; line-height: 1; }
+.wk-diff { margin-left: 8px; font-size: var(--dl-fs-caption); font-weight: 400; color: var(--dl-ink-3); }
+.wk-diff.is-up { color: var(--dl-ok, #1f6b3a); }
+.wk-diff.is-down { color: var(--dl-focus); }
+.wk-pulse-l { margin-top: 4px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+.wk-pulse-bar { height: 3px; margin-top: 8px; background: var(--dl-hair-2); }
+.wk-pulse-bar i { display: block; height: 100%; background: var(--dl-ink); transition: width .2s ease; }
+
+/* A 并排：每人一列 */
+.wk-board-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border-bottom: 1px solid var(--dl-hair); }
+.wk-col { min-width: 0; padding: 14px 18px 28px 0; border-right: 1px solid var(--dl-hair-2); transition: opacity .15s ease; }
+.wk-col + .wk-col { padding-left: 18px; }
+.wk-col:last-child { border-right: 0; }
+.wk-col.is-loading { opacity: .55; }
+.wk-col-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; font-size: 1.05rem; font-weight: 600; color: var(--dl-ink); }
+.wk-col-head span { font-size: var(--dl-fs-caption); font-weight: 400; color: var(--dl-ink-3); }
+.wk-item { padding: 10px 0 11px; border-top: 1px solid var(--dl-hair-2); }
+.wk-item[role="button"] { cursor: pointer; }
+.wk-item[role="button"]:hover { background: var(--dl-ink-wash); }
+.wk-item:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
+.wk-item-co { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: var(--dl-fs-body-s); }
+.wk-item-co span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-item-co em { flex: none; font-style: normal; font-weight: 400; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+.wk-item-work, .wk-item-next { margin: 3px 0 0; font-size: var(--dl-fs-body-s); line-height: 1.5; }
+.wk-item-work { color: var(--dl-ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wk-item-next { color: var(--dl-ink); font-size: var(--dl-fs-caption); }
+.wk-item-next span { margin-right: 6px; color: var(--dl-ink-3); }
+.wk-item-next.is-none { color: var(--dl-ink-3); }
+
+/* B 轮讲：左侧人员轨，右侧一个人铺满 */
+.wk-board-talk { display: grid; grid-template-columns: 200px minmax(0, 1fr); border-bottom: 1px solid var(--dl-hair); min-height: 480px; }
+.wk-rail { padding: 6px 0; border-right: 1px solid var(--dl-hair); }
+.wk-rail-btn { display: flex; justify-content: space-between; align-items: baseline; width: 100%; padding: 12px 14px 12px 0; border: 0; border-bottom: 1px solid var(--dl-hair-2); background: none; text-align: left; font-size: 1rem; font-weight: 600; color: var(--dl-ink); cursor: pointer; }
+.wk-rail-btn b { font-size: 1.25rem; }
+.wk-rail-btn.is-active { padding-left: 12px; background: var(--dl-ink); color: #fff; }
+.wk-rail-btn.is-active kbd { background: transparent; color: #ccc; border-color: #666; }
+.wk-rail-btn:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: -2px; }
+.wk-stage { min-width: 0; padding: 16px 0 24px 28px; }
+.wk-stage h2 { margin: 0; font-size: 1.4rem; font-weight: 700; color: var(--dl-ink); }
+.wk-stage-sum { margin: 2px 0 8px; color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
+.wk-stage-pager { margin: 14px 0 0; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); text-align: right; }
+.wk-reports.is-talk .wk-members { display: none; }
+.wk-board-talk .wk-row { grid-template-columns: 200px minmax(0, 1fr); gap: 6px 28px; padding: 16px 0 18px; }
+.wk-board-talk .wk-facts { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 18px; }
+.wk-board-talk .wk-fact { grid-template-columns: 1fr; gap: 2px; }
+.wk-board-talk .wk-open { display: none; }
+.wk-board-talk .wk-fact.is-next h4 { color: var(--dl-ink-3); }
+.wk-board-talk .wk-row[role="button"] { cursor: pointer; }
+.wk-board-talk .wk-row[role="button"]:hover { background: var(--dl-ink-wash); }
+
 @media (max-width: 820px) {
   #page-overview .wk-head { align-items: flex-start; }
   .wk-week { align-items: flex-start; width: 100%; }
-  .wk-week-switch { justify-content: space-between; width: 100%; max-width: 440px; }
-  .wk-week-switch button { flex: 1; justify-content: center; }
+  .wk-week-switch { width: 100%; }
+  .wk-week-switch .wk-week-cell { flex: 1; min-width: 0; }
+  .wk-board-talk { grid-template-columns: 1fr; }
+  .wk-rail { display: flex; border-right: 0; border-bottom: 1px solid var(--dl-hair); overflow-x: auto; }
+  .wk-rail-btn { width: auto; flex: none; gap: 10px; padding: 10px 14px; border-bottom: 0; }
+  .wk-stage { padding-left: 0; }
+  .wk-week-hint { display: none; }
   .wk-row { grid-template-columns: 1fr; gap: 12px; padding: 18px 0 20px; }
   .wk-who { display: grid; gap: 2px; }
   .wk-when { margin-top: 2px; }
@@ -3534,7 +3624,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   .wk-open { margin-left: 0; }
 }
 @media (pointer: coarse) {
-  .wk-member, .wk-week-switch button { min-height: var(--dl-tap-touch, 48px); }
+  .wk-rail-btn, .wk-view-btn, .wk-week-switch button { min-height: var(--dl-tap-touch, 48px); }
 }
 
 /* Inbox 页签：「对话」与「其他事项」是同一个 Inbox 的两个页签，不是两个页面。 */

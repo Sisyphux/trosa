@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本周工作 · 三版对比（静态示意，假数据）</title>
+<style>
+:root{--ink:#111;--ink2:#444;--ink3:#595959;--mut:#666;--hair:rgba(17,17,17,.16);--hair2:rgba(17,17,17,.09);--wash:rgba(17,17,17,.04);--acc:#e8431f;--ok:#1f6b3a;--warn:#8a5a00;
+--font:"Hanken Grotesk","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.55 var(--font);color:var(--ink);background:#fff;border-top:4px solid var(--acc);font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.mock-bar{display:flex;gap:6px;align-items:center;padding:10px 24px;background:var(--wash);border-bottom:1px solid var(--hair);font-size:12px;color:var(--ink3)}
+.mock-bar b{color:var(--ink);margin-right:8px}
+.mock-bar button{padding:4px 10px;border:1px solid var(--hair);border-radius:2px;background:#fff}
+.mock-bar button[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.page{padding:20px 24px 48px;max-width:1440px;margin:0 auto}
+.eyebrow{font-size:12px;color:var(--mut)}
+h1{margin:0;font-size:26px;font-weight:700;letter-spacing:-.01em}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--ink)}
+/* week strip */
+.weeks{display:flex;align-items:stretch;gap:0}
+.wk-arrow{width:36px;border:1px solid var(--hair);display:grid;place-items:center;font-size:16px}
+.wk-arrow:hover{background:var(--wash)}
+.wk-cell{min-width:104px;padding:4px 10px;border:1px solid var(--hair);border-left:0;text-align:left;font-size:12px;color:var(--ink3);position:relative}
+.wk-cell b{display:block;font-size:13px;color:var(--ink);font-weight:600}
+.wk-cell[aria-current=true]{background:var(--ink);color:#ddd}
+.wk-cell[aria-current=true] b{color:#fff}
+.wk-cell.now::after{content:"本周";position:absolute;right:8px;top:4px;font-size:11px;color:var(--acc)}
+.wk-cell[aria-current=true].now::after{color:#ff9a7f}
+.hint{font-size:12px;color:var(--mut);margin-top:6px;text-align:right}
+kbd{font:11px var(--font);border:1px solid var(--hair);padding:0 5px;border-radius:2px;background:#fff}
+/* team pulse */
+.pulse{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--hair)}
+.pulse>div{padding:14px 16px 12px 0}
+.pulse .n{font-size:30px;font-weight:700;line-height:1}
+.pulse .l{font-size:12px;color:var(--mut)}
+.bar{height:3px;background:var(--hair2);margin-top:8px}
+.bar i{display:block;height:100%;background:var(--ink)}
+.diff{font-size:12px;color:var(--ink3);margin-left:6px}
+.diff.up{color:var(--ok)}.diff.dn{color:var(--acc)}
+/* A: columns */
+.cols{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid var(--hair)}
+.col{padding:14px 16px 24px 0;border-right:1px solid var(--hair2);min-width:0}
+.col+.col{padding-left:16px}.col:last-child{border-right:0}
+.col h2{margin:0 0 2px;font-size:16px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline}
+.col h2 span{font-size:12px;color:var(--mut);font-weight:400}
+.sub{font-size:12px;color:var(--mut);margin-bottom:10px}
+.item{padding:10px 0;border-top:1px solid var(--hair2);cursor:pointer}
+.item:hover{background:var(--wash)}
+.item .co{font-weight:600;font-size:13.5px;display:flex;justify-content:space-between;gap:8px}
+.item .co em{font-style:normal;font-weight:400;font-size:12px;color:var(--mut);white-space:nowrap}
+.item p{margin:2px 0 0;color:var(--ink2);font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item .nx{color:var(--ink);font-size:12.5px;margin-top:4px}
+.item .nx::before{content:"下一步 ";color:var(--mut)}
+.item.open p{-webkit-line-clamp:unset}
+.stuck{display:inline-block;font-size:11px;border:1px solid var(--acc);color:var(--acc);padding:0 5px;border-radius:2px;margin-right:6px}
+/* B: presenter */
+.pres{display:grid;grid-template-columns:200px 1fr;gap:0;border-bottom:1px solid var(--hair);min-height:520px}
+.rail{border-right:1px solid var(--hair);padding:8px 0}
+.rail button{display:flex;justify-content:space-between;align-items:baseline;width:100%;text-align:left;padding:12px 16px 12px 0;border-bottom:1px solid var(--hair2)}
+.rail button .nm{font-size:15px;font-weight:600}
+.rail button .k{font-size:11px;color:var(--mut);margin-left:6px}
+.rail button .ct{font-size:20px;font-weight:700}
+.rail button[aria-pressed=true]{background:var(--ink);color:#fff;padding-left:12px}
+.rail button[aria-pressed=true] .k{color:#bbb}
+.stage{padding:18px 0 24px 28px}
+.stage h2{margin:0;font-size:22px;font-weight:700}
+.stage .sum{color:var(--ink3);margin:2px 0 14px;font-size:13px}
+.row{display:grid;grid-template-columns:200px 1fr 1fr;gap:18px;padding:14px 0;border-top:1px solid var(--hair2)}
+.row .co{font-weight:600}.row .co small{display:block;color:var(--mut);font-weight:400;font-size:12px}
+.row h4{margin:0 0 2px;font-size:12px;font-weight:600;color:var(--mut)}
+.row p{margin:0;color:var(--ink2)}
+.row.next p{color:var(--ink)}
+.pager{display:flex;justify-content:space-between;margin-top:14px;font-size:12px;color:var(--mut)}
+/* C: table */
+.filters{display:flex;gap:6px;padding:12px 0;flex-wrap:wrap}
+.chip{padding:3px 10px;border:1px solid var(--hair);border-radius:2px;font-size:12.5px}
+.chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+table{width:100%;border-collapse:collapse}
+th{font-size:12px;font-weight:600;color:var(--mut);text-align:left;padding:6px 12px 6px 0;border-bottom:1px solid var(--ink)}
+td{padding:10px 12px 10px 0;border-bottom:1px solid var(--hair2);vertical-align:top;color:var(--ink2)}
+td.who{white-space:nowrap;color:var(--ink);font-weight:600;width:80px}
+td.co{font-weight:600;color:var(--ink);width:200px}
+.hidden{display:none}
+.note{margin:28px 0 0;padding-top:14px;border-top:1px solid var(--hair);font-size:13px;color:var(--ink3);max-width:900px}
+.note h3{margin:0 0 6px;font-size:14px;color:var(--ink)}
+.note li{margin:2px 0}
+@media (max-width:900px){.pulse,.cols{grid-template-columns:1fr 1fr}.pres{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="mock-bar"><b>静态示意 · 假数据</b>
+ <button data-v="A" aria-pressed="true">A 并排四列（周会默认）</button>
+ <button data-v="B" aria-pressed="false">B 轮讲模式</button>
+ <button data-v="C" aria-pressed="false">C 全队总表</button>
+ <span style="margin-left:auto">三版共用同一条周条与团队概览，可点周条、按 ← →、按 1/2/3 切换版本</span></div>
+
+<div class="page">
+ <div class="head">
+  <div><div class="eyebrow">团队工作台</div><h1>本周工作</h1></div>
+  <div>
+   <div class="weeks" id="weeks"></div>
+   <div class="hint"><kbd>←</kbd> <kbd>→</kbd> 换周　<kbd>T</kbd> 回本周　<kbd>1</kbd>–<kbd>4</kbd> 看某人</div>
+  </div>
+ </div>
+
+ <div class="pulse" id="pulse"></div>
+
+ <div id="vA"></div>
+ <div id="vB" class="hidden"></div>
+ <div id="vC" class="hidden"></div>
+
+ <div class="note" id="note"></div>
+</div>
+
+<script>
+var people=[
+ {id:'hamid',name:'Hamid'},{id:'amy',name:'Amy'},{id:'kelley',name:'Kelley'},{id:'lina',name:'Lina'}];
+var base={
+ hamid:[['Brightway Trading','德国','寄出样品 3 款，对方确认收到并要求补报 FOB 价','周四前发补充报价',0],
+        ['Nordic Fit AB','瑞典','视频会议讨论包装方案，对方倾向环保纸盒','周三发包装打样方案',0],
+        ['Cairo Home','埃及','已发两次邮件无回复','周五再跟进一次，无回复转 Inbox',1],
+        ['Sunset Imports','美国','对方询问 MOQ，已回复 500 件起','等对方确认数量',0]],
+ amy:[['Delmar Retail','墨西哥','收到首批订单意向 2000 件，核对交期','周二发 PI',0],
+      ['Kappa Outdoor','加拿大','样品测试通过，开始谈价格','周四电话谈价',0],
+      ['Zeta Mart','智利','对方换了采购负责人，重新建立联系','等新联系人回复',1]],
+ kelley:[['Alto Gifts','西班牙','展会后第一次跟进，发了目录','下周一发邮件问兴趣款',0],
+         ['Hanseatic Co.','德国','确认认证文件清单','周三发 CE 文件',0]],
+ lina:[['Pacific Wares','澳大利亚','报价后对方沉默两周，电话联系','等对方内部评审',1],
+       ['Lumen Studio','英国','设计稿确认，开始排产沟通','周五确认排产日期',0],
+       ['Orion Supply','印度','寄出样品','样品到达后电话回访',0]]};
+var weekOffsets=[-2,-1,0,1];
+var state={w:0,v:'A',p:'hamid'};
+function range(o){var d=new Date(2026,9,19+o*7),e=new Date(d);e.setDate(d.getDate()+6);return[(d.getMonth()+1)+'/'+d.getDate(),(e.getMonth()+1)+'/'+e.getDate()]}
+function data(pid){ // 换周时模拟数量变化
+ var arr=base[pid].slice();
+ if(state.w<0)arr=arr.slice(0,Math.max(1,arr.length-1+(state.w===-2?0:1)));
+ if(state.w>0)arr=arr.slice(0,Math.max(0,arr.length-2));
+ return arr}
+function count(){return people.map(function(p){return data(p.id).length})}
+function renderWeeks(){
+ var h='<button class="wk-arrow" data-d="-1" aria-label="上一周">←</button>';
+ [-2,-1,0,1].forEach(function(o){var r=range(o);h+='<button class="wk-cell'+(o===0?' now':'')+'" data-w="'+o+'" aria-current="'+(state.w===o)+'"><b>'+r[0]+'–'+r[1]+'</b>'+(o===0?'':(o<0?Math.abs(o)+' 周前':'下周'))+'</button>'});
+ h+='<button class="wk-arrow" data-d="1" aria-label="下一周">→</button>';
+ document.getElementById('weeks').innerHTML=h}
+function renderPulse(){
+ var c=count(),max=Math.max.apply(null,c.concat([1]));
+ var prev={hamid:3,amy:3,kelley:3,lina:2};
+ document.getElementById('pulse').innerHTML=people.map(function(p,i){
+  var d=c[i]-prev[p.id];
+  return '<div><div class="n">'+c[i]+'<span class="diff '+(d>0?'up':d<0?'dn':'')+'">'+(d>0?'↑'+d:d<0?'↓'+(-d):'持平')+' 对比上周</span></div><div class="l">'+p.name+' · 有进展的客户</div><div class="bar"><i style="width:'+(c[i]/max*100)+'%"></i></div></div>'}).join('')}
+function itemHtml(r){return '<div class="item"><div class="co"><span>'+r[0]+'</span><em>'+r[1]+'</em></div><p>'+(r[4]?'<span class="stuck">卡住</span>':'')+r[2]+'</p><div class="nx">'+r[3]+'</div></div>'}
+function renderA(){
+ document.getElementById('vA').innerHTML='<div class="cols">'+people.map(function(p){var a=data(p.id);return '<div class="col"><h2>'+p.name+'<span>'+a.length+' 位客户</span></h2><div class="sub">'+a.filter(function(x){return x[4]}).length+' 个卡住 · 点一条展开全文</div>'+(a.length?a.map(itemHtml).join(''):'<div class="item" style="cursor:default;color:var(--mut)">这一周没有已确认的沟通</div>')+'</div>'}).join('')+'</div>';
+ document.querySelectorAll('#vA .item').forEach(function(n){n.onclick=function(){n.classList.toggle('open')}})}
+function renderB(){
+ var c=count();
+ var rail='<div class="rail">'+people.map(function(p,i){return '<button data-p="'+p.id+'" aria-pressed="'+(state.p===p.id)+'"><span><span class="nm">'+p.name+'</span><span class="k">'+(i+1)+'</span></span><span class="ct">'+c[i]+'</span></button>'}).join('')+'</div>';
+ var a=data(state.p),pp=people.filter(function(x){return x.id===state.p})[0],idx=people.indexOf(pp);
+ var st='<div class="stage"><h2>'+pp.name+'</h2><div class="sum">'+a.length+' 位客户有进展 · '+a.filter(function(x){return x[4]}).length+' 个卡住</div>'+
+ (a.length?a.map(function(r){return '<div class="row"><div class="co">'+r[0]+'<small>'+r[1]+'</small></div><div><h4>实际工作</h4><p>'+(r[4]?'<span class="stuck">卡住</span>':'')+r[2]+'</p></div><div class="next"><h4>下一步</h4><p>'+r[3]+'</p></div></div>'}).join(''):'<div class="row" style="color:var(--mut)">这一周没有已确认的沟通</div>')+
+ '<div class="pager"><span>'+(idx>0?'← '+people[idx-1].name:'')+'</span><span>空格 / → 下一位'+(idx<people.length-1?'：'+people[idx+1].name:'')+'</span></div></div>';
+ document.getElementById('vB').innerHTML='<div class="pres">'+rail+st+'</div>';
+ document.querySelectorAll('#vB .rail button').forEach(function(b){b.onclick=function(){state.p=b.dataset.p;renderB()}})}
+var chipSel='all';
+function renderC(){
+ var rows=[];people.forEach(function(p){data(p.id).forEach(function(r){rows.push([p,r])})});
+ rows.sort(function(a,b){return b[1][4]-a[1][4]});
+ var chips='<div class="filters"><button class="chip" data-f="all" aria-pressed="'+(chipSel==='all')+'">全部 '+rows.length+'</button><button class="chip" data-f="stuck" aria-pressed="'+(chipSel==='stuck')+'">只看卡住的 '+rows.filter(function(r){return r[1][4]}).length+'</button>'+people.map(function(p){return '<button class="chip" data-f="'+p.id+'" aria-pressed="'+(chipSel===p.id)+'">'+p.name+'</button>'}).join('')+'</div>';
+ var shown=rows.filter(function(r){return chipSel==='all'||(chipSel==='stuck'?r[1][4]:r[0].id===chipSel)});
+ document.getElementById('vC').innerHTML=chips+'<table><thead><tr><th>负责人</th><th>客户</th><th>实际工作</th><th>下一步</th></tr></thead><tbody>'+shown.map(function(r){return '<tr><td class="who">'+r[0].name+'</td><td class="co">'+r[1][0]+'<br><span style="font-weight:400;color:var(--mut);font-size:12px">'+r[1][1]+'</span></td><td>'+(r[1][4]?'<span class="stuck">卡住</span>':'')+r[1][2]+'</td><td style="color:var(--ink)">'+r[1][3]+'</td></tr>'}).join('')+'</tbody></table>';
+ document.querySelectorAll('#vC .chip').forEach(function(b){b.onclick=function(){chipSel=b.dataset.f;renderC()}})}
+var notes={
+ A:'<h3>A 并排四列 · 适合“大家一起看”</h3><ul><li>四个人同时在屏上，开会不用切人；换周时四列同时换，不丢位置。</li><li>顶部团队概览一眼看出这周谁活动少、比上周多还是少。</li><li>每条默认两行，点一下展开全文；“卡住”由人工标记的等待或无回复自动提示。</li><li>代价：一人客户很多时列会很长，需要列内各自滚动；窄屏退化为一列一人。</li></ul>',
+ B:'<h3>B 轮讲模式 · 适合“逐个人讲”</h3><ul><li>一次只放大一个人，字更大，投屏更清楚；空格或 → 到下一位，按 1–4 直接跳。</li><li>换周时停留在当前这个人，不会跳回“我”。</li><li>左侧始终显示每个人的数量，方便对比。</li><li>代价：同一时间看不到别人，横向对比靠左侧数字。</li></ul>',
+ C:'<h3>C 全队总表 · 适合“按问题过问”</h3><ul><li>所有人混在一张表里，默认把“卡住”的排在最前，会议先过问题再过进展。</li><li>可按人或只看卡住的筛选；不需要翻页找客户。</li><li>代价：失去“每个人这周做了什么”的整体感，更像检查单。</li></ul>'};
+function setV(v){state.v=v;['A','B','C'].forEach(function(k){document.getElementById('v'+k).classList.toggle('hidden',k!==v)});document.querySelectorAll('.mock-bar [data-v]').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.v===v)});document.getElementById('note').innerHTML=notes[v]}
+function all(){renderWeeks();renderPulse();renderA();renderB();renderC();setV(state.v)}
+document.getElementById('weeks').onclick=function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.w!==undefined)state.w=+b.dataset.w;else state.w=Math.max(-2,Math.min(1,state.w+ +b.dataset.d));all()};
+document.querySelectorAll('.mock-bar [data-v]').forEach(function(b){b.onclick=function(){setV(b.dataset.v)}});
+document.addEventListener('keydown',function(e){
+ if(e.target.closest('input,textarea'))return;
+ if(e.key==='ArrowLeft'){state.w=Math.max(-2,state.w-1);all()}
+ else if(e.key==='ArrowRight'){state.w=Math.min(1,state.w+1);all()}
+ else if(e.key==='t'||e.key==='T'){state.w=0;all()}
+ else if(e.key===' '&&state.v==='B'){e.preventDefault();var i=(people.findIndex(function(p){return p.id===state.p})+1)%people.length;state.p=people[i].id;renderB()}
+ else if(/^[1-4]$/.test(e.key)){state.p=people[+e.key-1].id;state.v='B';renderB();setV('B')}
+});
+all();
+</script>
+</body>
+</html>
