@@ -447,3 +447,13 @@ html.motion-reduced .hand-tip{transition:none !important}
 }
 /* 卡片原为 overflow:hidden，会让里面的 sticky 失效；clip 同样裁切但不形成滚动容器 */
 #trosa .settings-sections .personalization-card.personalization-card { overflow: clip !important; }
+/* ---- 三个录入弹窗小幅统一（md-polish）-------------------------------------
+   记录沟通 / 批量完成跟进 / 添加客户：去重复、补齐一致的快捷日期、折叠标题可读。
+   不改色、不改字体、不加阴影；只补间距与字号。 */
+/* 上下文摘要里被隐藏的格子（联系人为空、日期重复）必须真正消失 */
+#trosa .modal .communication-context-summary > div[hidden]{display:none}
+/* 批量完成跟进：快捷日期与日期框上下排开，和“记录沟通”里的一致 */
+#trosa #batchCompleteModal .task-date-choices{margin:6px 0 8px}
+/* 添加客户：“更多公司资料”是折叠入口，字号与输入框一致，触控区 ≥40px */
+#trosa #addCustomerModal .add-more-toggle,
+#trosa #addNewCustomerModal .add-more-toggle{font-size:.88rem;color:var(--dl-ink);min-height:40px;margin:4px 0 0}

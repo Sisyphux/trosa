@@ -996,9 +996,15 @@ if(t!=='classic')document.documentElement.setAttribute('data-type','swiss');}cat
         <div class="modal-note-title" id="batchCompleteTitle">将完成 0 个客户的跟进</div>
         <div class="modal-note-hint">结果和日期将应用到全部所选客户</div>
       </div>
-      <div class="form-group"><label class="form-label">跟进结果</label><textarea class="form-control" id="batchCompleteResult" rows="3" placeholder="记录本次沟通的内容和结果..."></textarea></div>
+      <div class="form-group"><label class="form-label">跟进结果</label><textarea class="form-control" id="batchCompleteResult" rows="3" placeholder="记录本次沟通的内容和结果…"></textarea></div>
       <div class="form-row">
-        <div class="form-group"><label class="form-label">下次跟进日期</label><input type="date" class="form-control" id="batchCompleteNext"></div>
+        <div class="form-group"><label class="form-label" for="batchCompleteNext">下次跟进日期</label>
+          <div class="next-date-choices task-date-choices">
+            <button type="button" aria-pressed="false" onclick="setBatchCompleteNextDate(7, this)">7 天</button>
+            <button type="button" aria-pressed="false" onclick="setBatchCompleteNextDate(15, this)">15 天</button>
+            <button type="button" aria-pressed="false" onclick="setBatchCompleteNextDate(30, this)">30 天</button>
+          </div>
+          <input type="date" class="form-control" id="batchCompleteNext" onchange="markBatchCompleteNextChip(null)"></div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1050,7 +1056,7 @@ if(t!=='classic')document.documentElement.setAttribute('data-type','swiss');}cat
       <div class="add-customer-basics">
         <div class="form-group">
           <label class="form-label">客户官网 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
-          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址，例如 https://example.com"><button type="button" class="btn" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button></div>
+          <div class="website-entry"><input type="text" class="form-control" id="addExistWebsite" onpaste="scheduleSmartFillCustomer('add')" placeholder="粘贴官网网址"><button type="button" class="btn" id="existSmartFillButton" onclick="smartFillCustomer('add')"><span class="ui-icon ui-icon-sparkle" aria-hidden="true"></span>从网站识别</button></div>
         </div>
         <div class="form-group">
           <label class="form-label">公司 / 客户名称 <span class="required" aria-hidden="true">*</span><span class="sr-only">必填</span></label>
@@ -1081,8 +1087,8 @@ if(t!=='classic')document.documentElement.setAttribute('data-type','swiss');}cat
         <div class="form-group"><label class="form-label">来源补充说明</label><input type="text" class="form-control" id="addExistSourceDetail" placeholder="可选，例如：SIGN CHINA 2026"></div>
       </div>
       <section class="draft-contacts-section">
-        <div class="draft-contacts-header"><div><strong>邮箱与联系方式</strong></div></div>
-        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('exist')">添加邮箱</button></div></details>
+        <div class="draft-contacts-header"><div><strong>联系人</strong></div></div>
+        <details class="draft-email-import" open><summary>粘贴邮箱</summary><div><textarea class="form-control" id="existDraftEmailImport" rows="2" onpaste="scheduleEmailImport('exist')" placeholder="直接粘贴一个或多个邮箱；每行一个，也支持逗号或分号"></textarea><div class="email-validation-result" id="existEmailValidation" hidden></div><button type="button" class="text-action" onclick="importDraftEmails('exist')">添加到联系人</button></div></details>
         <details class="manual-contact-entry"><summary>手动填写联系人（可选）</summary><div id="existDraftContacts"></div><button type="button" class="text-action" onclick="addDraftContact('exist')">＋ 再添加一位联系人</button></details>
       </section>
       <button type="button" class="text-action add-more-toggle" onclick="toggleAddCustomerAdvanced('exist')">更多公司资料</button>

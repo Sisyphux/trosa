@@ -3514,11 +3514,17 @@ async function openCommunicationConfirm(options) {
   if (hasContext) {
     if (contextCustomer) contextCustomer.textContent = context.customerName || (context.customerId ? '当前客户' : '待选择');
     if (contextContact) contextContact.textContent = context.contactName || '未关联';
+    // 联系人没有就不占位；日期在下面的“沟通日期”里可直接改，这里不再重复一份。
+    var contactCell = contextContact && contextContact.parentElement;
+    if (contactCell) contactCell.hidden = !context.contactName;
+    var dateCell = contextDate && contextDate.parentElement;
+    if (dateCell) dateCell.hidden = true;
     if (contextSource) contextSource.textContent = [context.sourceLabel || context.source || '手动记录', context.sourceDetail || ''].filter(Boolean).join(' · ');
     if (contextDate) contextDate.textContent = context.followDate ? formatChineseDate(context.followDate) : '未记录';
   }
   if (context.customerId) {
-    if (knownCustomer) knownCustomer.hidden = false;
+    // 上方的上下文摘要已经写了客户名，就不再重复一行。
+    if (knownCustomer) knownCustomer.hidden = !!hasContext;
     if (knownCustomerName) knownCustomerName.textContent = context.customerName || '当前客户';
     if (pickerWrap) pickerWrap.hidden = true;
     document.getElementById('inboxReplyCustomer').value = context.customerId;
@@ -3585,7 +3591,7 @@ function updateInboxReplyDirectionPreview() {
   var direction = resolvedInboxReplyDirection();
   if (override !== 'auto') hint.textContent = '手动指定：' + communicationDirectionLabel(override);
   else if (direction !== 'unknown') hint.textContent = '系统识别：' + communicationDirectionLabel(direction);
-  else hint.textContent = '系统将在 AI 整理时结合发言人和内容判断沟通方向';
+  else hint.textContent = '沟通方向会在 AI 整理后自动判断';
 }
 
 function clearInboxReplyAnalysis() {
@@ -3853,7 +3859,7 @@ function updateAutoDirectionPreview(context) {
     return;
   }
   hint.textContent = direction === 'unknown'
-    ? '系统将在 AI 整理时结合发言人和客户信息判断'
+    ? '沟通方向会在 AI 整理后自动判断'
     : (override === 'auto' ? '系统识别：' : '手动指定：') + communicationDirectionLabel(direction);
 }
 
@@ -5782,6 +5788,7 @@ async function batchCompleteToday() {
     document.getElementById('batchCompleteTitle').textContent = '将完成今日 ' + reminders.length + ' 条跟进提醒';
     document.getElementById('batchCompleteResult').value = '';
     document.getElementById('batchCompleteNext').value = '';
+    markBatchCompleteNextChip(null);
     openModal('batchCompleteModal');
   } catch(e) {}
 }
@@ -8115,8 +8122,24 @@ async function batchCompleteGroup(groupKey) {
     document.getElementById('batchCompleteTitle').textContent = '将完成 ' + targets.length + ' 个客户的跟进';
     document.getElementById('batchCompleteResult').value = '';
     document.getElementById('batchCompleteNext').value = '';
+    markBatchCompleteNextChip(null);
     openModal('batchCompleteModal');
   } catch(e) {}
+}
+
+function markBatchCompleteNextChip(button) {
+  document.querySelectorAll('#batchCompleteModal .task-date-choices button').forEach(function(choice) {
+    choice.classList.toggle('is-selected', choice === button);
+    choice.setAttribute('aria-pressed', choice === button ? 'true' : 'false');
+  });
+}
+
+// 与“记录沟通”里的 7 / 15 / 30 天一致：点一下把日期填成今天 + N 天。
+function setBatchCompleteNextDate(days, button) {
+  var date = new Date();
+  date.setDate(date.getDate() + days);
+  document.getElementById('batchCompleteNext').value = localDateString(date);
+  markBatchCompleteNextChip(button);
 }
 
 async function submitBatchComplete() {
