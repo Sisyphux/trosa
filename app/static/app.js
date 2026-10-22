@@ -13848,8 +13848,7 @@ var OV = {
   _detailController: null,
   _weekData: {},
   _status: {},
-  _usersLoaded: false,
-  _talkMember: ''
+  _usersLoaded: false
 };
 
 function getWeekStart(offset) {
@@ -13962,22 +13961,49 @@ function renderWeekStrip() {
   if (label) label.textContent = formatWeekLabel(getWeekStart(overviewWeekOffset));
 }
 
-function weeklyDayLabel(dateStr) {
+function weeklyDateLabel(dateStr) {
   var parts = String(dateStr || '').split('-');
-  if (parts.length < 3) return '<b>' + escapeHtml(dateStr || '未记日期') + '</b>';
+  if (parts.length < 3) return '';
   var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
-  return '<b>周' + '日一二三四五六'.charAt(d.getDay()) + '</b>' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+  return '周' + '日一二三四五六'.charAt(d.getDay()) + ' ' + (d.getMonth() + 1) + '/' + d.getDate();
 }
 
-// One communication, as it was recorded: who, what happened, what comes next.
+// Sela writes “客户回复了邮件：……” in front of every captured reply. Say who spoke
+// once, in a small label, and leave the sentence itself clean.
+function weeklyTextLines(source) {
+  return String(source || '').split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
+    var m = line.match(/^客户回复了邮件[:：]\s*/);
+    var body = m ? line.slice(m[0].length) : line;
+    return '<p>' + (m ? '<span class="wk-from">客户来信</span>' : '') + renderRichText(body) + '</p>';
+  }).join('');
+}
+
+// One customer's communication this week: who, what was said, and the next step only when one was written.
 function weeklyRecordHtml(r, uid) {
   var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-  var source = customerSourceLabel(r.customer_source);
-  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country, source].filter(Boolean).join(' · ');
-  var open = canOpen ? ' role="button" tabindex="0" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')" onkeydown="if(event.key===\'Enter\'){overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')}"' : '';
-  return '<article class="wk-record"' + open + '><h3>' + escapeHtml(nm) + '</h3>' + (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
-    weeklyFactBlock(weeklyCustomerText(r, 'actual_work'), 'wk-record-text', '') +
+  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean).join(' · ');
+  var title = canOpen
+    ? '<button type="button" class="wk-record-name" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">' + escapeHtml(nm) + '</button>'
+    : '<span class="wk-record-name">' + escapeHtml(nm) + '</span>';
+  return '<article class="wk-record"><header><h3>' + title + '</h3><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(weeklyDateLabel(r.date)) + '</time></header>' +
+    (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
+    '<div class="wk-record-text">' + weeklyTextLines(weeklyCustomerText(r, 'actual_work')) + '</div>' +
+    '<button type="button" class="wk-record-more" hidden onclick="toggleWeeklyRecord(this)">展开</button>' +
     (r.next_step ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(r.next_step) + '</p>' : '') + '</article>';
+}
+
+function toggleWeeklyRecord(button) {
+  var text = button.parentNode.querySelector('.wk-record-text');
+  var open = text.classList.toggle('is-open');
+  button.textContent = open ? '收起' : '展开';
+}
+
+// Long entries are clamped; only those that really overflow get the 展开 button.
+function markClampedWeeklyRecords() {
+  Array.from(document.querySelectorAll('#weeklyMemberContent .wk-record-text')).forEach(function(text) {
+    var button = text.parentNode.querySelector('.wk-record-more');
+    if (button && !text.classList.contains('is-open')) button.hidden = text.scrollHeight <= text.clientHeight + 1;
+  });
 }
 
 function weeklyBodyHtml(uid, data, status) {
@@ -13987,53 +14013,27 @@ function weeklyBodyHtml(uid, data, status) {
   }
   var reps = data.reported_customers || [], html = '';
   if (status === 'error') html += '<div class="wk-error wk-error-inline" role="alert"><span>更新失败，已保留最近一次内容。</span><button type="button" onclick="retryWeeklyMember(\'' + escapeHtml(uid) + '\')">重试</button></div>';
-  if (!reps.length) html += '<div class="wk-empty">' + emptyStateHtml('week', '本周没有已确认的沟通', '在“完成跟进”里勾选“同步到周报”的沟通，会出现在这里。') + '</div>';
-  var days = [];
-  reps.forEach(function(r) {
-    var last = days[days.length - 1];
-    if (last && last.date === r.date) last.items.push(r);
-    else days.push({ date: r.date, items: [r] });
-  });
-  html += days.map(function(day) {
-    return '<section class="wk-day"><h2 class="wk-day-label">' + weeklyDayLabel(day.date) + '</h2><div class="wk-records">' +
-      day.items.map(function(r) { return weeklyRecordHtml(r, uid); }).join('') + '</div></section>';
-  }).join('');
+  if (!reps.length) html += '<p class="wk-person-empty">这周没有同步到周报的沟通</p>';
+  html += reps.map(function(r) { return weeklyRecordHtml(r, uid); }).join('');
   var pg = data.reported_customer_pagination || {};
   if (pg.has_next) html += '<button class="wk-more" type="button" onclick="loadMoreWeeklyMembers(\'' + escapeHtml(uid) + '\')">显示更多客户</button>';
   return html;
 }
 
+// Everyone on one page, one band per person, so the meeting reads top to bottom
+// and nobody has to be “switched to”.
 function renderWeeklyBoard() {
   var host = document.getElementById('ovReports');
   if (!host) return;
   if (!host.querySelector('#weeklyMemberContent')) {
-    host.innerHTML = '<div class="wk-members" id="weeklyTeamOverview" role="group" aria-label="负责人"></div><div class="wk-board" id="weeklyMemberContent"></div>';
+    host.innerHTML = '<div class="wk-board" id="weeklyMemberContent"></div><p class="wk-footnote">只显示在“完成跟进”里勾选了“同步到周报”的沟通。</p>';
   }
-  var ids = weeklyMemberIds();
-  if (!OV.labels[OV._talkMember]) OV._talkMember = defaultWeeklyMember();
-  var uid = OV._talkMember;
-  document.getElementById('weeklyTeamOverview').innerHTML = ids.map(function(id) {
-    var on = id === uid;
-    return '<button type="button" class="wk-member-tab' + (on ? ' is-active' : '') + '" aria-pressed="' + on + '" onclick="setWeeklyTalkMember(\'' + escapeHtml(id) + '\')">' + escapeHtml(OV.labels[id]) + '</button>';
+  document.getElementById('weeklyMemberContent').innerHTML = weeklyMemberIds().map(function(uid) {
+    var status = OV._status[uid], data = weeklyCurrentData(uid);
+    return '<section class="wk-person' + (status === 'loading' && data ? ' is-loading' : '') + '" data-weekly-member="' + escapeHtml(uid) + '"><h2 class="wk-person-name">' + escapeHtml(OV.labels[uid]) + '</h2>' +
+      '<div class="wk-person-body">' + weeklyBodyHtml(uid, data, status) + '</div></section>';
   }).join('');
-  var board = document.getElementById('weeklyMemberContent');
-  var status = OV._status[uid];
-  board.classList.toggle('is-loading', status === 'loading' && !!weeklyCurrentData(uid));
-  board.setAttribute('data-weekly-member', uid);
-  board.innerHTML = weeklyBodyHtml(uid, weeklyCurrentData(uid), status);
-}
-
-function setWeeklyTalkMember(uid) {
-  if (!OV.labels[uid]) return;
-  OV._talkMember = uid;
-  renderWeeklyBoard();
-}
-
-function stepWeeklyTalkMember(step) {
-  var ids = weeklyMemberIds();
-  if (!ids.length) return;
-  var i = Math.max(0, ids.indexOf(OV._talkMember));
-  setWeeklyTalkMember(ids[(i + step + ids.length) % ids.length]);
+  markClampedWeeklyRecords();
 }
 
 async function loadWeeklyMember(uid, ws, loadToken, options) {
@@ -14146,8 +14146,6 @@ document.addEventListener('keydown', function(event) {
   if (event.key === 'ArrowLeft') { event.preventDefault(); overviewPrevWeek(); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); overviewNextWeek(); }
   else if (event.key === 't' || event.key === 'T') { overviewGoWeek(0); }
-  else if (event.key === ' ' && tag !== 'BUTTON') { event.preventDefault(); stepWeeklyTalkMember(1); }
-  else if (/^[1-9]$/.test(event.key) && weeklyMemberIds()[Number(event.key) - 1]) setWeeklyTalkMember(weeklyMemberIds()[Number(event.key) - 1]);
 });
 
 function showOverviewCustomerLoading(owner) {

@@ -3375,7 +3375,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 .wk-error-inline button { margin: 0; }
 
 .wk-week-switch button:focus-visible,
-.wk-record:focus-visible,
 .wk-more:focus-visible,
 .wk-error button:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
 
@@ -3406,33 +3405,35 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   margin: 0 2px; padding: 0 5px; border: 1px solid var(--dl-hair); border-radius: 2px; background: #fff; font: inherit; font-size: .75rem; color: var(--dl-ink-2);
 }
 
-/* 负责人：只放名字，选中的下面一条墨线 */
-.wk-members { display: flex; flex-wrap: wrap; gap: 0 28px; border-top: 1px solid var(--dl-ink); border-bottom: 1px solid var(--dl-hair); }
-.wk-member-tab { padding: 14px 0 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: 1.1rem; font-weight: 600; color: var(--dl-ink-3); cursor: pointer; }
-.wk-member-tab:hover { color: var(--dl-ink); }
-.wk-member-tab.is-active { color: var(--dl-ink); border-bottom-color: var(--dl-ink); }
-.wk-member-tab:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
+/* 每人一条带：左边名字，右边这周的沟通。四个人在同一页从上读到下，不用切换 */
+.wk-board { min-width: 0; border-top: 1px solid var(--dl-ink); }
+.wk-person { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 0 32px; padding: 28px 0 6px; border-bottom: 1px solid var(--dl-hair); transition: opacity .15s ease; }
+.wk-person-name { position: sticky; top: 68px; align-self: start; margin: 0; font-size: 1.75rem; font-weight: 700; line-height: 1.2; color: var(--dl-ink); }
+.wk-person-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 1fr)); gap: 34px 44px; padding-bottom: 30px; min-width: 0; align-items: start; }
+.wk-person.is-loading .wk-person-body { opacity: .55; }
+.wk-person-body > .wk-state, .wk-person-body > .wk-error, .wk-person-body > .wk-more, .wk-person-body > .wk-person-empty { grid-column: 1 / -1; }
+.wk-person-body > .wk-state { border-top: 0; min-height: 0; padding: 4px 0; }
+.wk-person-empty { margin: 6px 0 0; color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
+.wk-footnote { margin: 14px 0 0; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
 
-/* 账页：左边日期，右边那天的沟通 */
-.wk-board { min-width: 0; padding: 4px 0 40px; transition: opacity .15s ease; }
-.wk-board.is-loading { opacity: .55; }
-.wk-day { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 0 28px; padding: 24px 0 4px; border-top: 1px solid var(--dl-hair-2); }
-.wk-day:first-child { border-top: 0; }
-.wk-day-label { align-self: start; margin: 0; font-size: var(--dl-fs-label); font-weight: 400; color: var(--dl-ink-3); line-height: 1.5; }
-.wk-day-label b { display: block; font-size: var(--dl-fs-body); font-weight: 600; color: var(--dl-ink); }
-.wk-records { display: grid; gap: 30px; padding-bottom: 26px; min-width: 0; }
-.wk-record { max-width: 48rem; min-width: 0; }
-.wk-record[role="button"] { cursor: pointer; }
-.wk-record[role="button"]:hover h3 { text-decoration: underline; text-underline-offset: 3px; }
-.wk-record:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 6px; }
-.wk-record h3 { margin: 0; font-size: 1.15rem; font-weight: 600; color: var(--dl-ink); }
-.wk-record-meta { margin: 2px 0 0; font-size: var(--dl-fs-label); color: var(--dl-ink-3); }
-.wk-record .wk-fact { display: block; margin-top: 10px; }
-.wk-record .wk-fact h4 { display: none; }
-.wk-record .wk-fact p, .wk-record .wk-fact li { margin: 0; font-size: 1rem; line-height: 1.7; color: var(--dl-ink); }
-.wk-record .wk-fact ul { margin: 0; padding: 0; list-style: none; }
-.wk-record .wk-fact li + li { margin-top: 6px; }
-.wk-record-next { margin: 10px 0 0; font-size: var(--dl-fs-body-s); line-height: 1.6; color: var(--dl-ink-2); }
+/* 一条沟通：客户名是视觉重心，正文 16px / 1.75，行宽自然落在 30–36 个汉字 */
+.wk-record { min-width: 0; }
+.wk-record header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+.wk-record h3 { margin: 0; min-width: 0; font-size: 1.12rem; font-weight: 600; line-height: 1.4; color: var(--dl-ink); }
+.wk-record-name { display: inline; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+button.wk-record-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+button.wk-record-name:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
+.wk-record time { flex: none; font-size: var(--dl-fs-label); color: var(--dl-ink-3); }
+.wk-record-meta { margin: 1px 0 0; font-size: var(--dl-fs-label); color: var(--dl-ink-3); }
+.wk-record-text { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; margin-top: 10px; }
+.wk-record-text.is-open { display: block; }
+.wk-record-text p { margin: 0; font-size: 1rem; line-height: 1.75; color: var(--dl-ink); overflow-wrap: anywhere; }
+.wk-record-text p + p { margin-top: 6px; }
+.wk-from { margin-right: 8px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+.wk-record-more { margin-top: 2px; padding: 0; border: 0; background: none; font-size: var(--dl-fs-label); color: var(--dl-ink-3); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.wk-record-more[hidden] { display: none; }
+.wk-record-more:hover { color: var(--dl-ink); }
+.wk-record-next { margin: 8px 0 0; font-size: var(--dl-fs-body-s); line-height: 1.6; color: var(--dl-ink-2); }
 .wk-record-next span { margin-right: 10px; color: var(--dl-ink-3); }
 
 @media (max-width: 820px) {
@@ -3441,11 +3442,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   .wk-week-switch { width: 100%; }
   .wk-week-switch .wk-week-cell { flex: 1; min-width: 0; }
   .wk-week-hint { display: none; }
-  .wk-day { grid-template-columns: 1fr; gap: 6px; }
-  .wk-day-label b { display: inline; margin-right: 8px; }
+  .wk-person { grid-template-columns: 1fr; gap: 10px; }
+  .wk-person-name { position: static; font-size: 1.4rem; }
 }
 @media (pointer: coarse) {
-  .wk-member-tab, .wk-week-switch button { min-height: var(--dl-tap-touch, 48px); }
+  .wk-week-switch button { min-height: var(--dl-tap-touch, 48px); }
 }
 
 /* Inbox 页签：「对话」与「其他事项」是同一个 Inbox 的两个页签，不是两个页面。 */
