@@ -471,7 +471,10 @@ def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict
     if postgres_mode():
         rows = conn.execute(
             '''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country AS customer_country,
-                  c.source AS customer_source, c.source_detail AS customer_source_detail
+                  c.source AS customer_source, c.source_detail AS customer_source_detail,
+                  c.website AS customer_website, c.profile AS customer_profile, c.field AS customer_field,
+                  c.industry AS customer_industry, c.company_size AS customer_company_size,
+                  c.annual_revenue AS customer_annual_revenue, c.created_at AS customer_created_at
                  FROM trosa.customer_interactions i
                  JOIN trosa.customer_records c ON c.id=i.customer_id
                 WHERE i.occurred_on>=? AND i.occurred_on<=? AND i.is_reported=true
@@ -483,7 +486,10 @@ def weekly_interactions(conn: Any, *, from_date: str, to_date: str) -> list[dict
         return [dict(row) for row in rows]
     rows = conn.execute(
         '''SELECT i.*, c.name AS customer_name, c.company AS customer_company, c.country AS customer_country,
-                  c.source AS customer_source, c.source_detail AS customer_source_detail FROM (
+                  c.source AS customer_source, c.source_detail AS customer_source_detail,
+                  c.website AS customer_website, c.profile AS customer_profile, c.field AS customer_field,
+                  c.industry AS customer_industry, c.company_size AS customer_company_size,
+                  c.annual_revenue AS customer_annual_revenue, c.created_at AS customer_created_at FROM (
              SELECT 'communication' AS kind, f.id, f.customer_id, f.follow_date AS occurred_on,
                     f.created_at, f.content, f.result, f.next_plan, f.activity_type,
                     f.direction, f.source, f.is_reported

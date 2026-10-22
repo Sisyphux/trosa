@@ -21892,6 +21892,12 @@ def _weekly_member_error_payload(user, week_start, week_end, error):
     }
 
 
+def _weekly_date_text(value):
+    if hasattr(value, 'strftime'):
+        return value.strftime('%Y-%m-%d')
+    return str(value or '')[:10]
+
+
 def _join_weekly_text(values):
     """Join same-customer facts without shipping the underlying log objects."""
     seen = set()
@@ -21951,6 +21957,14 @@ def _build_weekly_summary(user, week_start, week_end):
                 'customer_country': item.get('customer_country', ''),
                 'customer_source': item.get('customer_source') or '',
                 'customer_source_detail': item.get('customer_source_detail') or '',
+                # What a colleague who has never met this customer needs to place
+                # them. Business facts only: no contacts, notes, level or status.
+                'customer_industry': (item.get('customer_industry') or item.get('customer_field') or '').strip(),
+                'customer_profile': (item.get('customer_profile') or '').strip()[:400],
+                'customer_website': (item.get('customer_website') or '').strip()[:200],
+                'customer_company_size': (item.get('customer_company_size') or '').strip(),
+                'customer_annual_revenue': (item.get('customer_annual_revenue') or '').strip(),
+                'customer_created_on': _weekly_date_text(item.get('customer_created_at')),
                 'date': item.get('occurred_on', ''),
                 '_seen_events': set(),
                 '_actual_work': [],
@@ -21981,6 +21995,12 @@ def _build_weekly_summary(user, week_start, week_end):
                 'customer_country': group['customer_country'],
                 'customer_source': group['customer_source'],
                 'customer_source_detail': group['customer_source_detail'],
+                'customer_industry': group['customer_industry'],
+                'customer_profile': group['customer_profile'],
+                'customer_website': group['customer_website'],
+                'customer_company_size': group['customer_company_size'],
+                'customer_annual_revenue': group['customer_annual_revenue'],
+                'customer_created_on': group['customer_created_on'],
                 'date': group['date'],
                 'activity_count': len(group['_actual_work']),
                 'actual_work': _join_weekly_text(group['_actual_work']),

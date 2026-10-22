@@ -3425,7 +3425,12 @@ button.wk-record-name:hover { text-decoration: underline; text-underline-offset:
 button.wk-record-name:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
 .wk-record time { flex: none; font-size: var(--dl-fs-label); color: var(--dl-ink-3); }
 .wk-record-meta { margin: 1px 0 0; font-size: var(--dl-fs-label); color: var(--dl-ink-3); }
-.wk-record-text { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; margin-top: 10px; }
+.wk-record-profile { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin: 6px 0 0; font-size: var(--dl-fs-body-s); line-height: 1.55; color: var(--dl-ink-2); overflow-wrap: anywhere; }
+.wk-record-facts { margin: 4px 0 0; font-size: var(--dl-fs-label); line-height: 1.6; color: var(--dl-ink-3); overflow-wrap: anywhere; }
+.wk-record-facts i { margin: 0 6px; font-style: normal; }
+.wk-record-facts a { color: var(--dl-ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.wk-record-facts a:hover { color: var(--dl-ink); }
+.wk-record-text { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--dl-hair-2); }
 .wk-record-text.is-open { display: block; }
 .wk-record-text p { margin: 0; font-size: 1rem; line-height: 1.75; color: var(--dl-ink); overflow-wrap: anywhere; }
 .wk-record-text p + p { margin-top: 6px; }

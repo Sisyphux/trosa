@@ -400,9 +400,12 @@ class CalendarAndAccessTest(unittest.TestCase):
         self.assertNotIn('notes', payload['customer'])
         summary = client.get('/api/weekly-summary?week_start=2026-08-03').get_json()
         summary_text = str(summary)
-        self.assertNotIn('customer_profile', summary_text)
-        self.assertNotIn('customer_level', summary_text)
-        self.assertNotIn('stats', summary_text)
+        # The board shows business facts so a colleague can place the customer,
+        # but never contacts, notes, level, status or the internal summary text.
+        for forbidden in ('private@example.com', '13800000000', '联系人隐私', '不应返回的备注', '系统字段', 'customer_level', 'customer_status', 'stats'):
+            self.assertNotIn(forbidden, summary_text)
+        reported = [row for member in summary.values() if isinstance(member, dict) for row in member.get('reported_customers', [])]
+        self.assertTrue(any(row.get('customer_website') == 'example.com' and row.get('customer_industry') == '包装' for row in reported))
 
     def test_weekly_summary_merges_shared_company_fan_out_into_one_card(self):
         spec = importlib.util.spec_from_file_location('crm_app_weekly_dedupe_test', ROOT / 'app.py')

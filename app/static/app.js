@@ -13978,15 +13978,35 @@ function weeklyTextLines(source) {
   }).join('');
 }
 
-// One customer's communication this week: who, what was said, and the next step only when one was written.
+// Business facts that let someone who has never met this customer place them:
+// what they do, where they are, a website to check, how they were found.
+function weeklyCustomerFacts(r) {
+  var facts = [];
+  var site = String(r.customer_website || '').trim();
+  if (site) {
+    var url = /^https?:\/\//i.test(site) ? site : 'https://' + site;
+    var host = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/.*$/, '');
+    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) facts.push('<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(host) + '</a>');
+  }
+  var source = [customerSourceLabel(r.customer_source), String(r.customer_source_detail || '').trim()].filter(Boolean).join(' · ');
+  if (source) facts.push('来源 ' + escapeHtml(source));
+  if (r.customer_company_size) facts.push('规模 ' + escapeHtml(r.customer_company_size));
+  if (r.customer_annual_revenue) facts.push('年营收 ' + escapeHtml(r.customer_annual_revenue));
+  if (r.customer_created_on) facts.push('建档 ' + escapeHtml(r.customer_created_on));
+  return facts.length ? '<p class="wk-record-facts">' + facts.join('<i aria-hidden="true">·</i>') + '</p>' : '';
+}
+
+// One customer's communication this week: who they are, what was said, and the next step only when one was written.
 function weeklyRecordHtml(r, uid) {
   var nm = r.customer_company || r.customer_name || '客户', canOpen = !!r.customer_id;
-  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country].filter(Boolean).join(' · ');
+  var meta = [r.customer_name && r.customer_name !== nm ? r.customer_name : '', r.customer_country, r.customer_industry].filter(Boolean).join(' · ');
   var title = canOpen
     ? '<button type="button" class="wk-record-name" onclick="overviewShowCustDetail(' + Number(r.customer_id) + ',\'' + escapeHtml(uid) + '\')">' + escapeHtml(nm) + '</button>'
     : '<span class="wk-record-name">' + escapeHtml(nm) + '</span>';
   return '<article class="wk-record"><header><h3>' + title + '</h3><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(weeklyDateLabel(r.date)) + '</time></header>' +
     (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
+    (r.customer_profile ? '<p class="wk-record-profile">' + escapeHtml(r.customer_profile) + '</p>' : '') +
+    weeklyCustomerFacts(r) +
     '<div class="wk-record-text">' + weeklyTextLines(weeklyCustomerText(r, 'actual_work')) + '</div>' +
     '<button type="button" class="wk-record-more" hidden onclick="toggleWeeklyRecord(this)">展开</button>' +
     (r.next_step ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(r.next_step) + '</p>' : '') + '</article>';
