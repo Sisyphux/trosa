@@ -13848,7 +13848,8 @@ var OV = {
   _detailController: null,
   _weekData: {},
   _status: {},
-  _usersLoaded: false
+  _usersLoaded: false,
+  _lit: ''
 };
 
 function getWeekStart(offset) {
@@ -13970,11 +13971,27 @@ function weeklyDateLabel(dateStr) {
 
 // Sela writes “客户回复了邮件：……” in front of every captured reply. Say who spoke
 // once, in a small label, and leave the sentence itself clean.
+// The hard facts in a sentence — prices, quantities, sizes, dates, weekdays — are what a
+// reader scans for, so set them in bold. Only text outside tags is touched.
+var _WK_KEY_RE = new RegExp([
+  '(?:US\\$|\\$|¥|€|USD|RMB|EUR)\\s?\\d[\\d,.]*(?:\\s?/\\s?(?:kg|KG|吨|pcs|件|个|张))?',
+  '\\d[\\d,.]*\\s?(?:usd|USD|美元|欧元|元|RMB)(?:\\s?/\\s?(?:kg|KG|吨|pcs|件|个|张))?',
+  '\\d[\\d,.]*\\s?(?:kg|KG|吨|件|个|pcs|PCS|套|张|箱|柜|ft|FT|mm|MM|cm|CM|%|％)',
+  '20\\d{2}年\\d{1,2}月\\d{1,2}日', '\\d{1,2}月\\d{1,2}日', '(?:下)?周[一二三四五六日]'
+].join('|'), 'g');
+
+function weeklyEmphasizeFacts(html) {
+  return String(html).split(/(<[^>]+>)/).map(function(part) {
+    if (part.charAt(0) === '<') return part;
+    return part.replace(_WK_KEY_RE, '<b class="wk-key">$&</b>');
+  }).join('');
+}
+
 function weeklyTextLines(source) {
   return String(source || '').split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
     var m = line.match(/^客户回复了邮件[:：]\s*/);
     var body = m ? line.slice(m[0].length) : line;
-    return '<p>' + (m ? '<span class="wk-from">客户来信</span>' : '') + renderRichText(body) + '</p>';
+    return '<p>' + (m ? '<span class="wk-from">客户来信</span>' : '') + weeklyEmphasizeFacts(renderRichText(body)) + '</p>';
   }).join('');
 }
 
@@ -13982,18 +13999,19 @@ function weeklyTextLines(source) {
 // what they do, where they are, a website to check, how they were found.
 function weeklyCustomerFacts(r) {
   var facts = [];
+  var add = function(label, value) { facts.push('<div><dt>' + label + '</dt><dd>' + value + '</dd></div>'); };
   var site = String(r.customer_website || '').trim();
   if (site) {
     var url = /^https?:\/\//i.test(site) ? site : 'https://' + site;
     var host = url.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/.*$/, '');
-    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) facts.push('<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(host) + '</a>');
+    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host)) add('官网', '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(host) + '</a>');
   }
   var source = [customerSourceLabel(r.customer_source), String(r.customer_source_detail || '').trim()].filter(Boolean).join(' · ');
-  if (source) facts.push('来源 ' + escapeHtml(source));
-  if (r.customer_company_size) facts.push('规模 ' + escapeHtml(r.customer_company_size));
-  if (r.customer_annual_revenue) facts.push('年营收 ' + escapeHtml(r.customer_annual_revenue));
-  if (r.customer_created_on) facts.push('建档 ' + escapeHtml(r.customer_created_on));
-  return facts.length ? '<p class="wk-record-facts">' + facts.join('<i aria-hidden="true">·</i>') + '</p>' : '';
+  if (source) add('来源', escapeHtml(source));
+  if (r.customer_company_size) add('规模', escapeHtml(r.customer_company_size));
+  if (r.customer_annual_revenue) add('年营收', escapeHtml(r.customer_annual_revenue));
+  if (r.customer_created_on) add('建档', escapeHtml(r.customer_created_on));
+  return facts.length ? '<dl class="wk-spec">' + facts.join('') + '</dl>' : '';
 }
 
 // One customer's communication this week: who they are, what was said, and the next step only when one was written.
@@ -14049,12 +14067,39 @@ function renderWeeklyBoard() {
   if (!host.querySelector('#weeklyMemberContent')) {
     host.innerHTML = '<div class="wk-board" id="weeklyMemberContent"></div><p class="wk-footnote">只显示在“完成跟进”里勾选了“同步到周报”的沟通。</p>';
   }
+  if (!OV.labels[OV._lit]) OV._lit = weeklyMemberIds()[0] || '';
   document.getElementById('weeklyMemberContent').innerHTML = weeklyMemberIds().map(function(uid) {
-    var status = OV._status[uid], data = weeklyCurrentData(uid);
-    return '<section class="wk-person' + (status === 'loading' && data ? ' is-loading' : '') + '" data-weekly-member="' + escapeHtml(uid) + '"><h2 class="wk-person-name">' + escapeHtml(OV.labels[uid]) + '</h2>' +
+    var status = OV._status[uid], data = weeklyCurrentData(uid), lit = uid === OV._lit;
+    return '<section class="wk-person' + (lit ? ' is-lit' : '') + (status === 'loading' && data ? ' is-loading' : '') + '" data-weekly-member="' + escapeHtml(uid) + '" onclick="setWeeklyLit(\'' + escapeHtml(uid) + '\')"><h2 class="wk-person-name">' + weeklyNameHtml(uid, lit) + '</h2>' +
       '<div class="wk-person-body">' + weeklyBodyHtml(uid, data, status) + '</div></section>';
   }).join('');
   markClampedWeeklyRecords();
+}
+
+// One person is “speaking”: their band stays in full ink and their name gets the
+// page's single hand-drawn stroke; the others step back to grey. No state, just focus.
+function weeklyNameHtml(uid, lit) {
+  var name = escapeHtml(OV.labels[uid]);
+  return lit ? handUnderlined(name) : name;
+}
+
+function setWeeklyLit(uid) {
+  if (!OV.labels[uid] || uid === OV._lit) return;
+  OV._lit = uid;
+  Array.from(document.querySelectorAll('#weeklyMemberContent .wk-person')).forEach(function(section) {
+    var id = section.getAttribute('data-weekly-member'), lit = id === uid;
+    section.classList.toggle('is-lit', lit);
+    section.querySelector('.wk-person-name').innerHTML = weeklyNameHtml(id, lit);
+  });
+  var target = document.querySelector('#weeklyMemberContent .wk-person.is-lit');
+  if (target && target.scrollIntoView) target.scrollIntoView({ block: 'nearest', behavior: shouldAnimateLists() ? 'smooth' : 'auto' });
+}
+
+function stepWeeklyLit(step) {
+  var ids = weeklyMemberIds();
+  if (!ids.length) return;
+  var i = Math.max(0, ids.indexOf(OV._lit)) + step;
+  setWeeklyLit(ids[Math.min(ids.length - 1, Math.max(0, i))]);
 }
 
 async function loadWeeklyMember(uid, ws, loadToken, options) {
@@ -14160,6 +14205,8 @@ function showWeek() {
     OV._status[uid] = 'loading';
   });
   renderWeeklyBoard();
+  var enterBoard = document.getElementById('weeklyMemberContent');
+  if (enterBoard && shouldAnimateLists()) { enterBoard.classList.remove('wk-enter'); void enterBoard.offsetWidth; enterBoard.classList.add('wk-enter'); }
   weeklyMemberIds().forEach(function(uid) { loadWeeklyMember(uid, ws, loadToken); });
   // The previous week is the next likely click; have it ready.
   var prev = getWeekStart(overviewWeekOffset - 1);
@@ -14200,6 +14247,8 @@ document.addEventListener('keydown', function(event) {
   if (event.key === 'ArrowLeft') { event.preventDefault(); overviewPrevWeek(); }
   else if (event.key === 'ArrowRight') { event.preventDefault(); overviewNextWeek(); }
   else if (event.key === 't' || event.key === 'T') { overviewGoWeek(0); }
+  else if (event.key === 'ArrowDown' || event.key === 'j') { event.preventDefault(); stepWeeklyLit(1); }
+  else if (event.key === 'ArrowUp' || event.key === 'k') { event.preventDefault(); stepWeeklyLit(-1); }
 });
 
 function showOverviewCustomerLoading(owner) {

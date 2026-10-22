@@ -58,7 +58,7 @@ class WeeklyStyleSourceTests(unittest.TestCase):
             self.assertIsNone(re.search(r'\.weekly-(person|work|member|board|team)', css), name)
             self.assertNotIn('#page-overview', css, name)
         v5 = (STATIC / 'visual-v5.css').read_text(encoding='utf-8')
-        for selector in ('.wk-person', '.wk-record', '.wk-person-name', '.wk-empty', '.wk-error'):
+        for selector in ('.wk-person', '.wk-record', '.wk-person-name', '.wk-spec', '.wk-key', '.wk-empty', '.wk-error'):
             self.assertIn(selector, v5)
 
     def test_visual_v5_blocks_are_balanced_and_section_16_is_whole(self):
@@ -73,7 +73,7 @@ class WeeklyStyleSourceTests(unittest.TestCase):
         js = (STATIC / 'app.js').read_text(encoding='utf-8')
         for token in ('wk-week-switch', 'wk-reports'):
             self.assertIn(token, html)
-        for token in ('wk-week-current', 'wk-person', 'wk-record', 'wk-board'):
+        for token in ('wk-week-current', 'wk-person', 'wk-record', 'wk-board', 'wk-spec', 'wk-key', 'is-lit'):
             self.assertIn(token, js)
         self.assertNotIn('weekly-work-card', js)
         self.assertNotIn('ov-week-nav', html)
