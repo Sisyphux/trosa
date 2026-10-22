@@ -14520,8 +14520,8 @@ function dialogueComposerHtml() {
     chips + attachments +
     '<label class="sr-only" for="dialogueReplyInput">回复 sela</label>' +
     '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="3"' +
-      ' placeholder="用一句话回复 sela…（回车发送，Shift+回车换行）"' +
-      ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)">' +
+      ' placeholder="用一句话回复 sela…（回车发送，Shift+回车换行，可直接粘贴图片）"' +
+      ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
       escapeHtml(dialogueDraft) + '</textarea>' +
     '<div class="dialogue-composer-actions">' +
       '<label class="dialogue-attach-btn' + (attachable ? '' : ' is-disabled') + '">附件' +
@@ -14668,11 +14668,31 @@ async function closeDialogueThread() {
   await loadDialogue({ afterReply: true, sentId: threadId });
 }
 
-async function uploadDialogueAttachment(input) {
-  var file = input && input.files && input.files[0];
+function pasteDialogueAttachment(event) {
+  var items = (event.clipboardData && event.clipboardData.items) || [];
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].kind !== 'file' || !/^image\//.test(items[i].type)) continue;
+    var file = items[i].getAsFile();
+    if (!file) continue;
+    event.preventDefault();
+    if (!file.name || file.name === 'image.png') {
+      var ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      file = new File([file], '粘贴的图片-' + Date.now() + '.' + ext, { type: file.type });
+    }
+    sendDialogueAttachment(file, null);
+    return false;
+  }
+  return true;
+}
+
+function uploadDialogueAttachment(input) {
+  return sendDialogueAttachment(input && input.files && input.files[0], input);
+}
+
+async function sendDialogueAttachment(file, input) {
   if (!file) return;
   var customerId = dialogueCustomerId();
-  if (!customerId) { showToast('这条对话没有关联客户，暂时不能上传附件。', 'error'); input.value = ''; return; }
+  if (!customerId) { showToast('这条对话没有关联客户，暂时不能上传附件。', 'error'); if (input) input.value = ''; return; }
   dialogueUploading = true;
   var form = new FormData();
   form.append('files', file);
