@@ -6634,6 +6634,8 @@ function ledgerInit() {
     var node = event.target.closest('.ld-ent');
     if (node) ledgerOpen(Number(node.dataset.id));
   });
+  // 标尺在页面隐藏时可能被画在 0 宽的画布上；拿到尺寸后补画，否则会拉伸成一整块色。
+  if (window.ResizeObserver) new ResizeObserver(function() { drawLedgerRuler(); }).observe(ruler);
   ruler.addEventListener('pointerdown', function(event) {
     LD.dragging = true;
     try { ruler.setPointerCapture(event.pointerId); } catch (ignore) {}

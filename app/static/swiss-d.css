@@ -362,3 +362,9 @@ html.motion-reduced .hand-tip{transition:none !important}
 #trosa #customerEditModal .cw-dlg dt,#trosa #customerEditModal .cw-subk{font-size:.74em;letter-spacing:.02em;text-transform:none;color:var(--dl-ink-3)}
 #trosa #customerEditModal #editTabContacts .cw-foot > .cw-link:first-child{display:none}
 @media (min-width:821px){#trosa #customerEditModal .cw-pbody{min-height:0;overflow-y:auto}#trosa #customerEditModal .cw-panel{bottom:11%}}
+/* 客户列表小幅优化（2026-10-22）：版式不变，只把 10–12px 的小字提到可读大小。 */
+#trosa .ld-gl{font-size:.8rem;letter-spacing:.04em;text-transform:none}
+#trosa .ld-gr{font-size:.82rem}
+#trosa .ld-wh{font-size:.9rem}
+#trosa .ld-l2{font-size:.8rem}
+@media (min-width:1280px){#trosa .ld-l2{font-size:.86rem;grid-template-columns:210px minmax(0,1fr) 250px}}
