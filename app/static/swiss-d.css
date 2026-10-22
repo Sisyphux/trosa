@@ -383,3 +383,22 @@ html.motion-reduced .hand-tip{transition:none !important}
   #trosa .today-page-header .command-shelf.command-shelf.command-shelf .command-icon.command-icon{
     width:36px !important;min-width:36px !important;max-width:36px !important;height:36px !important;min-height:36px !important}
 }
+/* ---- 沟通记录 / 操作日志 小幅优化（hl-polish）---------------------------------
+   沟通记录：客户名加粗成每条的主语；编辑 / 删除不再每条占一整行——
+   有鼠标的设备平时收起、悬停或键盘聚焦该条时出现在右上角，
+   触屏与窄屏没有悬停，保持原来的常显一行。 */
+#trosa #historyTimeline .timeline-title { font-weight: 600 !important; }
+#trosa #historyTimeline .timeline-actions { margin-top: 8px; display: flex; gap: 6px; }
+@media (min-width: 821px) and (hover: hover) {
+  #trosa #historyTimeline .timeline { max-width: 1040px; }
+  #trosa #historyTimeline .timeline-actions {
+    position: absolute; top: -6px; right: 0; margin-top: 0;
+    opacity: 0; transition: opacity var(--dl-dur-fast, .16s) var(--dl-ease, ease);
+  }
+  #trosa #historyTimeline .timeline-item:hover .timeline-actions,
+  #trosa #historyTimeline .timeline-item:focus-within .timeline-actions { opacity: 1; }
+}
+/* 操作日志：中文动作名比英文代码字短，胶囊不换行；同一时刻的连续几条只写一次时间，空时间格不占读屏。 */
+#trosa #logsList .log-item .badge { white-space: nowrap; }
+#trosa #logsList .log-time:empty { visibility: hidden; }
+@media (max-width: 820px) { #trosa #logsList .log-time:empty { display: none; } }

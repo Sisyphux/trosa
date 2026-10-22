@@ -11898,6 +11898,14 @@ function showCustomModal(title, bodyHtml) {
 }
 
 // ========== FOLLOW-UP HISTORY ==========
+// 沟通记录的日期：同年写“10月21日”，跨年才带年份，和全站日期写法一致。
+function historyDateLabel(dateStr) {
+  var value = String(dateStr || '').trim();
+  var match = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return escapeHtml(value);
+  var text = formatChineseDate(value);
+  return Number(match[1]) === new Date().getFullYear() ? text : match[1] + '年' + text;
+}
 var _historyLoadToken = 0;
 async function loadHistory() {
   _pageDataLoadedAt = Date.now();
@@ -11915,10 +11923,10 @@ async function loadHistory() {
     var html = '<div class="timeline">';
     history.forEach(function(h) {
       _followTimelineCache[h.id] = h;
-      html += '<div class="timeline-item"><div class="timeline-date">' + (h.follow_date || '') + (h.created_at ? ' | ' + h.created_at.substring(11, 16) : '') + '</div><div class="timeline-title">' + escapeHtml(h.customer_name || 'Unknown') + '</div><div class="timeline-desc" data-rich-log-id="' + h.id + '" data-rich-field="content">' + renderRichText(communicationDisplayText(h.content || '', h.activity_type, h.direction)) + '</div>' +
-        (h.result ? '<div class="timeline-desc" style="margin-top:2px;"><strong>Result:</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="result">' + renderRichText(h.result) + '</span></div>' : '') +
-        (h.next_plan ? '<div class="timeline-desc" style="margin-top:2px;"><strong>Next Plan:</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="next_plan">' + renderRichText(h.next_plan) + '</span></div>' : '') +
-        '<div style="margin-top:8px;display:flex;gap:6px;">' +
+      html += '<div class="timeline-item"><div class="timeline-date" title="' + escapeHtml((h.follow_date || '') + (h.created_at ? ' ' + h.created_at.substring(11, 16) : '')) + '">' + historyDateLabel(h.follow_date) + (h.created_at ? ' ' + h.created_at.substring(11, 16) : '') + '</div><div class="timeline-title">' + escapeHtml(h.customer_name || '未命名客户') + '</div><div class="timeline-desc" data-rich-log-id="' + h.id + '" data-rich-field="content">' + renderRichText(communicationDisplayText(h.content || '', h.activity_type, h.direction)) + '</div>' +
+        (h.result ? '<div class="timeline-desc" style="margin-top:2px;"><strong>结果：</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="result">' + renderRichText(h.result) + '</span></div>' : '') +
+        (h.next_plan ? '<div class="timeline-desc" style="margin-top:2px;"><strong>下一步：</strong> <span data-rich-log-id="' + h.id + '" data-rich-field="next_plan">' + renderRichText(h.next_plan) + '</span></div>' : '') +
+        '<div class="timeline-actions">' +
           '<button class="btn btn-sm" onclick="openFollowEditModal(' + h.id + ')">' + uiIcon('edit') + '编辑</button>' +
           '<button class="btn btn-sm btn-danger" onclick="deleteFollowLog(' + h.id + ')" style="font-size:0.72rem;">删除</button>' +
         '</div></div>';
@@ -12211,6 +12219,30 @@ function showFollowUndoToast(logId, removed) {
 }
 
 // ========== ACTIVITY LOGS ==========
+// 操作类型的中文名；没收录的类型原样显示，不丢信息。
+var _LOG_ACTION_LABELS = {
+  CREATE: '创建', UPDATE: '更新', DELETE: '删除', SOFT_DELETE: '移除', PERMANENT_DELETE: '永久删除',
+  RESTORE: '恢复', UNDO: '撤销', ARCHIVE: '归档', MERGE: '合并', TRANSFER: '转交',
+  FOLLOW_UP: '跟进', RESCHEDULE: '改期', COMPLETE: '完成', SYNC: '同步',
+  BATCH_UPDATE: '批量更新', BATCH_FOLLOW_UP: '批量跟进', BATCH_COMPLETE: '批量完成', BATCH_SOFT_DELETE: '批量移除',
+  UPDATE_WAITING: '更新等待', REORDER_TODAY_TASKS: '调整今日顺序', UPLOAD_EXCEL: '导入表格',
+  RECOVER_EXCEL_HISTORY: '恢复历史表格', EMPTY_RECYCLE_BIN: '清空回收站',
+  INBOX_DECISION: '处理收件', CREATE_INBOX_REPLY: '记录回复', AUTO_LINK_INBOX: '自动关联收件',
+  CREATE_AGENT_PROPOSAL: '助手提议', CONFIRM_AGENT_PROPOSAL: '确认提议', CANCEL_AGENT_PROPOSAL: '取消提议',
+  CREATE_AGENT_GATEWAY_PROPOSAL: '助手提议', AGENT_GATEWAY_WRITE: '助手写入', UNDO_AGENT_GATEWAY_WRITE: '撤销助手写入',
+  CREATE_AGENT_GATEWAY_TOKEN: '创建助手令牌', REVOKE_AGENT_GATEWAY_TOKEN: '撤销助手令牌',
+  REVOKE: '撤销', ROTATE: '更换', ACCEPT: '接受', CONNECT: '连接', DISCONNECT: '断开', DISABLE: '停用'
+};
+function logActionLabel(action) {
+  var key = String(action || '');
+  return _LOG_ACTION_LABELS[key.toUpperCase()] || key;
+}
+// 操作日志时间精确到分钟，写法同沟通记录（今年不带年份）。
+function logTimeLabel(createdAt) {
+  var value = String(createdAt || '').trim();
+  if (!/^\d{4}-\d{1,2}-\d{1,2}/.test(value)) return escapeHtml(value);
+  return historyDateLabel(value) + ' ' + value.substring(11, 16);
+}
 var _logsLoadToken = 0;
 async function loadLogs(action) {
   _pageDataLoadedAt = Date.now();
@@ -12220,7 +12252,7 @@ async function loadLogs(action) {
 
   // 筛选按钮栏始终保留：失败后用户仍能切换筛选或重试。
   var actions_list = ['all', 'CREATE', 'UPDATE', 'DELETE', 'COMPLETE', 'SYNC'];
-  var labels = ['全部', '创建', '更新', '删除', '完成', '同步'];
+  var labels = ['全部', '创建', '更新', '已删除', '完成', '同步'];
   var filterHtml = '<div style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap;">';
   actions_list.forEach(function(a, i) {
     var isActive = a === currentAction;
@@ -12242,13 +12274,18 @@ async function loadLogs(action) {
       el.innerHTML = html;
       return;
     }
+    var previousTime = '';
     logs.forEach(function(l) {
       var badgeClass = '';
       if (l.action === 'create') badgeClass = 'badge-today';
       else if (l.action === 'update') badgeClass = 'badge-info';
       else if (l.action === 'delete') badgeClass = 'badge-overdue';
       else if (l.action === 'complete') badgeClass = '';
-      html += '<div class="log-item"><span class="log-time">' + (l.created_at || '') + '</span><span class="badge' + (badgeClass ? ' ' + badgeClass : '') + '" style="font-size:0.68rem;">' + (l.action || '') + '</span><span class="log-detail">' + escapeHtml(l.details || '') + '</span></div>';
+      // 连续几条同一时刻只写一次时间；完整时间留在悬停提示里。
+      var timeText = logTimeLabel(l.created_at);
+      var shownTime = timeText === previousTime ? '' : timeText;
+      previousTime = timeText;
+      html += '<div class="log-item"><span class="log-time" title="' + escapeHtml(l.created_at || '') + '">' + shownTime + '</span><span class="badge' + (badgeClass ? ' ' + badgeClass : '') + '" style="font-size:0.68rem;" title="' + escapeHtml(l.action || '') + '">' + escapeHtml(logActionLabel(l.action)) + '</span><span class="log-detail">' + escapeHtml(l.details || '') + '</span></div>';
     });
     el.innerHTML = html;
   } catch(e) {
