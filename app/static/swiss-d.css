@@ -421,3 +421,29 @@ html.motion-reduced .hand-tip{transition:none !important}
 @media (pointer: coarse) {
   #trosa .nav-order-settings .nav-order-item button { width: 44px; height: 44px; }
 }
+
+/* ==========================================================================
+   设置页「账户与界面」底部保存栏（2026-10-22）
+   页面很长，"保存设置"原只在卡片顶部，滚下去就点不到。在该卡片末尾放一条
+   贴底的保存栏：它在卡片内容流里（sticky），所以不会盖住最后一项；贴在页面底部
+   状态条（.room-bot，高 --room-bar，z-index 60）正上方，滚到卡片末尾时自然落回
+   原位。白底、顶部 1px 细线、无阴影、无新色；按钮与页顶那个共用 savePersonalSettings。
+   只有该卡片有"保存设置"按钮，AI 接口等分区各有自己的保存方式，不加。
+   ========================================================================== */
+#trosa .settings-savebar {
+  position: sticky; bottom: var(--room-bar, 52px); z-index: 50;
+  display: flex; justify-content: flex-end; align-items: center;
+  padding: 8px 0; background: #fff; border-top: 1px solid var(--dl-hair);
+}
+#trosa .settings-savebar .btn { min-height: 36px; }
+@media (min-width: 821px) {
+  /* 宽屏：与内容列同宽，按钮靠右，与页顶的保存按钮对齐 */
+  #trosa .settings-savebar { margin-top: 8px; }
+}
+@media (max-width: 820px) {
+  /* 手机：按钮占满一行，触控目标 ≥44px */
+  #trosa .settings-savebar { padding: 8px 0 10px; }
+  #trosa .settings-savebar .btn { width: 100%; min-height: 44px; }
+}
+/* 卡片原为 overflow:hidden，会让里面的 sticky 失效；clip 同样裁切但不形成滚动容器 */
+#trosa .settings-sections .personalization-card.personalization-card { overflow: clip !important; }

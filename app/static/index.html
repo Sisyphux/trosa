@@ -615,6 +615,7 @@ if(t!=='classic')document.documentElement.setAttribute('data-type','swiss');}cat
             <div class="settings-group"><h4>界面性能</h4><div class="settings-inline-field"><span>模式</span><select id="preferenceInterfacePerformance" onchange="previewInterfacePerformance(this.value)"><option value="auto">自动（推荐）</option><option value="full">完整视觉</option><option value="lite">轻量</option><option value="performance">性能优先</option></select></div><p class="settings-help" id="performanceProbeStatus">默认完整视觉。操作明显卡顿时自动切到轻量，持续流畅后自动恢复。</p></div>
             <div class="settings-group"><h4>Inbox 提醒范围</h4><div class="settings-number-grid"><label>重点客户未联系<input type="number" id="preferencePrioritySilentDays" min="7" max="365"><span>天</span></label><label>其他客户未联系<input type="number" id="preferenceRegularSilentDays" min="14" max="730"><span>天</span></label><label>最多显示长期未联系客户<input type="number" id="preferenceMaxReactivation" min="1" max="12"><span>位</span></label></div></div>
           </div>
+          <div class="settings-savebar"><button type="button" class="btn btn-sm btn-primary" onclick="savePersonalSettings()">保存设置</button></div>
         </div>
         <div class="card ai-integration-card" id="aiIntegrationSettingsCard" data-settings-section="ai" aria-labelledby="aiIntegrationTitle">
           <div class="card-header"><div><h3 id="aiIntegrationTitle">AI 接口</h3><p>AI 功能共用此接口。截图识别需使用支持图片的模型；连接测试不发送客户资料。</p></div></div>
