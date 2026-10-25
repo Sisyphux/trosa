@@ -613,7 +613,7 @@ def create_thread(conn, *, payload, idempotency_key=None, actor='sela'):
     subject = _subject(payload.get('subject'))
     title = _text(payload.get('title'), field='title', maximum=MAX_TITLE, required=False)
     if not title:
-        title = subject or 'sela 对话'
+        title = subject or '对话'
     text = _text(payload.get('text'), field='text')
     suggested = _suggested(payload.get('suggested_replies'))
     refs = _refs(payload.get('refs'))

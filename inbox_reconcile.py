@@ -248,7 +248,7 @@ def reconcile_inbox_connection(conn):
             resolve_inbox_item(
                 conn, inbox_item_id=row['id'], resolved_at=now,
                 resolution_reason='identity_not_a_human_question',
-                resolution_note='身份歧义只回给 sela 处理，不再进入 Inbox；原始证据保留用于审计。',
+                resolution_note='身份歧义由系统自动处理，不再进入 Inbox；原始证据保留用于审计。',
                 resolution_source='auto',
             )
             stats['self_resolved'] += 1

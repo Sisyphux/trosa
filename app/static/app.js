@@ -14580,7 +14580,7 @@ var dialogueUploading = false;
 var dialogueConflictNote = null;
 var dialogueMobileView = 'list';
 
-var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: 'sela 处理中', done: '已归档' };
+var DIALOGUE_GROUP_LABELS = { awaiting: '等你', sela: '处理中', done: '已归档' };
 // Finished conversations are archived: the group stays collapsed unless the reader opens it.
 var dialogueArchivedOpen = false;
 try { dialogueArchivedOpen = localStorage.getItem('trosa.dialogue.archivedOpen') === '1'; } catch (error) { dialogueArchivedOpen = false; }
@@ -14661,7 +14661,7 @@ function renderDialogueOverview() {
   var overview = document.getElementById('dialogueOverview');
   if (!overview) return;
   overview.innerHTML = '<strong>' + dialogueAwaitingCount() + '</strong> 条等你回复，' +
-    Number(dialogueCounts.awaiting_sela || 0) + ' 条等 sela。';
+    Number(dialogueCounts.awaiting_sela || 0) + ' 条在处理中。';
 }
 
 function refreshDialogueBadge() {
@@ -14707,7 +14707,7 @@ function renderDialogueList() {
   if (!listEl) return;
   if (dialogueListError) { listEl.innerHTML = loadFailureHtml(dialogueListError, '对话列表', 'loadDialogue()'); return; }
   if (!dialogueThreads.length) {
-    listEl.innerHTML = emptyStateHtml('inbox', '现在没有对话', '需要你决定的事，sela 会放在这里。', '', { compact: true, noArt: true });
+    listEl.innerHTML = emptyStateHtml('inbox', '现在没有对话', '需要你决定的事，会放在这里。', '', { compact: true, noArt: true });
     return;
   }
   var ordered = orderedDialogueThreads();
@@ -14845,7 +14845,7 @@ function renderDialogueThreadHtml() {
   var body = '<div class="dialogue-messages" id="dialogueMessages" role="log" aria-live="polite" aria-relevant="additions">' +
       (messages.length ? messages.map(renderDialogueMessageHtml).join('')
         : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
-      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('sela 处理中…', 'inline') + '</div>' : '') +
+      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('处理中…', 'inline') + '</div>' : '') +
     '</div>';
   var composer = closed
     ? '<div class="dialogue-closed-note" role="status">这条对话已结束。</div>'
@@ -14892,7 +14892,7 @@ function openDialogueCustomer(event) {
 function dialogueComposerHtml() {
   var suggestions = dialogueSuggestions();
   var chips = suggestions.length
-    ? '<div class="dialogue-suggestions" role="group" aria-label="sela 的建议回复">' +
+    ? '<div class="dialogue-suggestions" role="group" aria-label="建议回复">' +
         suggestions.map(function(text, index) {
           return '<button type="button" class="dialogue-suggestion" data-suggestion-index="' + index + '"' +
             ' onclick="fillDialogueSuggestion(this)">' + escapeHtml(String(text)) + '</button>';
@@ -14908,9 +14908,9 @@ function dialogueComposerHtml() {
     : '';
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
     chips + attachments +
-    '<label class="sr-only" for="dialogueReplyInput">回复 sela</label>' +
+    '<label class="sr-only" for="dialogueReplyInput">回复</label>' +
     '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="3"' +
-      ' placeholder="用一句话回复 sela…（回车发送，Shift+回车换行，可直接粘贴图片）"' +
+      ' placeholder="用一句话回复…（回车发送，Shift+回车换行，可直接粘贴图片）"' +
       ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
       escapeHtml(dialogueDraft) + '</textarea>' +
     '<div class="dialogue-composer-actions">' +
@@ -14925,7 +14925,7 @@ function dialogueComposerHtml() {
 
 function renderDialogueMessageHtml(message) {
   var role = String(message.role || 'system');
-  var who = role === 'human' ? '你' : (role === 'system' ? '系统' : 'sela');
+  var who = role === 'human' ? '你' : (role === 'system' ? '系统' : '助手');
   var refs = renderDialogueRefsHtml(message.refs);
   var attachments = renderDialogueAttachmentsHtml(message.attachments);
   return '<div class="dialogue-msg dialogue-msg--' + escapeHtml(role) + '" data-role="' + escapeHtml(role) + '">' +
@@ -15027,7 +15027,7 @@ async function submitDialogueReply(event) {
   dialogueSending = false;
   dialogueDraft = '';
   dialogueAttachments = [];
-  showToast('sela 已收到', 'success');
+  showToast('已收到', 'success');
   await loadDialogue({ afterReply: true, sentId: threadId });
   return false;
 }
@@ -15036,7 +15036,7 @@ async function closeDialogueThread() {
   if (!dialogueThread) return;
   var confirmed = await showAppConfirm({
     title: '归档这条对话？',
-    message: '你这边已经处理好了，不用再回复。归档后它会收进「已归档」；sela 之后有新事，会另开一条来找你。',
+    message: '你这边已经处理好了，不用再回复。归档后它会收进「已归档」；之后有新事，会另开一条来找你。',
     submitLabel: '归档'
   });
   if (!confirmed) return;

@@ -3176,14 +3176,14 @@ def sela_service_integration_token():
     digest. It is separate from personal Agent Gateway PATs.
     """
     if g.current_user != 'hamid':
-        return jsonify({'error': '只有 Hamid 可以管理 Sela 服务令牌'}), 403
+        return jsonify({'error': '只有 Hamid 可以管理自动同步的访问令牌'}), 403
     conn = get_system_db()
     now = _calendar_now_text()
     if request.method == 'DELETE':
         conn.execute('DELETE FROM app_settings WHERE key=?', (_SELA_SERVICE_INTEGRATION_KEY,))
         conn.commit()
         conn.close()
-        log_operation('REVOKE', 'integration', details='撤销 Sela 服务令牌')
+        log_operation('REVOKE', 'integration', details='撤销自动同步访问令牌')
         return jsonify({'success': True, 'enabled': False, 'service': 'sela-service-v1'})
     token = 'trosa_sela_' + secrets.token_urlsafe(48)
     record = {
@@ -3199,7 +3199,7 @@ def sela_service_integration_token():
                  (_SELA_SERVICE_INTEGRATION_KEY, json.dumps(record, ensure_ascii=False)))
     conn.commit()
     conn.close()
-    log_operation('ROTATE', 'integration', details='创建/轮换 Sela 服务令牌')
+    log_operation('ROTATE', 'integration', details='创建/轮换自动同步访问令牌')
     return jsonify({
         'success': True,
         'enabled': True,
@@ -7649,7 +7649,7 @@ def _sela_block_cold_prospect(conn, source_id, reason, now):
         )
         _record_operation_log(
             conn, 'BLOCK', 'sela_prospect', int(profile['customer_id']),
-            f'Sela 服务身份将冷 Prospect {source_id} 设为停止联系：{reason[:500]}', now,
+            f'自动同步将冷线索 {source_id} 设为停止联系：{reason[:500]}', now,
         )
         changed = True
     # Already blocked (by a human or an earlier call) still answers the open
@@ -11458,7 +11458,7 @@ def _customer_context_markdown(customer, contacts, follow_history, outreach_emai
     else:
         lines.append('- 联系人：待确认')
     if agent_prospect:
-        lines.extend(['', '## Sela 研究资料（仅作研究依据，未自动视为已确认客户事实）'])
+        lines.extend(['', '## 自动研究资料（仅作研究依据，未自动视为已确认客户事实）'])
         research_labels = (
             ('资格状态', 'qualification_status'), ('研究状态', 'research_status'),
             ('置信度', 'confidence'), ('沟通角度', 'angle'),
@@ -15348,7 +15348,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
         _update_contact(conn, contact_id=primary_id, values=values)
         after = _snapshot_entity(conn, 'contacts', primary_id)
         _record_operation_log(conn, 'UPDATE', 'contact', primary_id,
-                              f'Sela Inbox 人工回答确认邮箱 {email}（原为附加邮箱，提为主邮箱）', now)
+                              f'在 Inbox 中人工确认邮箱 {email}（原为附加邮箱，提为主邮箱）', now)
         return {'contact_id': primary_id, 'created': False, 'already_present': False,
                 'primary_changed': True, 'undo': ('UPDATE_CONTACT', primary_id, before, after)}
     if same:
@@ -15382,7 +15382,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
         _update_contact(conn, contact_id=contact_id, values=values)
         after = _snapshot_entity(conn, 'contacts', contact_id)
         _record_operation_log(conn, 'UPDATE', 'contact', contact_id,
-                              f'Sela Inbox 人工回答确认邮箱 {email}', now)
+                              f'在 Inbox 中人工确认邮箱 {email}', now)
         return {'contact_id': contact_id, 'created': False, 'already_present': False,
                 'primary_changed': True, 'undo': ('UPDATE_CONTACT', contact_id, before, after)}
     contact_id = int(_create_contact(conn, customer_id=customer_id, values={
@@ -15393,7 +15393,7 @@ def _sela_resolve_contact_email(conn, customer_id, email, now, *, actor='', addi
     }, created_at=now))
     after = _snapshot_entity(conn, 'contacts', contact_id)
     _record_operation_log(conn, 'CREATE', 'contact', contact_id,
-                          f'Sela Inbox 人工回答确认邮箱 {email}', now)
+                          f'在 Inbox 中人工确认邮箱 {email}', now)
     return {'contact_id': contact_id, 'created': True, 'already_present': False,
             'undo': ('CREATE_CONTACT', contact_id, None, after)}
 
