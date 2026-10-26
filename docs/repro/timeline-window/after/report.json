@@ -1,0 +1,26 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18192",
+  "checks": [
+    {
+      "id": "record-saved-on-server",
+      "title": "服务端已经保存了这条记录",
+      "pass": true,
+      "detail": "服务端共 6 条"
+    },
+    {
+      "id": "record-still-on-screen",
+      "title": "保存几秒后，时间线里仍能看到这条补记",
+      "pass": true,
+      "detail": "保存前 3 行；保存后 6 行：历史记录5 | 历史记录4 | 历史记录3 | 历史记录2 | 历史记录1 | 补记：10.20 询问近期需求"
+    }
+  ],
+  "screenshots": [
+    "01-before-record.png",
+    "02-after-record.png"
+  ],
+  "pageErrors": [],
+  "measurements": {
+    "customer_id": 1
+  }
+}

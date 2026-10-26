@@ -2604,7 +2604,7 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         self.assertIn("else if (currentPage === 'customers') loadCustomers({ preservePosition: true });", handler)
         self.assertIn('function syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey)', javascript)
         self.assertIn('upsertCustomerTimelineEntry(activity)', handler)
-        self.assertIn('reconcileCustomerTimeline({ includeSummary: true })', handler)
+        self.assertIn('reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey })', handler)
         self.assertIn('recentFactFromCommunication(activity)', javascript)
         self.assertIn('recent_facts: _customerDetailCache.recent_facts', javascript)
         # The post-await writes go through the scope gate: `cache` is the

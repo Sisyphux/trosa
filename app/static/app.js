@@ -4198,7 +4198,7 @@ async function saveInboxReply() {
         if (saved && (saved.completed_task || saved.next_step)) applyCustomerTaskSnapshot(reminders);
         syncCustomerWorkspaceAfterCommunication(customerId, activity, changedKey);
       }
-      reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+      reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey }).catch(function() {});
     }
     // 待归属沟通流水线：确认一条后直接载入下一条，不回列表。
     if (context.autoPipeline) {
@@ -8549,6 +8549,7 @@ async function openEditModal(id) {
     renderCustomerNextTask(c.reminders || []);
     _customerDetailCache = c;
     _customerTimelinePage = 1;
+    _customerTimelinePerPage = Number(c.timeline_pagination && c.timeline_pagination.per_page) || 3;
     _customerTimelineLoading = false;
     _customerSectionLoads = {};
     renderCustomerTimelineMore(c.timeline_pagination);
@@ -10171,15 +10172,35 @@ async function loadMoreCustomerTimeline() {
   }
 }
 
+function timelineResponseHasKey(data, key) {
+  return normalizeCustomerTimelineItems((data && data.items) || []).some(function(item) {
+    return customerTimelineKey(item) === key;
+  });
+}
+
 async function refreshCustomerTimeline(options) {
   options = options || {};
   var customerId = _customerDetailCache && _customerDetailCache.id;
   if (!customerId) return;
   var scope = beginCustomerScope(customerId);
-  var data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + _customerTimelinePerPage,
+  var perPage = _customerTimelinePerPage;
+  var data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + perPage,
     { silentError: !!options.silentError });
+  // 时间线按沟通日期排序，只取最新几条。刚保存/改过的记录若日期不在最新几条里
+  // （补记较早日期、或客户已有日期靠后的记录），按原页宽读回会把它挤掉，看起来像
+  // 没保存。要保证的那条还没出现时，放宽页宽重读，直到它出现或到上限。
+  if (options.ensureKey) {
+    var steps = [10, 20, 50];
+    for (var i = 0; i < steps.length && data && data.pagination && data.pagination.has_next &&
+        !timelineResponseHasKey(data, options.ensureKey) && steps[i] > perPage; i++) {
+      perPage = steps[i];
+      data = await api('/api/customers/' + customerId + '/timeline?page=1&per_page=' + perPage,
+        { silentError: !!options.silentError });
+    }
+  }
   var cache = liveCustomerCache(scope);
   if (!cache) return;
+  _customerTimelinePerPage = (data && data.pagination && Number(data.pagination.per_page)) || perPage;
   if (_customerWorkspaceCache[customerId]) {
     _customerWorkspaceCache[customerId].timeline = data;
     _customerWorkspaceCache[customerId].savedAt = Date.now();
@@ -10355,7 +10376,7 @@ async function reconcileCustomerTimeline(options) {
   options = options || {};
   if (!_customerDetailCache || !_customerDetailCache.id || _customerTimelinePage !== 1) return;
   try {
-    await refreshCustomerTimeline({ silentError: true });
+    await refreshCustomerTimeline({ silentError: true, ensureKey: options.ensureKey });
     if (options.includeSummary) await refreshCustomerWorkspace();
   } catch (error) {
     // The confirmed row stays on screen; opening the customer again reconciles
@@ -10681,7 +10702,7 @@ async function addFollowHistory() {
     // 这里刷新底层工作台，让关闭详情后不会留下旧的今日事项。
     if (currentPage === 'dashboard') loadDashboard();
     else if (currentPage === 'customers') loadCustomers({ preservePosition: true });
-    reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey }).catch(function() {});
     return true;
   } catch(e) { return false; }
   finally {
@@ -10732,7 +10753,7 @@ async function addOutreach() {
       document.getElementById('outreachDate').value = ''; document.getElementById('outreachReply').value = 'pending';
     }
     setCwForm('followCompose', false);
-    reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey }).catch(function() {});
   } catch(e) {}
 }
 
@@ -12253,7 +12274,7 @@ async function saveFollowEdit() {
     }
     showToast('沟通记录已更新', 'success');
     closeModal('followEditModal', true);
-    if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+    if (customerModal) reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey }).catch(function() {});
     else loadHistory();
   } catch(e) { showToast('更新失败', 'error'); }
   finally { endWrite('followEdit'); resetFollow(0); }
@@ -12306,7 +12327,7 @@ function showFollowUndoToast(logId, removed) {
       }
       toast.remove();
       showToast('记录已恢复', 'success');
-      if (customerModal) reconcileCustomerTimeline({ includeSummary: true }).catch(function() {});
+      if (customerModal) reconcileCustomerTimeline({ includeSummary: true, ensureKey: changedKey }).catch(function() {});
       else loadHistory();
     } catch(e) {}
   };
@@ -13685,6 +13706,7 @@ function resetUserScopedState() {
   _customerWorkspaceCache = {};
   _customerSectionLoads = {};
   _customerTimelinePage = 1;
+  _customerTimelinePerPage = 3;
   _customerTimelineLoading = false;
   _editingContactId = null;
   _editingContactOriginal = null;
