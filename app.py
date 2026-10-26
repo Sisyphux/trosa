@@ -21093,6 +21093,28 @@ def _activity_type_from_excel(content, header):
     return 'follow_up'
 
 
+def _past_import_date(value, today=None):
+    """An imported communication has already happened, so its date cannot be later than today.
+
+    A weekly sheet without years can be anchored a year or two too late (the
+    2026-09 recovery of one member's history landed 90 records in 2027).  Moving
+    a future date back whole years keeps month and day, which the cell text
+    also carries, and leaves valid dates untouched.
+    """
+    text = _excel_text(value)
+    try:
+        parsed = datetime.strptime(text[:10], '%Y-%m-%d')
+    except ValueError:
+        return text
+    limit = today or datetime.now()
+    while parsed.date() > limit.date():
+        try:
+            parsed = parsed.replace(year=parsed.year - 1)
+        except ValueError:  # February 29 in a non-leap target year
+            parsed = parsed.replace(year=parsed.year - 1, day=28)
+    return parsed.strftime('%Y-%m-%d')
+
+
 def _activity_date_from_excel(content, fallback_date):
     # A six-digit date written inside a cell (e.g. 260415) is more precise than a weekly heading.
     match = re.search(r'(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)', content)
@@ -21285,9 +21307,9 @@ def recover_excel_activities(paths=None):
 
                     for column, content, header, segment_date in activity_cells:
                         matched_cells += 1
-                        follow_date = segment_date or _activity_date_from_excel(
+                        follow_date = _past_import_date(segment_date or _activity_date_from_excel(
                             content, activity_dates.get(column, f'{sheet_fallback_year}-01-01')
-                        )
+                        ))
                         source_cell = f'{openpyxl.utils.get_column_letter(column + 1)}{row_number}'
                         source_key = hashlib.sha256(
                             f'{checksum}|{worksheet.title.strip().casefold()}|{source_cell}'.encode('utf-8')
