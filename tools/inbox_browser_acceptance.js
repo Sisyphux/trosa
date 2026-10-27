@@ -331,4 +331,4 @@ while (await list.locator('.inbox-question-open').count()) {
   await page.waitForTimeout(300);
 }
 await page.getByText('当前没有需要你判断的问题', {exact:true}).waitFor({timeout:15000});
-return {cards: 10, draft:true, retry:true, emailCorrection:true, undo:true, automaticResumeQueued:true, unlinkedSelaManual:true, mobileActionClear:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, performanceMode:performanceModeApplied, empty:true, uploads:observed, uploadTimings, layouts};
+return {cards: 10, draft:true, retry:true, emailCorrection:true, undo:true, automaticResumeQueued:true, unlinkedSelaManual:true, mobileActionClear:true, keyboard:true, focusManaged:true, ariaLive:true, reducedMotion:true, empty:true, uploads:observed, uploadTimings, layouts};
