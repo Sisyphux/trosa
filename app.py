@@ -9997,9 +9997,8 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens, coverag
     if postgres_mode():
         contexts = {}
 
-        def matches(values, customer_id=None):
-            haystack = _search_normalize(' '.join(str(value or '') for value in values))
-            hits = {token for token in normalized_tokens if token in haystack}
+        def matches(values, customer_id=None, fuzzy=False):
+            hits = _search_token_hits(normalized_tokens, values, fuzzy=fuzzy)
             if hits and coverage is not None and customer_id is not None:
                 coverage.setdefault(customer_id, set()).update(hits)
             return bool(hits)
@@ -10057,7 +10056,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens, coverag
                         'activity_type': 'email', 'contact_id': item.get('contact_id'), 'contact_name': '', 'action': 'view',
                     })
             for item in contacts_by_customer[customer_id]:
-                if matches((item.get('name'), item.get('email'), item.get('phone'), item.get('whatsapp'), item.get('linkedin')), customer_id):
+                if matches((item.get('name'), item.get('email'), item.get('phone'), item.get('whatsapp'), item.get('linkedin')), customer_id, fuzzy=True):
                     add_context(customer_id, {
                         'type': 'contact', 'label': '联系人', 'id': item.get('id'),
                         'contact_name': item.get('name') or '', 'contact_email': item.get('email') or '',
@@ -10222,9 +10221,10 @@ _CUSTOMER_SEARCH_CONTEXT_WEIGHTS = {
     'inbox': 38,
     'task': 20,
 }
-# Levels: 1 inside the text, 1.5 at the start of a word, 2 at the start, 3 exact.
-_CUSTOMER_SEARCH_MATCH_BONUS = {1: 0, 1.5: 8, 2: 15, 3: 32}
-_CUSTOMER_SEARCH_CONTEXT_BONUS = {1: 0, 1.5: 4, 2: 8, 3: 15}
+# Levels: 0.25 a small typo, 0.5 same letters ignoring spaces/punctuation/accents,
+# 1 inside the text, 1.5 at the start of a word, 2 at the start, 3 exact.
+_CUSTOMER_SEARCH_MATCH_BONUS = {0.25: -12, 0.5: -6, 1: 0, 1.5: 8, 2: 15, 3: 32}
+_CUSTOMER_SEARCH_CONTEXT_BONUS = {0.25: -6, 0.5: -3, 1: 0, 1.5: 4, 2: 8, 3: 15}
 
 
 def _search_normalize(value):
@@ -10232,7 +10232,85 @@ def _search_normalize(value):
     return unicodedata.normalize('NFKC', str(value or '')).casefold().strip()
 
 
-def _search_match_level(value, token):
+def _search_fold(value):
+    """Like ``_search_normalize`` but accents are dropped too ("José" -> "jose")."""
+    text = unicodedata.normalize('NFKD', str(value or '')).casefold()
+    return ''.join(ch for ch in text if not unicodedata.combining(ch))
+
+
+def _search_loose(value):
+    """Letters and digits only, so "Acme-Corp", "acme corp" and "+62 812-3456" line up."""
+    return ''.join(ch for ch in _search_fold(value) if ch.isalnum())
+
+
+def _search_typo_limit(length):
+    """How many slips a word of this length may have; short words must be exact."""
+    if length < 5:
+        return 0
+    return 1 if length < 9 else 2
+
+
+def _search_edit_distance(left, right, limit):
+    """Edit distance (a swapped pair counts once), giving up above ``limit``."""
+    if abs(len(left) - len(right)) > limit:
+        return limit + 1
+    before_previous = None
+    previous = list(range(len(right) + 1))
+    for i, a in enumerate(left, 1):
+        current = [i] + [0] * len(right)
+        for j, b in enumerate(right, 1):
+            best = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a != b))
+            if i > 1 and j > 1 and a == right[j - 2] and left[i - 2] == b:
+                best = min(best, before_previous[j - 2] + 1)
+            current[j] = best
+        if min(current) > limit:
+            return limit + 1
+        before_previous, previous = previous, current
+    return previous[-1]
+
+
+def _search_word_is_close(key, word, limit):
+    """True when ``key`` is a slightly misspelled ``word`` (or start of it)."""
+    if not word or key[0] != word[0]:
+        return False
+    if _search_edit_distance(key, word, limit) <= limit:
+        return True
+    # Someone still typing "acrylc" for "acrylic sheets" is close to the start.
+    return len(word) > len(key) and _search_edit_distance(key, word[:len(key)], limit) <= limit
+
+
+def _search_token_hits(normalized_tokens, values, fuzzy=False):
+    """Tokens that appear in any of ``values``.
+
+    A token is a hit when it is inside the text (the exact rule), or when it
+    matches once spaces, punctuation and accents are ignored.  With ``fuzzy``
+    a longer token also hits a word that is one or two letters off.
+    """
+    haystack = _search_normalize(' '.join(str(value or '') for value in values))
+    hits = {token for token in normalized_tokens if token in haystack}
+    pending = [token for token in normalized_tokens if token not in hits]
+    if not pending:
+        return hits
+    # Each value is squeezed on its own so neighbouring fields never join up.
+    loose_haystack = ' '.join(key for key in (_search_loose(value) for value in values) if key)
+    words = None
+    for token in pending:
+        key = _search_loose(token)
+        if len(key) < 2:
+            continue
+        if key in loose_haystack:
+            hits.add(token)
+            continue
+        limit = _search_typo_limit(len(key))
+        if fuzzy and limit:
+            if words is None:
+                words = {word for value in values for word in re.findall(r'[^\W_]+', _search_fold(value))}
+            if any(_search_word_is_close(key, word, limit) for word in words):
+                hits.add(token)
+    return hits
+
+
+def _search_match_level(value, token, fuzzy=False):
     normalized_value = _search_normalize(value)
     normalized_token = _search_normalize(token)
     if not normalized_value or not normalized_token:
@@ -10247,6 +10325,10 @@ def _search_match_level(value, token):
         if any(word.startswith(normalized_token) for word in re.split(r'[\s\-_/.,()&]+', normalized_value)):
             return 1.5
         return 1
+    if _search_token_hits([normalized_token], [value]):
+        return 0.5
+    if fuzzy and _search_token_hits([normalized_token], [value], fuzzy=True):
+        return 0.25
     return 0
 
 
@@ -10283,7 +10365,7 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None, 
             if field == 'name' and _search_normalize(value) == _search_normalize(customer.get('company')):
                 continue
             for token in search_tokens:
-                level = _search_match_level(value, token)
+                level = _search_match_level(value, token, fuzzy=field in ('name', 'company'))
                 if not level and field == 'country' and _country_matches(value, country_aliases.get(token)):
                     level = 3
                 if not level:
@@ -10306,7 +10388,7 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None, 
             context_text = str(context.get('content') or context.get('title') or context.get('contact_name') or '').strip()
             base_weight = _CUSTOMER_SEARCH_CONTEXT_WEIGHTS.get(context.get('type'), 20)
             for token in search_tokens:
-                level = _search_match_level(context_text, token)
+                level = _search_match_level(context_text, token, fuzzy=context.get('type') == 'contact')
                 if not level:
                     continue
                 score = base_weight + _CUSTOMER_SEARCH_CONTEXT_BONUS[level]
@@ -10476,8 +10558,10 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                 customer.get('source'), customer.get('source_detail'),
                 customer_source_display(customer.get('source')),
             )
-            haystack = _search_normalize(' '.join(str(value or '') for value in values))
-            customer['_search_field_hits'] = {token for token in normalized_tokens if token in haystack}
+            # Names and the company tolerate a small typo; long free text does not.
+            customer['_search_field_hits'] = (
+                _search_token_hits(normalized_tokens, values)
+                | _search_token_hits(normalized_tokens, (customer.get('name'), customer.get('company')), fuzzy=True))
             for token, keys in country_token_keys.items():
                 if _country_matches(customer.get('country'), keys):
                     customer['_search_field_hits'].add(token)
