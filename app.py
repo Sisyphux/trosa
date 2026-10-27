@@ -382,6 +382,7 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/continuations',
             '/api/integrations/sela/threads',
             '/api/integrations/sela/inbox-observability',
+            '/api/integrations/sela/outreach-history',
         })
         or (request.method == 'POST' and request.path in {
             '/api/integrations/sela/reply',
@@ -8754,6 +8755,68 @@ def sela_integration_update_resume_status(item_id):
         return jsonify({'success': False, 'error': '续跑状态未保存'}), 500
     finally:
         conn.close()
+
+
+_SELA_OUTREACH_HISTORY_PARAMS = frozenset({'ids'})
+_SELA_OUTREACH_HISTORY_MAX_IDS = 200
+
+
+@app.route('/api/integrations/sela/outreach-history', methods=['GET'])
+@login_required
+def sela_integration_outreach_history():
+    """Letters sent and replies received for up to 200 customers in one request.
+
+    ``GET /api/customers/<id>`` returns the same facts one customer at a time; reading a
+    thousand customers that way costs a thousand round trips.  This is the same read, batched:
+    per customer the identity fields, the primary-contact kind, every outreach email and every
+    inbound communication.  Customers that do not exist (or are deleted) are listed in ``missing``.
+    """
+    unknown = _sela_unsupported_params(_SELA_OUTREACH_HISTORY_PARAMS)
+    if unknown:
+        return _sela_unsupported_params_response(unknown, _SELA_OUTREACH_HISTORY_PARAMS)
+    try:
+        ids = list(dict.fromkeys(int(part) for part in str(request.args.get('ids') or '').split(',') if part.strip()))
+    except ValueError:
+        ids = []
+    if not ids or len(ids) > _SELA_OUTREACH_HISTORY_MAX_IDS or any(value <= 0 for value in ids):
+        return jsonify({
+            'success': False,
+            'error': f'ids 必须是 1-{_SELA_OUTREACH_HISTORY_MAX_IDS} 个逗号分隔的客户编号',
+        }), 400
+    conn = get_db()
+    try:
+        records = {cid: _customer_record(conn, cid) for cid in ids}
+        found = [cid for cid in ids if records[cid]]
+        contacts_by, interactions_by = {}, {}
+        if found:
+            for item in _customer_contacts(conn, 0, customer_ids=found):
+                contacts_by.setdefault(int(item['customer_id']), []).append(item)
+            if postgres_mode():
+                rows = _customer_interactions(conn, 0, customer_ids=found)
+            else:
+                rows = [row for cid in found for row in _customer_interactions(conn, cid)]
+            for row in rows:
+                interactions_by.setdefault(int(row['customer_id']), []).append(row)
+    finally:
+        conn.close()
+    customers = []
+    for cid in found:
+        record = records[cid]
+        items = interactions_by.get(cid, [])
+        customers.append({
+            'id': cid,
+            'company': record.get('company') or '',
+            'country': record.get('country') or '',
+            'industry': record.get('industry') or '',
+            'field': record.get('field') or '',
+            'contacts': [{'is_primary': bool(item.get('is_primary')), 'contact_type': item.get('contact_type') or ''}
+                         for item in contacts_by.get(cid, [])],
+            'outreach_emails': [item for item in items if item.get('kind') == 'email'],
+            'follow_history': [item for item in items
+                               if item.get('kind') == 'communication' and item.get('direction') == 'inbound'],
+        })
+    return jsonify({'success': True, 'customers': customers,
+                    'missing': [cid for cid in ids if not records[cid]]})
 
 
 @app.route('/api/integrations/sela/continuations', methods=['GET'])
