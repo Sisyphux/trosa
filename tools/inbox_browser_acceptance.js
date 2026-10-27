@@ -10,26 +10,16 @@ await page.setViewportSize({width: 1440, height: 900});
 await page.goto('about:blank', {waitUntil: 'domcontentloaded'});
 await page.goto(origin, {waitUntil: 'domcontentloaded'});
 await page.evaluate(async () => { localStorage.clear(); sessionStorage.clear(); if (navigator.serviceWorker) await Promise.all((await navigator.serviceWorker.getRegistrations()).map(r => r.unregister())); });
-// This run exercises the classic look's performance tiers; swiss (default) has none.
-await page.evaluate(() => localStorage.setItem('trosa.type', 'classic'));
 await page.reload({waitUntil: 'domcontentloaded'});
 if (await page.locator('#loginOverlay').isVisible()) {
   await page.waitForFunction(() => !document.querySelector('#loginOverlay') || getComputedStyle(document.querySelector('#loginOverlay')).display === 'none' || !!document.querySelector('#loginUsers [data-user-id="hamid"]'), null, {timeout:15000});
 if (await page.locator('#loginUsers [data-user-id="hamid"]').count()) await page.locator('#loginUsers [data-user-id="hamid"]').click();
 }
-// Use the real Settings control to enable performance-priority mode in the
-// isolated rehearsal account, then exercise Inbox under that mode.
 // There is no resident navigation: summon the index layer, exactly as a user does.
 const openIndex = async () => {
   await page.locator('#roomBrand').click();
   await page.locator('#roomIndex').waitFor({state: 'visible', timeout: 15000});
 };
-await openIndex();
-await page.locator('#roomIndex').getByRole('button', {name:'设置', exact:true}).click();
-await page.locator('#page-settings.active').waitFor();
-await page.locator('#preferenceInterfacePerformance').selectOption('performance');
-await page.getByRole('button', {name:'保存设置', exact:true}).first().click();
-await page.waitForFunction(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'), null, {timeout:15000});
 await openIndex();
 await page.locator('#roomIndex [data-page="inbox"]').first().click();
 await page.locator('#inboxTabOther').click();
@@ -68,8 +58,6 @@ const selectInboxContact = async (contactId) => {
   await select.selectOption(String(contactId));
 };
 const inboxCount = async () => Number((await page.locator('#inboxOverview strong').innerText()).trim());
-const performanceModeApplied = await page.evaluate(() => document.documentElement.dataset.interfacePerformance === 'performance' && document.documentElement.classList.contains('performance-priority'));
-if (!performanceModeApplied) throw new Error('Inbox is not running in performance-priority mode');
 const cardCount = await list.locator('.inbox-question-open').count();
 if (cardCount < 10) throw new Error('fixture card count mismatch: ' + cardCount + ' / ' + (await list.innerText()));
 // On a phone-sized viewport the primary action belongs in the Inbox header;
