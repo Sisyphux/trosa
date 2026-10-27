@@ -2137,6 +2137,46 @@ def _sync_name_key(value):
     return re.sub(r'\s+', ' ', re.sub(r'[^a-z0-9\u4e00-\u9fff]+', ' ', text)).strip()
 
 
+_LEGAL_FORM_TAIL = re.compile(
+    r'\s+(?:s a de c v|sa de cv|s de r l de c v|s a p i de c v|s a s|s a|s l|s r l|srl|sas|gmbh|ag|bv|nv|ltda|'
+    r'pvt|pte|sdn bhd|pt|cv|de cv)$')
+_PAREN_PART = re.compile(r'[(（]([^()（）]{2,40})[)）]')
+
+
+def _sela_name_variants(value):
+    """Return the name keys one company can legitimately appear under.
+
+    "Mar Industrial Distribuidora S.A. de C.V." and "Mar Industrial
+    Distribuidora (MIDSA)" are the same company, but their plain name keys
+    differ, so a second Customer used to be opened and developed again.  The
+    variants are: the full key, the key without a trailing legal form, the key
+    without a bracketed part, and the bracketed abbreviation itself.
+    """
+    text = str(value or '')
+    variants = []
+
+    def add(raw):
+        key = _sync_name_key(raw)
+        while key and _LEGAL_FORM_TAIL.search(key):
+            key = _LEGAL_FORM_TAIL.sub('', key).strip()
+        if key and key not in variants:
+            variants.append(key)
+
+    full = _sync_name_key(text)
+    if full:
+        variants.append(full)
+    add(text)
+    without_brackets = _PAREN_PART.sub(' ', text)
+    if without_brackets != text:
+        add(without_brackets)
+    for part in _PAREN_PART.findall(text):
+        key = _sync_name_key(part)
+        # A short bracket ("USA", "Mexico") is not a company identity.
+        if len(key.replace(' ', '')) >= 4 and key.isascii():
+            add(part)
+    return variants
+
+
 def _canonical_email(value):
     return (value or '').strip().casefold()
 
@@ -3543,18 +3583,20 @@ def _sela_company_identity_matches(rows, payload):
     conflicting identity is returned for a Trosa review instead of silently
     creating a second Customer for a company already owned by the CRM.
     """
-    wanted_name = _sync_name_key(payload.get('company') or payload.get('name'))
+    wanted_names = set(_sela_name_variants(payload.get('company') or payload.get('name')))
     wanted_domain = _canonical_website_domain(payload.get('website') or payload.get('domain'))
-    if not wanted_name and not wanted_domain:
+    if not wanted_names and not wanted_domain:
         return [], ''
     domain_hits, name_hits = [], []
     for row in rows:
         row_domain = _canonical_website_domain(row.get('website'))
-        row_name = _sync_name_key(row.get('company') or row.get('name'))
+        row_names = set(_sela_name_variants(row.get('company') or row.get('name')))
+        if row.get('name') and row.get('name') != row.get('company'):
+            row_names.update(_sela_name_variants(row.get('name')))
         matched = []
         if wanted_domain and row_domain and row_domain == wanted_domain:
             matched.append('domain')
-        if wanted_name and row_name and row_name == wanted_name:
+        if wanted_names and row_names and wanted_names & row_names:
             matched.append('company')
         if not matched:
             continue
@@ -3605,7 +3647,7 @@ def _sela_contact_identity_condition(column_prefix, wanted_email, wanted_phones)
     return '(' + ' OR '.join(conditions) + ')', params
 
 
-def _sela_company_candidate_condition(wanted_name_key, wanted_domain, candidate_id):
+def _sela_company_candidate_condition(wanted_name_keys, wanted_domain, candidate_id):
     """SQL superset for the Customers ``_sela_match_customers`` can pick by
     external id, canonical domain or normalized company name.
 
@@ -3624,17 +3666,21 @@ def _sela_company_candidate_condition(wanted_name_key, wanted_domain, candidate_
                      "OR octet_length(website) <> char_length(website) "
                      "OR strpos(website, '[') > 0)")
         params.append(wanted_domain)
-    if wanted_name_key:
-        tokens = [token for token in wanted_name_key.split(' ')
+    text = "COALESCE(NULLIF(company, ''), name)"
+    name_parts = []
+    for wanted_key in wanted_name_keys:
+        tokens = [token for token in wanted_key.split(' ')
                   if token and token != 'and' and token.isascii()]
         if not tokens:
             return '', []
         # Every token of an equal key is a substring of the row's own text, so
         # requiring all of them keeps this a superset and keeps it selective.
-        text = "COALESCE(NULLIF(company, ''), name)"
-        contains = ' AND '.join(f'strpos(lower({text}), ?) > 0' for _ in tokens)
-        parts.append(f"(({contains}) OR octet_length({text}) <> char_length({text}))")
+        name_parts.append('(' + ' AND '.join(f'strpos(lower({text}), ?) > 0' for _ in tokens) + ')')
         params.extend(tokens)
+    if name_parts:
+        # A shared variant's tokens are always substrings of the row's text.
+        parts.append('(' + ' OR '.join(name_parts) +
+                     f' OR octet_length({text}) <> char_length({text}))')
     return '(' + ' OR '.join(parts) + ')', params
 
 
@@ -3673,7 +3719,7 @@ def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted
     hit_ids = sorted({int(row['customer_id']) for row in contact_rows
                       if row.get('customer_id') is not None})
     company_condition, company_params = _sela_company_candidate_condition(
-        _sync_name_key(payload.get('company') or payload.get('name')), wanted_domain, candidate_id)
+        _sela_name_variants(payload.get('company') or payload.get('name')), wanted_domain, candidate_id)
     where, query_params = ['deleted_at IS NULL'], []
     if company_condition:
         selectors, selector_params = [company_condition], list(company_params)
@@ -4418,6 +4464,56 @@ def _sela_customer_contact_evidence(conn):
     return evidence
 
 
+def _sela_contact_domains_by_customer(conn):
+    """Map Customer id -> company domains found in its contact emails.
+
+    A Customer whose website field is empty or holds free text is still the
+    same company as a prospect writing from ``@thatcompany.com``.  Free-mail
+    domains identify nobody and are skipped.
+    """
+    if postgres_mode():
+        rows = conn.execute(
+            '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
+                 FROM trosa.customer_contacts contact
+                 JOIN trosa.customer_records record ON record.id=contact.customer_id
+                WHERE record.deleted_at IS NULL AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
+                 FROM contacts contact JOIN customers customer ON customer.id=contact.customer_id
+                WHERE (customer.is_deleted=0 OR customer.is_deleted IS NULL)
+                  AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+        ).fetchall()
+    result: dict[int, list[str]] = {}
+    for row in rows:
+        email = _canonical_email(row['email'])
+        domain = email.rsplit('@', 1)[1] if '@' in email else ''
+        if not domain or '.' not in domain or domain in _FREE_EMAIL_DOMAINS:
+            continue
+        domains = result.setdefault(int(row['customer_id']), [])
+        if domain not in domains:
+            domains.append(domain)
+    return result
+
+
+def _sela_record_identity(item, contact_domains):
+    """Names and domains one Customer can be recognised by in an exclusion."""
+    canonical_name = str(item.get('company') or item.get('name') or '').strip()
+    aliases = []
+    for source in (canonical_name, item.get('name')):
+        for variant in _sela_name_variants(source):
+            if variant != _sync_name_key(canonical_name) and variant not in aliases:
+                aliases.append(variant)
+    if item.get('name') and item.get('name') != canonical_name:
+        aliases.insert(0, str(item.get('name')))
+    domains = _canonical_website_domains(item.get('website'))
+    for domain in contact_domains:
+        if domain not in domains:
+            domains.append(domain)
+    return aliases, domains
+
+
 def _sela_other_member_contact_records(own_records):
     """Companies other active members have really contacted.
 
@@ -4444,6 +4540,7 @@ def _sela_other_member_contact_records(own_records):
                 evidence = _sela_customer_contact_evidence(member_conn)
                 if not evidence:
                     continue
+                member_contact_domains = _sela_contact_domains_by_customer(member_conn)
                 if postgres_mode():
                     rows = member_conn.execute(
                         '''SELECT id, name, company, website, country, updated_at
@@ -4466,18 +4563,19 @@ def _sela_other_member_contact_records(own_records):
                 continue
             canonical_name = str(item.get('company') or item.get('name') or '').strip()
             name_key = _sync_name_key(canonical_name)
-            domains = _canonical_website_domains(item.get('website'))
+            aliases, domains = _sela_record_identity(item, member_contact_domains.get(customer_id, []))
             if not canonical_name or not (domains or name_key):
                 continue
             if (name_key and name_key in covered_names) or any(d in covered_domains for d in domains):
                 continue
             covered_names.add(name_key)
+            covered_names.update(aliases)
             covered_domains.update(domains)
             extra.append({
                 'record_id': f'trosa-member-contact:{member}:{customer_id}',
                 'canonical_name': canonical_name,
                 'normalized_name': name_key,
-                'aliases': [],
+                'aliases': aliases,
                 'domains': domains,
                 'country': str(item.get('country') or ''),
                 'status': 'member_contacted', 'match_policy': 'hard',
@@ -4499,18 +4597,19 @@ def _sela_exclusion_snapshot_records(conn):
     can develop them while still reusing the existing record.
     """
     contact_evidence = _sela_customer_contact_evidence(conn)
+    contact_domains = _sela_contact_domains_by_customer(conn)
 
     def customer_record(item, customer_id, latest_outreach_date):
         canonical_name = str(item.get('company') or item.get('name') or '')
         if not canonical_name:
             return None
-        aliases = [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else []
+        aliases, domains = _sela_record_identity(item, contact_domains.get(customer_id, []))
         return {
             'record_id': f'trosa-customer:{customer_id}',
             'canonical_name': canonical_name,
             'normalized_name': _sync_name_key(canonical_name),
             'aliases': aliases,
-            'domains': _canonical_website_domains(item.get('website')),
+            'domains': domains,
             'country': str(item.get('country') or ''),
             'status': 'trosa_customer', 'match_policy': 'hard',
             'source': 'trosa_customer', 'source_id': str(customer_id),

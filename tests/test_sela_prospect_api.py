@@ -1035,6 +1035,56 @@ class SelaProspectApiTest(unittest.TestCase):
         matching = [r for r in records if 'shared-plastics.example' in (r.get('domains') or [])]
         self.assertEqual([r['record_id'] for r in matching], [f'trosa-customer:{own}'])
 
+    def test_name_variants_join_legal_form_and_bracket_abbreviation(self):
+        variants = self.module._sela_name_variants
+        self.assertIn('mar industrial distribuidora', variants('Mar Industrial Distribuidora S.A. de C.V.'))
+        self.assertIn('mar industrial distribuidora', variants('Mar Industrial Distribuidora (MIDSA)'))
+        self.assertIn('midsa', variants('Mar Industrial Distribuidora (MIDSA)'))
+        # A short bracket such as a country code is not a company identity.
+        self.assertNotIn('usa', variants('Acme Plastics (USA)'))
+
+    def test_prospect_with_bracket_abbreviation_reuses_existing_customer(self):
+        existing = {'id': 7, 'name': 'Mar Industrial Distribuidora S.A. de C.V.',
+                    'company': 'Mar Industrial Distribuidora S.A. de C.V.',
+                    'website': 'MIDSA, Mar Industrial Distribuidora. Distribuidor Master'}
+        hits, _ = self.module._sela_company_identity_matches(
+            [existing], {'company': 'Mar Industrial Distribuidora (MIDSA)',
+                         'website': 'https://www.midsa.com.mx/'})
+        self.assertEqual([row['id'] for row in hits], [7])
+        # A different recorded domain still means a different company.
+        other = dict(existing, website='https://other-company.example/')
+        hits, _ = self.module._sela_company_identity_matches(
+            [other], {'company': 'Mar Industrial Distribuidora (MIDSA)',
+                      'website': 'https://www.midsa.com.mx/'})
+        self.assertEqual(hits, [])
+
+    def test_exclusion_carries_aliases_and_contact_email_domain(self):
+        customer_id = self.add_customer('Mar Industrial Distribuidora S.A. de C.V.', website='')
+        conn = self.hamid_db()
+        try:
+            conn.execute("INSERT INTO contacts (customer_id, name, email) VALUES (?, 'Ventas', 'ventas@midsa.com.mx')",
+                         (customer_id,))
+            conn.execute("INSERT INTO contacts (customer_id, name, email) VALUES (?, 'Personal', 'someone@gmail.com')",
+                         (customer_id,))
+            conn.execute(
+                """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction, activity_type, created_at)
+                   VALUES (?, '已发邮件', '2026-08-10', 'outbound', 'follow_up', '2026-08-10 10:00:00')""",
+                (customer_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        record = next(r for r in self.exclusion_records() if r.get('record_id') == f'trosa-customer:{customer_id}')
+        self.assertEqual(record['domains'], ['midsa.com.mx'])
+        self.assertIn('mar industrial distribuidora', record['aliases'])
+
+    def test_member_contact_exclusion_carries_aliases_for_bracket_name(self):
+        member_id = self._add_member_customer('amy', 'Acme Distribuidora (ACMEX)', website='')
+        record = next(r for r in self.exclusion_records()
+                      if r.get('record_id') == f'trosa-member-contact:amy:{member_id}')
+        self.assertIn('acmex', record['aliases'])
+        self.assertIn('acme distribuidora', record['aliases'])
+
     def test_multi_url_website_is_split_into_separate_hosts(self):
         domains = self.module._canonical_website_domains(
             'https://www.bold.net\nhttps://institucional.bold.net/')
