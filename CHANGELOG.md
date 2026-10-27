@@ -1,3 +1,9 @@
+## 2026-10-27 — 搜索认中英文同义词和拼音：搜 acrylic 能找到“亚克力分销”
+
+- 现象：客户资料里中英文混着写（“亚克力分销”和 “acrylic sheet distributor”），搜一种写法找不到另一种；中文名也不能用拼音搜。
+- 修改：整词搜索时认同义词，例如 亚克力/压克力/有机玻璃/acrylic/pmma，分销/经销/批发/distributor/wholesaler，加工/fabricator，标牌/signage，激光/laser 等 23 组，词表来自现有客户的行业、领域、类型字段里真正出现过的词。英文按整词匹配（搜 wholesaler 不会命中 Sheeting 这类无关词），只在输入的整个词正好是已知词时才扩展，输入一半的词仍按原来的“包含”搜。名字、公司、国家、行业、类型、标签、联系人名可以用拼音搜：3 个字母以上拼音全拼命中（yakeli），2 个字母可以是开头的首字母（zw 搜 张伟）；备注和沟通记录不转拼音。这些命中排在精确命中之后。
+- 影响范围：`customer_search_synonyms.py`（新）、`app.py`（搜索匹配）、`requirements.txt`（新增纯 Python 依赖 pypinyin 0.55.0，发布时自动安装）、`tests/test_search_tolerant.py`。接口不变。
+
 ## 2026-10-27 — 搜索不再要求完全对上：空格、标点、重音、轻微打错都能搜到
 
 - 现象：搜 “acme-corp” 找不到 “Acme Corp”，搜 “Jose” 找不到 “José”，手机号写法不同（“812-3456” 对 “+62 812 3456”）或名字打错一两个字母（“acrylc” 对 “Acrylic”）都搜不到。

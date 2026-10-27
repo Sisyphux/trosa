@@ -12,9 +12,9 @@ app_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(app_module)
 
 
-def hits(tokens, values, fuzzy=False):
+def hits(tokens, values, fuzzy=False, pinyin=False):
     normalized = [app_module._search_normalize(token) for token in tokens]
-    return app_module._search_token_hits(normalized, values, fuzzy=fuzzy)
+    return app_module._search_token_hits(normalized, values, fuzzy=fuzzy, pinyin=pinyin)
 
 
 class TolerantSearchTokenTests(unittest.TestCase):
@@ -54,6 +54,40 @@ class TolerantSearchTokenTests(unittest.TestCase):
         self.assertLess(bonus[0.5], bonus[1])
 
 
+class SynonymAndPinyinTests(unittest.TestCase):
+    def test_chinese_and_english_terms_find_each_other(self):
+        self.assertEqual(hits(['acrylic'], ['亚克力分销']), {'acrylic'})
+        self.assertEqual(hits(['亚克力'], ['Acrylic Sheet Distributor']), {'亚克力'})
+        self.assertEqual(hits(['pmma'], ['有机玻璃板']), {'pmma'})
+        self.assertEqual(hits(['分销商'], ['Acrylic Sheet Distributor']), {'分销商'})
+        self.assertEqual(hits(['distributors'], ['亚克力经销商']), {'distributors'})
+        self.assertEqual(hits(['laser'], ['激光加工商']), {'laser'})
+
+    def test_english_terms_match_whole_words_only(self):
+        self.assertEqual(hits(['sheet'], ['Acrylic Sheets']), {'sheet'})
+        self.assertEqual(hits(['wholesaler'], ['Sheeting Co']), set())
+        self.assertEqual(hits(['批发'], ['Wholesale Plastics']), {'批发'})
+        self.assertEqual(hits(['批发'], ['Wholesalers Inc']), {'批发'})
+        self.assertEqual(hits(['板材'], ['Sheeting Co']), set())
+
+    def test_only_a_whole_known_term_expands(self):
+        self.assertEqual(hits(['acryl'], ['亚克力']), set())
+        self.assertEqual(hits(['banana'], ['亚克力']), set())
+
+    def test_pinyin_finds_chinese_text_only_when_asked(self):
+        self.assertEqual(hits(['yakeli'], ['亚克力分销']), set())
+        self.assertEqual(hits(['yakeli'], ['亚克力分销'], pinyin=True), {'yakeli'})
+        self.assertEqual(hits(['fenxiao'], ['亚克力分销'], pinyin=True), {'fenxiao'})
+        self.assertEqual(hits(['zw'], ['张伟'], pinyin=True), {'zw'})
+        self.assertEqual(hits(['zhangwei'], ['张伟 Ltd'], pinyin=True), {'zhangwei'})
+
+    def test_pinyin_does_not_overreach(self):
+        self.assertEqual(hits(['z'], ['张伟'], pinyin=True), set())
+        self.assertEqual(hits(['wl'], ['张伟'], pinyin=True), set())
+        self.assertEqual(hits(['yakeli'], ['Acrylic Co'], pinyin=True), set())
+        self.assertEqual(hits(['k1'], ['亚克力'], pinyin=True), set())
+
+
 class TolerantCustomerListTests(unittest.TestCase):
     def customer(self, customer_id, company):
         return {'id': customer_id, 'company': company, 'name': company, 'is_pinned': False, 'pinned_order': 0,
@@ -89,6 +123,16 @@ class TolerantCustomerListTests(unittest.TestCase):
         self.assertEqual(self.search('acrylc', customers), [2])
         self.assertEqual(self.search('zeta acrylc', customers), [2])
         self.assertEqual(self.search('nothing', customers), [])
+
+    def test_chinese_english_and_pinyin_queries_find_the_customer(self):
+        a = self.customer(1, 'Bright Signs LLC')
+        a['field'] = '亚克力分销'
+        b = self.customer(2, 'Other Co')
+        b['field'] = 'Glass'
+        self.assertEqual(self.search('acrylic', [a, b]), [1])
+        self.assertEqual(self.search('yakeli', [a, b]), [1])
+        self.assertEqual(self.search('acrylic distributor', [a, b]), [1])
+        self.assertEqual(self.search('玻璃', [a, b]), [2])
 
     def test_exact_hit_ranks_before_tolerant_hit(self):
         customers = [self.customer(1, 'Acrylc Works'), self.customer(2, 'Acrylic Works')]

@@ -91,6 +91,7 @@ from customer_timezone import (
     infer_timezone as _infer_customer_timezone,
     normalize_timezone as _normalize_customer_timezone,
 )
+from customer_search_synonyms import pinyin_hit as _search_pinyin_hit, synonym_hit as _search_synonym_hit
 from customer_country_search import (
     country_alias_keys as _country_alias_keys,
     country_alias_sql_values as _country_alias_sql_values,
@@ -9998,7 +9999,7 @@ def _customer_search_match_contexts(cursor, customer_ids, search_tokens, coverag
         contexts = {}
 
         def matches(values, customer_id=None, fuzzy=False):
-            hits = _search_token_hits(normalized_tokens, values, fuzzy=fuzzy)
+            hits = _search_token_hits(normalized_tokens, values, fuzzy=fuzzy, pinyin=fuzzy)
             if hits and coverage is not None and customer_id is not None:
                 coverage.setdefault(customer_id, set()).update(hits)
             return bool(hits)
@@ -10279,12 +10280,14 @@ def _search_word_is_close(key, word, limit):
     return len(word) > len(key) and _search_edit_distance(key, word[:len(key)], limit) <= limit
 
 
-def _search_token_hits(normalized_tokens, values, fuzzy=False):
+def _search_token_hits(normalized_tokens, values, fuzzy=False, pinyin=False):
     """Tokens that appear in any of ``values``.
 
-    A token is a hit when it is inside the text (the exact rule), or when it
-    matches once spaces, punctuation and accents are ignored.  With ``fuzzy``
-    a longer token also hits a word that is one or two letters off.
+    A token is a hit when it is inside the text (the exact rule), when it
+    matches once spaces, punctuation and accents are ignored, or when it names
+    the same idea in the other language ("acrylic" for "亚克力").  With
+    ``fuzzy`` a longer token also hits a word that is one or two letters off;
+    with ``pinyin`` letters typed as pinyin hit Chinese text.
     """
     haystack = _search_normalize(' '.join(str(value or '') for value in values))
     hits = {token for token in normalized_tokens if token in haystack}
@@ -10293,12 +10296,16 @@ def _search_token_hits(normalized_tokens, values, fuzzy=False):
         return hits
     # Each value is squeezed on its own so neighbouring fields never join up.
     loose_haystack = ' '.join(key for key in (_search_loose(value) for value in values) if key)
+    folded_haystack = ' '.join(_search_fold(value) for value in values)
     words = None
     for token in pending:
         key = _search_loose(token)
         if len(key) < 2:
             continue
-        if key in loose_haystack:
+        if key in loose_haystack or _search_synonym_hit(token, folded_haystack):
+            hits.add(token)
+            continue
+        if pinyin and any(_search_pinyin_hit(token, value) for value in values):
             hits.add(token)
             continue
         limit = _search_typo_limit(len(key))
@@ -10310,7 +10317,7 @@ def _search_token_hits(normalized_tokens, values, fuzzy=False):
     return hits
 
 
-def _search_match_level(value, token, fuzzy=False):
+def _search_match_level(value, token, fuzzy=False, pinyin=False):
     normalized_value = _search_normalize(value)
     normalized_token = _search_normalize(token)
     if not normalized_value or not normalized_token:
@@ -10325,7 +10332,7 @@ def _search_match_level(value, token, fuzzy=False):
         if any(word.startswith(normalized_token) for word in re.split(r'[\s\-_/.,()&]+', normalized_value)):
             return 1.5
         return 1
-    if _search_token_hits([normalized_token], [value]):
+    if _search_token_hits([normalized_token], [value], pinyin=pinyin):
         return 0.5
     if fuzzy and _search_token_hits([normalized_token], [value], fuzzy=True):
         return 0.25
@@ -10365,7 +10372,8 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None, 
             if field == 'name' and _search_normalize(value) == _search_normalize(customer.get('company')):
                 continue
             for token in search_tokens:
-                level = _search_match_level(value, token, fuzzy=field in ('name', 'company'))
+                level = _search_match_level(value, token, fuzzy=field in ('name', 'company'),
+                                            pinyin=field not in ('notes', 'profile'))
                 if not level and field == 'country' and _country_matches(value, country_aliases.get(token)):
                     level = 3
                 if not level:
@@ -10388,7 +10396,8 @@ def _customer_search_rank_data(cursor, customers, search_tokens, contexts=None, 
             context_text = str(context.get('content') or context.get('title') or context.get('contact_name') or '').strip()
             base_weight = _CUSTOMER_SEARCH_CONTEXT_WEIGHTS.get(context.get('type'), 20)
             for token in search_tokens:
-                level = _search_match_level(context_text, token, fuzzy=context.get('type') == 'contact')
+                level = _search_match_level(context_text, token, fuzzy=context.get('type') == 'contact',
+                                            pinyin=context.get('type') == 'contact')
                 if not level:
                     continue
                 score = base_weight + _CUSTOMER_SEARCH_CONTEXT_BONUS[level]
@@ -10559,9 +10568,15 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
                 customer_source_display(customer.get('source')),
             )
             # Names and the company tolerate a small typo; long free text does not.
-            customer['_search_field_hits'] = (
-                _search_token_hits(normalized_tokens, values)
-                | _search_token_hits(normalized_tokens, (customer.get('name'), customer.get('company')), fuzzy=True))
+            field_hits = _search_token_hits(normalized_tokens, values)
+            rest = [token for token in normalized_tokens if token not in field_hits]
+            if rest:
+                field_hits |= _search_token_hits(rest, (customer.get('name'), customer.get('company')), fuzzy=True)
+                rest = [token for token in rest if token not in field_hits]
+            if rest:
+                # Short labels may be typed as pinyin; long notes are not converted.
+                field_hits |= _search_token_hits(rest, values[:7], pinyin=True)
+            customer['_search_field_hits'] = field_hits
             for token, keys in country_token_keys.items():
                 if _country_matches(customer.get('country'), keys):
                     customer['_search_field_hits'].add(token)
