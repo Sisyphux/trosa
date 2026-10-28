@@ -12809,6 +12809,7 @@ function showAppPrompt(options) {
     input.value = options.value == null ? '' : String(options.value);
     input.readOnly = !!options.readonly;
     input.onkeydown = function(event) {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === 'Enter' && !options.readonly) {
         event.preventDefault();
         submitAppDialog();
@@ -14996,6 +14997,8 @@ function fillDialogueSuggestion(button) {
 }
 
 function dialogueReplyKeydown(event) {
+  // Enter that confirms a half-typed pinyin / IME candidate is not "send" (Safari reports it as keyCode 229).
+  if (event.isComposing || event.keyCode === 229) return true;
   if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
     event.preventDefault();
     submitDialogueReply(event);
