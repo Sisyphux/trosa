@@ -296,3 +296,30 @@ class InboxNoteAttachmentPostgresTest(unittest.TestCase):
             got.close()
             other = client.get(f'/api/inbox/threads/{thread_id}/attachments/{uuid.uuid4()}')
             self.assertEqual(other.status_code, 404)
+
+
+    def test_gateway_customer_search_finds_a_contact_name_from_a_chat(self):
+        """An agent reading a WhatsApp screenshot only sees "Carlos": search must reach contacts."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location('trosa_inbox_note_pg_app2', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.app.config.update(TESTING=True)
+        session = module.app.test_client()
+        self.assertEqual(session.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        created = session.post('/api/customers', json={'name': 'Acrilicos Lima Note', 'company': 'Acrilicos Lima Note',
+                                                       'country': '秘鲁'})
+        self.assertIn(created.status_code, (200, 201), created.get_json())
+        customer_id = (created.get_json().get('id') or created.get_json().get('customer', {}).get('id'))
+        contact = session.post(f'/api/customers/{customer_id}/contacts',
+                               json={'name': 'Carlosnote Quispe', 'phone': '+51 987 654 321'})
+        self.assertIn(contact.status_code, (200, 201), contact.get_json())
+        token = session.post('/api/agent-gateway/tokens', json={'scopes': ['crm:read']}).get_json()['data']['token']
+        gateway = module.app.test_client()
+        found = gateway.get('/api/gateway/customers?query=Carlosnote',
+                            headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(found.status_code, 200, found.get_json())
+        customers = found.get_json()['data']['customers']
+        self.assertEqual([c['id'] for c in customers], [customer_id])
+        self.assertEqual(customers[0]['match'].get('contact_name'), 'Carlosnote Quispe')

@@ -17056,6 +17056,33 @@ def _gateway_authoritative_dates(conn, rows):
 def gateway_search_customers():
     query = str(request.args.get('query') or '').strip()[:200]
     limit, offset = _gateway_limit(), _gateway_offset()
+    if postgres_mode() and query:
+        # Same matching as the Customer search box: also contacts (name, email, phone,
+        # WhatsApp), past messages and tasks, so an agent can find "Carlos" or a number
+        # seen in a chat screenshot.  ``match`` says why each customer was returned.
+        payload = _customer_list_payload({'search': query, 'sort': 'updated_at', 'order': 'desc',
+                                          'per_page': str(limit), 'page': str(offset // limit + 1)})
+        rows = payload.get('customers') or []
+        conn = get_db()
+        try:
+            dated = _gateway_authoritative_dates(conn, [
+                {'id': row['id'], 'name': row.get('name'), 'company': row.get('company'),
+                 'country': row.get('country'), 'last_contact': row.get('last_contact'),
+                 'next_follow_up': row.get('next_follow_up')} for row in rows])
+        finally:
+            conn.close()
+        customers = []
+        for row, item in zip(rows, dated):
+            projected = _gateway_customer_payload(item)
+            context = row.get('match_context') or {}
+            match = {key: context.get(key) for key in ('label', 'contact_name', 'contact_email', 'content', 'date')
+                     if context.get(key)}
+            if match:
+                projected['match'] = match
+            customers.append(projected)
+        return _gateway_response({'customers': customers},
+                                 pagination={'limit': limit,
+                                             'has_more': int(payload.get('page') or 1) < int(payload.get('pages') or 1)})
     if postgres_mode():
         conn = get_db()
         try:
