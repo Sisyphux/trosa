@@ -404,3 +404,42 @@ class InboxDialogueContractConsistencyTest(DialogueTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HumanNoteThreadTest(DialogueTestCase):
+    """"记一笔"：the human opens the conversation, sela answers."""
+
+    def test_human_note_starts_with_human_message_and_waits_for_sela(self):
+        body = dialogue.create_human_thread(
+            self.conn, payload={'text': '今天和 Carlos 通了电话\n他要 3mm 透明板报价'},
+            idempotency_key='note-1', actor='hamid')
+        thread = body['thread']
+        self.assertTrue(body['created'])
+        self.assertTrue(thread['subject'].startswith('note:'))
+        self.assertEqual(thread['awaiting'], 'sela')
+        self.assertEqual(thread['title'], '今天和 Carlos 通了电话')
+        full = dialogue.get_thread(self.conn, thread_id=thread['id'])['thread']
+        self.assertEqual([m['role'] for m in full['messages']], ['human'])
+        listed = dialogue.list_threads(self.conn, awaiting='sela', status='open')
+        self.assertIn(thread['id'], [t['id'] for t in listed['threads']])
+
+    def test_screenshot_only_note_gets_placeholder_text(self):
+        body = dialogue.create_human_thread(
+            self.conn, payload={'text': '  ', 'attachment_ids': ['8f1c2a52-3c1e-4a4b-9f60-111111111111']},
+            attachment_lookup=lambda _conn, ids: [{'file_object_id': ids[0], 'name': 'wa.png',
+                                                   'mime_type': 'image/png'}])
+        full = dialogue.get_thread(self.conn, thread_id=body['thread']['id'])['thread']
+        self.assertEqual(full['messages'][0]['text'], dialogue.NOTE_ATTACHMENT_ONLY_TEXT)
+        self.assertEqual(full['messages'][0]['attachments'][0]['name'], 'wa.png')
+        self.assertEqual(dialogue.thread_attachment_ids(self.conn, thread_id=body['thread']['id']),
+                         ['8f1c2a52-3c1e-4a4b-9f60-111111111111'])
+
+    def test_empty_note_is_refused(self):
+        with self.assertRaises(dialogue.DialogueError):
+            dialogue.create_human_thread(self.conn, payload={'text': ''})
+
+    def test_same_key_replays_instead_of_opening_a_second_thread(self):
+        first = dialogue.create_human_thread(self.conn, payload={'text': '记一笔'}, idempotency_key='k')
+        again = dialogue.create_human_thread(self.conn, payload={'text': '记一笔'}, idempotency_key='k')
+        self.assertEqual(first['thread']['id'], again['thread']['id'])
+        self.assertEqual(dialogue.list_threads(self.conn, status='open')['counts']['open'], 1)

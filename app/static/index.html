@@ -281,12 +281,13 @@
         <div class="page-heading">
           <div class="page-eyebrow">待判断</div>
           <h2>Inbox</h2>
-          <p class="page-lede dialogue-overview" id="dialogueOverview">每条对话会用一句话说明要你决定什么，你回一句话即可。</p>
+          <p class="page-lede dialogue-overview" id="dialogueOverview">每条对话会用一句话说明要你决定什么，你回一句话即可；今天聊了什么，点「记一笔」发给助手。</p>
         </div>
       </div>
       <div class="page-body dialogue-page-body">
         <div class="dialogue-workspace" id="dialogueWorkspace">
           <aside class="dialogue-list-pane" aria-label="对话列表">
+            <button type="button" class="dialogue-note-btn" onclick="startDialogueNote()">＋ 记一笔</button>
             <div class="dialogue-list" id="dialogueList"><div class="dialogue-loading" data-state="loading" role="status">正在加载对话…</div></div>
           </aside>
           <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容">

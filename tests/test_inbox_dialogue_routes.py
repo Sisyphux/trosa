@@ -285,3 +285,37 @@ class InboxDialogueRoutesTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HumanNoteRoutesTest(unittest.TestCase):
+    setUp = InboxDialogueRoutesTest.setUp
+    tearDown = InboxDialogueRoutesTest.tearDown
+    _create_thread = InboxDialogueRoutesTest._create_thread
+
+    def test_human_can_open_a_note_thread_but_not_anonymously_or_by_token(self):
+        anon = self.module.app.test_client()
+        self.assertEqual(anon.post('/api/inbox/threads', json={'text': '匿名'}).status_code, 401)
+        self.assertIn(
+            self.service.post('/api/inbox/threads', json={'text': '服务令牌'},
+                              headers=self.service_headers).status_code, (401, 403))
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        response = human.post('/api/inbox/threads', json={'text': '今天和 Carlos 聊了报价'})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        thread = response.get_json()['thread']
+        self.assertEqual(thread['awaiting'], 'sela')
+        # sela sees it in its queue and can read it with the service token.
+        listing = self.service.get('/api/integrations/sela/threads?awaiting=sela&status=open',
+                                   headers=self.service_headers).get_json()
+        self.assertIn(thread['id'], [t['id'] for t in listing['threads']])
+
+    def test_service_token_reaches_thread_attachments_path_only(self):
+        thread_id = self._create_thread()
+        file_id = '8f1c2a52-3c1e-4a4b-9f60-111111111111'
+        response = self.service.get(
+            f'/api/integrations/sela/threads/{thread_id}/attachments/{file_id}',
+            headers=self.service_headers)
+        self.assertNotEqual(response.status_code, 401)  # whitelisted; SQLite has no file store
+        self.assertEqual(
+            self.service.get(f'/api/integrations/sela/threads/{thread_id}/attachments/not-a-uuid',
+                             headers=self.service_headers).status_code, 401)

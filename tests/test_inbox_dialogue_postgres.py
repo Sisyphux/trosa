@@ -251,3 +251,48 @@ class InboxDialoguePostgresTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class InboxNoteAttachmentPostgresTest(unittest.TestCase):
+    """"记一笔" screenshots: uploaded without a customer, readable only through their thread."""
+
+    @classmethod
+    def setUpClass(cls):
+        InboxDialoguePostgresTest.setUpClass.__func__(cls)
+
+    @classmethod
+    def tearDownClass(cls):
+        InboxDialoguePostgresTest.tearDownClass.__func__(cls)
+
+    setUp = InboxDialoguePostgresTest.setUp
+    tearDown = InboxDialoguePostgresTest.tearDown
+
+    def test_note_screenshot_round_trip(self):
+        import importlib.util
+        import io
+        import tempfile
+
+        spec = importlib.util.spec_from_file_location('trosa_inbox_note_pg_app', ROOT / 'app.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.app.config.update(TESTING=True)
+        with tempfile.TemporaryDirectory() as data_dir:
+            module.DB_DIR = data_dir
+            client = module.app.test_client()
+            self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+            upload = client.post('/api/inbox/uploads',
+                                 data={'file': (io.BytesIO(b'\x89PNG fake screenshot'), 'wa.png')},
+                                 content_type='multipart/form-data')
+            self.assertEqual(upload.status_code, 200, upload.get_json())
+            file_id = upload.get_json()['file_object_id']
+            created = client.post('/api/inbox/threads', json={'text': '', 'attachment_ids': [file_id]})
+            self.assertEqual(created.status_code, 200, created.get_json())
+            thread_id = created.get_json()['thread']['id']
+            thread = client.get(f'/api/inbox/threads/{thread_id}').get_json()['thread']
+            self.assertEqual(thread['messages'][0]['attachments'][0]['mime_type'], 'image/png')
+            got = client.get(f'/api/inbox/threads/{thread_id}/attachments/{file_id}')
+            self.assertEqual(got.status_code, 200)
+            self.assertEqual(got.data, b'\x89PNG fake screenshot')
+            got.close()
+            other = client.get(f'/api/inbox/threads/{thread_id}/attachments/{uuid.uuid4()}')
+            self.assertEqual(other.status_code, 404)

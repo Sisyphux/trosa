@@ -802,6 +802,62 @@ def reply_human(conn, *, thread_id, payload, idempotency_key=None, actor='',
     return body
 
 
+NOTE_SUBJECT_PREFIX = 'note:'
+NOTE_TITLE_CHARS = 40
+NOTE_ATTACHMENT_ONLY_TEXT = '（见截图）'
+
+
+def create_human_thread(conn, *, payload, idempotency_key=None, actor='',
+                        attachment_lookup=None):
+    """The human opens a conversation ("记一笔"): free text and/or screenshots for sela.
+
+    The thread starts with the human message and waits for sela.  Its subject is
+    ``note:<uuid>`` so it never collides with sela's per-prospect conversations.
+    """
+    attachment_ids = _attachment_ids(payload.get('attachment_ids'))
+    raw_text = payload.get('text')
+    if (raw_text is None or (isinstance(raw_text, str) and not raw_text.strip())) and attachment_ids:
+        raw_text = NOTE_ATTACHMENT_ONLY_TEXT
+    text = _text(raw_text.strip() if isinstance(raw_text, str) else raw_text, field='text')
+    request_hash = _hash({'op': 'human_create', 'text': text, 'attachment_ids': attachment_ids})
+    replay = _receipt_replay(conn, 'human_create', idempotency_key, request_hash)
+    if replay is not None:
+        return replay
+    _enforce_daily_cap(conn)
+    attachments = []
+    if attachment_ids and attachment_lookup is not None:
+        attachments = attachment_lookup(conn, attachment_ids) or []
+    thread_id = str(uuid.uuid4())
+    first_line = text.splitlines()[0].strip() if text.strip() else ''
+    title = first_line[:NOTE_TITLE_CHARS] + ('…' if len(first_line) > NOTE_TITLE_CHARS else '')
+    now = _now()
+    _insert_thread(conn, thread_id=thread_id, subject=NOTE_SUBJECT_PREFIX + thread_id,
+                   title=title or '记一笔', now=now, awaiting='sela', revision=1)
+    message_id = _insert_message(
+        conn, thread_id=thread_id, seq=1, role='human', text=text, actor=actor or None,
+        attachments=attachments, awaiting_after='sela', idempotency_key=idempotency_key,
+        created_at=now,
+    )
+    body = {'success': True, 'created': True,
+            'thread': _thread_dict(conn, _thread_row(conn, thread_id))}
+    _receipt_write(conn, thread_id=thread_id, operation='human_create', key=idempotency_key,
+                   request_hash=request_hash, response=body, message_id=message_id)
+    return body
+
+
+def thread_attachment_ids(conn, *, thread_id):
+    """Every ``file_object_id`` attached to a message of this thread (scoped)."""
+    if not _thread_row(conn, thread_id):
+        raise DialogueError('not_found', '对话不存在', 404)
+    ids = []
+    for message in _messages(conn, thread_id):
+        for item in _load(message.get('attachments'), []) or []:
+            file_id = str((item or {}).get('file_object_id') or '')
+            if file_id and file_id not in ids:
+                ids.append(file_id)
+    return ids
+
+
 def get_thread(conn, *, thread_id):
     row = _thread_row(conn, thread_id)
     if not row:

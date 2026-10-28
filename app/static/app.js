@@ -14600,6 +14600,8 @@ var dialogueSending = false;
 var dialogueDraft = '';
 var dialogueAttachments = [];
 var dialogueUploading = false;
+// 「记一笔」：人自己开一条新对话（还没有 thread），右栏显示空白输入框。
+var dialogueNoteMode = false;
 var dialogueConflictNote = null;
 var dialogueMobileView = 'list';
 
@@ -14716,6 +14718,7 @@ async function loadDialogue(options) {
   dialogueCounts = data.counts || dialogueCounts;
   dialogueNavBadge();
   renderDialogueOverview();
+  if (dialogueNoteMode) { renderDialogueList(); renderDialogueThread(); return; }
   var stillPresent = dialogueSelectedId && dialogueThreads.some(function(t) { return t.id === dialogueSelectedId; });
   if (options.afterReply) dialogueSelectedId = dialogueNextAwaitingId(options.sentId);
   else if (stillPresent) dialogueSelectedId = dialogueSelectedId;
@@ -14779,6 +14782,7 @@ function dialogueRowHtml(thread) {
 async function selectDialogueThread(id, options) {
   options = options || {};
   if (!id) return;
+  if (dialogueNoteMode) { dialogueNoteMode = false; dialogueDraft = ''; dialogueAttachments = []; }
   if (id !== dialogueSelectedId) dialogueConflictNote = null;
   dialogueSelectedId = id;
   // 手机（单栏）上，列表加载完自动选中的那条只在右栏预备好，不替人点进去：先让人看到列表。
@@ -14829,6 +14833,7 @@ function reconcileDialogueListEntry(thread) {
 function renderDialogueThread() {
   var pane = document.getElementById('dialogueThreadPane');
   if (!pane) return;
+  if (dialogueNoteMode) { pane.innerHTML = dialogueNoteHtml(); return; }
   if (dialogueThreadError) {
     pane.innerHTML = loadFailureHtml(dialogueThreadError, '对话', "selectDialogueThread('" + String(dialogueSelectedId || '') + "')");
     return;
@@ -14921,14 +14926,7 @@ function dialogueComposerHtml() {
             ' onclick="fillDialogueSuggestion(this)">' + escapeHtml(String(text)) + '</button>';
         }).join('') + '</div>'
     : '';
-  var attachable = !!dialogueCustomerId();
-  var attachments = dialogueAttachments.length
-    ? '<div class="dialogue-composer-attachments">' + dialogueAttachments.map(function(attachment, index) {
-        return '<span class="dialogue-attachment">' + escapeHtml(attachment.name || '附件') +
-          '<button type="button" class="dialogue-attachment-remove" aria-label="移除附件"' +
-            ' onclick="removeDialogueAttachment(' + index + ')">×</button></span>';
-      }).join('') + '</div>'
-    : '';
+  var attachments = dialogueComposerAttachmentsHtml();
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
     chips + attachments +
     '<label class="sr-only" for="dialogueReplyInput">回复</label>' +
@@ -14936,14 +14934,27 @@ function dialogueComposerHtml() {
       ' placeholder="用一句话回复…（回车发送，Shift+回车换行，可直接粘贴图片）"' +
       ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
       escapeHtml(dialogueDraft) + '</textarea>' +
-    '<div class="dialogue-composer-actions">' +
-      '<label class="dialogue-attach-btn' + (attachable ? '' : ' is-disabled') + '">附件' +
-        '<input type="file" id="dialogueAttachInput" onchange="uploadDialogueAttachment(this)"' + (attachable ? '' : ' disabled') + '></label>' +
+    '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
       '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending ? ' disabled' : '') + '>发送</button>' +
       '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()">归档</button>' +
     '</div>' +
     '<div class="dialogue-composer-error" role="alert" hidden></div>' +
   '</form>';
+}
+
+function dialogueAttachButtonHtml() {
+  return '<label class="dialogue-attach-btn">附件' +
+    '<input type="file" id="dialogueAttachInput" accept="image/*,.pdf,.txt,.csv,.xlsx,.docx" multiple onchange="uploadDialogueAttachment(this)"></label>';
+}
+
+function dialogueComposerAttachmentsHtml() {
+  return dialogueAttachments.length
+    ? '<div class="dialogue-composer-attachments">' + dialogueAttachments.map(function(attachment, index) {
+        return '<span class="dialogue-attachment">' + escapeHtml(attachment.name || '附件') +
+          '<button type="button" class="dialogue-attachment-remove" aria-label="移除附件"' +
+            ' onclick="removeDialogueAttachment(' + index + ')">×</button></span>';
+      }).join('') + '</div>'
+    : '';
 }
 
 function renderDialogueMessageHtml(message) {
@@ -14975,10 +14986,94 @@ function renderDialogueRefsHtml(refs) {
 
 function renderDialogueAttachmentsHtml(list) {
   if (!Array.isArray(list) || !list.length) return '';
+  var threadId = dialogueThread && dialogueThread.id;
   return list.map(function(attachment) {
-    var size = attachment && attachment.size_bytes ? ' · ' + Math.max(1, Math.round(attachment.size_bytes / 1024)) + ' KB' : '';
-    return '<span class="dialogue-attachment">' + escapeHtml((attachment && attachment.name) || '附件') + escapeHtml(size) + '</span>';
+    attachment = attachment || {};
+    var name = attachment.name || '附件';
+    var url = threadId && attachment.file_object_id
+      ? '/api/inbox/threads/' + encodeURIComponent(threadId) + '/attachments/' + encodeURIComponent(attachment.file_object_id)
+      : '';
+    if (url && /^image\//.test(String(attachment.mime_type || ''))) {
+      return '<a class="dialogue-attachment-image" href="' + escapeHtml(url) + '" target="_blank" rel="noopener" title="' + escapeHtml(name) + '">' +
+        '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(name) + '" loading="lazy"></a>';
+    }
+    var size = attachment.size_bytes ? ' · ' + Math.max(1, Math.round(attachment.size_bytes / 1024)) + ' KB' : '';
+    var label = escapeHtml(name) + escapeHtml(size);
+    return url
+      ? '<a class="dialogue-attachment" href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + label + '</a>'
+      : '<span class="dialogue-attachment">' + label + '</span>';
   }).join('');
+}
+
+function startDialogueNote() {
+  dialogueNoteMode = true;
+  dialogueSelectedId = null;
+  dialogueThread = null;
+  dialogueThreadError = null;
+  dialogueConflictNote = null;
+  dialogueDraft = '';
+  dialogueAttachments = [];
+  dialogueMobileView = 'thread';
+  var page = document.getElementById('page-dialogue');
+  if (page) page.classList.add('dialogue-thread-open');
+  renderDialogueList();
+  renderDialogueThread();
+  focusDialogueReply();
+}
+
+function dialogueNoteHtml() {
+  return '<article class="dialogue-thread dialogue-thread--note">' +
+    '<header class="dialogue-thread-head">' +
+      '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
+      '<div class="dialogue-thread-titles">' +
+        '<div class="dialogue-thread-title">记一笔</div>' +
+        '<div class="dialogue-thread-sub"><span>聊天截图、聊天记录或一句话都行。助手会认出是哪个客户，记下进展和下一步。</span></div>' +
+      '</div>' +
+    '</header>' +
+    '<div class="dialogue-messages" id="dialogueMessages"></div>' +
+    '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
+      dialogueComposerAttachmentsHtml() +
+      '<label class="sr-only" for="dialogueReplyInput">记一笔</label>' +
+      '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="5"' +
+        ' placeholder="例如：今天和 Carlos 通了电话，他要 3mm 透明板报价，下周二前给他（可直接粘贴截图）"' +
+        ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
+        escapeHtml(dialogueDraft) + '</textarea>' +
+      '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
+        '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending || dialogueUploading ? ' disabled' : '') + '>发给助手</button>' +
+      '</div>' +
+      '<div class="dialogue-composer-error" role="alert" hidden></div>' +
+    '</form>' +
+  '</article>';
+}
+
+async function submitDialogueNote() {
+  var input = document.getElementById('dialogueReplyInput');
+  var text = (input ? input.value : dialogueDraft || '').trim();
+  var attachmentIds = dialogueAttachments.map(function(a) { return a.file_object_id; }).filter(Boolean);
+  if (dialogueUploading) { showDialogueComposerError({ message: '截图还在上传，稍等一下' }); return false; }
+  if (!text && !attachmentIds.length) { if (input) input.focus(); return false; }
+  dialogueSending = true;
+  setDialogueComposerBusy(true);
+  var body = { text: text, idempotency_key: 'note-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10) };
+  if (attachmentIds.length) body.attachment_ids = attachmentIds;
+  var data;
+  try {
+    data = await api('/api/inbox/threads', { method: 'POST', body: JSON.stringify(body) });
+  } catch (error) {
+    dialogueSending = false;
+    setDialogueComposerBusy(false);
+    showDialogueComposerError(error);
+    return false;
+  }
+  dialogueSending = false;
+  dialogueNoteMode = false;
+  dialogueDraft = '';
+  dialogueAttachments = [];
+  showToast('已发给助手', 'success');
+  var created = data && data.thread && data.thread.id;
+  await loadDialogue();
+  if (created) await selectDialogueThread(created, { keepList: true });
+  return false;
 }
 
 function fillDialogueReply(text) {
@@ -15025,7 +15120,10 @@ function showDialogueComposerError(error) {
 
 async function submitDialogueReply(event) {
   if (event && event.preventDefault) event.preventDefault();
-  if (dialogueSending || !dialogueThread) return false;
+  if (dialogueSending) return false;
+  if (dialogueNoteMode) return submitDialogueNote();
+  if (!dialogueThread) return false;
+  if (dialogueUploading) { showDialogueComposerError({ message: '附件还在上传，稍等一下' }); return false; }
   var input = document.getElementById('dialogueReplyInput');
   var text = (input ? input.value : dialogueDraft || '').trim();
   if (!text) { if (input) input.focus(); return false; }
@@ -15102,28 +15200,23 @@ function pasteDialogueAttachment(event) {
   return true;
 }
 
-function uploadDialogueAttachment(input) {
-  return sendDialogueAttachment(input && input.files && input.files[0], input);
+async function uploadDialogueAttachment(input) {
+  var files = Array.from((input && input.files) || []);
+  for (var i = 0; i < files.length; i++) await sendDialogueAttachment(files[i], null);
+  if (input) input.value = '';
 }
 
 async function sendDialogueAttachment(file, input) {
   if (!file) return;
-  var customerId = dialogueCustomerId();
-  if (!customerId) { showToast('这条对话没有关联客户，暂时不能上传附件。', 'error'); if (input) input.value = ''; return; }
   dialogueUploading = true;
   var form = new FormData();
-  form.append('files', file);
-  form.append('category', 'inbox_dialogue');
+  form.append('file', file);
   try {
-    var response = await fetch('/api/customers/' + encodeURIComponent(customerId) + '/files', {
-      method: 'POST', body: form, credentials: 'same-origin'
-    });
+    var response = await fetch('/api/inbox/uploads', { method: 'POST', body: form, credentials: 'same-origin' });
     var uploaded = await response.json().catch(function() { return {}; });
     if (!response.ok) throw new Error((uploaded && (uploaded.error || uploaded.message)) || '上传失败');
-    var created = (uploaded.created || [])[0];
-    if (created && created.file_object_id) {
-      dialogueAttachments.push({ file_object_id: created.file_object_id, name: created.original_name || file.name });
-      showToast('附件已添加', 'success');
+    if (uploaded.file_object_id) {
+      dialogueAttachments.push({ file_object_id: uploaded.file_object_id, name: uploaded.name || file.name });
     } else {
       showToast('上传成功但未返回可用的附件编号。', 'error');
     }
@@ -15132,13 +15225,13 @@ async function sendDialogueAttachment(file, input) {
   } finally {
     dialogueUploading = false;
     if (input) input.value = '';
-    if (dialogueThread) { renderDialogueThread(); focusDialogueReply(); }
+    if (dialogueThread || dialogueNoteMode) { renderDialogueThread(); focusDialogueReply(); }
   }
 }
 
 function removeDialogueAttachment(index) {
   dialogueAttachments.splice(index, 1);
-  if (dialogueThread) renderDialogueThread();
+  if (dialogueThread || dialogueNoteMode) renderDialogueThread();
   focusDialogueReply();
 }
 

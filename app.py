@@ -28,7 +28,7 @@ import zipfile
 import tarfile
 import email
 import unicodedata
-from uuid import UUID
+from uuid import UUID, uuid4
 from email import policy as email_policy
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
@@ -393,7 +393,8 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/threads',
         })
         or (request.method == 'GET' and re.fullmatch(
-            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+            r'(?:/attachments/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?',
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
@@ -8449,6 +8450,139 @@ def inbox_thread_user_close(thread_id):
         return _dialogue_write_failure('user_close')
     finally:
         conn.close()
+
+
+@app.route('/api/inbox/threads', methods=['POST'])
+@login_required
+def inbox_thread_human_create():
+    """"记一笔"：人自己开一条对话，发文字或截图给 sela，由 sela 认客户、记沟通和待办。"""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.create_human_thread(
+            conn, payload=payload, idempotency_key=key,
+            actor=str(getattr(g, 'current_user', '') or ''),
+            attachment_lookup=_dialogue_attachments,
+        )
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('human_create')
+    finally:
+        conn.close()
+
+
+INBOX_NOTE_FILE_DIR = os.path.join('uploads', 'inbox_notes')
+
+
+@app.route('/api/inbox/uploads', methods=['POST'])
+@login_required
+def inbox_dialogue_upload():
+    """对话附件（截图等）不需要先选客户：只存文件本体，返回可附到对话消息上的编号。"""
+    if not postgres_mode():
+        return jsonify({'error': '只有正式环境支持对话附件'}), 503
+    upload = request.files.get('file') or next(iter(request.files.getlist('files')), None)
+    if upload is None or not (upload.filename or '').strip():
+        return jsonify({'error': '请选择需要上传的文件'}), 400
+    original_name = upload.filename.strip()[:200]
+    ext = _customer_file_ext(original_name)
+    if ext not in CUSTOMER_FILE_EXTENSIONS:
+        return jsonify({'error': '暂不支持该文件类型'}), 400
+    upload.seek(0, os.SEEK_END)
+    size = upload.tell()
+    upload.seek(0)
+    if size <= 0:
+        return jsonify({'error': '文件为空'}), 400
+    if size > CUSTOMER_FILE_MAX_MB * 1024 * 1024:
+        return jsonify({'error': f'超过 {CUSTOMER_FILE_MAX_MB}MB 上限'}), 413
+    user = str(get_current_user() or '')
+    owner_dir = re.sub(r'[^A-Za-z0-9_-]', '_', user) or 'user'
+    stored_name = secrets.token_hex(16) + ext
+    relative_path = os.path.join(INBOX_NOTE_FILE_DIR, owner_dir, stored_name)
+    save_path = os.path.join(DB_DIR, relative_path)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    upload.save(save_path)
+    file_object_id = str(uuid4())
+    mime = _customer_file_mime(ext)
+    conn = get_db()
+    try:
+        uploaded_user = conn.execute(
+            '''SELECT id FROM identity.users
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user() LIMIT 1''',
+        ).fetchone()
+        conn.execute(
+            '''INSERT INTO core.file_objects
+               (id, organization_id, storage_key, original_name, mime_type, size_bytes, sha256,
+                uploaded_by_user_id, category, uploaded_by, created_at)
+               VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?, ?, ?, 'inbox_dialogue', ?, now())''',
+            (file_object_id, relative_path, original_name, mime, size,
+             _customer_file_sha256(save_path), uploaded_user['id'] if uploaded_user else None, user),
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f'inbox_dialogue_upload error: {e}', exc_info=True)
+        try:
+            os.remove(save_path)
+        except OSError:
+            pass
+        return jsonify({'error': '保存文件失败'}), 500
+    finally:
+        conn.close()
+    return jsonify({'success': True, 'file_object_id': file_object_id,
+                    'name': original_name, 'mime_type': mime, 'size_bytes': size})
+
+
+def _dialogue_attachment_response(thread_id, file_object_id):
+    """Serve one file attached to this (caller-scoped) thread; nothing else is reachable."""
+    if not postgres_mode():
+        return jsonify({'error': '只有正式环境支持对话附件'}), 503
+    conn = get_db()
+    try:
+        if file_object_id not in _dialogue.thread_attachment_ids(conn, thread_id=thread_id):
+            return jsonify({'error': '附件不存在'}), 404
+        row = conn.execute(
+            '''SELECT storage_key, original_name, mime_type FROM core.file_objects
+                WHERE id=? AND organization_id=trosa.compat_org_id() AND deleted_at IS NULL''',
+            (file_object_id,),
+        ).fetchone()
+    except _dialogue.DialogueError as error:
+        return _dialogue_error_response(error)
+    finally:
+        conn.close()
+    if not row:
+        return jsonify({'error': '附件不存在或已删除'}), 404
+    stored_path = os.path.join(DB_DIR, row['storage_key'])
+    if not os.path.exists(stored_path):
+        return jsonify({'error': '附件本体缺失'}), 404
+    ext = _customer_file_ext(row['original_name'])
+    download_name = re.sub(r'[\r\n\x00-\x1f]', '', row['original_name']) or 'file' + ext
+    return send_from_directory(
+        os.path.dirname(stored_path), os.path.basename(stored_path),
+        mimetype=row['mime_type'] or _customer_file_mime(ext) or 'application/octet-stream',
+        as_attachment=ext not in CUSTOMER_FILE_PREVIEWABLE, download_name=download_name,
+        conditional=True,
+    )
+
+
+@app.route('/api/inbox/threads/<thread_id>/attachments/<file_object_id>', methods=['GET'])
+@login_required
+def inbox_thread_attachment(thread_id, file_object_id):
+    return _dialogue_attachment_response(thread_id, file_object_id)
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/attachments/<file_object_id>', methods=['GET'])
+@login_required
+def sela_integration_thread_attachment(thread_id, file_object_id):
+    """sela reads a screenshot the human attached, to understand the conversation."""
+    return _dialogue_attachment_response(thread_id, file_object_id)
 
 
 def _dialogue_orphan_prospect_subjects(conn):

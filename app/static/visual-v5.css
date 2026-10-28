@@ -3149,6 +3149,22 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   border: 1px solid var(--dl-hair); border-radius: var(--dl-r-pill);
   padding: 2px 10px; background: var(--dl-paper);
 }
+#trosa a.dialogue-attachment { text-decoration: none; }
+#trosa a.dialogue-attachment:hover { color: var(--dl-ink); border-color: var(--dl-hair-strong); }
+#trosa .dialogue-attachment-image {
+  display: block; max-width: 240px; border: 1px solid var(--dl-hair);
+  border-radius: var(--dl-r-sm); overflow: hidden; background: var(--dl-paper);
+}
+#trosa .dialogue-attachment-image img { display: block; width: 100%; height: auto; max-height: 320px; object-fit: cover; object-position: top; }
+#trosa .dialogue-note-btn {
+  display: block; width: calc(100% - 24px); margin: 12px; box-sizing: border-box;
+  padding: 10px 14px; cursor: pointer; font: inherit; font-size: var(--dl-fs-body-s);
+  color: var(--dl-paper); background: var(--dl-ink); border: 1px solid var(--dl-ink);
+  border-radius: var(--dl-r-sm); text-align: center;
+}
+#trosa .dialogue-note-btn:hover { background: var(--dl-ink-hover); border-color: var(--dl-ink-hover); }
+#trosa .dialogue-note-btn:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 3px; }
+#trosa .dialogue-thread--note .dialogue-messages { flex: 0 0 auto; padding: 0; }
 #trosa .dialogue-attachment-remove {
   margin-left: 6px; background: none; border: 0; cursor: pointer;
   color: var(--dl-mut); font: inherit; line-height: 1;
