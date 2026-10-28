@@ -14870,9 +14870,18 @@ function renderDialogueThreadHtml() {
     ? '<div class="dialogue-conflict" role="alert"><span>有新消息，请先看</span>' +
         '<button type="button" class="btn btn-sm" onclick="reloadDialogueThread()">刷新</button></div>'
     : '';
+  // 助手收尾时那句总结（记了什么、排了哪天的待办）是给人看的最后一句话，不能只存不显示。
+  var closingSummary = closed && thread.closed_by === 'sela' && thread.closed_summary
+    ? '<div class="dialogue-msg dialogue-msg--sela" data-role="sela">' +
+        '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span>' +
+          '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(thread.closed_at)) + '</time></div>' +
+        '<div class="dialogue-msg-text">' + renderRichText(thread.closed_summary) + '</div>' +
+      '</div>'
+    : '';
   var body = '<div class="dialogue-messages" id="dialogueMessages" role="log" aria-live="polite" aria-relevant="additions">' +
       (messages.length ? messages.map(renderDialogueMessageHtml).join('')
         : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
+      closingSummary +
       (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('处理中…', 'inline') + '</div>' : '') +
     '</div>';
   var composer = closed
