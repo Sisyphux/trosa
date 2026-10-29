@@ -38,8 +38,12 @@ def clean_env(**extra):
     argument checks) and must not inherit ``TRADE_OS_AGENT_ROLE`` from a
     dev/review session, or the role guard would reject the call before the
     behaviour under test is reached.
+
+    The SSH host is pinned to a name that cannot resolve, so no test can reach
+    the production alias (trosa-new) through the default routing.
     """
     base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+    base["TRADE_OS_SSH_HOST"] = "test-host.invalid"
     base.update(extra)
     return base
 
@@ -254,8 +258,7 @@ class UnifiedEntrypointTests(unittest.TestCase):
     def setUp(self):
         handle = tempfile.NamedTemporaryFile(
             "w", suffix="-workbench.env", delete=False, encoding="utf-8")
-        handle.write("TRADE_OS_ECS_REGION=test-region\n")
-        handle.write("TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n")
+        handle.write("TRADE_OS_SSH_HOST=test-host.invalid\n")
         handle.write(f"PROJECT_ROOT={ROOT}\n")
         handle.close()
         self.env_file = handle.name
@@ -288,37 +291,51 @@ class UnifiedEntrypointTests(unittest.TestCase):
         doc = json.loads(proc.stdout)
         self.assertIn(doc["category"], ("compatible", "destructive"))
 
-    def test_release_path_never_uses_ssh_transport(self):
+    def test_release_path_goes_through_the_ssh_wrapper_only(self):
         text = (ROOT / "deploy" / "cloud" / "trosa-release").read_text(encoding="utf-8")
-        self.assertIn("run-cloud-assistant-command.sh", text)
-        self.assertIn("Cloud Assistant", text)
-        # No scp/ssh invocation may remain in the release path.
+        self.assertIn("run-ssh-command.sh", text)
+        self.assertIn('LAUNCHER="$SCRIPT_DIR/release-launch-remote.sh"', text)
+        # trosa-release itself never invokes ssh/scp: every remote call goes
+        # through ssh_exec, which owns the exit-code contract.
         for line in text.splitlines():
             stripped = line.strip()
             if stripped.startswith("#") or not stripped:
                 continue
             self.assertNotRegex(stripped, r"(^|\s)(ssh|scp)\s",
-                                f"SSH transport leaked into unified entry: {line}")
+                                f"SSH invoked outside the wrapper: {line}")
 
-    def test_cloud_assistant_client_does_not_require_executable_bit(self):
-        text = (ROOT / "deploy" / "cloud" / "run-cloud-assistant-command.sh").read_text(encoding="utf-8")
-        # The client is always invoked via `python3` (default
-        # $script_dir/cloud-assistant.py; env override is a test hook only).
-        self.assertIn('client="${TRADE_OS_CLOUD_ASSISTANT_CLIENT:-$script_dir/cloud-assistant.py}"', text)
-        self.assertIn('python3 "$client" run', text)
-        self.assertIn('python3 "$client" get', text)
+    def test_ssh_wrapper_keeps_the_three_way_outcome_contract(self):
+        text = (ROOT / "deploy" / "cloud" / "run-ssh-command.sh").read_text(encoding="utf-8")
+        self.assertIn("command -v ssh", text)
+        self.assertIn("BatchMode=yes", text)
+        self.assertIn("ConnectTimeout=10", text)
+        # Commands travel base64-encoded and never meet the login shell's quoting.
+        self.assertIn("base64 -d", text)
+        # Nested tools (pg_dump, docker exec) must see EOF, not the transport stream.
+        self.assertIn("</dev/null", text)
+        self.assertIn("exit 124", text)
+        self.assertIn("exit 2", text)
 
-    def test_workbench_noninteractive_commands_explicitly_use_bash(self):
-        text = (ROOT / "deploy" / "cloud" / "run-workbench-command.sh").read_text(encoding="utf-8")
-        self.assertIn('command_payload="$(printf', text)
-        self.assertIn('workbench_command="bash -c', text)
-        self.assertIn('--command "$workbench_command"', text)
+    def test_no_cloud_vendor_api_remains_on_the_release_path(self):
+        # The release path is SSH-only: no vendor RunCommand API, no Workbench CLI,
+        # no vendor instance routing.
+        release_path = ("trosa-release", "run-ssh-command.sh", "release-launch-remote.sh",
+                        "status-workbench.sh", "logs-workbench.sh", "backup-workbench.sh",
+                        "release-env.sh", "release-remote.sh", "status-remote.sh",
+                        "backup-remote.sh")
+        forbidden = ("RunCommand", "DescribeInvocations", "Cloud Assistant", "aliyuncs",
+                     "TRADE_OS_ECS_", "release-runner", "workbench download")
+        for name in release_path:
+            text = (ROOT / "deploy" / "cloud" / name).read_text(encoding="utf-8")
+            for token in forbidden:
+                self.assertNotIn(token, text, f"{name} still references {token}")
 
     def test_shell_syntax_valid(self):
         for name in ("trosa-release", "release-remote.sh", "status-remote.sh",
                      "auto-publish.sh", "release-commit.sh", "release-test.sh",
-                     "release-env.sh", "agent-worktree.sh", "run-workbench-command.sh",
-                     "run-cloud-assistant-command.sh", "cloud-assistant-bootstrap.sh",
+                     "release-env.sh", "agent-worktree.sh", "run-ssh-command.sh",
+                     "release-launch-remote.sh", "status-workbench.sh",
+                     "logs-workbench.sh", "backup-workbench.sh", "backup-remote.sh",
                      "lib-release-gate.sh"):
             proc = run(["bash", "-n", f"deploy/cloud/{name}"])
             self.assertEqual(proc.returncode, 0, f"{name}: {proc.stderr}")
@@ -333,24 +350,6 @@ class UnifiedEntrypointTests(unittest.TestCase):
         self.assertLess(ledger_failure, classifier)
         self.assertLess(ledger_failure, destructive_refusal)
         self.assertNotIn("LEDGER_UNREADABLE", text[ledger_start:])
-
-    def test_readonly_ecs_db_plan_capability_is_fixed_and_secret_free(self):
-        text = (ROOT / "deploy" / "cloud" / "cloud-assistant-bootstrap.sh").read_text(encoding="utf-8")
-        self.assertIn("db-plan-readonly accepts no arguments", text)
-        self.assertIn("install -d -m 0711 -o root -g root /usr/local/lib/trosa", text)
-        self.assertIn("TROSA_DB_PLAN_COMMIT must be an exact 40-character", text)
-        self.assertIn("/usr/local/lib/trosa/release_db_plan.py", text)
-        self.assertIn("https://codeload.github.com/Sisyphux/trosa/tar.gz/${planner_commit}", text)
-        self.assertIn("/usr/local/lib/trosa/db-plan-migrations", text)
-        self.assertIn("runuser -u tradeos", text)
-        self.assertIn("#!/opt/trade-os/venv/bin/python", text)
-        self.assertIn("SELECT name FROM audit.schema_migrations", text)
-        self.assertIn("release_db_plan.py", text)
-        self.assertIn('db-plan-readonly ""', text)
-        self.assertIn('"migration_ledger_unreadable"', text)
-        self.assertNotIn("print(database_url", text)
-        self.assertNotIn("print(pgpassfile", text)
-        self.assertNotIn("str(exc)", text)
 
     def test_remote_runner_rejects_bad_arguments_without_side_effects(self):
         proc = run(["bash", "deploy/cloud/release-remote.sh",

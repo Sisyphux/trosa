@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Read cloud status and resources. This file is executed on ECS by Workbench.
+# Read production status and resources. Executed on the server over SSH by
+# trosa-release status / status-workbench.sh. Read-only: it never changes state.
+# Paths it depends on: /opt/trade-os/current (symlink to the active release),
+# /opt/trade-os/.deploy-state.json, /opt/trade-os/.last-deploy-result.json,
+# /opt/trade-os/venv, /etc/trade-os/trade-os.env (read only when permitted).
 set -u
 
 app_status=$(systemctl is-active trade-os 2>/dev/null || true)

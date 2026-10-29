@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Trosa server-side release runner. Runs ON ECS, detached from the operator's
+# Trosa server-side release runner. Runs ON the production server (trosa-new),
+# started by release-launch-remote.sh and detached from the operator's SSH
 # connection, so a dropped local network / closed SSH channel can never leave
 # production in an unknown half-published state.
 #
@@ -14,7 +15,7 @@
 # and skip work that is already done. Database migrations are forward-only;
 # the runner never downgrades the schema.
 #
-# Usage (invoked on ECS by deploy/cloud/trosa-release, never by hand):
+# Usage (invoked on the server by deploy/cloud/release-launch-remote.sh, never by hand):
 #   release-remote.sh REMOTE_ROOT SERVICE_NAME RELEASE_ID COMMIT_SHA GITHUB_REMOTE MODE [ALLOW_DESTRUCTIVE]
 #   MODE: deploy | rollback
 #

@@ -4,14 +4,14 @@ The behavior this suite protects:
 
 * a database-sensitive release still requires a reliable, checksum-verified,
   restorable backup before production changes;
-* that authoritative backup lives in the cloud (ECS durable snapshot, with an
-  optional OSS mirror) and is the release gate;
+* that authoritative backup lives on the server (durable snapshot, with an
+  optional offsite mirror) and is the release gate;
 * downloading the archive to the Mac is optional and a transfer failure
-  (workbench download / scp / SSH file stream) NEVER blocks the release;
+  (scp over SSH) NEVER blocks the release;
 * failures are distinguishable: backup_failed vs backup_verification_failed vs
   code-release failure vs local_download_failed.
 
-Everything here is offline: ECS is replaced by stubs and a fake PostgreSQL
+Everything here is offline: the server is replaced by stubs and a fake PostgreSQL
 backup runner.
 """
 
@@ -39,6 +39,8 @@ def read(path: Path) -> str:
 
 def clean_env(**extra) -> dict:
     base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+    # Never route to the production alias from a test (see test_release_mechanism).
+    base["TRADE_OS_SSH_HOST"] = "test-host.invalid"
     base.update(extra)
     return base
 
@@ -117,7 +119,7 @@ class BackupRemoteTests(unittest.TestCase):
         self.assertIsNotNone(doc, proc.stdout)
         self.assertEqual(doc["status"], "ok")
         self.assertEqual(doc["failure_class"], None)
-        self.assertEqual(doc["storage"], "ecs-durable")
+        self.assertEqual(doc["storage"], "server-durable")
         self.assertTrue(doc["verified"])
         self.assertTrue(doc["restorable"])
         self.assertGreater(doc["size_bytes"], 0)
@@ -147,39 +149,39 @@ class BackupRemoteTests(unittest.TestCase):
         self.assertEqual(backup_json_line(proc)["failure_class"],
                          "backup_verification_failed")
 
-    def test_oss_configured_without_uploader_fails_closed(self):
+    def test_mirror_configured_without_uploader_fails_closed(self):
         pg = make_fake_pg(self.tmp)
         proc = run_backup_remote(
             pg, self.backup_root, "true",
-            TRADE_OS_BACKUP_OSS_URI="oss://bucket/prefix")
+            TRADE_OS_BACKUP_MIRROR_URI="mirror://bucket/prefix")
         self.assertEqual(proc.returncode, 12, proc.stderr)
         self.assertEqual(backup_json_line(proc)["failure_class"],
                          "backup_verification_failed")
 
-    def test_oss_mirror_self_report_must_match(self):
+    def test_mirror_self_report_must_match(self):
         pg = make_fake_pg(self.tmp)
         proc = run_backup_remote(
             pg, self.backup_root, "true",
-            TRADE_OS_BACKUP_OSS_URI="oss://bucket/prefix",
+            TRADE_OS_BACKUP_MIRROR_URI="mirror://bucket/prefix",
             TRADE_OS_BACKUP_UPLOAD_CMD="printf 'size=1\\nsha256=deadbeef\\n'")
         self.assertEqual(proc.returncode, 12, proc.stderr)
 
-    def test_oss_mirror_success_is_recorded(self):
+    def test_mirror_success_is_recorded(self):
         pg = make_fake_pg(self.tmp)
-        cmd = ("printf 'oss_uri=%s\\n' {remote}; "
+        cmd = ("printf 'mirror_uri=%s\\n' {remote}; "
                "printf 'size=%s\\n' \"$(stat -c%s {local} 2>/dev/null || stat -f%z {local})\"; "
                "if command -v sha256sum >/dev/null 2>&1; then "
                "printf 'sha256=%s\\n' \"$(sha256sum {local} | awk '{print $1}')\"; "
                "else printf 'sha256=%s\\n' \"$(shasum -a 256 {local} | awk '{print $1}')\"; fi")
         proc = run_backup_remote(
             pg, self.backup_root, "true",
-            TRADE_OS_BACKUP_OSS_URI="oss://bucket/prefix",
+            TRADE_OS_BACKUP_MIRROR_URI="mirror://bucket/prefix",
             TRADE_OS_BACKUP_UPLOAD_CMD=cmd)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         doc = backup_json_line(proc)
-        self.assertEqual(doc["storage"], "ecs-durable+oss")
-        self.assertTrue(doc["oss"]["verified"])
-        self.assertTrue(doc["oss"]["uri"].startswith("oss://bucket/prefix/"))
+        self.assertEqual(doc["storage"], "server-durable+mirror")
+        self.assertTrue(doc["mirror"]["verified"])
+        self.assertTrue(doc["mirror"]["uri"].startswith("mirror://bucket/prefix/"))
 
 
     def _data_dir_with_attachment(self) -> Path:
@@ -244,11 +246,7 @@ class BackupWorkbenchTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="trosa-backup-wb-"))
         self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.tmp)]))
         self.env_file = self.tmp / "workbench.env"
-        self.env_file.write_text(
-            "TRADE_OS_ECS_REGION=test-region\n"
-            "TRADE_OS_ECS_INSTANCE_ID=i-test\n"
-            "TRADE_OS_SSH_HOST=stub-host\n",
-            encoding="utf-8")
+        self.env_file.write_text("TRADE_OS_SSH_HOST=stub-host\n", encoding="utf-8")
         self.local_dir = self.tmp / "local"
         self.local_dir.mkdir()
         self.runner = write_exec(self.tmp / "runner.sh", "#!/usr/bin/env bash\nexit 0\n")
@@ -260,7 +258,6 @@ class BackupWorkbenchTests(unittest.TestCase):
             "TRADE_OS_WORKBENCH_ENV": str(self.env_file),
             "TRADE_OS_BACKUP_RUNNER": str(self.runner),
             "TRADE_OS_LOCAL_BACKUP_DIR": str(self.local_dir),
-            "TRADE_OS_BACKUP_TRANSFER": "auto",
         }
         opts.update(extra_env or {})
         env = clean_env(**opts)
@@ -328,7 +325,6 @@ class BackupWorkbenchTests(unittest.TestCase):
                         "printf 'SHA256=abc\\n'\n",
             fetch_body="exec sleep 30\n",
             extra_env={"TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT": "2",
-                       "TRADE_OS_BACKUP_TRANSFER": "ssh",
                        "TRADE_OS_SSH_HOST": "stub-host"})
         self.assertEqual(proc.returncode, 20, proc.stderr)
         self.assertIn("TROSA_BACKUP_STATUS ok", proc.stdout)

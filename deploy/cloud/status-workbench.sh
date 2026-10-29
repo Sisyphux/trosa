@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Show the cloud service, tunnel, local health, resources, and recent errors.
+# Show the production service, tunnel, local health, resources, and recent errors.
+# Runs status-remote.sh on the server over SSH (alias: TRADE_OS_SSH_HOST).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,8 +9,6 @@ source "$SCRIPT_DIR/release-env.sh"
 ENV_FILE="$(trosa_resolve_workbench_env "$SCRIPT_DIR")"
 trosa_warn_legacy_workbench_env "$ENV_FILE"
 source "$ENV_FILE"
-: "${TRADE_OS_ECS_REGION:?TRADE_OS_ECS_REGION is required}"
-: "${TRADE_OS_ECS_INSTANCE_ID:?TRADE_OS_ECS_INSTANCE_ID is required}"
 REMOTE_ROOT="${TRADE_OS_REMOTE_ROOT:-/opt/trade-os}"
 
 case "$REMOTE_ROOT" in
@@ -19,15 +18,8 @@ case "$REMOTE_ROOT" in
     ;;
 esac
 
-# Keep the SSM input short. The detailed, machine-readable status script is
-# shipped inside the release and runs on ECS, where /proc and systemd exist.
+# The detailed, machine-readable status script is shipped inside the release
+# and runs on the server, where /proc and systemd exist.
 remote_command="bash '$REMOTE_ROOT/current/deploy/cloud/status-remote.sh'"
 
-# Keep the established filename for callers, but execute over the Cloud
-# Assistant control plane. It remains available when port 22 and Workbench
-# instance-login authentication are unavailable.
-TRADE_OS_CLOUD_ASSISTANT_TIMEOUT=60 \
-  bash "$SCRIPT_DIR/run-cloud-assistant-command.sh" \
-  "$TRADE_OS_ECS_INSTANCE_ID" \
-  "$TRADE_OS_ECS_REGION" \
-  "$remote_command"
+bash "$SCRIPT_DIR/run-ssh-command.sh" "$(trosa_ssh_host)" "$remote_command"

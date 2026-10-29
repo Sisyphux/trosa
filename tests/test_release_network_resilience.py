@@ -1,14 +1,13 @@
-"""网络异常模拟验收：发布链路在 Cloud Assistant / GitHub API 故障下的行为。
+"""网络异常模拟验收：发布链路在 SSH 传输 / GitHub API 故障下的行为。
 
 验收目标（不触网、不碰生产）：
 
-* RunCommand 已被接受但 DescribeInvocations 持续失败时，传输层只报告
-  "已提交但结果未知"（exit 124 + CLOUD_ASSISTANT_PENDING），绝不当作
-  "命令失败/未发射"。
-* DescribeInvocations 偶发失败（一次网络抖动）时，同一调用在截止时间内
-  自动重试并最终拿到真实结果。
-* Cloud Assistant API 在提交前被明确拒绝（HTTP 4xx）时才允许报告
-  "未提交、可直接重跑"。
+* SSH 会话建立前失败（主机不可达、拒绝连接、认证失败）时，传输层报告
+  "未发送、可安全重跑"（exit 2），绝不误报为"结果未知"。
+* SSH 会话建立后断开、结果不可知时，传输层只报告 "未知"（exit 124），
+  绝不当作"命令失败/未发射"。
+* 远端命令的退出码、stdout 与引号内容原样传回（经 base64 传输，不被本机或
+  远端登录 shell 二次解释）。
 * trosa-release publish 在发射结果未知时输出 unknown 状态与恢复指引，
   而不是"发射失败、production 未变更"。
 * `trosa-release check --release-id` 恢复查询能归一出
@@ -18,6 +17,7 @@
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -47,6 +47,9 @@ def clean_env(**extra):
     ``TRADE_OS_*`` variables the test passes explicitly.
     """
     base = {k: v for k, v in os.environ.items() if not k.startswith("TRADE_OS_")}
+    # Pin the SSH host to a name that cannot resolve: no test may reach the
+    # production alias (trosa-new) through default routing.
+    base["TRADE_OS_SSH_HOST"] = "test-host.invalid"
     base.update(extra)
     return base
 
@@ -140,87 +143,86 @@ class BaselineRetryTests(unittest.TestCase):
         self.assertEqual(captured["auth"], "Bearer tok-123")
 
 
-class RunCloudAssistantSimulationTests(unittest.TestCase):
-    """传输层故障注入：直接驱动 run-cloud-assistant-command.sh。"""
+# 模拟 ssh：不联网。最后一个参数就是远端命令，本机以同样的方式执行它；
+# STUB_SSH_MODE 决定本次“连接”的结局。
+SSH_STUB = r'''#!/usr/bin/env bash
+case "${STUB_SSH_MODE:-run}" in
+  refused)
+    echo "ssh: connect to host test-host port 22: Connection refused" >&2
+    exit 255 ;;
+  denied)
+    echo "trosa-operator@test-host: Permission denied (publickey)." >&2
+    exit 255 ;;
+  dropped)
+    echo "Connection reset by 203.0.113.9 port 22" >&2
+    exit 255 ;;
+  exit7)
+    exit 7 ;;
+esac
+for last; do :; done
+bash -c "$last"
+'''
+
+
+class RunSshSimulationTests(unittest.TestCase):
+    """传输层故障注入：驱动 run-ssh-command.sh，ssh 由上面的桩替代。"""
 
     def setUp(self):
-        self.counter = 0
-        self.tmp = tempfile.mkdtemp(prefix="trosa-release-net-")
+        self.tmp = Path(tempfile.mkdtemp(prefix="trosa-release-net-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        bin_dir = self.tmp / "bin"
+        bin_dir.mkdir()
+        write_script(bin_dir / "ssh", SSH_STUB.split("\n", 1)[1])
+        self.path = f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"
 
-    def transport(self, run_body: str, get_body: str,
-                  extra_env: dict | None = None):
-        # stub cloud-assistant.py：run/get 行为由传入的 Python 代码片段决定。
-        self.counter += 1
-        client = Path(self.tmp) / f"ca-{self.counter}.py"
-        client.write_text(
-            "#!/usr/bin/env python3\n"
-            "import sys\n"
-            "op = sys.argv[1] if len(sys.argv) > 1 else ''\n"
-            f"def run_stub():\n{run_body}\n"
-            f"def get_stub():\n{get_body}\n"
-            "{'run': run_stub, 'get': get_stub}[op]()\n",
-            encoding="utf-8")
-        client.chmod(client.stat().st_mode | stat.S_IEXEC)
-        env = clean_env(
-            TRADE_OS_CLOUD_ASSISTANT_CLIENT=str(client),
-            TRADE_OS_CLOUD_ASSISTANT_TIMEOUT="10",
-            TRADE_OS_CLOUD_ASSISTANT_POLL_GRACE="2",
-            **(extra_env or {}))
-        return run(["bash", "deploy/cloud/run-cloud-assistant-command.sh",
-                    "i-1", "cn-x", "echo hi"], env=env)
+    def transport(self, remote_command: str, mode: str = "run"):
+        env = clean_env(PATH=self.path, STUB_SSH_MODE=mode)
+        return run(["bash", "deploy/cloud/run-ssh-command.sh",
+                    "test-host", remote_command], env=env)
 
-    def test_accepted_but_describe_always_failing_is_unknown_not_failure(self):
-        # RunCommand 接受（返回 InvokeId），DescribeInvocations 一直网络失败：
-        # 只能报告"已提交但结果未知"，不得当作命令失败。
-        run_body = '    print(\'{"InvokeId": "inv-1", "CommandId": "cmd-1"}\')\n'
-        get_body = '    print("stub network failure", file=sys.stderr)\n    raise SystemExit(2)\n'
-        proc = self.transport(run_body, get_body)
-        self.assertEqual(proc.returncode, 124, proc.stderr)
-        self.assertIn("CLOUD_ASSISTANT_PENDING invoke_id=inv-1", proc.stderr)
-
-    def test_transient_describe_failure_retries_and_succeeds(self):
-        # 第 1 次 get 网络失败，第 2 次返回完成且退出码 0。
-        flag = f"{self.tmp}/called"
-        run_body = '    print(\'{"InvokeId": "inv-1", "CommandId": "cmd-1"}\')\n'
-        get_body = (
-            '    import base64, json, os\n'
-            f'    if not os.path.exists({flag!r}):\n'
-            f'        open({flag!r}, "w").close()\n'
-            '        print("stub network failure", file=sys.stderr)\n'
-            '        raise SystemExit(2)\n'
-            '    out = base64.b64encode(b"hi").decode()\n'
-            '    row = {"InvocationStatus": "Success", "ExitCode": 0, "Output": out}\n'
-            '    doc = {"Invocations": {"Invocation": [dict(row, InvokeInstances={"InvokeInstance": [row]})]}}\n'
-            '    print(json.dumps(doc))\n'
-        )
-        proc = self.transport(run_body, get_body)
+    def test_remote_output_and_quoting_survive_the_round_trip(self):
+        proc = self.transport("printf '%s\\n' \"it's ok\" \"$HOME\" | head -c 6")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("hi", proc.stdout)
+        self.assertEqual(proc.stdout, "it's o")
 
-    def test_explicit_api_rejection_is_not_submitted(self):
-        # Cloud Assistant 明确拒绝（4xx）：未提交，可以安全重跑。
-        run_body = '    print("cloud-assistant: RunCommand HTTP 403: denied", file=sys.stderr)\n    raise SystemExit(2)\n'
-        get_body = '    raise SystemExit(2)\n'
-        proc = self.transport(run_body, get_body)
+    def test_remote_exit_code_is_passed_through(self):
+        proc = self.transport("exit 7")
+        self.assertEqual(proc.returncode, 7, proc.stderr)
+
+    def test_nested_stdin_reader_sees_end_of_file(self):
+        # 远端命令里读 stdin 的工具（pg_dump / docker exec 等）必须立刻拿到 EOF，
+        # 不能把传输层的通道吞掉。
+        proc = self.transport("cat; echo done")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "done")
+
+    def test_connection_refused_is_not_submitted(self):
+        proc = self.transport("echo hi", mode="refused")
         self.assertEqual(proc.returncode, 2, proc.stderr)
-        self.assertNotIn("CLOUD_ASSISTANT_PENDING", proc.stderr)
+        self.assertIn("was not sent", proc.stderr)
+        self.assertNotIn("hi", proc.stdout)
 
-    def test_ambiguous_run_failure_is_unknown(self):
-        # RunCommand 请求发出后网络死亡（重试耗尽）：接受与否未知 → 124。
-        run_body = '    print("CLOUD_ASSISTANT_AMBIGUOUS action=RunCommand", file=sys.stderr)\n    raise SystemExit(2)\n'
-        get_body = '    raise SystemExit(2)\n'
-        proc = self.transport(run_body, get_body)
+    def test_auth_failure_is_not_submitted(self):
+        proc = self.transport("echo hi", mode="denied")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_connection_dropped_after_start_is_unknown_not_failure(self):
+        proc = self.transport("echo hi", mode="dropped")
         self.assertEqual(proc.returncode, 124, proc.stderr)
+        self.assertIn("outcome unknown", proc.stderr)
+
+    def test_remote_exit_7_is_not_mistaken_for_transport_failure(self):
+        proc = self.transport("echo hi", mode="exit7")
+        self.assertEqual(proc.returncode, 7, proc.stderr)
 
 
 class ReleaseClientStateTests(unittest.TestCase):
-    """trosa-release 状态机与恢复查询（stub 传输层，不发任何 API 请求）。"""
+    """trosa-release 状态机与恢复查询（stub 传输层，不发任何 SSH 请求）。"""
 
     def setUp(self):
         handle = tempfile.NamedTemporaryFile(
             "w", suffix="-workbench.env", delete=False, encoding="utf-8")
-        handle.write("TRADE_OS_ECS_REGION=test-region\n")
-        handle.write("TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n")
+        handle.write("TRADE_OS_SSH_HOST=test-host.invalid\n")
         handle.write(f"PROJECT_ROOT={ROOT}\n")
         handle.close()
         self.env_file = handle.name
@@ -233,15 +235,15 @@ class ReleaseClientStateTests(unittest.TestCase):
             transport_body)
         env = clean_env(
             TRADE_OS_WORKBENCH_ENV=self.env_file,
-            TRADE_OS_CLOUD_ASSISTANT_TRANSPORT=transport,
+            TRADE_OS_SSH_TRANSPORT=transport,
             TRADE_OS_RELEASE_POLL_INTERVAL="1",
             TRADE_OS_RELEASE_POLL_TIMEOUT="30")
         return run(["bash", "deploy/cloud/trosa-release", *args], env=env)
 
     def test_launch_unknown_is_not_reported_as_release_failure(self):
-        # 发射命令被接受但结果未知（124）：不得判定发布失败，也不得声称
+        # 发射命令结果未知（124，SSH 断开）：不得判定发布失败，也不得声称
         # "production 未变更"。
-        body = 'echo "Cloud Assistant invocation is still pending" >&2\nexit 124\n'
+        body = 'echo "ssh: connection dropped mid-launch" >&2\nexit 124\n'
         proc = self.release("publish", "--commit", self.commit,
                             "--release-id", "rel-test-unknown",
                             transport_body=body)
@@ -254,13 +256,34 @@ class ReleaseClientStateTests(unittest.TestCase):
         self.assertIn("TROSA_RELEASE_STATE unknown", combined)
 
     def test_launch_rejection_still_reports_unchanged_production(self):
-        # Cloud Assistant 提交前明确拒绝：未发射，可安全重跑。
-        body = 'echo "cloud-assistant: RunCommand HTTP 403: denied" >&2\nexit 2\n'
+        # SSH 会话未建立：发射脚本未送达，production 未变更，可安全重跑。
+        body = 'echo "ssh: connect to host test-host port 22: Connection refused" >&2\nexit 2\n'
         proc = self.release("publish", "--commit", self.commit,
                             "--release-id", "rel-test-reject",
                             transport_body=body)
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("production 未变更", proc.stderr)
+
+    def test_launch_sends_server_launcher_over_ssh(self):
+        # 发射时服务器上不需要预装任何脚本：启动器与参数随同一条 SSH 命令发送。
+        captured = Path(tempfile.mkdtemp(prefix="trosa-release-cap-")) / "cmd.txt"
+        self.addCleanup(lambda: captured.unlink(missing_ok=True))
+        # Only the launch command is captured; the polls that follow are plain cat calls.
+        body = (
+            f"case \"$2\" in *'sudo -n'*) printf '%s' \"$2\" > '{captured}' ;; esac\n"
+            'printf "launched rel-test-shape mode=deploy\\n"\n'
+            "printf '%s\\n' '{\"release\": \"rel-test-shape\", \"status\": \"success\"}'\n"
+        )
+        proc = self.release("publish", "--commit", self.commit,
+                            "--release-id", "rel-test-shape",
+                            transport_body=body)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        sent = captured.read_text(encoding="utf-8")
+        self.assertIn("sudo -n bash -s --", sent)
+        self.assertIn("<<'TROSA_LAUNCH'", sent)
+        self.assertIn("setsid nohup", sent)
+        self.assertIn(f"'rel-test-shape' '{self.commit}'", sent)
+        self.assertNotIn("release-runner", sent)
 
     def test_publish_terminal_states_emit_state_lines(self):
         for status, expected_state, rc in (
@@ -383,8 +406,7 @@ class AgentRoleIsolationTests(unittest.TestCase):
     def test_publish_still_refused_under_explicit_dev_role(self):
         handle = tempfile.NamedTemporaryFile(
             "w", suffix="-workbench.env", delete=False, encoding="utf-8")
-        handle.write("TRADE_OS_ECS_REGION=test-region\n")
-        handle.write("TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n")
+        handle.write("TRADE_OS_SSH_HOST=test-host.invalid\n")
         handle.close()
         self.addCleanup(os.remove, handle.name)
         env = clean_env(

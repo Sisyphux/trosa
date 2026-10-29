@@ -1,4 +1,4 @@
-# ECS + Cloud Assistant 发布流程
+# 服务器发布流程（SSH）
 
 > 正式发布统一入口：`deploy/cloud/trosa-release`。Codex、Qoder、人工、其他
 > Agent 一律使用它；不要手写 SSH 命令、不要直调底层脚本。
@@ -10,10 +10,13 @@
 > deploy/cloud/trosa-release rollback        # 切回 previous_healthy（数据库不降级）
 > ```
 >
-> 原理（一句话）：本机只做“发射 + 轮询”，真正的发布在 ECS 上由
-> `release-remote.sh` 以后台任务幂等执行；传输强制走 Alibaba Cloud Assistant
-> 的 `RunCommand` / `DescribeInvocations`，不使用 SSH、Workbench session 或
-> 实例 root 密码。22 端口不再是发布链路——本机断网、Agent 退出后重进，都只是重新
+> 原理（一句话）：本机只做“发射 + 轮询”，真正的发布在服务器上由
+> `release-remote.sh` 以后台任务幂等执行。传输只走 SSH：`deploy/cloud/run-ssh-command.sh`
+> 连接 `~/.ssh/config` 中的别名（默认 `trosa-new`，即腾讯云 Lighthouse 43.155.211.57，
+> 用户 ubuntu，sudo 免密），不使用阿里云 API、Cloud Assistant、Workbench 或 root 密码。
+> 发射时 `release-launch-remote.sh` 随同一条 SSH 命令送到服务器，以 root 执行：校验参数 →
+> 从 GitHub 拉取该 commit 的 `release-remote.sh` → `setsid nohup` 后台启动后立即返回。
+> 服务器上不需要预装任何发布脚本。22 端口断开、本机断网、Agent 退出后重进，都只是重新
 > 轮询同一个 release。每次发布对应 `releases/<id>/release.json` 与
 > `DEPLOY_RESULT.json`（release/commit/mode/phase/status/production/
 > previous/backup/migration/health/error/next_action），`status --json`
@@ -26,26 +29,22 @@
 > `--allow-destructive-db`）、`sensitive_runtime`（迁移代码变化但无新文件，
 > 按 compatible 处理）。触发器函数体内的行同步 DELETE 与 DROP
 > INDEX/CONSTRAINT 不算破坏性。对数据库敏感改动，发布门禁要求切换流量前在
-> ECS 生成并校验一份权威备份（`deploy/cloud/backup-remote.sh`：大小 +
-> SHA-256 + `pg_restore --list` 可恢复性，可选 OSS 镜像），失败即中止；
-> 下载到 Mac 的异地归档是可选项，`workbench download` / `scp` / SSH 文件流
-> 失败**不会**阻塞发布。失败分类：`backup_failed`（备份失败）、
-> `backup_verification_failed`（备份校验/存储失败）、`release_failed`（代码
-> 发布失败）与客户端 `local_download_failed`（单纯下载失败）。
->
-> `publish-workbench.sh` / `rollback-workbench.sh` 已冻结为兼容垫片（会打印
-> DEPRECATED 警告），待新机制经一次真实发布验证后删除。
+> 服务器生成并校验一份权威备份（`deploy/cloud/backup-remote.sh`：大小 +
+> SHA-256 + `pg_restore --list` 可恢复性，可选离机镜像），失败即中止；
+> 下载到 Mac 的异地归档是可选项，`scp` 下载失败**不会**阻塞发布。失败分类：
+> `backup_failed`（备份失败）、`backup_verification_failed`（备份校验/存储失败）、
+> `release_failed`（代码发布失败）与客户端 `local_download_failed`（单纯下载失败）。
 
-Trade OS 使用一台持久磁盘 ECS、一个 Waitress 进程、一个 PostgreSQL 写入源和一个 Cloudflare Tunnel。不要启动第二个 Trade OS 实例，也不要把 `data/`、`.env` 或 `.venv` 上传到发布包。ECS 主机防火墙只允许 SSH，应用只监听 `127.0.0.1:8080`；PostgreSQL 只监听 ECS `127.0.0.1:5432`。
+Trade OS 使用一台持久磁盘服务器、一个 Waitress 进程、一个 PostgreSQL 写入源和一个 Cloudflare Tunnel。当前正式服务器是腾讯云 Lighthouse（SSH 别名 `trosa-new`）。不要启动第二个 Trade OS 实例，也不要把 `data/`、`.env` 或 `.venv` 上传到发布包。服务器防火墙只允许 SSH，应用只监听 `127.0.0.1:8080`；PostgreSQL 只监听服务器 `127.0.0.1:5432`。
 
-首次配置：
+首次配置（本机）：
 
 ```bash
 mkdir -p ~/.config/trosa
 cp deploy/cloud/workbench.env.example ~/.config/trosa/workbench.env
 chmod 600 ~/.config/trosa/workbench.env
-# 编辑实例 ID 等路由信息，不要写入任何密钥
-deploy/cloud/bootstrap-workbench.sh
+# 确认其中 TRADE_OS_SSH_HOST=trosa-new（不写任何密钥）
+ssh -o BatchMode=yes trosa-new true   # 连通性检查，无输出即正常
 ```
 
 发布配置放在仓库外（`~/.config/trosa/workbench.env`，或由 `TRADE_OS_WORKBENCH_ENV`
@@ -55,32 +54,29 @@ deploy/cloud/bootstrap-workbench.sh
 `rollback`）还要求 `TRADE_OS_AGENT_ROLE=release`：开发/审查 Agent 会话应设置
 `TRADE_OS_AGENT_ROLE=dev` 或 `review`，它们在 `publish` 时会被明确拒绝。
 
-Cloud Assistant 使用 Workbench 的本机受保护 AK profile（`~/.workbench/config.json`，
-权限 0600）签名 API；`workbench.env` 永远只放实例路由信息。首次切换可运行
-`cloud-assistant-bootstrap.sh` 作为一条 **root Cloud Assistant** 命令：它会创建不可
-登录的 `trosa-operator`，日常 status/logs 以该用户执行；发布只允许它 sudo 到一个
-固定、参数校验过的包装器，包装器仍只启动已有 `release-remote.sh`。
+### SSH 与权限
 
-同一 bootstrap 还安装 `sudo /usr/local/lib/trosa/db-plan-readonly`：它不接受参数，
-只切换至 `tradeos` service account，对当前 release 的 migration ledger 执行固定
-`SELECT name` 并调用同一份 `release_db_plan.py`。输出仅为脱敏 JSON（ledger 状态、
-已应用范围/count、pending、category、destructive files）；不输出 DSN、密码、
-PGPASSFILE 内容或其他环境变量，也不能执行 SQL、迁移、重启或切换 release。
-安装该只读能力时需把经过审阅、已推送的 Trosa commit 作为
-`TROSA_DB_PLAN_COMMIT` 传给 root bootstrap；ECS 会从该精确公开 commit 安装同一份
-`release_db_plan.py` 和只读 migration 清单到 root 管理的位置，旧 release 没有 planner
-或尚未包含候选迁移时也不会复制一套规则。该安装不切换运行 release。
+- 认证只用操作者本机的私钥（由 `~/.ssh/config` 的 `IdentityFile` 指定）。脚本不读取、
+  不保存任何密钥；`workbench.env` 只放 SSH 别名。
+- 服务器端的发布、回滚、备份以 root 经 `sudo -n` 运行（ubuntu 账号的免密 sudo）。
+- 状态检查与日志（`status-workbench.sh` / `logs-workbench.sh`）以普通账号只读运行，
+  因此迁移账本一栏为 `null`（数据库凭据只有 root 可读）。需要账本信息时再单独授权。
+- 传输层退出码契约（`run-ssh-command.sh`）：远端命令的真实退出码；`2` = SSH 会话未建立，
+  命令未送达，可直接重跑；`124` = 会话建立后结果未知，**不是**发布失败，先用
+  `check --release-id` 恢复查询。
 
-首次配置还需要由维护者安全写入 `/etc/trade-os/trade-os.env`、`/etc/cloudflared/config.yml` 和 Tunnel 凭据，然后再启用：
+同一个 `workbench.env` 的 `TRADE_OS_SSH_HOST` 决定所有发布、状态、备份、回滚打到哪台
+服务器。**迁移注意**：旧阿里云 ECS（别名 `trosa-ecs`，47.239.60.195）只作为回退保留，
+已停止并禁用；如果本机配置仍写着 `trosa-ecs`，所有脚本都会去那台旧机器，必须改成 `trosa-new`。
+
+首次配置服务器（一次性，由维护者在服务器上完成，不经过发布脚本）：写入
+`/etc/trade-os/trade-os.env`、`/etc/cloudflared/config.yml` 和 Tunnel 凭据，然后启用：
 
 ```bash
 sudo systemctl enable --now trade-os cloudflared
 ```
 
-当前正式入口为 `https://app.trosa.space`。正式业务数据位于 ECS 的
-PostgreSQL（`/opt/trade-os-postgres`），应用通过 systemd drop-in 注入的
-DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史回滚材料。Tunnel
-凭据只保存在 `/etc/cloudflared/`，不会进入代码仓库。
+当前正式入口为 `https://app.trosa.space`。正式业务数据位于服务器上的 PostgreSQL（`/opt/trade-os-postgres`），应用通过 systemd drop-in 注入的 DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史回滚材料。Tunnel 凭据只保存在 `/etc/cloudflared/`，不会进入代码仓库。
 
 ## 与 sela 的稳定同步契约
 
@@ -96,15 +92,15 @@ DSN 连接；`/var/lib/trade-os` 仅保存客户附件、导入来源和历史�
 
 发布和验收顺序：
 
-1. 先通过 `deploy/cloud/publish-workbench.sh` 发布包含 `sela-v2` 的 Trosa commit。服务启动时会自动执行增量数据库迁移，既有数据不会被重建。
+1. 先通过 `deploy/cloud/trosa-release publish --commit <sha>` 发布包含 `sela-v2` 的 Trosa commit。服务启动时会自动执行增量数据库迁移，既有数据不会被重建。
 2. 在 Mac 的 sela 项目中运行 `python3 tools/lab.py trosa-status`，确认健康检查中的 prospect/exclusion 契约版本，再按需运行对应的重试命令处理历史积压。
 3. 在 sela 侧观察 outbox/quarantine 并运行 `python3 tools/lab.py trosa-status`；临时网络失败会在 outbox 重试，被 Trosa 拒绝或过期的事件进入 quarantine，不会自动重放。
 
 如果发布健康检查失败，发布脚本会切回上一份 release；若已经有新契约写入数据，不要把旧代码作为长期运行版本，应重新发布包含 `sela-v2` 的版本。数据库新增字段和回执表是向后兼容的，发布前不需要停掉本地 sela。
 
-公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到本 ECS，并用独立随机密钥证明来源；ECS 环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
+公司局域网继续使用 `http://192.168.0.58:8080` 查看只读周报，但该地址现在由公司 Mac 上的 `com.tradeos.weekly-lan` 提供。Mac 只把允许的周报读取请求转到正式服务器，并用独立随机密钥证明来源；服务器环境只保存 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256` 摘要。Mac 不运行第二个 Trade OS、不读取本地旧数据库，离开公司网络后也不会监听该地址。安装和验收步骤见根目录 `DEPLOYMENT.md`。
 
-代码同步与云端发布现在由 commit 驱动：每个 Agent 在自己的 worktree 和任务分支中完成一个逻辑完整的 commit，`auto-publish.sh` 接收 commit 或 branch，先在基于 `origin/main` 的临时 release worktree 中 cherry-pick 并跑完整门禁，再推送 release candidate 到公开的 `Sisyphux/trosa`、读取发布前 ECS 状态、通过 Cloud Assistant 发布并检查公网健康。调用者的 dirty working tree、index 和未跟踪文件都不参与发布。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
+代码同步与服务器发布由 commit 驱动：每个 Agent 在自己的 worktree 和任务分支中完成一个逻辑完整的 commit，`auto-publish.sh` 接收 commit 或 branch，先在基于 `origin/main` 的临时 release worktree 中 cherry-pick 并跑完整门禁，再推送 release candidate 到公开的 `Sisyphux/trosa`、读取发布前服务器状态、通过 SSH 发射发布并检查公网健康。调用者的 dirty working tree、index 和未跟踪文件都不参与发布。普通改动不需要人工批准；明确的本地-only 请求和疑似破坏性数据库操作除外。
 
 日常自动入口：
 
@@ -119,47 +115,38 @@ deploy/cloud/auto-publish.sh --branch fix/modal-exit
 deploy/cloud/auto-publish.sh --dry-run --commit abc1234
 ```
 
-发布输入只有 commit 或 branch，不接受文件清单，也不会使用调用者的 index、未暂存改动或未跟踪文件。脚本会在基于 `origin/main` 的临时 worktree 中按顺序 cherry-pick 输入，拒绝运行数据、密钥、本地环境文件和生成运行时；数据库敏感改动由 ECS 在切换流量前生成并校验权威备份（`backup-remote.sh`），本地归档可选、不再阻塞发布。`--dry-run` 只构建候选并执行本地门禁，不访问 ECS、不备份、不推送、不发布。
+发布输入只有 commit 或 branch，不接受文件清单，也不会使用调用者的 index、未暂存改动或未跟踪文件。脚本会在基于 `origin/main` 的临时 worktree 中按顺序 cherry-pick 输入，拒绝运行数据、密钥、本地环境文件和生成运行时；数据库敏感改动由服务器在切换流量前生成并校验权威备份（`backup-remote.sh`），本地归档可选、不再阻塞发布。`--dry-run` 只构建候选并执行本地门禁，不访问服务器、不备份、不推送、不发布。
 
-底层 `publish-workbench.sh` 仍可用于发布已提交且已推送的本地 `HEAD`；当前仓库公开，因此 ECS 可以直接下载对应 commit 的 GitHub 归档。仓库目前没有 GitHub Actions 或 Webhook 自动部署。
+单独发布一个已推送的 commit 用 `trosa-release publish --commit <sha>`（旧的 `publish-workbench.sh` 已删除）。仓库目前没有 GitHub Actions 或 Webhook 自动部署。
 
 日常操作：
 
 ```bash
+deploy/cloud/trosa-release status --json
 deploy/cloud/status-workbench.sh
 deploy/cloud/logs-workbench.sh
-deploy/cloud/auto-publish.sh --commit <sha>
-deploy/cloud/publish-workbench.sh
-deploy/cloud/rollback-workbench.sh
-deploy/cloud/backup-workbench.sh
+deploy/cloud/backup-workbench.sh --cloud-only
+deploy/cloud/trosa-release rollback
 ```
 
 `status-workbench.sh` 会先输出 `TROSA_MANAGER_STATUS` 和
 `TROSA_MANAGER_RESOURCE` 两行稳定字段，分别供工作台读取服务可用性、`sela` 同步契约版本以及
 CPU、内存、根分区磁盘、负载和运行时间；后面的 systemd、磁盘和日志内容仍用于技术排查。
-只读状态检查使用 Cloud Assistant API，因此本机 SSH 不可握手、22 端口关闭或 Workbench
-实例认证失败时，仍可查询网站和服务器状态。每条命令都有 InvokeId/CommandId，可在网络
-恢复后用 `DescribeInvocations` 查询同一远端执行结果；不保留交互式 shell。
+状态与日志检查都通过 SSH 执行。若 SSH 不可握手，脚本会以退出码 2 明确告诉你“连接没建立”，
+不会假装服务器状态正常。
 
-发布前建议先查看状态；发布失败时脚本会自动回退，手动回退使用：
-
-```bash
-deploy/cloud/status-workbench.sh
-deploy/cloud/publish-workbench.sh
-deploy/cloud/rollback-workbench.sh
-deploy/cloud/logs-workbench.sh
-```
+发布前建议先查看状态；发布失败时脚本会自动回退，手动回退使用 `trosa-release rollback`。
 
 `auto-publish.sh` 是日常入口；`release-commit.sh` 负责构建发布候选，
-`trosa-release publish` 是 ECS 统一发布器。`release-pipeline.sh` 是常驻发布流水线
+`trosa-release publish` 是服务器统一发布器。`release-pipeline.sh` 是常驻发布流水线
 （能力分权）：开发方用 `agent-worktree.sh ship` 把分支写进队列
 `trosa-tasks/.ship-queue`，流水线消费该队列、按候选 diff 用 `tools/release_tier.py`
 重新计算 T0/T1/T2，再调 `release-commit.sh --pipeline`（强制重跑完整门禁、不读开发方
 证据、禁用已验收树复用）发布 T1。`run` 默认 dry-run，`--publish` 才真正发布；T2 停在
 `awaiting-approval`，T0 合入 main 不部署。`classify --task <id>` 与 `status` 为只读。
 流水线自身不存放凭据。`release-commit.sh` 先在干净临时
-worktree 中完成 cherry-pick、回归、只读 ECS 状态和必要备份，再推送唯一的
-release commit，最后调用 `trosa-release publish`。底层发布器让 ECS 后台任务下载指定 commit 的公开归档，
+worktree 中完成 cherry-pick、回归、只读服务器状态和必要备份，再推送唯一的
+release commit，最后调用 `trosa-release publish`。底层发布器让服务器后台任务下载指定 commit 的公开归档，
 按阶段执行：fetch → db-plan（显式迁移分类）→ backup（仅有数据库变化时，
 服务端本地快照）→ migrate（切换流量之前）→ activate（原子切换 `current`
 符号链接并重启）→ health（契约 + 页面 + systemd + 迁移账本 +
@@ -177,7 +164,7 @@ checkout 落后（例如历史 worktree 里残留旧脚本）或脚本被改动�
 - **本地**：`release-commit.sh` 用共享 git 目录中的可移植锁（死进程/超时可回收）串行化
   发布候选；推送 `origin/main` 使用 `--force-with-lease`，基线上移时后到者被拒绝，绝不
   覆盖另一个发布的提交。
-- **ECS**：`flock` 有界等待串行化所有 release（deploy 与 rollback 共用）；超过等待窗口
+- **服务器**：`flock` 有界等待串行化所有 release（deploy 与 rollback 共用）；超过等待窗口
   写入明确的 `busy` 终端结果并退出，不静默挂起。切换流量前，`tools/release_baseline.py`
   会证明候选 commit 仍包含当前 production commit（GitHub compare，`ahead`/`identical`
   才允许）；基于旧 production、production commit 未知或 compare 不可用都会 fail closed，
@@ -225,7 +212,7 @@ hash、门禁实现哈希（运行门禁那份 `deploy/cloud/` + 候选树 `tool
 批量发布时每个 `--commit` 输入与 `--branch` 使用同一完成证据判定（`verify_result=ok`、
 证据对应该 commit、且已包含最新 `origin/main`），找不到证据即拒绝。
 
-ECS 发布锁保证同一时间只有一个 release 在执行；同一 release 重复执行是
+服务器发布锁保证同一时间只有一个 release 在执行；同一 release 重复执行是
 幂等的（已是生产版本且健康时直接返回 success）。release id 与 commit 一一绑定，
 append-only `.release-ledger.jsonl` 记录每个终端结果；state / result / manifest /
 health / migration / backup 全部原子写入，发布中断不会留下半写状态。
@@ -234,56 +221,54 @@ health / migration / backup 全部原子写入，发布中断不会留下半写�
 
 `publish` / `rollback` 的每个结果都带 `TROSA_RELEASE_STATE` 行，只有五种状态：
 
-- `submitted`：RunCommand 已被 Cloud Assistant 接受（InvokeId 已返回），结果未确认；
-- `checking`：正在轮询 ECS 结果；
+- `submitted`：发射命令已在服务器上执行并返回 `launched`（SSH 会话已建立），结果未确认；
+- `checking`：正在轮询服务器上的结果文件；
 - `success`：已确认成功；
 - `failed`：已确认失败/被拒（`refused` / `rolled_back` / `rollback_failed` / `busy`
   归入 failed 家族，但各自仍保留 `TROSA_RELEASE_*` 细分行与退出码）；
-- `unknown`：无法确定（轮询失败、超时）。**unknown 不是发布失败**：production
+- `unknown`：无法确定（SSH 断开、轮询失败、超时）。**unknown 不是发布失败**：production
   状态未知，可能已变更；不要假定未变更，也不要盲目改代码。
 
 网络故障下的行为约定：
 
-1. `RunCommand` 已接受但 `DescribeInvocations` 失败/超时（传输层 exit 124 +
-   `CLOUD_ASSISTANT_PENDING` 行）→ 客户端报告 `TROSA_RELEASE_STATE unknown`
+1. SSH 会话建立后结果未知（传输层 exit 124）→ 客户端报告 `TROSA_RELEASE_STATE unknown`
    （exit 5），绝不报告"发射失败、production 未变更"；
-2. 只有 Cloud Assistant API 明确拒绝（HTTP 4xx）或发射未确认时才报告
-   "production 未变更，可直接重跑"；
+2. 只有 SSH 会话根本没建立（传输层 exit 2：主机解析失败、连接被拒、认证失败、主机指纹
+   不符）时才报告"production 未变更，可直接重跑"；
 3. 恢复查询：`deploy/cloud/trosa-release check --release-id <ID> [--json]` 按该
-   release 只读询问 ECS 上的 `DEPLOY_RESULT.json`，归一输出上述状态；无结果时
+   release 只读读取服务器上的 `DEPLOY_RESULT.json`，归一输出上述状态；无结果时
    返回 unknown（可能仍在 fetch 阶段、发射未被接受或已清理），稍后重跑 check 或
    幂等重跑同一 publish；
-4. Cloud Assistant API 的瞬态网络错误有界重试（RunCommand 每次调用携带
-   ClientToken，重试幂等）；`DescribeInvocations` 只读查询在截止时间内自动重试；
+4. SSH 连接本身不做自动重试；轮询是只读 `cat`，任何一次失败只意味着“这次没问到”；
 5. GitHub compare API（baseline 门）瞬态故障（网络错误 / 5xx / 429）默认重试
    2 次（线性退避）后仍 fail closed；`TRADE_OS_GITHUB_TOKEN` 或 `GITHUB_TOKEN`
-   可提高限额（可在 ECS `/etc/trade-os/trade-os.env` 配置，经
+   可提高限额（可在服务器 `/etc/trade-os/trade-os.env` 配置，经
    `load_production_env` 传入 guard）。
 
-`deploy/cloud/backup-remote.sh` 在 ECS 上调用 PostgreSQL 生产目录的 verified logical dump，
+`deploy/cloud/backup-remote.sh` 在服务器上调用 PostgreSQL 生产目录的 verified logical dump，
 核对 SHA-256 与 `pg_restore --list` 可恢复性，并保留在 `/var/lib/trade-os/release-backups/<id>/`。
-配置 `TRADE_OS_BACKUP_OSS_URI` 与自校验的 `TRADE_OS_BACKUP_UPLOAD_CMD` 后会额外镜像到 OSS；
-镜像必须回传匹配的 `size=` 与 `sha256=`，否则判备份校验失败。
+配置 `TRADE_OS_BACKUP_MIRROR_URI` 与自校验的 `TRADE_OS_BACKUP_UPLOAD_CMD` 后会额外镜像到离机存储；
+镜像必须回传匹配的 `size=` 与 `sha256=`，否则判备份校验失败。当前服务器未配置离机镜像。
 
-`backup-workbench.sh` 在此之上可选地把数据库 dump、客户附件和 manifest 打包下载到 Mac 的
+`backup-workbench.sh` 在此之上可选地把数据库 dump、客户附件和 manifest 打包经 `scp` 下载到 Mac 的
 `~/Library/Application Support/trosa/backups/`，核对 bundle SHA-256 后保留最近 14 天的归档。
-`--cloud-only` 只生成校验云端备份不下载；`--download=never|auto|require` 控制本地归档。
-下载失败（workbench/scp/SSH 文件流）只影响本地副本，退出码 20 并打印
+`--cloud-only` 只生成校验服务器备份不下载；`--download=never|auto|require` 控制本地归档。
+下载失败（scp）只影响本地副本，退出码 20 并打印
 `TROSA_LOCAL_ARCHIVE local_download_failed`，与备份失败（10/11/12）严格区分。
-它不创建阿里云 ECS 系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建 ECS。应用在
+它不创建服务器系统盘快照；系统盘级灾难恢复需要另外配置云快照或重建服务器。应用在
 PostgreSQL 模式下不会把旧 SQLite 目录伪装成备份，也不会通过备份 API 恢复 SQLite 文件。
 
 ## 私有浏览器桌面
 
 服务器还运行一个独立的轻量 XFCE 桌面，供必要时在浏览器中直接操作 Ubuntu。它使用
 `trosa-desktop` 无 sudo 权限账户，与 Trosa 的 `tradeos` 数据账户隔离；TigerVNC 与 noVNC
-只监听服务器 `127.0.0.1:5901/6080`，没有 ECS 公网端口、UFW 规则或 Cloudflare Tunnel 路由。
+只监听服务器 `127.0.0.1:5901/6080`，没有服务器公网端口、UFW 规则或 Cloudflare Tunnel 路由。
 
 从 Mac 通过 `trosa-desktop` SSH 主机别名打开本机隧道，再访问
 `http://127.0.0.1:6080/vnc.html`。服务器工作台已将此动作做成“打开服务器桌面”。服务文件、
 停用方式和验收要求见 [desktop/README.md](desktop/README.md)。
 
-数据库仍是单写入源。不要在 Mac 上重新启动旧的正式应用并通过同一个域名使用；当前 Mac 的三个旧 LaunchAgent 已禁用但文件保留。如需回退到 Mac，先停止 ECS Tunnel，再执行：
+数据库仍是单写入源。不要在 Mac 上重新启动旧的正式应用并通过同一个域名使用；当前 Mac 的三个旧 LaunchAgent 已禁用但文件保留。如需回退到 Mac，先停止服务器上的 Tunnel，再执行：
 
 ```bash
 USER_ID=$(id -u)

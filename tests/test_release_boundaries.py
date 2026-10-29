@@ -59,7 +59,7 @@ class WorkbenchEnvResolutionTests(unittest.TestCase):
 
     def test_explicit_override_wins(self):
         explicit = Path(self.tmp.name) / "custom.env"
-        explicit.write_text("TRADE_OS_ECS_REGION=r\n", encoding="utf-8")
+        explicit.write_text("TRADE_OS_SSH_HOST=r\n", encoding="utf-8")
         self.assertEqual(
             self.resolve(TRADE_OS_WORKBENCH_ENV=str(explicit)), str(explicit)
         )
@@ -68,14 +68,14 @@ class WorkbenchEnvResolutionTests(unittest.TestCase):
         cfg = Path(self.tmp.name) / "trosa"
         cfg.mkdir()
         canonical = cfg / "workbench.env"
-        canonical.write_text("TRADE_OS_ECS_REGION=r\n", encoding="utf-8")
+        canonical.write_text("TRADE_OS_SSH_HOST=r\n", encoding="utf-8")
         self.assertEqual(
             self.resolve(XDG_CONFIG_HOME=self.tmp.name), str(canonical)
         )
 
     def test_legacy_in_repo_path_still_readable(self):
         legacy = self.script_dir / "workbench.env"
-        legacy.write_text("TRADE_OS_ECS_REGION=r\n", encoding="utf-8")
+        legacy.write_text("TRADE_OS_SSH_HOST=r\n", encoding="utf-8")
         self.assertEqual(
             self.resolve(XDG_CONFIG_HOME=str(Path(self.tmp.name) / "empty")),
             str(legacy),

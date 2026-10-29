@@ -4,7 +4,7 @@
 
 Trosa 是目前四人使用（设计上不限于四人，可按需增加使用者）的外贸 CRM 工作台。核心闭环是：恢复客户上下文 → 执行已确认动作 → 记录实际事实 → 按需确认下一步及日期。沟通记录可以没有下一步；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 ECS，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 正式服务器，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一项产品维护优先级是让 Inbox 与 Search 带着上下文进入共同入口；不要跳过路线图直接扩张其他页面。
 
 ## 多 Agent 并行开发（强制）
 
@@ -22,10 +22,10 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 - **Agent 读业务数据的现成入口**：先运行 `python3 tools/trosa_cli.py whoami`；通过就用该 CLI（只读 + 提议，提议由成员在 Trosa 确认）。没有令牌时请成员本人按 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) 领取，Agent 不得索要访问码或绕过。
 - **维护者全员只读通道**：需要跨成员读取真实数据（排查排除清单、重复客户、迁移核对等）时，用 `python3 tools/trosa_maint_read.py`（独立只读数据库角色，凭据在 `~/.config/trosa-maint/readonly.json`，与 `workbench.env` 分开；开通与边界见 [`docs/MAINTAINER_DATA_ACCESS.md`](docs/MAINTAINER_DATA_ACCESS.md)）。不要为了读数据去读 `workbench.env`。
 - **Trosa / Sela 业务数据访问优先顺序**：系统已为 Agent 提供后端接口和内部数据访问能力。处理业务数据必须优先遵循 `现有 API / service → database / internal tools → CLI → UI（仅作最后验收）`。除非任务明确要求 UI 验收，禁止使用浏览器、Computer Use 或模拟人工点击读取或修改业务数据。已有 API / service 能完成操作时，必须调用现有接口，不得绕过接口改用页面操作。
-- **ECS 是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于 ECS 本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。
+- **正式服务器（腾讯云 Lighthouse，SSH 别名 `trosa-new`）是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于服务器本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。
 - **正式运行契约是 `trosa-postgresql-v1`**：唯一正式入口是 `serve.py`，要求 `CRM_ENV=production`、`TRADE_OS_DATA_BACKEND=postgres` 和非空 `TRADE_OS_DATABASE_URL`；`/api/network/ping` 必须报告 `status=ok`、`backend=postgresql`、`formal_runtime=true` 和该契约名。缺配置时在迁移、调度器和端口启动前失败，不得隐式回退 SQLite。
-- 本地仅用于开发、隔离测试和已验证发布；不得修改 ECS 数据、正式备份或当前 `data/` 链接所指的运行数据。测试必须使用独立的 `CRM_DB_PATH`。
-- 业务数据单一事实源是 ECS PostgreSQL；SQLite 仅用于隔离开发、导入/导出和明确批准的历史恢复边界。Excel 仅用于导入、导出和历史恢复；Apple 日历 ICS 订阅已于 2026-10-01 退役，不再提供。
+- 本地仅用于开发、隔离测试和已验证发布；不得修改正式服务器数据、正式备份或当前 `data/` 链接所指的运行数据。测试必须使用独立的 `CRM_DB_PATH`。
+- 业务数据单一事实源是正式服务器上的 PostgreSQL；SQLite 仅用于隔离开发、导入/导出和明确批准的历史恢复边界。Excel 仅用于导入、导出和历史恢复；Apple 日历 ICS 订阅已于 2026-10-01 退役，不再提供。
 - `app.py`、`desktop.py` 和根目录启动器不是正式启动命令：根目录入口只打开已验证的正式工作台；需要 SQLite 旧形状回归时必须显式设置 `CRM_ENV=development TRADE_OS_DEV_SQLITE=1`，PostgreSQL 演练使用 `serve_rehearsal.py` 或 `tools/postgres_rehearsal.py`，并且只允许 loopback 固定演练库。
 - 修改前先查看 `git status --short`。工作区可能有用户未提交的改动，绝不覆盖、回退、删除或格式化无关文件。
 - 自动发布时只传入已完成的 commit 或 branch，不传文件路径；release 候选在独立临时 worktree 中组装，主工作区已有的无关修改必须保留，不能混入发布。
@@ -81,6 +81,6 @@ node --check app/static/app.js
 (cd browser-extension && npm test)
 ```
 
-后端、前端、数据迁移、性能和发布还须遵循 `TROSA_MAINTENANCE.md` 的最低验证与 ECS 发布检查。用户可感知的功能变动同步记录到 `CHANGELOG.md`；仅开发环境或开发文档变动无需伪造产品变更日志。
+后端、前端、数据迁移、性能和发布还须遵循 `TROSA_MAINTENANCE.md` 的最低验证与正式服务器发布检查。用户可感知的功能变动同步记录到 `CHANGELOG.md`；仅开发环境或开发文档变动无需伪造产品变更日志。
 
 界面缺陷必须先在真实浏览器里重现再修：按 [`docs/REAL_BROWSER_REPRO.md`](docs/REAL_BROWSER_REPRO.md) 用隔离服务和 `tools/repro_*.cjs` 脚本重现，修复前脚本须以退出码 20 报告缺陷，修复后同一脚本须退出 0，证据存入 `docs/repro/<场景>/`。仅凭 jsdom 或读代码，不能宣称界面问题已修复。

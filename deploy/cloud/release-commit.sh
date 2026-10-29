@@ -562,16 +562,16 @@ run_step '发布前 ECS 状态' check_cloud_status
 # 校验大小/SHA-256/pg_restore --list，失败会中止发布），不再要求先下载到
 # 本地 Mac。workbench download / scp / SSH 文件流失败不会阻塞发布。
 if [[ "$DB_SENSITIVE" == 1 ]]; then
-  printf '\n==> 数据库敏感改动：权威备份在 ECS 切换流量前生成并校验（失败会中止发布）\n'
+  printf '\n==> 数据库敏感改动：权威备份在服务器切换流量前生成并校验（失败会中止发布）\n'
   printf '    本地 Mac 归档为可选，不再是发布前置条件（如需强制：--require-local-backup）。\n'
   if [[ "$REQUIRE_LOCAL_BACKUP" == 1 ]]; then
     run_step '数据库敏感改动本地归档（显式要求）' \
-      env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_BACKUP_TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}" \
+      env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" \
       bash "$SCRIPT_DIR/backup-workbench.sh" --download=require
   fi
 fi
 
-# 推送是必须的一步：ECS 按 commit SHA 从 GitHub 公开归档下载，本地存在不等于
+# 推送是必须的一步：服务器按 commit SHA 从 GitHub 公开归档下载，本地存在不等于
 # 远端可达。--force-with-lease 固定期望的远端值，防止覆盖并发发布。
 run_step "推送 release commit 到 GitHub $TARGET_BRANCH" \
   git push --quiet origin "HEAD:refs/heads/$TARGET_BRANCH" \
@@ -631,7 +631,7 @@ fi
 LOCAL_ARCHIVE_STATUS="skipped"
 if [[ "$DB_SENSITIVE" == 1 && "$REQUIRE_LOCAL_BACKUP" != 1 ]]; then
   printf '\n==> 可选本地归档（失败不影响发布结果）\n'
-  if env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" TRADE_OS_BACKUP_TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}" \
+  if env TRADE_OS_WORKBENCH_ENV="$ENV_FILE" \
       bash "$SCRIPT_DIR/backup-workbench.sh" --download=auto; then
     LOCAL_ARCHIVE_STATUS="ok"
   else

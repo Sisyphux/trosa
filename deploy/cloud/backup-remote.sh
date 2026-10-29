@@ -10,10 +10,10 @@
 # Guarantees (the whole point of this file):
 #   1. the dump is produced by the production backup runner, which runs
 #      ``pg_restore --list`` and writes a SHA-256 next to the dump;
-#   2. the dump is copied to a durable, release-scoped directory on ECS;
+#   2. the dump is copied to a durable, release-scoped directory on the server;
 #   3. the copy is re-verified: non-empty, size recorded, SHA-256 matches, and
 #      ``pg_restore --list`` succeeds (proving it can actually be restored);
-#   4. cloud storage mirroring (OSS) is optional, but when configured it must
+#   4. offsite mirroring is optional, but when configured it must
 #      upload AND self-report a matching SHA-256/size, or the backup is not
 #      considered done.
 #
@@ -46,8 +46,8 @@ Usage: backup-remote.sh RELEASE_ID [--bundle] [--json]
   TRADE_OS_DATA_DIR              默认 /var/lib/trade-os
   TRADE_OS_RELEASE_BACKUP_ROOT   默认 /var/lib/trade-os/release-backups
   TRADE_OS_PG_RESTORE_LIST_CMD   覆盖可恢复性检查命令（模板，{dump} 占位）
-  TRADE_OS_BACKUP_OSS_URI        可选 OSS 目标前缀，如 oss://bucket/prefix
-  TRADE_OS_BACKUP_UPLOAD_CMD     OSS 上传命令模板（{local} {remote} 占位）；
+  TRADE_OS_BACKUP_MIRROR_URI        可选离机镜像目标前缀，如 <scheme>://bucket/prefix
+  TRADE_OS_BACKUP_UPLOAD_CMD     离机镜像上传命令模板（{local} {remote} 占位）；
                                  必须自行校验并打印 size= 与 sha256=
 EOF
 }
@@ -73,7 +73,7 @@ POSTGRES_ROOT="${TRADE_OS_POSTGRES_ROOT:-/opt/trade-os-postgres}"
 DATA_DIR="${TRADE_OS_DATA_DIR:-/var/lib/trade-os}"
 BACKUP_ROOT="${TRADE_OS_RELEASE_BACKUP_ROOT:-/var/lib/trade-os/release-backups}"
 RESTORE_LIST_CMD="${TRADE_OS_PG_RESTORE_LIST_CMD:-}"
-OSS_URI="${TRADE_OS_BACKUP_OSS_URI:-}"
+MIRROR_URI="${TRADE_OS_BACKUP_MIRROR_URI:-}"
 UPLOAD_CMD="${TRADE_OS_BACKUP_UPLOAD_CMD:-}"
 SNAP_DIR="$BACKUP_ROOT/$RELEASE_ID"
 
@@ -97,23 +97,23 @@ file_size() {
 }
 
 # Print the single machine-readable result line. All inputs are passed as
-# positional args so the JSON is always well-formed; ``oss`` is raw JSON.
+# positional args so the JSON is always well-formed; ``mirror`` is raw JSON.
 emit() {
-  local status=$1 failure_class=$2 storage=$3 path=$4 size_bytes=$5 sha=$6 restorable=$7 oss_json=$8
+  local status=$1 failure_class=$2 storage=$3 path=$4 size_bytes=$5 sha=$6 restorable=$7 mirror_json=$8
   python3 - "$status" "$failure_class" "$storage" "$path" "$size_bytes" "$sha" \
-    "$restorable" "$oss_json" "$RELEASE_ID" <<'PY'
+    "$restorable" "$mirror_json" "$RELEASE_ID" <<'PY'
 import json
 import sys
 
-status, failure_class, storage, path, size_bytes, sha, restorable, oss, release = sys.argv[1:10]
+status, failure_class, storage, path, size_bytes, sha, restorable, mirror, release = sys.argv[1:10]
 try:
     size_value = int(size_bytes) if size_bytes != "" else 0
 except ValueError:
     size_value = 0
 try:
-    oss_doc = json.loads(oss)
+    mirror_doc = json.loads(mirror)
 except Exception:
-    oss_doc = None
+    mirror_doc = None
 print("TROSA_BACKUP_JSON " + json.dumps({
     "release": release,
     "status": status,
@@ -125,7 +125,7 @@ print("TROSA_BACKUP_JSON " + json.dumps({
     "sha256": sha,
     "restorable": bool(restorable),
     "verified": status == "ok",
-    "oss": oss_doc,
+    "mirror": mirror_doc,
 }, sort_keys=True, separators=(",", ":")))
 PY
 }
@@ -193,13 +193,13 @@ if [ "$copy_sha" != "$actual_sha" ]; then
   fail 11 backup_verification_failed "durable copy checksum mismatch after copy"
 fi
 
-storage="ecs-durable"
-oss_json="null"
-if [ -n "$OSS_URI" ]; then
-  remote="$OSS_URI/$RELEASE_ID/database.dump"
+storage="server-durable"
+mirror_json="null"
+if [ -n "$MIRROR_URI" ]; then
+  remote="$MIRROR_URI/$RELEASE_ID/database.dump"
   if [ -z "$UPLOAD_CMD" ]; then
     fail 12 backup_verification_failed \
-      "TRADE_OS_BACKUP_OSS_URI is set but TRADE_OS_BACKUP_UPLOAD_CMD is not; refusing an unverified cloud mirror"
+      "TRADE_OS_BACKUP_MIRROR_URI is set but TRADE_OS_BACKUP_UPLOAD_CMD is not; refusing an unverified cloud mirror"
   fi
   upload_rendered="${UPLOAD_CMD//\{local\}/$dst}"
   upload_rendered="${upload_rendered//\{remote\}/$remote}"
@@ -210,23 +210,23 @@ if [ -n "$OSS_URI" ]; then
     fail 12 backup_verification_failed "cloud mirror upload failed (exit $upload_rc)"
   fi
   if [ "$JSON_ONLY" != 1 ]; then log "$upload_out"; fi
-  oss_sha=$(printf '%s\n' "$upload_out" | sed -n 's/^sha256=//p' | tail -n 1)
-  oss_size=$(printf '%s\n' "$upload_out" | sed -n 's/^size=//p' | tail -n 1)
-  oss_uri=$(printf '%s\n' "$upload_out" | sed -n 's/^oss_uri=//p' | tail -n 1)
-  if [ -z "$oss_sha" ] || [ "$oss_sha" != "$actual_sha" ]; then
+  mirror_sha=$(printf '%s\n' "$upload_out" | sed -n 's/^sha256=//p' | tail -n 1)
+  mirror_size=$(printf '%s\n' "$upload_out" | sed -n 's/^size=//p' | tail -n 1)
+  mirror_uri=$(printf '%s\n' "$upload_out" | sed -n 's/^mirror_uri=//p' | tail -n 1)
+  if [ -z "$mirror_sha" ] || [ "$mirror_sha" != "$actual_sha" ]; then
     fail 12 backup_verification_failed "cloud mirror reported checksum does not match local dump"
   fi
-  if [ -n "$oss_size" ] && [ "$oss_size" != "$size_bytes" ]; then
+  if [ -n "$mirror_size" ] && [ "$mirror_size" != "$size_bytes" ]; then
     fail 12 backup_verification_failed "cloud mirror reported size does not match local dump"
   fi
-  oss_json=$(python3 - "$oss_uri" "$remote" "$size_bytes" "$oss_sha" <<'PY'
+  mirror_json=$(python3 - "$mirror_uri" "$remote" "$size_bytes" "$mirror_sha" <<'PY'
 import json
 import sys
 uri, fallback, size, sha = sys.argv[1:5]
 print(json.dumps({"uri": uri or fallback, "size_bytes": int(size), "sha256": sha, "verified": True}, sort_keys=True))
 PY
 )
-  storage="ecs-durable+oss"
+  storage="server-durable+mirror"
 fi
 
 if [ "$BUNDLE" = 1 ]; then
@@ -281,4 +281,4 @@ if [ "$BUNDLE" = 1 ]; then
 fi
 
 log "backup ok: $dst ($size_bytes bytes, sha256=$actual_sha, storage=$storage)"
-emit "ok" "" "$storage" "$dst" "$size_bytes" "$actual_sha" "true" "$oss_json"
+emit "ok" "" "$storage" "$dst" "$size_bytes" "$actual_sha" "true" "$mirror_json"

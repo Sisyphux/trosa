@@ -1,3 +1,10 @@
+## 2026-10-29 — 发布、状态、备份改走 SSH 连腾讯云服务器，阿里云 Cloud Assistant 路径删除
+
+- 现象：正式服务器已从阿里云 ECS 迁到腾讯云 Lighthouse（SSH 别名 `trosa-new`），但发布脚本仍通过阿里云 Cloud Assistant 连旧 ECS，之后的发布会失败。
+- 修改：传输层统一为 `deploy/cloud/run-ssh-command.sh`（SSH 别名默认 `trosa-new`，可用 `TRADE_OS_SSH_HOST` 覆盖；退出码契约与原来一致：远端真实退出码 / 2 = SSH 未建立、命令未送达 / 124 = 结果未知）。发射改由 `deploy/cloud/release-launch-remote.sh` 随 SSH 命令送到服务器执行，不再需要预装 `/usr/local/lib/trosa/release-runner`。状态、日志、备份脚本改用同一传输层。删除 Cloud Assistant、Workbench、ECS 引导与单独发布的冻结垫片（`run-cloud-assistant-command.sh`、`cloud-assistant.py`、`cloud-assistant-bootstrap.sh`、`run-workbench-command.sh`、`publish-workbench.sh`、`rollback-workbench.sh`、`bootstrap-workbench.sh`、`publish-remote.sh`）。备份的可选异地副本由 OSS 专用变量改为通用的 `TRADE_OS_BACKUP_MIRROR_URI` / `TRADE_OS_BACKUP_MIRROR_UPLOAD_CMD`，存储标签改为 `server-durable`。
+- 影响范围：`deploy/cloud/`（`trosa-release`、`status-workbench.sh`、`logs-workbench.sh`、`backup-workbench.sh`、`backup-remote.sh`、`release-remote.sh`、`release-commit.sh`、`release-env.sh`、`release-test.sh`、`workbench.env.example`）、`tests/test_release_*.py`、`tests/test_runtime_contract.py`、`deploy/cloud/README.md`、`DEPLOYMENT.md`、`AGENTS.md`。业务代码不变。
+- 运维变化：本机 `~/.config/trosa/workbench.env` 里的 `TRADE_OS_SSH_HOST` 必须是 `trosa-new`；旧的 `TRADE_OS_ECS_*` 行已不再使用。
+
 ## 2026-10-29 — Inbox 对话页改成档案式：读数栏、表格列表、带时间栏的记录、开发登记表
 
 - 现象：回答助手的问题时，页面上看不到这家公司是谁（哪个国家、做什么、为什么开发它、背调查到什么、发过几封信），只能凭记忆或另去翻客户页；对话区在常见笔记本上只剩约 200px 高，最新那句提问常被挤在下面；每条提问下面还摆着几个现成的“建议回复”按钮，像选选项，不像和人说话；整页是一排普通卡片，没有层级。

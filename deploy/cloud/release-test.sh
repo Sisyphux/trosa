@@ -143,8 +143,7 @@ fi
 # never inherit credentials or production routing during a local regression.
 TEST_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/trosa-release-test-env.XXXXXX")"
 {
-  printf 'TRADE_OS_ECS_REGION=test-region\n'
-  printf 'TRADE_OS_ECS_INSTANCE_ID=i-test-instance\n'
+  printf 'TRADE_OS_SSH_HOST=test-host.invalid\n'
 } >"$TEST_ENV_FILE"
 
 # 并行分支通过共享日志目录汇总输出；父进程在 trap 中统一回收。

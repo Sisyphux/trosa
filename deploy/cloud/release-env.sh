@@ -3,8 +3,9 @@
 #
 # 为什么把发布配置移出仓库
 # ------------------------
-# workbench.env 决定“这次发布会打到哪台 ECS”。它只含路由元数据（实例 id、
-# 区域、公网地址、服务名），不含密钥；但它是发布能力的开关。留在仓库里意味着
+# workbench.env 决定“这次发布会打到哪台服务器”（TRADE_OS_SSH_HOST，默认
+# trosa-new）。它只含路由元数据（SSH 别名、服务名等），不含密钥；但它是发布能力
+# 的开关。留在仓库里意味着
 # 任何任务 worktree、release 归档或误提交都可能带上它。正式位置改为用户配置
 # 目录：
 #
@@ -85,3 +86,7 @@ trosa_require_release_role() {
 
 # 人类可读的当前角色，用于 status 输出。
 trosa_agent_role() { printf '%s' "${TRADE_OS_AGENT_ROLE:-release}"; }
+
+# 正式服务器的 SSH 别名（~/.ssh/config 中配置，默认 trosa-new）。
+# 只是主机别名，不含地址、用户或密钥；workbench.env 可用 TRADE_OS_SSH_HOST 覆盖。
+trosa_ssh_host() { printf '%s' "${TRADE_OS_SSH_HOST:-trosa-new}"; }

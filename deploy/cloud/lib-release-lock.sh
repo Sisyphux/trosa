@@ -4,7 +4,7 @@
 # Why this is not `flock`
 # ----------------------
 # Development and release-candidate assembly happen on macOS, where `flock` is
-# not part of the base system.  ECS (Linux) uses `flock` for the production
+# not part of the base system.  The production server (Linux) uses `flock` for the production
 # release lock, but the local workflows (task migration-number reservation and
 # local release serialization) need a lock that works everywhere and survives a
 # crashed holder.

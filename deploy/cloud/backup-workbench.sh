@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Create and verify a PostgreSQL + attachment backup on ECS, then OPTIONALLY
-# download it to the Mac.
+# Create and verify a PostgreSQL + attachment backup on the production server
+# (over SSH), then OPTIONALLY download it to the Mac.
 #
 # Why this was rewritten: the release gate used to run this script before every
 # database-sensitive publish, and any failure to transfer the archive to the Mac
-# (Workbench download / scp / SSH file stream) blocked the release even though a
-# perfectly good, verified backup already existed in the cloud. The download is
-# now optional and can never block a release.
+# (scp / SSH file stream) blocked the release even though a perfectly good,
+# verified backup already existed on the server. The download is now optional
+# and can never block a release.
 #
 # Two independent outcomes, never conflated:
-#   1. Cloud backup (generation + checksum + restorability + optional OSS
+#   1. Server backup (generation + checksum + restorability + optional offsite
 #      mirror) — this is the safety gate. Failure exits 10/11/12.
 #   2. Local archive download — a convenience. Failure exits 20
 #      (``local_download_failed``) and does not mean the backup failed.
@@ -17,7 +17,7 @@
 # Usage:
 #   backup-workbench.sh [--cloud-only] [--download=auto|require|never] [--json]
 #
-#   --cloud-only           只在 ECS 生成并校验云端备份，不下载。
+#   --cloud-only           只在服务器生成并校验备份，不下载。
 #   --download=auto         尝试下载；失败打印 LOCAL_DOWNLOAD_FAILED 并以 20 退出。
 #   --download=require      同 auto；调用方可据此把本地归档视为必需。
 #   --download=never        明确不下载。
@@ -26,7 +26,7 @@
 #   0   ok
 #   10  backup_failed
 #   11  backup_verification_failed
-#   12  backup_verification_failed (configured cloud mirror failed)
+#   12  backup_verification_failed (configured offsite mirror failed)
 #   20  local_download_failed
 set -uo pipefail
 export LC_ALL=C
@@ -43,8 +43,7 @@ fi
 trosa_warn_legacy_workbench_env "$ENV_FILE"
 source "$ENV_FILE"
 
-: "${TRADE_OS_ECS_REGION:?TRADE_OS_ECS_REGION is required}"
-: "${TRADE_OS_ECS_INSTANCE_ID:?TRADE_OS_ECS_INSTANCE_ID is required}"
+SSH_HOST="$(trosa_ssh_host)"
 DATA_DIR="${TRADE_OS_DATA_DIR:-/var/lib/trade-os}"
 POSTGRES_ROOT="${TRADE_OS_POSTGRES_ROOT:-/opt/trade-os-postgres}"
 REMOTE_ROOT="${TRADE_OS_REMOTE_ROOT:-/opt/trade-os}"
@@ -52,12 +51,9 @@ LOCAL_BACKUP_ROOT="${TRADE_OS_LOCAL_BACKUP_DIR:-$HOME/Library/Application Suppor
 STAMP="$(date -u +%Y%m%d%H%M%S)"
 RELEASE_ID="${STAMP}"
 ARCHIVE_NAME="trosa-postgres-backup-${STAMP}.tar.gz"
-# The server-side helper derives its bundle path from RELEASE_ID; prefer the
-# ARCHIVE= line it returns and fall back to this only for the legacy inline
-# path on an ECS that predates the helper.
+# The server-side helper derives its bundle path from RELEASE_ID and returns it
+# on an ARCHIVE= line; this default only applies if that line is missing.
 REMOTE_ARCHIVE="/tmp/${ARCHIVE_NAME}"
-# Transport: auto (try scp then Workbench), ssh (scp only), workbench (only).
-TRANSFER="${TRADE_OS_BACKUP_TRANSFER:-auto}"
 DOWNLOAD_MODE="auto"
 CLOUD_ONLY=0
 JSON_ONLY=0
@@ -90,80 +86,40 @@ USE_BUNDLE=0
 BUNDLE_FLAG=""
 [[ "$USE_BUNDLE" == 1 ]] && BUNDLE_FLAG="--bundle"
 
-# The pre-migration helper is the single verified-backup implementation. Use
-# the deployed copy (current release, else the newest release that has it); a
-# legacy inline path keeps the tool usable on an ECS that predates the helper.
+# The verified-backup implementation is backup-remote.sh from the deployed
+# release (current, else the newest release that has it). The backup runner and
+# the PostgreSQL dump belong to root, so the whole remote step runs under sudo;
+# the bundle is handed back to the SSH user so it can be copied down.
 remote_command=$(cat <<EOF
+sudo -n bash -s <<'TROSA_BACKUP'
 set -uo pipefail
+umask 077
 REMOTE_ROOT='$REMOTE_ROOT'
 POSTGRES_ROOT='$POSTGRES_ROOT'
 DATA_DIR='$DATA_DIR'
 RELEASE_ID='$RELEASE_ID'
-if [ -r /etc/trade-os/trade-os.env ]; then set -a; . /etc/trade-os/trade-os.env; set +a; fi
+BUNDLE_PATH="/tmp/trosa-postgres-backup-\$RELEASE_ID.tar.gz"
 # Failed downloads can leave bundles behind; keep /tmp bounded.
 find /tmp -maxdepth 1 -name 'trosa-postgres-backup-*.tar.gz' -mtime +2 -delete 2>/dev/null || true
 helper=''
 for candidate in "\$REMOTE_ROOT/current/deploy/cloud/backup-remote.sh" \$(ls -1dt "\$REMOTE_ROOT"/releases/*/deploy/cloud/backup-remote.sh 2>/dev/null); do
   if [ -f "\$candidate" ]; then helper="\$candidate"; break; fi
 done
-if [ -n "\$helper" ]; then
-  TRADE_OS_POSTGRES_ROOT="\$POSTGRES_ROOT" TRADE_OS_DATA_DIR="\$DATA_DIR" \
-    bash "\$helper" "\$RELEASE_ID" $BUNDLE_FLAG
-  exit \$?
-fi
-
-# ---- legacy inline fallback (ECS predates backup-remote.sh) ----
-cd "\$POSTGRES_ROOT"
-backup_log="/tmp/trosa-postgres-backup-\${RELEASE_ID}.database.log"
-./backup.sh | tee "\$backup_log"
-dump_rel="\$(sed -n 's/^backup=//p' "\$backup_log" | tail -n 1)"
-database_sha="\$(sed -n 's/^sha256=//p' "\$backup_log" | tail -n 1)"
-if [ -z "\$dump_rel" ] || [ -z "\$database_sha" ]; then
-  printf '%s\\n' 'PostgreSQL backup did not return a dump path and checksum.' >&2
+if [ -z "\$helper" ]; then
+  printf '%s\\n' 'backup-remote.sh is missing from every deployed release' >&2
   exit 10
 fi
-if [ "\${dump_rel#/}" != "\$dump_rel" ]; then
-  printf '%s\\n' 'Unexpected absolute PostgreSQL dump path.' >&2
-  exit 11
-fi
-dump_path="\$POSTGRES_ROOT/\$dump_rel"
-test -s "\$dump_path" || { printf '%s\\n' 'dump missing' >&2; exit 11; }
-actual_sha="\$(sha256sum "\$dump_path" | awk '{print \$1}')"
-[ "\$actual_sha" = "\$database_sha" ] || { printf '%s\\n' 'dump checksum mismatch' >&2; exit 11; }
-(cd "\$POSTGRES_ROOT" && docker compose exec -T postgres pg_restore --list "/backups/\$(basename "\$dump_rel")") >/dev/null 2>&1 \\
-  || { printf '%s\\n' 'dump is not restorable' >&2; exit 11; }
-if [ "$USE_BUNDLE" = "1" ]; then
-  staging="/tmp/trosa-postgres-backup-\${RELEASE_ID}"
-  rm -rf "\$staging"; mkdir -p "\$staging"
-  cp -- "\$dump_path" "\$staging/database.dump"
-  if [ -d "\$DATA_DIR/uploads/customer_files" ]; then
-    # The attachment archive is part of the backup contract: a failed or empty
-    # archive must fail the backup rather than be reported as verified.
-    if ! tar -C "\$DATA_DIR" -cf "\$staging/uploads.tar" uploads/customer_files 2>/dev/null; then
-      printf '%s\\n' 'cannot archive attachments' >&2; exit 10
-    fi
-    if [ ! -s "\$staging/uploads.tar" ]; then
-      printf '%s\\n' 'attachment archive is empty' >&2; exit 11
-    fi
-  fi
-  { printf 'format=trosa-postgres-backup-v1\\n'
-    printf 'database_dump=database.dump\\n'
-    printf 'database_dump_sha256=%s\\n' "\$database_sha"
-    if [ -f "\$staging/uploads.tar" ]; then printf 'attachments=uploads.tar\\n'; else printf 'attachments=none\\n'; fi
-  } > "\$staging/manifest.txt"
-  tar -C "\$staging" -czf "\$REMOTE_ARCHIVE" . \\
-    || { printf '%s\\n' 'cannot create bundle archive' >&2; exit 10; }
-  rm -rf "\$staging"
-  printf 'ARCHIVE=%s\\n' "\$REMOTE_ARCHIVE"
-  printf 'SHA256=%s\\n' "\$(sha256sum "\$REMOTE_ARCHIVE" | awk '{print \$1}')"
-fi
-printf 'DATABASE_DUMP=%s\\n' "\$dump_path"
-printf 'DATABASE_SHA256=%s\\n' "\$database_sha"
+TRADE_OS_POSTGRES_ROOT="\$POSTGRES_ROOT" TRADE_OS_DATA_DIR="\$DATA_DIR" \
+  bash "\$helper" "\$RELEASE_ID" $BUNDLE_FLAG
+rc=\$?
+if [ -f "\$BUNDLE_PATH" ]; then chown "\${SUDO_USER:-root}" "\$BUNDLE_PATH"; fi
+exit \$rc
+TROSA_BACKUP
 EOF
 )
 
-runner="${TRADE_OS_BACKUP_RUNNER:-$SCRIPT_DIR/run-workbench-command.sh}"
-output="$(bash "$runner" "$TRADE_OS_ECS_INSTANCE_ID" "$TRADE_OS_ECS_REGION" "$remote_command" 2>&1)"
+runner="${TRADE_OS_BACKUP_RUNNER:-$SCRIPT_DIR/run-ssh-command.sh}"
+output="$(bash "$runner" "$SSH_HOST" "$remote_command" 2>&1)"
 backup_rc=$?
 [[ "$JSON_ONLY" == 1 ]] || printf '%s\n' "$output"
 
@@ -173,30 +129,24 @@ remote_archive="$(printf '%s\n' "$output" | sed -n 's/^ARCHIVE=//p' | tail -n 1)
 # The helper names the bundle after its release id; trust the returned path.
 [[ -n "$remote_archive" ]] && REMOTE_ARCHIVE="$remote_archive"
 
-# Classify the cloud backup result. A non-zero helper exit means the cloud
-# backup is not trustworthy, regardless of any transfer outcome.
+# Classify the server backup result. A non-zero helper exit means the backup is
+# not trustworthy, regardless of any transfer outcome.
 if [[ "$backup_rc" != 0 ]]; then
   case "$backup_rc" in
     10) printf 'TROSA_BACKUP_STATUS backup_failed\n' >&2 ;;
     11|12) printf 'TROSA_BACKUP_STATUS backup_verification_failed\n' >&2 ;;
     *) printf 'TROSA_BACKUP_STATUS backup_failed\n' >&2 ;;
   esac
-  printf '云端备份未完成（helper exit %s）；这不是本地下载问题。\n' "$backup_rc" >&2
+  printf '服务器备份未完成（helper exit %s）；这不是本地下载问题。\n' "$backup_rc" >&2
   exit "$backup_rc"
 fi
-if [[ -n "$backup_json" ]]; then
-  printf 'TROSA_BACKUP_STATUS ok\n'
-  [[ "$JSON_ONLY" == 1 ]] || printf '云端备份已校验：%s\n' "$backup_json"
-else
-  # Legacy fallback prints no JSON but a DATABASE_SHA256 line.
-  legacy_sha="$(printf '%s\n' "$output" | sed -n 's/^DATABASE_SHA256=//p' | tail -n 1)"
-  if [[ -z "$legacy_sha" ]]; then
-    printf 'TROSA_BACKUP_STATUS backup_verification_failed\n' >&2
-    printf '云端备份未返回可校验结果。\n' >&2
-    exit 11
-  fi
-  printf 'TROSA_BACKUP_STATUS ok\n'
+if [[ -z "$backup_json" ]]; then
+  printf 'TROSA_BACKUP_STATUS backup_verification_failed\n' >&2
+  printf '服务器备份未返回可校验结果。\n' >&2
+  exit 11
 fi
+printf 'TROSA_BACKUP_STATUS ok\n'
+[[ "$JSON_ONLY" == 1 ]] || printf '服务器备份已校验：%s\n' "$backup_json"
 
 if [[ "$DOWNLOAD_MODE" == "never" ]]; then
   [[ "$JSON_ONLY" == 1 ]] || printf '跳过本地下载（--cloud-only / --download=never）。\n'
@@ -208,9 +158,8 @@ if [[ -z "$remote_sha" ]]; then
   exit 20
 fi
 
-# Bound every transfer attempt. macOS has no coreutils ``timeout``, and the
-# Workbench CLI can hang in its session/relay path instead of failing fast; a
-# release must never wait on the optional local archive indefinitely.
+# Bound every transfer attempt. macOS has no coreutils ``timeout``; a release
+# must never wait on the optional local archive indefinitely.
 run_with_timeout() {
   local limit=$1; shift
   "$@" &
@@ -230,44 +179,31 @@ run_with_timeout() {
 }
 
 download_once() {
-  local transport=$1 attempt_timeout="${TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT:-60}"
-  # Test hook: a caller-supplied fetcher receives <remote> <local-dir> <transport>.
+  local attempt_timeout="${TRADE_OS_BACKUP_DOWNLOAD_TIMEOUT:-60}"
+  # Test hook: a caller-supplied fetcher receives <remote> <local-dir>.
   if [[ -n "${TRADE_OS_BACKUP_FETCH:-}" ]]; then
-    run_with_timeout "$attempt_timeout" "$TRADE_OS_BACKUP_FETCH" \
-      "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT" "$transport"
+    run_with_timeout "$attempt_timeout" "$TRADE_OS_BACKUP_FETCH" "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT"
     return $?
   fi
-  case "$transport" in
-    ssh)
-      [[ -n "${TRADE_OS_SSH_HOST:-}" ]] || return 127
-      run_with_timeout "$attempt_timeout" scp -o BatchMode=yes -o ConnectTimeout=10 \
-        "${TRADE_OS_SSH_HOST}:${REMOTE_ARCHIVE}" "$LOCAL_BACKUP_ROOT/"
-      ;;
-    workbench)
-      command -v workbench >/dev/null 2>&1 || return 127
-      run_with_timeout "$attempt_timeout" workbench download "$REMOTE_ARCHIVE" "$LOCAL_BACKUP_ROOT/" \
-        --instance-id "$TRADE_OS_ECS_INSTANCE_ID" --region "$TRADE_OS_ECS_REGION" --force
-      ;;
-    *) return 2 ;;
-  esac
+  run_with_timeout "$attempt_timeout" scp -o BatchMode=yes -o ConnectTimeout=10 \
+    "${SSH_HOST}:${REMOTE_ARCHIVE}" "$LOCAL_BACKUP_ROOT/"
 }
 
 # The expected local path once the transfer finishes.
 EXPECTED_LOCAL="$LOCAL_BACKUP_ROOT/$(basename "$REMOTE_ARCHIVE")"
 
 # A transfer is successful when the artifact on disk is complete and matches
-# the server-reported checksum. Do not trust the transport's exit status: scp
-# (and Workbench) can leave a fully written file behind and then hang on the
-# control channel, which the watchdog kills with a non-zero status.
+# the server-reported checksum. Do not trust scp's exit status alone: it can
+# leave a fully written file behind and then hang, which the watchdog kills.
 local_archive_verified() {
   [[ -f "$EXPECTED_LOCAL" ]] || return 1
   [[ "$(shasum -a 256 "$EXPECTED_LOCAL" | awk '{print $1}')" == "$remote_sha" ]]
 }
 
 download_with_retry() {
-  local transport=$1 attempt
+  local attempt
   for attempt in 1 2; do
-    if download_once "$transport"; then return 0; fi
+    if download_once; then return 0; fi
     if local_archive_verified; then return 0; fi
     sleep 2
   done
@@ -275,25 +211,11 @@ download_with_retry() {
 }
 
 downloaded=0
-case "$TRANSFER" in
-  ssh) download_with_retry ssh && downloaded=1 ;;
-  workbench) download_with_retry workbench && downloaded=1 ;;
-  auto)
-    # Prefer the key-based SSH data path when configured (the Workbench
-    # session/relay can hang independently of port 22); fall back to a bounded
-    # Workbench attempt.
-    if [[ -n "${TRADE_OS_SSH_HOST:-}" ]] && download_with_retry ssh; then
-      downloaded=1
-    elif download_with_retry workbench; then
-      downloaded=1
-    fi
-    ;;
-  *) printf '未知 TRADE_OS_BACKUP_TRANSFER=%s\n' "$TRANSFER" >&2; exit 2 ;;
-esac
+if download_with_retry; then downloaded=1; fi
 
 if [[ "$downloaded" != 1 ]]; then
   printf 'TROSA_LOCAL_ARCHIVE local_download_failed\n' >&2
-  printf '本地归档下载失败（workbench/scp/SSH 文件流）；云端备份已完成并通过校验，发布不受影响。\n' >&2
+  printf '本地归档下载失败（scp）；服务器备份已完成并通过校验，发布不受影响。\n' >&2
   exit 20
 fi
 
@@ -315,7 +237,7 @@ tar -tzf "$local_archive" >/dev/null 2>&1 || {
 # Keep the rolling window of local archives (best effort).
 find "$LOCAL_BACKUP_ROOT" -type f -name 'trosa-postgres-backup-*.tar.gz' -mtime +14 -delete 2>/dev/null || true
 
-bash "$runner" "$TRADE_OS_ECS_INSTANCE_ID" "$TRADE_OS_ECS_REGION" "rm -f '$REMOTE_ARCHIVE'" >/dev/null 2>&1 || true
+bash "$runner" "$SSH_HOST" "rm -f '$REMOTE_ARCHIVE'" >/dev/null 2>&1 || true
 
 printf 'TROSA_LOCAL_ARCHIVE ok\n'
 printf 'local backup=%s\nsha256=%s\n' "$local_archive" "$local_sha"

@@ -1,12 +1,12 @@
 # Trade OS 上线指南（家庭服务器 + Cloudflare Tunnel）
 
-云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端保持单台主机、单个 PostgreSQL 写入进程；Workbench 用于受控查看、发布已推送的代码和执行 systemd 运维命令。
+云服务器部署补充流程见 [`deploy/cloud/README.md`](deploy/cloud/README.md)。云端保持单台主机、单个 PostgreSQL 写入进程；本机通过 SSH（别名 `trosa-new`）受控查看、发布已推送的代码和执行 systemd 运维命令。
 
 ## 日常代码发布
 
 默认流程是：每个代码任务在独立 worktree 中完成一个逻辑完整的 commit，
 通过验证后由 Codex 调用 `deploy/cloud/auto-publish.sh`，自动完成“构建干净
-release worktree → 完整回归 → 推送 release commit 到 `main` → ECS 发布 →
+release worktree → 完整回归 → 推送 release commit 到 `main` → 服务器发布 →
 公网健康检查”。发布过程不读取调用者的 dirty working tree。
 
 ```bash
@@ -18,7 +18,7 @@ deploy/cloud/auto-publish.sh --branch fix/modal-exit
 ```
 
 它会在临时 release worktree 中 cherry-pick 输入 commit，使用项目 `.venv` 执行
-Python 回归、Python/JavaScript 语法检查和浏览器扩展回归；发布前读取 ECS 状态，
+Python 回归、Python/JavaScript 语法检查和浏览器扩展回归；发布前读取服务器状态，
 普通改动直接发布。涉及 PostgreSQL schema、迁移或导入边界的改动会先执行已校验的数据库和附件备份；检测到疑似破坏性 SQL 时默认停止，只有明确确认并设置
 `TRADE_OS_AUTO_PUBLISH_ALLOW_DESTRUCTIVE_DB=1` 才会继续。
 
@@ -36,17 +36,17 @@ deploy/cloud/auto-publish.sh --dry-run --commit HEAD
 
 `--commit` 可重复传入；`--branch` 会按拓扑顺序收集分支相对
 `origin/main` 的 commit。输入 commit 已经在 `origin/main` 时会报告已存在并安全结束。
-发布只移动远程 `main` 和 ECS，不移动调用者的本地分支，也不使用其暂存区、未暂存改动或未跟踪文件。
+发布只移动远程 `main` 和正式服务器，不移动调用者的本地分支，也不使用其暂存区、未暂存改动或未跟踪文件。
 
-ECS 发布失败时保留 GitHub commit，但发布脚本自动恢复上一份应用 release；如果 ECS 本机健康而公网健康检查暂时失败，不会因可能的 Cloudflare Tunnel/网络抖动自动回滚，而是报告需要处理。明确说“只本地运行”“不要上线”或“只诊断”时，不调用自动入口。
+服务器发布失败时保留 GitHub commit，但发布脚本自动恢复上一份应用 release；如果服务器本机健康而公网健康检查暂时失败，不会因可能的 Cloudflare Tunnel/网络抖动自动回滚，而是报告需要处理。明确说“只本地运行”“不要上线”或“只诊断”时，不调用自动入口。
 
-底层 `deploy/cloud/publish-workbench.sh` 仍保留，用于已经存在的 commit 的单独发布和故障处理；单独 `git push` 只更新 GitHub，不保证 ECS 已上线。
+单个已推送 commit 的单独发布与故障处理使用 `deploy/cloud/trosa-release publish --commit <sha>`（旧的 `publish-workbench.sh` 已删除）；单独 `git push` 只更新 GitHub，不保证服务器已上线。
 
-当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为阿里云 ECS；应用通过 Cloudflare Tunnel 提供公网入口。公司 Mac 不再运行第二套 Trade OS，只在连接公司网络并取得固定地址 `192.168.0.58` 时，自动提供一个读取云端周报的局域网入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
+当前规模适合以一台长期运行的主机承载单个应用进程。当前正式主机为腾讯云 Lighthouse（SSH 别名 `trosa-new`，43.155.211.57）；应用通过 Cloudflare Tunnel 提供公网入口。阿里云 ECS（`trosa-ecs`）已停止并禁用，只作为回退保留到约 2026-11-05。公司 Mac 不再运行第二套 Trade OS，只在连接公司网络并取得固定地址 `192.168.0.58` 时，自动提供一个读取云端周报的局域网入口。另准备一台备用 Mac 或 NAS 作为冷备机，用于故障后的恢复切换。
 
 ## 运行角色
 
-- **主机（当前 ECS）**：唯一允许运行 Trade OS 与写入正式 PostgreSQL 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
+- **主机（当前腾讯云 `trosa-new`）**：唯一允许运行 Trade OS 与写入正式 PostgreSQL 的设备，也是唯一运行 Cloudflare Tunnel 的设备。
 - **公司 Mac**：不保存、不合并、不写入业务数据库；只在公司网络上提供 `http://192.168.0.58:8080` 只读周报入口。
 - **备用机**：保留同版本代码、Python 环境、`cloudflared` 安装与不含密钥的环境模板；平时不启动 Trade OS，不挂载或同步正在使用的数据目录。
 - **备份副本**：从主机生成带校验清单的 PostgreSQL logical dump + 客户附件 bundle，再加密复制到外接 SSD 和一处异地存储。Time Machine 可作为整机恢复补充，不能替代这份可独立校验的业务备份。
@@ -57,21 +57,21 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
 
 ### 公司局域网只读周报入口
 
-正式应用和 PostgreSQL 全部留在 ECS。公司 Mac 安装 `com.tradeos.weekly-lan` 后会常驻等待网络变化：只有本机真正取得 `192.168.0.58` 时才监听 8080；离开公司、关机或失去该地址后入口自动消失。它只转发应用外壳、周报汇总和周报客户详情，任何写入请求及其他 CRM 接口都在 Mac 和 ECS 两端拒绝。
+正式应用和 PostgreSQL 全部留在服务器。公司 Mac 安装 `com.tradeos.weekly-lan` 后会常驻等待网络变化：只有本机真正取得 `192.168.0.58` 时才监听 8080；离开公司、关机或失去该地址后入口自动消失。它只转发应用外壳、周报汇总和周报客户详情，任何写入请求及其他 CRM 接口都在 Mac 和服务器两端拒绝。
 
 1. 确认公司路由器将 `192.168.0.58` 固定分配给这台 Mac，且没有把 8080 转发到互联网。
 2. 在 Mac 项目目录执行 `deploy/macos/install-weekly-lan.sh`。首次安装会创建仅本机可读的随机密钥，并输出对应的 SHA-256 摘要。
-3. 将输出的 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256=...` 安全写入 ECS 的 `/etc/trade-os/trade-os.env`，重启 `trade-os`。ECS 只保存摘要，不保存 Mac 使用的原始密钥。
+3. 将输出的 `CRM_WEEKLY_GATEWAY_TOKEN_SHA256=...` 安全写入服务器的 `/etc/trade-os/trade-os.env`，重启 `trade-os`。服务器只保存摘要，不保存 Mac 使用的原始密钥。
 4. 在非公司网络确认 Mac 不监听 8080；回到公司后从另一台设备打开 `http://192.168.0.58:8080`，确认自动进入本周工作。再验证普通客户接口与 POST 请求均被拒绝。
 
-安装文件位于 `~/Library/Application Support/TradeOS/`，私密配置为 `weekly-lan.env`，日志位于 `logs/weekly-lan.log` 和 `logs/weekly-lan-error.log`。该入口不依赖旧的 `com.tradeos.app`、`com.tradeos.tunnel` 或 `com.tradeos.health`；这三个 Mac 正式服务继续保持禁用，避免与 ECS 双运行。
+安装文件位于 `~/Library/Application Support/TradeOS/`，私密配置为 `weekly-lan.env`，日志位于 `logs/weekly-lan.log` 和 `logs/weekly-lan-error.log`。该入口不依赖旧的 `com.tradeos.app`、`com.tradeos.tunnel` 或 `com.tradeos.health`；这三个 Mac 正式服务继续保持禁用，避免与服务器双运行。
 
 ### 灾难恢复入口（仅在批准主机切换后）
 
-`deploy/macos/` 只保留灾难恢复所需的备用运行入口：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于在确认 ECS 已停止且 Mac 将成为唯一正式主机后启动 `serve.py`。它们要求 `CRM_ENV=production`、PostgreSQL backend、非空 DSN 和 `PGPASSFILE`；缺少任何一项都会在启动前失败，不会启动 SQLite writer。ECS 正常运行期间不得启用这套备用入口。
+`deploy/macos/` 只保留灾难恢复所需的备用运行入口：`run-production.sh` 负责读取仅本机可见的生产设置，`com.tradeos.app.plist.example` 用于在确认服务器已停止且 Mac 将成为唯一正式主机后启动 `serve.py`。它们要求 `CRM_ENV=production`、PostgreSQL backend、非空 DSN 和 `PGPASSFILE`；缺少任何一项都会在启动前失败，不会启动 SQLite writer。服务器正常运行期间不得启用这套备用入口。
 
 - 私有生产设置必须设置会话密钥和 `https://app.trosa.space`；各账号的不同 6 位访问码在生产登录页首次进入时分别设置，并只以哈希形式保存在 PostgreSQL 兼容设置表（按当前用户作用域隔离）。
-- 只有执行灾难回退并让 Mac 成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`；切换前先停止 ECS 的应用与 Tunnel，并确认没有第二个 writer。
+- 只有执行灾难回退并让 Mac 成为唯一正式主机时，才设置 `CRM_BIND_HOST=0.0.0.0` 与 `CRM_INTERNAL_VIEWER_CIDRS=192.168.0.0/23`；切换前先停止服务器的应用与 Tunnel，并确认没有第二个 writer。
 - Mac 上的 `CRM_DB_PATH` 只可保存附件、导入来源和 SQLite 回滚材料；正式业务表、事务和身份仍在 PostgreSQL。不要把任何 `data/` 目录解释为日常业务数据库。
 - 日常开发始终在桌面项目目录完成。任何代码发布都必须经过仓库的发布门禁和 PostgreSQL 健康门；不要用旧的本地启动器复制或合并业务数据。
 - 如确需在灾难恢复期间使用 Mac，`run-production.sh` 使用 macOS 自带的 `caffeinate -i` 阻止**空闲系统睡眠**，但不阻止显示器熄灭。恢复结束后关闭 Mac 服务，避免双写。
@@ -111,7 +111,7 @@ PostgreSQL 生产库不允许两台主机同时作为 writer。发生主机故�
    CRM_ENV=production
    CRM_SESSION_SECRET=至少32字符的随机值
    CRM_PUBLIC_URL=https://trade.example.com
-   # Formal ECS runtime is injected by the systemd PostgreSQL drop-in.
+   # Formal server runtime is injected by the systemd PostgreSQL drop-in.
    TRADE_OS_DATA_BACKEND=postgres
    TRADE_OS_DATABASE_URL=postgresql://tradeos_app@127.0.0.1:5432/tradeos
    PGPASSFILE=/etc/trade-os/postgres.pgpass
@@ -147,7 +147,7 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 
 ## 数据目录
 
-`CRM_DB_PATH` 在正式 ECS 上不是 PostgreSQL 数据目录；它只指向附件、导入来源和历史 SQLite 回滚材料。正式业务表和事务位于 PostgreSQL。
+`CRM_DB_PATH` 在正式服务器上不是 PostgreSQL 数据目录；它只指向附件、导入来源和历史 SQLite 回滚材料。正式业务表和事务位于 PostgreSQL。
 
 - 数据目录使用本机持久磁盘。
 - PostgreSQL 生产库只允许一个正式 Trade OS writer；附件目录也只由正式服务写入。
@@ -158,9 +158,9 @@ Gmail 同步保持可选：未配置时，客户、时间线、Today、Inbox 和
 
 应用保持一个唯一可写 PostgreSQL 主数据库，不会把 SQLite 文件当作第二个运行中的数据库。正式备份脚本生成一致性 logical dump，执行 `pg_restore --list` 验证，再和客户附件打包并核对 SHA-256；不依赖应用内的 SQLite 快照定时器。任务失败只记录失败状态，不切换主库。
 
-数据库敏感发布在切换流量前会由 `deploy/cloud/backup-remote.sh` 在 ECS 生成并校验权威快照（大小 + SHA-256 + `pg_restore --list`），并保留在 `/var/lib/trade-os/release-backups/`；配置 OSS 镜像后同一份备份会额外留存到对象存储。本地下载是可选项，`workbench download` / `scp` / SSH 文件流失败不阻塞发布。
+数据库敏感发布在切换流量前会由 `deploy/cloud/backup-remote.sh` 在服务器生成并校验权威快照（大小 + SHA-256 + `pg_restore --list`），并保留在 `/var/lib/trade-os/release-backups/`；配置 OSS 镜像后同一份备份会额外留存到对象存储。本地下载是可选项，`workbench download` / `scp` / SSH 文件流失败不阻塞发布。
 
-本机 bundle 用于快速恢复误删和错误操作，但与主数据库仍可能位于同一台 ECS，不能抵御整机或磁盘损坏。正式上线还需要异地备份：
+本机 bundle 用于快速恢复误删和错误操作，但与主数据库仍可能位于同一台服务器，不能抵御整机或磁盘损坏。正式上线还需要异地备份：
 
 1. 每天运行 `deploy/cloud/backup-workbench.sh`，把 PostgreSQL dump、附件和 manifest 加密复制到外接盘或可信对象存储；若对象存储已配置，同一份云端备份本身就满足异地要求，本地拉取仅作补充。
 2. 至少保留 30 天，建议与应用的 90 天本地保留策略配合。
