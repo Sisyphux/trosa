@@ -8659,6 +8659,78 @@ def _dialogue_attach_customer_id(conn, thread):
         thread['customer_id'] = int(dict(profile)['customer_id'])
 
 
+def _dialogue_context_customer_id(thread):
+    """The customer a conversation is about: the resolved prospect, a numeric
+    ``prospect:<n>`` subject (older threads carry a Trosa number), or the last
+    customer the messages refer to (human notes)."""
+    if str(thread.get('customer_id') or '').isdigit():
+        return int(thread['customer_id'])
+    subject = str(thread.get('subject') or '')
+    if subject.startswith('prospect:') and subject[len('prospect:'):].strip().isdigit():
+        return int(subject[len('prospect:'):].strip())
+    for message in reversed(thread.get('messages') or []):
+        for ref in reversed(message.get('refs') or []):
+            if isinstance(ref, dict) and ref.get('type') == 'customer' and str(ref.get('id') or '').isdigit():
+                return int(ref['id'])
+    return None
+
+
+def _dialogue_attach_context(conn, thread):
+    """Attach the dossier the human needs to answer: who this company is, why
+    sela develops it, its background check and what has been sent so far.
+
+    Display-only and best effort: a failure here never breaks reading the thread.
+    """
+    if not isinstance(thread, dict):
+        return
+    try:
+        customer_id = _dialogue_context_customer_id(thread)
+        if customer_id is None:
+            return
+        profile = _sela_profile_for_customer(conn, customer_id)
+        view = _sela_prospect_view(conn, profile) if profile else None
+        if view:
+            details = view.get('contact_details') if isinstance(view.get('contact_details'), dict) else {}
+            outreach = view.get('outreach') if isinstance(view.get('outreach'), dict) else {}
+            thread['context'] = {
+                'kind': 'prospect',
+                'customer_id': customer_id,
+                'company': view.get('company') or '',
+                'country': view.get('country') or '',
+                'city': view.get('city') or '',
+                'website': view.get('website') or '',
+                'business_type': view.get('business_type') or '',
+                'reason': view.get('reason') or '',
+                'background': view.get('research_reason') or '',
+                'contact_name': details.get('name') or '',
+                'contact_title': details.get('title') or '',
+                'email': view.get('email') or '',
+                'email_route_status': view.get('email_route_status') or '',
+                'sent_count': int(outreach.get('sent_count') or 0),
+                'first_sent_at': outreach.get('first_sent_at') or '',
+                'last_sent_at': outreach.get('last_sent_at') or '',
+                'replied': bool(view.get('replied')),
+                'bounced': bool(view.get('bounced')),
+                'do_not_contact': bool(view.get('do_not_contact')),
+            }
+            return
+        customer = _sela_profile_customer(conn, customer_id)
+        if not customer:
+            return
+        customer = dict(customer)
+        thread['context'] = {
+            'kind': 'customer',
+            'customer_id': customer_id,
+            'company': str(customer.get('company') or customer.get('name') or ''),
+            'country': str(customer.get('country') or ''),
+            'website': str(customer.get('website') or ''),
+            'business_type': str(customer.get('field') or customer.get('industry') or ''),
+            'last_contact': str(customer.get('last_contact') or ''),
+        }
+    except Exception:
+        app.logger.warning('inbox thread context unavailable', exc_info=True)
+
+
 @app.route('/api/inbox/threads/<thread_id>', methods=['GET'])
 @login_required
 def inbox_thread_get(thread_id):
@@ -8667,6 +8739,7 @@ def inbox_thread_get(thread_id):
     try:
         body = _dialogue.get_thread(conn, thread_id=thread_id)
         _dialogue_attach_customer_id(conn, body.get('thread'))
+        _dialogue_attach_context(conn, body.get('thread'))
         return jsonify(body)
     except _dialogue.DialogueError as error:
         return _dialogue_error_response(error)

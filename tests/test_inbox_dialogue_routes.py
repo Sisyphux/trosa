@@ -159,6 +159,55 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertEqual(human_body['thread']['customer_id'], 4321)
         self.assertNotIn('customer_id', sela_body['thread'])
 
+    def test_human_thread_read_carries_the_company_dossier(self):
+        thread_id = self._create_thread()
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        names = ('_sela_profile_by_source', '_sela_profile_for_customer', '_sela_prospect_view', '_sela_profile_customer')
+        original = {name: getattr(self.module, name) for name in names}
+        view = {
+            'company': 'Route Acrylics', 'country': '巴西', 'website': 'https://route.example',
+            'business_type': '亚克力加工', 'reason': '圣保罗的亚克力加工厂', 'research_reason': '做什么：做展示架',
+            'contact_details': {'name': 'Ana', 'title': '采购'}, 'email': 'ana@route.example',
+            'email_route_status': 'VERIFIED', 'outreach': {'sent_count': 2, 'last_sent_at': '2026-10-20'},
+            'replied': False, 'bounced': False, 'do_not_contact': False,
+        }
+        try:
+            self.module._sela_profile_by_source = lambda conn, source_id: (
+                {'customer_id': 4321} if source_id == 'route' else None)
+            self.module._sela_profile_for_customer = lambda conn, cid: {'customer_id': cid} if cid == 4321 else None
+            self.module._sela_prospect_view = lambda conn, profile: dict(view)
+            body = human.get(f'/api/inbox/threads/{thread_id}').get_json()
+            context = body['thread']['context']
+            self.assertEqual(context['kind'], 'prospect')
+            self.assertEqual(context['company'], 'Route Acrylics')
+            self.assertEqual(context['reason'], '圣保罗的亚克力加工厂')
+            self.assertEqual(context['background'], '做什么：做展示架')
+            self.assertEqual(context['contact_name'], 'Ana')
+            self.assertEqual(context['sent_count'], 2)
+            sela_body = self.service.get(
+                f'/api/integrations/sela/threads/{thread_id}', headers=self.service_headers).get_json()
+            self.assertNotIn('context', sela_body['thread'])
+
+            # Not a sela prospect: the plain customer record.
+            self.module._sela_profile_for_customer = lambda conn, cid: None
+            self.module._sela_profile_customer = lambda conn, cid: {
+                'id': cid, 'company': 'Route Customer', 'country': '智利', 'last_contact': '2026-10-01'}
+            context = human.get(f'/api/inbox/threads/{thread_id}').get_json()['thread']['context']
+            self.assertEqual(context['kind'], 'customer')
+            self.assertEqual(context['company'], 'Route Customer')
+
+            # A failing dossier never breaks reading the conversation.
+            def boom(conn, cid):
+                raise RuntimeError('dossier read failed')
+            self.module._sela_profile_for_customer = boom
+            response = human.get(f'/api/inbox/threads/{thread_id}')
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn('context', response.get_json()['thread'])
+        finally:
+            for name, value in original.items():
+                setattr(self.module, name, value)
+
     def test_human_list_hides_threads_of_archived_prospect_customer(self):
         thread_id = self._create_thread()
         human = self.module.app.test_client()

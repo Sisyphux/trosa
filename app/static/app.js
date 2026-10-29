@@ -14958,17 +14958,98 @@ function renderDialogueThreadHtml() {
       '</div>' +
     '</div>';
   var composer = closed ? '' : dialogueComposerHtml();
-  return '<article class="dialogue-thread" data-thread-id="' + escapeHtml(thread.id) + '">' +
-    header + conflict + body + composer + '</article>';
+  var dossier = dialogueDossierHtml(thread.context, thread.title);
+  return '<article class="dialogue-thread' + (dossier ? ' has-dossier' : '') + '" data-thread-id="' + escapeHtml(thread.id) + '">' +
+    '<div class="dialogue-main">' + header + conflict + body + composer + '</div>' + dossier + '</article>';
 }
 
-function dialogueSuggestions() {
-  if (!dialogueThread || !Array.isArray(dialogueThread.messages)) return [];
-  for (var i = dialogueThread.messages.length - 1; i >= 0; i--) {
-    var message = dialogueThread.messages[i];
-    if (Array.isArray(message.suggested_replies) && message.suggested_replies.length) return message.suggested_replies;
+// ---- 卷宗：回答之前要知道这家是谁 ------------------------------------------------
+// 右栏放这家公司的底细：在哪、做什么、为什么开发它、背调、发过几封。数据随对话一起读回
+// （thread.context），没有就不出这一栏。窄屏时它收在消息上方，点开才看。
+function dialogueDossierDate(value) {
+  var text = String(value || '').slice(0, 10);
+  var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return '';
+  var year = Number(match[1]);
+  var label = Number(match[2]) + '月' + Number(match[3]) + '日';
+  return year === new Date().getFullYear() ? label : year + '年' + label;
+}
+
+function dialogueWebsiteHtml(url) {
+  var raw = String(url || '').trim();
+  if (!raw) return '';
+  var href = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+  var shown = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
+  return '<a class="dialogue-dossier-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
+    escapeHtml(shown) + uiIcon('external') + '</a>';
+}
+
+// 背调按行写成“做什么：…”“市场：…”，小标题单独一行，扫一眼就能找到要的那条。
+function dialogueBackgroundHtml(text) {
+  return String(text).split(/\n+/).map(function(line) {
+    line = line.trim();
+    if (!line) return '';
+    var match = /^([^：:]{1,10})[：:]\s*(.+)$/.exec(line);
+    return match
+      ? '<p class="dialogue-dossier-item"><span class="dialogue-dossier-key">' + escapeHtml(match[1]) + '</span>' + escapeHtml(match[2]) + '</p>'
+      : '<p>' + escapeHtml(line) + '</p>';
+  }).join('');
+}
+
+function dialogueDossierSection(label, html) {
+  return html ? '<section class="dialogue-dossier-sec"><h4>' + escapeHtml(label) + '</h4>' + html + '</section>' : '';
+}
+
+function dialogueDossierHtml(context, threadTitle) {
+  if (!context || !context.company) return '';
+  // 对话标题已经是公司名时，卷宗不再重复写一遍。
+  var sameName = String(threadTitle || '').trim().toLowerCase() === String(context.company).trim().toLowerCase();
+  var place = [context.country, context.city].filter(Boolean).join(' · ');
+  var identity = [place, context.business_type].filter(Boolean).join(' · ');
+  var openCustomer = context.customer_id
+    ? '<button type="button" class="dialogue-dossier-open" onclick="openDialogueCustomerById(\'' + escapeHtml(String(context.customer_id)) + '\')">' +
+        uiIcon('open') + '<span>客户资料</span></button>'
+    : '';
+  var head = '<header class="dialogue-dossier-head' + (sameName ? ' is-same-name' : '') + '">' +
+      (sameName ? '' : '<div class="dialogue-dossier-name">' + escapeHtml(context.company) + '</div>') +
+      (identity ? '<div class="dialogue-dossier-id">' + escapeHtml(identity) + '</div>' : '') +
+      '<div class="dialogue-dossier-actions">' + dialogueWebsiteHtml(context.website) + openCustomer + '</div>' +
+    '</header>';
+  var flags = [];
+  if (context.do_not_contact) flags.push('<span class="dialogue-dossier-flag">不联系</span>');
+  if (context.bounced) flags.push('<span class="dialogue-dossier-flag">退信</span>');
+  if (context.replied) flags.push('<span class="dialogue-dossier-flag is-quiet">回过信</span>');
+  var body = '';
+  if (context.kind === 'prospect') {
+    body += dialogueDossierSection('为什么开发', context.reason ? '<p>' + escapeHtml(context.reason) + '</p>' : '<p class="is-empty">还没写</p>');
+    body += dialogueDossierSection('背调', context.background
+      ? dialogueBackgroundHtml(context.background)
+      : '<p class="is-empty">还没做</p>');
+    var person = [context.contact_name, context.contact_title].filter(Boolean).join(' · ');
+    var routeLabel = { VERIFIED: '已验证', NO_MX: '收不了信', DNS_UNAVAILABLE: '没验证成' }[context.email_route_status] || '';
+    var contactHtml = (person ? '<p>' + escapeHtml(person) + '</p>' : '') +
+      (context.email ? '<p class="dialogue-dossier-mail">' + escapeHtml(context.email) +
+        (routeLabel ? '<span class="dialogue-dossier-note">' + routeLabel + '</span>' : '') + '</p>' : '') ||
+      '<p class="is-empty">没有邮箱</p>';
+    body += dialogueDossierSection('联系人', contactHtml);
+    var sent = context.sent_count
+      ? '<p>发过 <b class="tnum">' + context.sent_count + '</b> 封' +
+          (dialogueDossierDate(context.last_sent_at) ? '，最近 ' + dialogueDossierDate(context.last_sent_at) : '') + '</p>'
+      : '<p class="is-empty">还没发过</p>';
+    body += dialogueDossierSection('开发信', sent + (flags.length ? '<p class="dialogue-dossier-flags">' + flags.join('') + '</p>' : ''));
+  } else {
+    var last = dialogueDossierDate(context.last_contact);
+    body += dialogueDossierSection('上次联系', last ? '<p>' + last + '</p>' : '<p class="is-empty">没有记录</p>');
   }
-  return [];
+  var wide = !window.matchMedia || window.matchMedia('(min-width: 1101px)').matches;
+  return '<aside class="dialogue-dossier" aria-label="这家公司">' +
+    '<details class="dialogue-dossier-fold"' + (wide ? ' open' : '') + '>' +
+      '<summary class="dialogue-dossier-summary">' +
+        (sameName ? '' : '<span class="dialogue-dossier-sname">' + escapeHtml(context.company) + '</span>') +
+        '<span class="dialogue-dossier-id">' + escapeHtml(identity || '公司资料') + '</span></summary>' +
+      head + body +
+    '</details>' +
+  '</aside>';
 }
 
 function dialogueLinkCustomerId() {
@@ -15001,26 +15082,12 @@ function openDialogueCustomerById(customerId) {
 }
 
 function dialogueComposerHtml() {
-  var suggestions = dialogueSuggestions();
-  // 建议回复是最常见的答法：点一下（或按数字键）填进回复框，回车才发出。
-  var chips = suggestions.length
-    ? '<div class="dialogue-suggestions" role="group" aria-label="建议回复">' +
-        suggestions.map(function(text, index) {
-          return '<button type="button" class="dialogue-suggestion" data-suggestion-index="' + index + '"' +
-            ' onclick="fillDialogueSuggestion(this)"' + (index < 9 ? ' data-key="' + (index + 1) + '" title="按 ' + (index + 1) + ' 填入"' : '') + '>' +
-            escapeHtml(String(text)) + '</button>';
-        }).join('') + '</div>'
-    : '';
-  return dialogueComposerFormHtml({
-    lead: chips, label: '回复', rows: 1, submitLabel: '发送',
-    placeholder: '回一句话…'
-  });
+  return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: '回一句话…' });
 }
 
 // 回复框与「记一笔」共用一个输入框：文字、附件、发送在同一个框里。
 function dialogueComposerFormHtml(opts) {
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
-    (opts.lead || '') +
     '<div class="dialogue-field">' +
       dialogueComposerAttachmentsHtml() +
       '<label class="sr-only" for="dialogueReplyInput">' + escapeHtml(opts.label) + '</label>' +
@@ -15229,24 +15296,6 @@ async function submitDialogueNote() {
   return false;
 }
 
-function fillDialogueReply(text) {
-  var input = document.getElementById('dialogueReplyInput');
-  if (!input) return;
-  input.value = String(text == null ? '' : text);
-  dialogueDraft = input.value;
-  growDialogueReply();
-  input.focus();
-  // 光标放到句末，接着补一句就行。
-  if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
-}
-
-function fillDialogueSuggestion(button) {
-  if (!button) return;
-  var index = Number(button.getAttribute('data-suggestion-index'));
-  var suggestions = dialogueSuggestions();
-  if (suggestions[index] != null) fillDialogueReply(suggestions[index]);
-}
-
 function dialogueReplyKeydown(event) {
   // Enter that confirms a half-typed pinyin / IME candidate is not "send" (Safari reports it as keyCode 229).
   if (event.isComposing || event.keyCode === 229) return true;
@@ -15443,11 +15492,7 @@ function dialogueKeydown(event) {
   if (isTypingTarget(event.target)) return;
   if (event.key === 'j' || event.key === 'J') { event.preventDefault(); moveDialogueSelection(1); return; }
   if (event.key === 'k' || event.key === 'K') { event.preventDefault(); moveDialogueSelection(-1); return; }
-  if (event.key === 'Enter') { event.preventDefault(); focusDialogueReply(); return; }
-  if (/^[1-9]$/.test(event.key)) {
-    var chip = document.querySelector('#dialogueComposer .dialogue-suggestion[data-key="' + event.key + '"]');
-    if (chip) { event.preventDefault(); fillDialogueSuggestion(chip); }
-  }
+  if (event.key === 'Enter') { event.preventDefault(); focusDialogueReply(); }
 }
 document.addEventListener('keydown', dialogueKeydown);
 

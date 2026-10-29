@@ -2,8 +2,8 @@
 // 数据流驱动 renderDialogueList / renderDialogueThreadHtml。
 //
 //   * 列表按「等你 / 处理中 / 已归档」分组，行内显示标题、摘要、轮到谁与多久。
-//   * 打开一条对话后显示消息（含 system）与 sela 的建议回复。
-//   * 建议回复只填入回复框，不会直接发送。
+//   * 打开一条对话后显示消息（含 system）；不给现成的回复选项，回话就是自己写一句。
+//   * 有这家公司的资料时，右栏卷宗显示开发理由与背调；没有就不出这一栏。
 //   * 发送后提示「已收到」，并自动跳到下一条「等你」。
 //   * thread_changed 冲突显示「有新消息，请先看」提示，不静默重试。
 //   * 列表为空显示明确空状态；加载失败显示失败原因而不是「没有数据」。
@@ -64,7 +64,12 @@ const summaries = [
 
 const threads = {
   [A]: { id: A, subject: 'prospect:alpha', title: 'Alpha 竞品排除', status: 'open', awaiting: 'human', revision: 2,
-    opened_at: now(), updated_at: now(), closed_at: null, closed_by: null, closed_summary: null, messages: [
+    opened_at: now(), updated_at: now(), closed_at: null, closed_by: null, closed_summary: null,
+    context: { kind: 'prospect', customer_id: 7, company: 'Alpha Acrylics', country: '巴西', business_type: '亚克力加工',
+      website: 'https://alpha.example', reason: '圣保罗的亚克力加工厂', background: '做什么：切割亚克力板做展示架\n可能买什么：3mm 透明板',
+      contact_name: 'Ana', contact_title: '采购', email: 'ana@alpha.example', email_route_status: 'VERIFIED',
+      sent_count: 2, last_sent_at: '2026-10-20', replied: false, bounced: false, do_not_contact: false },
+    messages: [
       { id: 'm1', thread_id: A, seq: 1, role: 'sela', text: '要不要排除 Northwind？',
         suggested_replies: ['是，排除这家竞品', '不是，保留它'], refs: [{ type: 'customer', id: '7' }],
         hints: null, attachments: [], created_at: now() },
@@ -209,18 +214,22 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   win.dialogueCounts.awaiting_human = savedAwaiting;
   win.updateTodayDialogueEntry();
 
-  // 默认选中最靠前的「等你」对话：消息含 sela 与 system，建议回复以可点击文字出现。
+  // 默认选中最靠前的「等你」对话：消息含 sela 与 system；不出现现成的回复选项。
   assert.equal(win.dialogueSelectedId, A, '应默认打开第一条等你对话');
   const threadPane = doc.getElementById('dialogueThreadPane');
   assert.ok(threadPane.querySelector('.dialogue-msg--sela'), '应有 sela 消息');
   assert.ok(threadPane.querySelector('.dialogue-msg--system'), '应有 system 消息');
-  const suggestions = threadPane.querySelectorAll('.dialogue-suggestion');
-  assert.deepEqual(Array.from(suggestions).map((s) => s.textContent), ['是，排除这家竞品', '不是，保留它']);
-  // 建议回复只填入回复框：点击后不产生任何发送请求。
-  const beforePosts = replyPosts;
-  win.fillDialogueSuggestion(suggestions[0]);
-  assert.equal(doc.getElementById('dialogueReplyInput').value, '是，排除这家竞品');
-  assert.equal(replyPosts, beforePosts, '点击建议回复不应发送');
+  assert.equal(threadPane.querySelectorAll('.dialogue-suggestion, .dialogue-suggestions').length, 0, '不应出现回复选项');
+  assert.ok(!threadPane.textContent.includes('是，排除这家竞品'), '建议回复文字不应出现在界面上');
+
+  // 卷宗：这家公司在哪、做什么、为什么开发、背调、发过几封。
+  const dossier = threadPane.querySelector('.dialogue-dossier');
+  assert.ok(dossier, '有公司资料时应有卷宗栏');
+  assert.ok(dossier.textContent.includes('巴西'), dossier.textContent);
+  assert.ok(dossier.textContent.includes('圣保罗的亚克力加工厂'), '应显示开发理由');
+  assert.ok(dossier.querySelector('.dialogue-dossier-key') && dossier.textContent.includes('切割亚克力板做展示架'), '背调按行显示');
+  assert.ok(dossier.textContent.includes('发过 2 封'), dossier.textContent);
+  assert.ok(dossier.querySelector('a[href="https://alpha.example"]'), '应有官网链接');
 
   // 界面里没有按问题类型生成的表单分支。
   assert.equal(threadPane.querySelectorAll('[data-inbox-field]').length, 0);
@@ -241,6 +250,7 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.ok(doc.getElementById('toastContainer').textContent.includes('已收到'), '应提示 已收到');
   assert.equal(win.dialogueSelectedId, B, '发送后应自动跳到下一条等你对话');
   assert.ok(doc.querySelector('.dialogue-row.is-selected[data-dialogue-id="' + B + '"]'));
+  assert.equal(threadPane.querySelectorAll('.dialogue-dossier').length, 0, '没有公司资料时不出卷宗栏');
 
   // 键盘 J/K 在列表内切换。
   win.dialogueKeydown({ key: 'k', target: doc.body, preventDefault() {}, defaultPrevented: false, metaKey: false, ctrlKey: false, altKey: false });
