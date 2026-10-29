@@ -14685,9 +14685,34 @@ function dialogueNavBadge() {
 function renderDialogueOverview() {
   var overview = document.getElementById('dialogueOverview');
   if (!overview) return;
-  overview.innerHTML = '<strong>' + dialogueAwaitingCount() + '</strong> 条等你回复，' +
-    Number(dialogueCounts.awaiting_sela || 0) + ' 条在处理中。';
+  var waiting = Number(dialogueCounts.awaiting_sela || 0);
+  overview.innerHTML = '<strong class="tnum">' + dialogueAwaitingCount() + '</strong> 条等你回复' +
+    (waiting ? '<span class="dialogue-overview-sep" aria-hidden="true">·</span>' + waiting + ' 条在处理中' : '');
 }
+
+// 对话区占满一屏：列表与消息各自滚动，回复框始终在屏幕底部，不随页面滚走。
+var dialogueFitObserver = null;
+function watchDialogueWorkspace(workspace) {
+  if (dialogueFitObserver || typeof ResizeObserver !== 'function') return;
+  dialogueFitObserver = new ResizeObserver(function() { fitDialogueWorkspace(); });
+  dialogueFitObserver.observe(workspace);
+}
+function fitDialogueWorkspace() {
+  var workspace = document.getElementById('dialogueWorkspace');
+  var page = document.getElementById('page-dialogue');
+  if (!workspace || !page) return;
+  watchDialogueWorkspace(workspace);
+  if (window.matchMedia && window.matchMedia('(max-width: 760px)').matches) { workspace.style.height = ''; return; }
+  var rect = workspace.getBoundingClientRect();
+  // 页面还没显示（或切页过渡还没排出来）时量不到位置：等它真正出现（ResizeObserver）再量。
+  if (!rect.width) return;
+  var top = rect.top + (window.scrollY || 0);
+  var bottomBar = document.getElementById('roomBot');
+  var reserve = bottomBar && bottomBar.offsetParent !== null ? bottomBar.getBoundingClientRect().height : 0;
+  var height = Math.max(460, Math.round(window.innerHeight - top - reserve - 16)) + 'px';
+  if (workspace.style.height !== height) workspace.style.height = height;
+}
+window.addEventListener('resize', function() { fitDialogueWorkspace(); });
 
 function refreshDialogueBadge() {
   return api('/api/inbox/threads?limit=1').then(function(data) {
@@ -14718,6 +14743,7 @@ async function loadDialogue(options) {
   dialogueCounts = data.counts || dialogueCounts;
   dialogueNavBadge();
   renderDialogueOverview();
+  fitDialogueWorkspace();
   if (dialogueNoteMode) { renderDialogueList(); renderDialogueThread(); return; }
   var stillPresent = dialogueSelectedId && dialogueThreads.some(function(t) { return t.id === dialogueSelectedId; });
   if (options.afterReply) dialogueSelectedId = dialogueNextAwaitingId(options.sentId);
@@ -14766,16 +14792,17 @@ function dialogueRowHtml(thread) {
   var preview = (thread.last_message_preview && thread.last_message_preview.text) || '（还没有消息）';
   var elapsed = dialogueElapsed(thread.updated_at);
   var selected = thread.id === dialogueSelectedId;
-  var meta = [];
-  if (dialogueSubjectText(thread.subject)) meta.push(dialogueSubjectText(thread.subject));
-  if (elapsed) meta.push(elapsed);
-  return '<div class="dialogue-row' + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
+  // 分组标题已经说了轮到谁，行内只留一个记号；名称给读屏与悬停。
+  var lastRole = thread.last_message_preview && thread.last_message_preview.role;
+  var who = lastRole === 'human' ? '你：' : '';
+  return '<div class="dialogue-row dialogue-row--' + group + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
       ' data-dialogue-id="' + escapeHtml(thread.id) + '" aria-current="' + (selected ? 'true' : 'false') + '"' +
       ' onclick="selectDialogueThread(\'' + thread.id + '\')">' +
+      '<span class="dialogue-row-mark" aria-hidden="true"></span>' +
       '<div class="dialogue-row-top"><span class="dialogue-row-title">' + escapeHtml(thread.title || dialogueSubjectText(thread.subject) || '对话') + '</span>' +
-        '<span class="dialogue-row-turn dialogue-row-turn--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span></div>' +
-      '<div class="dialogue-row-summary">' + escapeHtml(preview) + '</div>' +
-      (meta.length ? '<div class="dialogue-row-meta">' + escapeHtml(meta.join(' · ')) + '</div>' : '') +
+        (elapsed ? '<time class="dialogue-row-time">' + escapeHtml(elapsed) + '</time>' : '') + '</div>' +
+      '<div class="dialogue-row-summary">' + (who ? '<span class="dialogue-row-who">' + who + '</span>' : '') + escapeHtml(preview) + '</div>' +
+      '<span class="sr-only">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
     '</div>';
 }
 
@@ -14783,6 +14810,8 @@ async function selectDialogueThread(id, options) {
   options = options || {};
   if (!id) return;
   if (dialogueNoteMode) { dialogueNoteMode = false; dialogueDraft = ''; dialogueAttachments = []; }
+  var notePage = document.getElementById('page-dialogue');
+  if (notePage) notePage.classList.remove('dialogue-note-open');
   if (id !== dialogueSelectedId) dialogueConflictNote = null;
   dialogueSelectedId = id;
   // 手机（单栏）上，列表加载完自动选中的那条只在右栏预备好，不替人点进去：先让人看到列表。
@@ -14844,6 +14873,30 @@ function renderDialogueThread() {
   }
   if (!dialogueThread) { pane.innerHTML = loadLoadingHtml('正在打开对话…'); return; }
   pane.innerHTML = renderDialogueThreadHtml();
+  fitDialogueWorkspace();
+  growDialogueReply();
+  // 打开就停在最新一句：要你回答的问题总在最下面。
+  var messagesEl = document.getElementById('dialogueMessages');
+  if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// 在“等你”的对话里，第一条（或下一条）的位置，例如 2 / 4。
+function dialogueAwaitingPosition() {
+  var awaiting = orderedDialogueThreads().filter(function(thread) { return dialogueGroup(thread) === 'awaiting'; });
+  for (var i = 0; i < awaiting.length; i++) {
+    if (awaiting[i].id === dialogueSelectedId) return { index: i + 1, total: awaiting.length };
+  }
+  return null;
+}
+
+// 要你回答的那一句：轮到你时，最后一条助手消息。整屏只点亮它。
+function dialogueFocusIndex(messages, group) {
+  if (group !== 'awaiting') return -1;
+  for (var i = messages.length - 1; i >= 0; i--) {
+    if (messages[i] && messages[i].role === 'sela') return i;
+    if (messages[i] && messages[i].role === 'human') return -1;
+  }
+  return -1;
 }
 
 function renderDialogueThreadHtml() {
@@ -14856,37 +14909,55 @@ function renderDialogueThreadHtml() {
     ? '<a href="#" class="dialogue-thread-title-link" title="打开客户详情"' +
         ' onclick="return openDialogueCustomer(event)">' + escapeHtml(thread.title || '对话') + '</a>'
     : escapeHtml(thread.title || '对话');
+  var position = group === 'awaiting' ? dialogueAwaitingPosition() : null;
+  var stepper = position && position.total > 1
+    ? '<div class="dialogue-stepper" role="group" aria-label="在等你回复的对话之间切换">' +
+        '<button type="button" class="dialogue-step" onclick="moveDialogueSelection(-1)" title="上一条（K）" aria-label="上一条"' +
+          (position.index === 1 ? ' disabled' : '') + '>' + uiIcon('left') + '</button>' +
+        '<span class="dialogue-step-count tnum">' + position.index + ' / ' + position.total + '</span>' +
+        '<button type="button" class="dialogue-step" onclick="moveDialogueSelection(1)" title="下一条（J）" aria-label="下一条">' + uiIcon('right') + '</button>' +
+      '</div>'
+    : '';
+  var archive = closed ? ''
+    : '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()" title="已经处理好，不用再回复">' +
+        uiIcon('archive') + '<span>归档</span></button>';
   var header = '<header class="dialogue-thread-head">' +
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
         '<div class="dialogue-thread-title">' + titleHtml + '</div>' +
         '<div class="dialogue-thread-sub"' + (thread.subject ? ' title="' + escapeHtml(thread.subject) + '"' : '') + '>' +
-          (dialogueSubjectText(thread.subject) ? '<span>' + escapeHtml(dialogueSubjectText(thread.subject)) + '</span>' : '') +
           '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
+          (dialogueSubjectText(thread.subject) ? '<span>' + escapeHtml(dialogueSubjectText(thread.subject)) + '</span>' : '') +
         '</div>' +
       '</div>' +
+      '<div class="dialogue-thread-tools">' + stepper + archive + '</div>' +
     '</header>';
   var conflict = dialogueConflictNote
     ? '<div class="dialogue-conflict" role="alert"><span>有新消息，请先看</span>' +
         '<button type="button" class="btn btn-sm" onclick="reloadDialogueThread()">刷新</button></div>'
     : '';
   // 助手收尾时那句总结（记了什么、排了哪天的待办）是给人看的最后一句话，不能只存不显示。
+  var lastMessage = messages[messages.length - 1];
   var closingSummary = closed && thread.closed_by === 'sela' && thread.closed_summary
-    ? '<div class="dialogue-msg dialogue-msg--sela" data-role="sela">' +
+    ? '<div class="dialogue-msg dialogue-msg--sela dialogue-msg--summary' + (lastMessage && lastMessage.role === 'sela' ? ' is-cont' : '') + '" data-role="sela">' +
         '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span>' +
           '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(thread.closed_at)) + '</time></div>' +
         '<div class="dialogue-msg-text">' + renderRichText(thread.closed_summary) + '</div>' +
       '</div>'
     : '';
+  var focusIndex = dialogueFocusIndex(messages, group);
   var body = '<div class="dialogue-messages" id="dialogueMessages" role="log" aria-live="polite" aria-relevant="additions">' +
-      (messages.length ? messages.map(renderDialogueMessageHtml).join('')
+      '<div class="dialogue-stream">' +
+      (messages.length ? messages.map(function(message, index) {
+          return renderDialogueMessageHtml(message, index, messages, index === focusIndex);
+        }).join('')
         : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
       closingSummary +
-      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('处理中…', 'inline') + '</div>' : '') +
+      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('助手在处理…', 'inline') + '</div>' : '') +
+      (closed ? '<div class="dialogue-closed-note" role="status"><span>已归档</span></div>' : '') +
+      '</div>' +
     '</div>';
-  var composer = closed
-    ? '<div class="dialogue-closed-note" role="status">这条对话已结束。</div>'
-    : dialogueComposerHtml();
+  var composer = closed ? '' : dialogueComposerHtml();
   return '<article class="dialogue-thread" data-thread-id="' + escapeHtml(thread.id) + '">' +
     header + conflict + body + composer + '</article>';
 }
@@ -14919,7 +14990,10 @@ function dialogueCustomerId() {
 
 function openDialogueCustomer(event) {
   if (event) event.preventDefault();
-  var customerId = dialogueLinkCustomerId();
+  return openDialogueCustomerById(dialogueLinkCustomerId());
+}
+
+function openDialogueCustomerById(customerId) {
   if (!customerId) return false;
   switchPage('customers');
   setTimeout(function() { openEditModal(customerId); }, 0);
@@ -14928,68 +15002,139 @@ function openDialogueCustomer(event) {
 
 function dialogueComposerHtml() {
   var suggestions = dialogueSuggestions();
+  // 建议回复是最常见的答法：点一下（或按数字键）填进回复框，回车才发出。
   var chips = suggestions.length
     ? '<div class="dialogue-suggestions" role="group" aria-label="建议回复">' +
         suggestions.map(function(text, index) {
           return '<button type="button" class="dialogue-suggestion" data-suggestion-index="' + index + '"' +
-            ' onclick="fillDialogueSuggestion(this)">' + escapeHtml(String(text)) + '</button>';
+            ' onclick="fillDialogueSuggestion(this)"' + (index < 9 ? ' data-key="' + (index + 1) + '" title="按 ' + (index + 1) + ' 填入"' : '') + '>' +
+            escapeHtml(String(text)) + '</button>';
         }).join('') + '</div>'
     : '';
-  var attachments = dialogueComposerAttachmentsHtml();
+  return dialogueComposerFormHtml({
+    lead: chips, label: '回复', rows: 1, submitLabel: '发送',
+    placeholder: '回一句话…'
+  });
+}
+
+// 回复框与「记一笔」共用一个输入框：文字、附件、发送在同一个框里。
+function dialogueComposerFormHtml(opts) {
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
-    chips + attachments +
-    '<label class="sr-only" for="dialogueReplyInput">回复</label>' +
-    '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="3"' +
-      ' placeholder="用一句话回复…（回车发送，Shift+回车换行，可直接粘贴图片）"' +
-      ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
-      escapeHtml(dialogueDraft) + '</textarea>' +
-    '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
-      '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending ? ' disabled' : '') + '>发送</button>' +
-      '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()">归档</button>' +
+    (opts.lead || '') +
+    '<div class="dialogue-field">' +
+      dialogueComposerAttachmentsHtml() +
+      '<label class="sr-only" for="dialogueReplyInput">' + escapeHtml(opts.label) + '</label>' +
+      '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="' + opts.rows + '"' +
+        ' placeholder="' + escapeHtml(opts.placeholder) + '"' +
+        ' title="回车发送，Shift+回车换行，可直接粘贴截图"' +
+        ' oninput="dialogueDraft=this.value;growDialogueReply()" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
+        escapeHtml(dialogueDraft) + '</textarea>' +
+      '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
+        (dialogueUploading ? '<span class="dialogue-uploading">' + waitHtml('正在上传…', 'inline') + '</span>' : '') +
+        '<span class="dialogue-composer-keys" aria-hidden="true"><kbd>↵</kbd></span>' +
+        '<button type="submit" class="btn btn-sm btn-primary dialogue-send"' + (dialogueSending || dialogueUploading ? ' disabled' : '') + '>' + escapeHtml(opts.submitLabel) + '</button>' +
+      '</div>' +
     '</div>' +
     '<div class="dialogue-composer-error" role="alert" hidden></div>' +
   '</form>';
 }
 
+// 回复框随内容长高，最多约 8 行，之后框内滚动。
+function growDialogueReply() {
+  var input = document.getElementById('dialogueReplyInput');
+  if (!input || !input.style) return;
+  input.style.height = 'auto';
+  var max = dialogueNoteMode ? 320 : 220;
+  input.style.height = Math.min(max, input.scrollHeight) + 'px';
+  input.style.overflowY = input.scrollHeight > max ? 'auto' : 'hidden';
+}
+
 function dialogueAttachButtonHtml() {
-  return '<label class="dialogue-attach-btn">附件' +
+  return '<label class="dialogue-attach-btn" title="添加截图或文件（也可以直接粘贴、拖进来）">' + uiIcon('file') +
+    '<span class="sr-only">添加附件</span>' +
     '<input type="file" id="dialogueAttachInput" accept="image/*,.pdf,.txt,.csv,.xlsx,.docx" multiple onchange="uploadDialogueAttachment(this)"></label>';
+}
+
+// 把截图或文件拖进对话区，和粘贴、点附件是同一条上传路。
+function dialogueCanAttach() {
+  return dialogueNoteMode || Boolean(dialogueThread && dialogueThread.status !== 'closed');
+}
+
+function dialogueDragOver(event) {
+  if (!event.dataTransfer || Array.prototype.indexOf.call(event.dataTransfer.types || [], 'Files') < 0) return true;
+  if (!dialogueCanAttach()) return true;
+  event.preventDefault();
+  var pane = document.getElementById('dialogueThreadPane');
+  if (pane) pane.classList.add('is-dropping');
+  return false;
+}
+
+function dialogueDragLeave(event) {
+  var pane = document.getElementById('dialogueThreadPane');
+  if (!pane || (event.relatedTarget && pane.contains(event.relatedTarget))) return;
+  pane.classList.remove('is-dropping');
+}
+
+async function dropDialogueAttachment(event) {
+  var pane = document.getElementById('dialogueThreadPane');
+  if (pane) pane.classList.remove('is-dropping');
+  var files = Array.from((event.dataTransfer && event.dataTransfer.files) || []);
+  if (!files.length || !dialogueCanAttach()) return true;
+  event.preventDefault();
+  for (var i = 0; i < files.length; i++) await sendDialogueAttachment(files[i], null);
+  return false;
 }
 
 function dialogueComposerAttachmentsHtml() {
   return dialogueAttachments.length
     ? '<div class="dialogue-composer-attachments">' + dialogueAttachments.map(function(attachment, index) {
-        return '<span class="dialogue-attachment">' + escapeHtml(attachment.name || '附件') +
-          '<button type="button" class="dialogue-attachment-remove" aria-label="移除附件"' +
-            ' onclick="removeDialogueAttachment(' + index + ')">×</button></span>';
+        var name = attachment.name || '附件';
+        var remove = '<button type="button" class="dialogue-attachment-remove" aria-label="移除 ' + escapeHtml(name) + '"' +
+          ' onclick="removeDialogueAttachment(' + index + ')">' + uiIcon('close') + '</button>';
+        if (attachment.preview) {
+          return '<span class="dialogue-attachment dialogue-attachment--thumb" title="' + escapeHtml(name) + '">' +
+            '<img src="' + escapeHtml(attachment.preview) + '" alt="' + escapeHtml(name) + '">' + remove + '</span>';
+        }
+        return '<span class="dialogue-attachment">' + uiIcon('file') + '<span class="dialogue-attachment-name">' + escapeHtml(name) + '</span>' + remove + '</span>';
       }).join('') + '</div>'
     : '';
 }
 
-function renderDialogueMessageHtml(message) {
+// 同一个人连着说的几条只在第一条写名字与时间；轮到你回答的那一句被点亮（focus）。
+function renderDialogueMessageHtml(message, index, messages, focus) {
   var role = String(message.role || 'system');
   var who = role === 'human' ? '你' : (role === 'system' ? '系统' : '助手');
   var refs = renderDialogueRefsHtml(message.refs);
   var attachments = renderDialogueAttachmentsHtml(message.attachments);
-  return '<div class="dialogue-msg dialogue-msg--' + escapeHtml(role) + '" data-role="' + escapeHtml(role) + '">' +
+  var previous = Array.isArray(messages) && index > 0 ? messages[index - 1] : null;
+  var continued = previous && String(previous.role || 'system') === role && role !== 'system';
+  if (role === 'system') {
+    return '<div class="dialogue-msg dialogue-msg--system" data-role="system">' +
+        '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
+      '</div>';
+  }
+  return '<div class="dialogue-msg dialogue-msg--' + escapeHtml(role) + (continued ? ' is-cont' : '') + (focus ? ' is-focus' : '') + '" data-role="' + escapeHtml(role) + '">' +
       '<div class="dialogue-msg-head"><span class="dialogue-msg-who">' + escapeHtml(who) + '</span>' +
         '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(message.created_at)) + '</time></div>' +
       '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
-      (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
       (attachments ? '<div class="dialogue-msg-attachments">' + attachments + '</div>' : '') +
+      (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
     '</div>';
 }
 
 function renderDialogueRefsHtml(refs) {
   if (!Array.isArray(refs) || !refs.length) return '';
-  var labels = { prospect: '线索', customer: '客户', message: '消息', action_receipt: '动作回执', file: '文件', thread: '对话' };
+  var labels = { customer: '客户', message: '消息', action_receipt: '动作回执', file: '文件', thread: '对话' };
   return refs.map(function(ref) {
-    if (!ref || !ref.type) return '';
+    // 线索就是这条对话本身（标题已写明），编号是内部键：不再单独出一个标签。
+    if (!ref || !ref.type || ref.type === 'prospect') return '';
     var id = ref.id == null ? '' : String(ref.id);
-    // 线索的编号是内部键，标签只写“线索”，编号留在悬停提示里。
-    var shownId = ref.type === 'prospect' ? '' : ' ' + id;
+    if (ref.type === 'customer' && /^\d+$/.test(id)) {
+      return '<button type="button" class="dialogue-ref dialogue-ref--link" onclick="openDialogueCustomerById(\'' + id + '\')">' +
+        uiIcon('open') + '<span>打开客户</span></button>';
+    }
     return '<span class="dialogue-ref" title="' + escapeHtml(ref.type + ' · ' + id) + '">' +
-      escapeHtml(labels[ref.type] || ref.type) + escapeHtml(shownId) + '</span>';
+      escapeHtml(labels[ref.type] || ref.type) + escapeHtml(' ' + id) + '</span>';
   }).join('');
 }
 
@@ -15024,7 +15169,7 @@ function startDialogueNote() {
   dialogueAttachments = [];
   dialogueMobileView = 'thread';
   var page = document.getElementById('page-dialogue');
-  if (page) page.classList.add('dialogue-thread-open');
+  if (page) { page.classList.add('dialogue-thread-open'); page.classList.add('dialogue-note-open'); }
   renderDialogueList();
   renderDialogueThread();
   focusDialogueReply();
@@ -15036,22 +15181,19 @@ function dialogueNoteHtml() {
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
         '<div class="dialogue-thread-title">记一笔</div>' +
-        '<div class="dialogue-thread-sub"><span>聊天截图、聊天记录或一句话都行。助手会认出是哪个客户，记下进展和下一步。</span></div>' +
+        '<div class="dialogue-thread-sub"><span>助手会认出是哪个客户，记下进展和下一步</span></div>' +
       '</div>' +
     '</header>' +
-    '<div class="dialogue-messages" id="dialogueMessages"></div>' +
-    '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
-      dialogueComposerAttachmentsHtml() +
-      '<label class="sr-only" for="dialogueReplyInput">记一笔</label>' +
-      '<textarea id="dialogueReplyInput" class="dialogue-reply-input" rows="5"' +
-        ' placeholder="例如：今天和 Carlos 通了电话，他要 3mm 透明板报价，下周二前给他（可直接粘贴截图）"' +
-        ' oninput="dialogueDraft=this.value" onkeydown="return dialogueReplyKeydown(event)" onpaste="return pasteDialogueAttachment(event)">' +
-        escapeHtml(dialogueDraft) + '</textarea>' +
-      '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
-        '<button type="submit" class="btn btn-sm dialogue-send"' + (dialogueSending || dialogueUploading ? ' disabled' : '') + '>发给助手</button>' +
-      '</div>' +
-      '<div class="dialogue-composer-error" role="alert" hidden></div>' +
-    '</form>' +
+    '<div class="dialogue-messages" id="dialogueMessages">' +
+      '<label class="dialogue-note-drop" for="dialogueAttachInput">' +
+        (typeof handIcon === 'function' ? handIcon('message', { cls: 'hi-id dialogue-note-art' }) : '') +
+        '<span class="dialogue-note-drop-title">粘贴、拖入或点这里选聊天截图</span>' +
+      '</label>' +
+    '</div>' +
+    dialogueComposerFormHtml({
+      label: '记一笔', rows: 3, submitLabel: '发给助手',
+      placeholder: '例如：今天和 Carlos 通了电话，他要 3mm 透明板报价，下周二前给他'
+    }) +
   '</article>';
 }
 
@@ -15076,6 +15218,8 @@ async function submitDialogueNote() {
   }
   dialogueSending = false;
   dialogueNoteMode = false;
+  var notePage = document.getElementById('page-dialogue');
+  if (notePage) notePage.classList.remove('dialogue-note-open');
   dialogueDraft = '';
   dialogueAttachments = [];
   showToast('已发给助手', 'success');
@@ -15090,7 +15234,10 @@ function fillDialogueReply(text) {
   if (!input) return;
   input.value = String(text == null ? '' : text);
   dialogueDraft = input.value;
+  growDialogueReply();
   input.focus();
+  // 光标放到句末，接着补一句就行。
+  if (input.setSelectionRange) input.setSelectionRange(input.value.length, input.value.length);
 }
 
 function fillDialogueSuggestion(button) {
@@ -15218,6 +15365,7 @@ async function uploadDialogueAttachment(input) {
 async function sendDialogueAttachment(file, input) {
   if (!file) return;
   dialogueUploading = true;
+  if (dialogueThread || dialogueNoteMode) { renderDialogueThread(); focusDialogueReply(); }
   var form = new FormData();
   form.append('file', file);
   try {
@@ -15225,7 +15373,11 @@ async function sendDialogueAttachment(file, input) {
     var uploaded = await response.json().catch(function() { return {}; });
     if (!response.ok) throw new Error((uploaded && (uploaded.error || uploaded.message)) || '上传失败');
     if (uploaded.file_object_id) {
-      dialogueAttachments.push({ file_object_id: uploaded.file_object_id, name: uploaded.name || file.name });
+      var preview = '';
+      if (/^image\//.test(file.type || '') && window.URL && URL.createObjectURL) {
+        try { preview = URL.createObjectURL(file); } catch (error) { preview = ''; }
+      }
+      dialogueAttachments.push({ file_object_id: uploaded.file_object_id, name: uploaded.name || file.name, preview: preview });
     } else {
       showToast('上传成功但未返回可用的附件编号。', 'error');
     }
@@ -15239,7 +15391,8 @@ async function sendDialogueAttachment(file, input) {
 }
 
 function removeDialogueAttachment(index) {
-  dialogueAttachments.splice(index, 1);
+  var removed = dialogueAttachments.splice(index, 1)[0];
+  if (removed && removed.preview && window.URL && URL.revokeObjectURL) URL.revokeObjectURL(removed.preview);
   if (dialogueThread || dialogueNoteMode) renderDialogueThread();
   focusDialogueReply();
 }
@@ -15290,7 +15443,11 @@ function dialogueKeydown(event) {
   if (isTypingTarget(event.target)) return;
   if (event.key === 'j' || event.key === 'J') { event.preventDefault(); moveDialogueSelection(1); return; }
   if (event.key === 'k' || event.key === 'K') { event.preventDefault(); moveDialogueSelection(-1); return; }
-  if (event.key === 'Enter') { event.preventDefault(); focusDialogueReply(); }
+  if (event.key === 'Enter') { event.preventDefault(); focusDialogueReply(); return; }
+  if (/^[1-9]$/.test(event.key)) {
+    var chip = document.querySelector('#dialogueComposer .dialogue-suggestion[data-key="' + event.key + '"]');
+    if (chip) { event.preventDefault(); fillDialogueSuggestion(chip); }
+  }
 }
 document.addEventListener('keydown', dialogueKeydown);
 

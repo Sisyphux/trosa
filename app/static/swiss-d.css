@@ -482,14 +482,12 @@ html.motion-reduced .hand-tip{transition:none !important}
 
 /* 3) 本周工作：客户名按钮（约 26px）与官网链接（约 17px）点不准。
       用上下内边距 + 等量负外边距扩大命中区到 ≥36px，排版不动。
-      Inbox 对话里的「归档」文字按钮（约 26×21）同样补到 36px。 */
+      （Inbox 对话的「归档」已移到对话头，本身就是 36px 按钮。） */
 #trosa .wk-record h3 .wk-record-name{padding-block:5px;margin-block:-5px}
 #trosa .wk-record .wk-spec dd a{padding-block:10px}
-#trosa .dialogue-composer-actions .dialogue-close-btn{min-height:36px;min-width:36px;padding:0 6px;margin-block:-4px;margin-right:-6px}
 @media (pointer:coarse){
   #trosa .wk-record h3 .wk-record-name{padding-block:9px;margin-block:-9px}
   #trosa .wk-record .wk-spec dd a{padding-block:14px}
-  #trosa .dialogue-composer-actions .dialogue-close-btn{min-height:44px;margin-block:-8px}
 }
 
 /* 4) 日历：桌面端页节顶部 72px 历史空白 + 页头留白，标题上方约 120px 空白；

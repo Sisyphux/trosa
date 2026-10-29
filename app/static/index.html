@@ -287,10 +287,13 @@
       <div class="page-body dialogue-page-body">
         <div class="dialogue-workspace" id="dialogueWorkspace">
           <aside class="dialogue-list-pane" aria-label="对话列表">
-            <button type="button" class="dialogue-note-btn" onclick="startDialogueNote()">＋ 记一笔</button>
+            <div class="dialogue-list-head">
+              <button type="button" class="dialogue-note-btn" onclick="startDialogueNote()" title="把今天和客户聊的发给助手记下来"><span class="ui-icon ui-icon-edit" aria-hidden="true"></span><span>记一笔</span></button>
+            </div>
             <div class="dialogue-list" id="dialogueList"><div class="dialogue-loading" data-state="loading" role="status">正在加载对话…</div></div>
           </aside>
-          <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容">
+          <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容"
+            ondragover="return dialogueDragOver(event)" ondragleave="dialogueDragLeave(event)" ondrop="dropDialogueAttachment(event)">
             <div class="dialogue-empty" data-state="empty" role="status"><p>从左边的列表选一条对话。</p></div>
           </section>
         </div>
