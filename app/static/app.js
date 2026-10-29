@@ -14634,19 +14634,6 @@ function toggleDialogueArchived() {
   renderDialogueList();
 }
 
-function dialogueElapsed(value) {
-  if (!value) return '';
-  var then = new Date(value);
-  if (isNaN(then.getTime())) return '';
-  var seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-  if (seconds < 60) return '刚刚';
-  var minutes = Math.round(seconds / 60);
-  if (minutes < 60) return minutes + ' 分钟前';
-  var hours = Math.round(minutes / 60);
-  if (hours < 24) return hours + ' 小时前';
-  return Math.round(hours / 24) + ' 天前';
-}
-
 // sela 的线程键（如 prospect:…）是内部标识，不给人看；放进悬停提示里留作排障。
 function dialogueSubjectText(subject) {
   var text = String(subject || '');
@@ -14682,12 +14669,45 @@ function dialogueNavBadge() {
   updateInboxNavCount();
 }
 
+// 顶上一排读数：等你回复 / 助手处理中 / 本周已归档 / 等你最久的那条等了多久。
+function dialogueWaitShort(value) {
+  if (!value) return '';
+  var then = new Date(value);
+  if (isNaN(then.getTime())) return '';
+  var minutes = Math.max(0, Math.round((Date.now() - then.getTime()) / 60000));
+  if (minutes < 60) return { n: minutes, u: '分' };
+  var hours = Math.round(minutes / 60);
+  if (hours < 24) return { n: hours, u: '小时' };
+  return { n: Math.round(hours / 24), u: '天' };
+}
+
+function dialogueStatHtml(value, label, opts) {
+  opts = opts || {};
+  return '<div class="dialogue-stat' + (opts.on ? ' is-on' : '') + '">' +
+    '<div class="dialogue-stat-n tnum">' + value + (opts.unit ? '<span class="dialogue-stat-u">' + opts.unit + '</span>' : '') + '</div>' +
+    '<div class="dialogue-stat-l">' + label + '</div></div>';
+}
+
 function renderDialogueOverview() {
   var overview = document.getElementById('dialogueOverview');
   if (!overview) return;
-  var waiting = Number(dialogueCounts.awaiting_sela || 0);
-  overview.innerHTML = '<strong class="tnum">' + dialogueAwaitingCount() + '</strong> 条等你回复' +
-    (waiting ? '<span class="dialogue-overview-sep" aria-hidden="true">·</span>' + waiting + ' 条在处理中' : '');
+  var awaiting = dialogueAwaitingCount();
+  var weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  var archived = 0;
+  var oldest = null;
+  (dialogueThreads || []).forEach(function(thread) {
+    var group = dialogueGroup(thread);
+    if (group === 'done' && thread.closed_at && new Date(thread.closed_at) >= weekStart) archived += 1;
+    if (group === 'awaiting' && thread.updated_at && (!oldest || thread.updated_at < oldest)) oldest = thread.updated_at;
+  });
+  var wait = awaiting ? dialogueWaitShort(oldest) : null;
+  overview.innerHTML =
+    dialogueStatHtml(awaiting, '等你回复', { on: awaiting > 0 }) +
+    dialogueStatHtml(Number(dialogueCounts.awaiting_sela || 0), '助手处理中') +
+    dialogueStatHtml(archived, '本周已归档') +
+    (wait ? dialogueStatHtml(wait.n, '等你最久的一条', { unit: wait.u }) : '');
 }
 
 // 对话区占满一屏：列表与消息各自滚动，回复框始终在屏幕底部，不随页面滚走。
@@ -14789,19 +14809,19 @@ function renderDialogueList() {
 
 function dialogueRowHtml(thread) {
   var group = dialogueGroup(thread);
-  var preview = (thread.last_message_preview && thread.last_message_preview.text) || '（还没有消息）';
-  var elapsed = dialogueElapsed(thread.updated_at);
+  var wait = dialogueWaitShort(thread.updated_at);
   var selected = thread.id === dialogueSelectedId;
-  // 分组标题已经说了轮到谁，行内只留一个记号；名称给读屏与悬停。
-  var lastRole = thread.last_message_preview && thread.last_message_preview.role;
-  var who = lastRole === 'human' ? '你：' : '';
+  var title = thread.title || dialogueSubjectText(thread.subject) || '对话';
+  // 一行就是一条对话：记号（实心 = 等你，空心 = 处理中）、公司、国家、等了多久；预览放在悬停里。
+  var preview = (thread.last_message_preview && thread.last_message_preview.text) || '';
   return '<div class="dialogue-row dialogue-row--' + group + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
       ' data-dialogue-id="' + escapeHtml(thread.id) + '" aria-current="' + (selected ? 'true' : 'false') + '"' +
+      (preview ? ' title="' + escapeHtml(preview.slice(0, 160)) + '"' : '') +
       ' onclick="selectDialogueThread(\'' + thread.id + '\')">' +
       '<span class="dialogue-row-mark" aria-hidden="true"></span>' +
-      '<div class="dialogue-row-top"><span class="dialogue-row-title">' + escapeHtml(thread.title || dialogueSubjectText(thread.subject) || '对话') + '</span>' +
-        (elapsed ? '<time class="dialogue-row-time">' + escapeHtml(elapsed) + '</time>' : '') + '</div>' +
-      '<div class="dialogue-row-summary">' + (who ? '<span class="dialogue-row-who">' + who + '</span>' : '') + escapeHtml(preview) + '</div>' +
+      '<span class="dialogue-row-title">' + escapeHtml(title) + '</span>' +
+      '<span class="dialogue-row-country">' + escapeHtml(thread.country || '—') + '</span>' +
+      '<time class="dialogue-row-time tnum">' + (wait ? wait.n + ' ' + wait.u : '') + '</time>' +
       '<span class="sr-only">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
     '</div>';
 }
@@ -14921,14 +14941,12 @@ function renderDialogueThreadHtml() {
   var archive = closed ? ''
     : '<button type="button" class="dialogue-close-btn" onclick="closeDialogueThread()" title="已经处理好，不用再回复">' +
         uiIcon('archive') + '<span>归档</span></button>';
-  var header = '<header class="dialogue-thread-head">' +
+  var header = '<header class="dialogue-thread-head"' + (thread.subject ? ' title="' + escapeHtml(thread.subject) + '"' : '') + '>' +
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
-        '<div class="dialogue-thread-title">' + titleHtml + '</div>' +
-        '<div class="dialogue-thread-sub"' + (thread.subject ? ' title="' + escapeHtml(thread.subject) + '"' : '') + '>' +
-          '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
-          (dialogueSubjectText(thread.subject) ? '<span>' + escapeHtml(dialogueSubjectText(thread.subject)) + '</span>' : '') +
-        '</div>' +
+        '<span class="dialogue-thread-kicker">对话记录</span>' +
+        '<span class="dialogue-thread-title">' + titleHtml + '</span>' +
+        '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
       '</div>' +
       '<div class="dialogue-thread-tools">' + stepper + archive + '</div>' +
     '</header>';
@@ -14940,9 +14958,8 @@ function renderDialogueThreadHtml() {
   var lastMessage = messages[messages.length - 1];
   var closingSummary = closed && thread.closed_by === 'sela' && thread.closed_summary
     ? '<div class="dialogue-msg dialogue-msg--sela dialogue-msg--summary' + (lastMessage && lastMessage.role === 'sela' ? ' is-cont' : '') + '" data-role="sela">' +
-        '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span>' +
-          '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(thread.closed_at)) + '</time></div>' +
-        '<div class="dialogue-msg-text">' + renderRichText(thread.closed_summary) + '</div>' +
+        '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span>' + dialogueClockHtml(thread.closed_at) + '</div>' +
+        '<div class="dialogue-msg-body"><div class="dialogue-msg-text">' + renderRichText(thread.closed_summary) + '</div></div>' +
       '</div>'
     : '';
   var focusIndex = dialogueFocusIndex(messages, group);
@@ -14951,14 +14968,16 @@ function renderDialogueThreadHtml() {
       (messages.length ? messages.map(function(message, index) {
           return renderDialogueMessageHtml(message, index, messages, index === focusIndex);
         }).join('')
-        : '<div class="dialogue-msg dialogue-msg--system">这段对话还没有消息。</div>') +
+        : '<div class="dialogue-msg dialogue-msg--system"><div class="dialogue-msg-head"><span class="dialogue-msg-who">系统</span></div><div class="dialogue-msg-body"><div class="dialogue-msg-text">这段对话还没有消息。</div></div></div>') +
       closingSummary +
-      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' + waitHtml('助手在处理…', 'inline') + '</div>' : '') +
-      (closed ? '<div class="dialogue-closed-note" role="status"><span>已归档</span></div>' : '') +
+      (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' +
+        '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span></div>' +
+        '<div class="dialogue-msg-body">' + waitHtml('在处理…', 'inline') + '</div></div>' : '') +
+      (closed ? '<div class="dialogue-closed-note" role="status"><span class="dialogue-msg-head">归档</span><span class="dialogue-msg-body">这条对话已归档</span></div>' : '') +
       '</div>' +
     '</div>';
   var composer = closed ? '' : dialogueComposerHtml();
-  var dossier = dialogueDossierHtml(thread.context, thread.title);
+  var dossier = dialogueDossierHtml(thread.context);
   return '<article class="dialogue-thread' + (dossier ? ' has-dossier' : '') + '" data-thread-id="' + escapeHtml(thread.id) + '">' +
     '<div class="dialogue-main">' + header + conflict + body + composer + '</div>' + dossier + '</article>';
 }
@@ -14981,73 +15000,79 @@ function dialogueWebsiteHtml(url) {
   var href = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
   var shown = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
   return '<a class="dialogue-dossier-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
-    escapeHtml(shown) + uiIcon('external') + '</a>';
+    escapeHtml(shown) + ' ↗</a>';
 }
 
 // 背调按行写成“做什么：…”“市场：…”，小标题单独一行，扫一眼就能找到要的那条。
-function dialogueBackgroundHtml(text) {
-  return String(text).split(/\n+/).map(function(line) {
+function dialogueKvHtml(label, html, cls) {
+  return html ? '<div class="dialogue-kv' + (cls ? ' ' + cls : '') + '"><span class="dialogue-kv-k">' + escapeHtml(label) + '</span>' +
+    '<span class="dialogue-kv-v">' + html + '</span></div>' : '';
+}
+
+// 背调按行写成“做什么：…”“市场：…”：每一行就是登记表里的一栏。
+function dialogueBackgroundRows(text) {
+  var rows = '';
+  var loose = [];
+  String(text).split(/\n+/).forEach(function(line) {
     line = line.trim();
-    if (!line) return '';
+    if (!line) return;
     var match = /^([^：:]{1,10})[：:]\s*(.+)$/.exec(line);
-    return match
-      ? '<p class="dialogue-dossier-item"><span class="dialogue-dossier-key">' + escapeHtml(match[1]) + '</span>' + escapeHtml(match[2]) + '</p>'
-      : '<p>' + escapeHtml(line) + '</p>';
+    if (match) rows += dialogueKvHtml(match[1], escapeHtml(match[2]));
+    else loose.push(escapeHtml(line));
+  });
+  return (loose.length ? dialogueKvHtml('背调', loose.join('<br>')) : '') + rows;
+}
+
+// sela 的节奏：首封，然后第 7、14、30、60、90 天各跟一封——六格，发过的涂黑。
+function dialogueCadenceHtml(sent) {
+  var labels = ['首封', '7', '14', '30', '60', '90'];
+  var cells = labels.map(function(label, i) {
+    return '<span class="dialogue-cad-cell' + (i < sent ? ' is-sent' : '') + '"><i></i><b>' + label + '</b></span>';
   }).join('');
+  return '<span class="dialogue-cad" role="img" aria-label="发过 ' + sent + ' 封">' + cells + '</span>';
 }
 
-function dialogueDossierSection(label, html) {
-  return html ? '<section class="dialogue-dossier-sec"><h4>' + escapeHtml(label) + '</h4>' + html + '</section>' : '';
-}
-
-function dialogueDossierHtml(context, threadTitle) {
+function dialogueDossierHtml(context) {
   if (!context || !context.company) return '';
-  // 对话标题已经是公司名时，卷宗不再重复写一遍。
-  var sameName = String(threadTitle || '').trim().toLowerCase() === String(context.company).trim().toLowerCase();
   var place = [context.country, context.city].filter(Boolean).join(' · ');
-  var identity = [place, context.business_type].filter(Boolean).join(' · ');
-  var openCustomer = context.customer_id
-    ? '<button type="button" class="dialogue-dossier-open" onclick="openDialogueCustomerById(\'' + escapeHtml(String(context.customer_id)) + '\')">' +
-        uiIcon('open') + '<span>客户资料</span></button>'
-    : '';
-  var head = '<header class="dialogue-dossier-head' + (sameName ? ' is-same-name' : '') + '">' +
-      (sameName ? '' : '<div class="dialogue-dossier-name">' + escapeHtml(context.company) + '</div>') +
-      (identity ? '<div class="dialogue-dossier-id">' + escapeHtml(identity) + '</div>' : '') +
-      '<div class="dialogue-dossier-actions">' + dialogueWebsiteHtml(context.website) + openCustomer + '</div>' +
+  var links = [dialogueWebsiteHtml(context.website),
+    context.customer_id
+      ? '<button type="button" class="dialogue-dossier-open" onclick="openDialogueCustomerById(\'' + escapeHtml(String(context.customer_id)) + '\')">客户资料</button>'
+      : ''].filter(Boolean).join('<span class="dialogue-dossier-dot" aria-hidden="true">·</span>');
+  var number = context.customer_id ? 'No.' + String(context.customer_id).padStart(4, '0') : '';
+  var head = '<header class="dialogue-dossier-head">' +
+      '<div class="dialogue-dossier-kicker">' + (context.kind === 'prospect' ? '开发登记' : '客户') + (number ? ' <span class="tnum">' + number + '</span>' : '') + '</div>' +
+      '<div class="dialogue-dossier-name">' + escapeHtml(context.company) + '</div>' +
+      (links ? '<div class="dialogue-dossier-links">' + links + '</div>' : '') +
     '</header>';
-  var flags = [];
-  if (context.do_not_contact) flags.push('<span class="dialogue-dossier-flag">不联系</span>');
-  if (context.bounced) flags.push('<span class="dialogue-dossier-flag">退信</span>');
-  if (context.replied) flags.push('<span class="dialogue-dossier-flag is-quiet">回过信</span>');
-  var body = '';
+  var rows = dialogueKvHtml('国家', escapeHtml(place)) + dialogueKvHtml('行业', escapeHtml(context.business_type || ''));
   if (context.kind === 'prospect') {
-    body += dialogueDossierSection('为什么开发', context.reason ? '<p>' + escapeHtml(context.reason) + '</p>' : '<p class="is-empty">还没写</p>');
-    body += dialogueDossierSection('背调', context.background
-      ? dialogueBackgroundHtml(context.background)
-      : '<p class="is-empty">还没做</p>');
+    rows += dialogueKvHtml('开发理由', context.reason ? escapeHtml(context.reason) : '<span class="is-empty">还没写</span>', 'is-key');
+    rows += context.background ? dialogueBackgroundRows(context.background) : dialogueKvHtml('背调', '<span class="is-empty">还没做</span>');
     var person = [context.contact_name, context.contact_title].filter(Boolean).join(' · ');
     var routeLabel = { VERIFIED: '已验证', NO_MX: '收不了信', DNS_UNAVAILABLE: '没验证成' }[context.email_route_status] || '';
-    var contactHtml = (person ? '<p>' + escapeHtml(person) + '</p>' : '') +
-      (context.email ? '<p class="dialogue-dossier-mail">' + escapeHtml(context.email) +
-        (routeLabel ? '<span class="dialogue-dossier-note">' + routeLabel + '</span>' : '') + '</p>' : '') ||
-      '<p class="is-empty">没有邮箱</p>';
-    body += dialogueDossierSection('联系人', contactHtml);
-    var sent = context.sent_count
-      ? '<p>发过 <b class="tnum">' + context.sent_count + '</b> 封' +
-          (dialogueDossierDate(context.last_sent_at) ? '，最近 ' + dialogueDossierDate(context.last_sent_at) : '') + '</p>'
-      : '<p class="is-empty">还没发过</p>';
-    body += dialogueDossierSection('开发信', sent + (flags.length ? '<p class="dialogue-dossier-flags">' + flags.join('') + '</p>' : ''));
+    rows += dialogueKvHtml('联系人', person ? escapeHtml(person) : '<span class="is-empty">没有</span>');
+    rows += dialogueKvHtml('邮箱', context.email
+      ? escapeHtml(context.email) + (routeLabel ? '<span class="dialogue-kv-note">' + routeLabel + '</span>' : '')
+      : '<span class="is-empty">没有</span>');
+    var flags = [];
+    if (context.do_not_contact) flags.push('不联系');
+    if (context.bounced) flags.push('退信');
+    if (context.replied) flags.push('回过信');
+    var last = dialogueDossierDate(context.last_sent_at);
+    rows += dialogueKvHtml('开发信', dialogueCadenceHtml(Number(context.sent_count || 0)) +
+      '<span class="dialogue-cad-text">' + (context.sent_count ? '发过 ' + context.sent_count + ' 封' + (last ? '，最近 ' + last : '') : '还没发过') + '</span>');
+    if (flags.length) rows += dialogueKvHtml('状态', flags.map(function(flag) { return '<span class="dialogue-flag">' + flag + '</span>'; }).join(''));
   } else {
-    var last = dialogueDossierDate(context.last_contact);
-    body += dialogueDossierSection('上次联系', last ? '<p>' + last + '</p>' : '<p class="is-empty">没有记录</p>');
+    var lastContact = dialogueDossierDate(context.last_contact);
+    rows += dialogueKvHtml('上次联系', lastContact || '<span class="is-empty">没有记录</span>');
   }
   var wide = !window.matchMedia || window.matchMedia('(min-width: 1101px)').matches;
   return '<aside class="dialogue-dossier" aria-label="这家公司">' +
     '<details class="dialogue-dossier-fold"' + (wide ? ' open' : '') + '>' +
-      '<summary class="dialogue-dossier-summary">' +
-        (sameName ? '' : '<span class="dialogue-dossier-sname">' + escapeHtml(context.company) + '</span>') +
-        '<span class="dialogue-dossier-id">' + escapeHtml(identity || '公司资料') + '</span></summary>' +
-      head + body +
+      '<summary class="dialogue-dossier-summary"><span>' + (context.kind === 'prospect' ? '开发登记' : '客户') + '</span>' +
+        '<span class="dialogue-dossier-sum-id">' + escapeHtml(place || context.company) + '</span></summary>' +
+      head + '<div class="dialogue-kvs">' + rows + '</div>' +
     '</details>' +
   '</aside>';
 }
@@ -15088,6 +15113,7 @@ function dialogueComposerHtml() {
 // 回复框与「记一笔」共用一个输入框：文字、附件、发送在同一个框里。
 function dialogueComposerFormHtml(opts) {
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
+    '<span class="dialogue-composer-who" aria-hidden="true">你</span>' +
     '<div class="dialogue-field">' +
       dialogueComposerAttachmentsHtml() +
       '<label class="sr-only" for="dialogueReplyInput">' + escapeHtml(opts.label) + '</label>' +
@@ -15098,7 +15124,6 @@ function dialogueComposerFormHtml(opts) {
         escapeHtml(dialogueDraft) + '</textarea>' +
       '<div class="dialogue-composer-actions">' + dialogueAttachButtonHtml() +
         (dialogueUploading ? '<span class="dialogue-uploading">' + waitHtml('正在上传…', 'inline') + '</span>' : '') +
-        '<span class="dialogue-composer-keys" aria-hidden="true"><kbd>↵</kbd></span>' +
         '<button type="submit" class="btn btn-sm btn-primary dialogue-send"' + (dialogueSending || dialogueUploading ? ' disabled' : '') + '>' + escapeHtml(opts.submitLabel) + '</button>' +
       '</div>' +
     '</div>' +
@@ -15167,7 +15192,21 @@ function dialogueComposerAttachmentsHtml() {
     : '';
 }
 
-// 同一个人连着说的几条只在第一条写名字与时间；轮到你回答的那一句被点亮（focus）。
+// 记录栏里的时间：今天只写时刻，别的日子写日期 + 时刻。
+function dialogueClockHtml(value) {
+  if (!value) return '';
+  var then = new Date(value);
+  if (isNaN(then.getTime())) return '';
+  var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+  var clock = pad(then.getHours()) + ':' + pad(then.getMinutes());
+  var now = new Date();
+  var sameDay = then.toDateString() === now.toDateString();
+  var day = (then.getFullYear() === now.getFullYear() ? '' : then.getFullYear() + '年') + (then.getMonth() + 1) + '月' + then.getDate() + '日';
+  return '<time class="dialogue-msg-time tnum" datetime="' + escapeHtml(then.toISOString()) + '">' +
+    (sameDay ? '' : '<span>' + day + '</span>') + clock + '</time>';
+}
+
+// 每条消息是台账里的一行：左边一栏写谁、什么时候，右边是正文。轮到你回答的那一行被点亮（focus）。
 function renderDialogueMessageHtml(message, index, messages, focus) {
   var role = String(message.role || 'system');
   var who = role === 'human' ? '你' : (role === 'system' ? '系统' : '助手');
@@ -15175,17 +15214,15 @@ function renderDialogueMessageHtml(message, index, messages, focus) {
   var attachments = renderDialogueAttachmentsHtml(message.attachments);
   var previous = Array.isArray(messages) && index > 0 ? messages[index - 1] : null;
   var continued = previous && String(previous.role || 'system') === role && role !== 'system';
-  if (role === 'system') {
-    return '<div class="dialogue-msg dialogue-msg--system" data-role="system">' +
-        '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
-      '</div>';
-  }
   return '<div class="dialogue-msg dialogue-msg--' + escapeHtml(role) + (continued ? ' is-cont' : '') + (focus ? ' is-focus' : '') + '" data-role="' + escapeHtml(role) + '">' +
       '<div class="dialogue-msg-head"><span class="dialogue-msg-who">' + escapeHtml(who) + '</span>' +
-        '<time class="dialogue-msg-time">' + escapeHtml(dialogueElapsed(message.created_at)) + '</time></div>' +
-      '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
-      (attachments ? '<div class="dialogue-msg-attachments">' + attachments + '</div>' : '') +
-      (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
+        dialogueClockHtml(message.created_at) +
+        (focus ? '<span class="dialogue-msg-ask">等你回答</span>' : '') + '</div>' +
+      '<div class="dialogue-msg-body">' +
+        '<div class="dialogue-msg-text">' + renderRichText(message.text || '') + '</div>' +
+        (attachments ? '<div class="dialogue-msg-attachments">' + attachments + '</div>' : '') +
+        (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
+      '</div>' +
     '</div>';
 }
 

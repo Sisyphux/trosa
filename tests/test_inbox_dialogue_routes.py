@@ -216,13 +216,17 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         try:
             self.module._sela_profile_by_source = lambda conn, source_id: (
                 {'customer_id': 4321} if source_id == 'route' else None)
-            self.module._sela_profile_customer = lambda conn, cid: {'id': cid, 'is_deleted': 0}
+            self.module._sela_profile_customer = lambda conn, cid: {'id': cid, 'is_deleted': 0, 'country': '巴西'}
             shown = human.get('/api/inbox/threads').get_json()
+            sela_list = self.service.get('/api/integrations/sela/threads', headers=self.service_headers).get_json()
             self.module._sela_profile_customer = lambda conn, cid: None
             hidden = human.get('/api/inbox/threads').get_json()
         finally:
             self.module._sela_profile_by_source, self.module._sela_profile_customer = original
         self.assertIn(thread_id, [t['id'] for t in shown['threads']])
+        # The human list table shows the company's country; the sela list body is untouched.
+        self.assertEqual(next(t for t in shown['threads'] if t['id'] == thread_id)['country'], '巴西')
+        self.assertNotIn('country', next(t for t in sela_list['threads'] if t['id'] == thread_id))
         self.assertNotIn(thread_id, [t['id'] for t in hidden['threads']])
         self.assertEqual(hidden['counts']['open'], shown['counts']['open'] - 1)
 

@@ -8585,10 +8585,11 @@ def sela_integration_thread_attachment(thread_id, file_object_id):
     return _dialogue_attachment_response(thread_id, file_object_id)
 
 
-def _dialogue_orphan_prospect_subjects(conn):
-    """``prospect:<id>`` subjects whose customer was archived or removed.
+def _dialogue_open_prospect_customers(conn):
+    """``{subject: customer row or None}`` for open ``prospect:<id>`` conversations.
 
-    Their conversations have nothing left to open, so the human Inbox hides them.
+    ``None`` means the prospect's customer was archived or removed; those
+    conversations have nothing left to open, so the human Inbox hides them.
     """
     where, params = _dialogue._scope()
     rows = conn.execute(
@@ -8596,7 +8597,7 @@ def _dialogue_orphan_prospect_subjects(conn):
         f"WHERE {where} AND status='open' AND subject LIKE 'prospect:%'",
         params,
     ).fetchall()
-    hidden = []
+    customers = {}
     for row in rows:
         subject = str(dict(row).get('subject') or '')
         source_id = subject[len('prospect:'):].strip()
@@ -8610,8 +8611,9 @@ def _dialogue_orphan_prospect_subjects(conn):
         customer = dict(customer) if customer else None
         if (not customer or customer.get('is_deleted')
                 or customer.get('deleted_at')):
-            hidden.append(subject)
-    return hidden
+            customer = None
+        customers[subject] = customer
+    return customers
 
 
 @app.route('/api/inbox/threads', methods=['GET'])
@@ -8624,6 +8626,7 @@ def inbox_threads_list():
     """
     conn = get_db()
     try:
+        customers = _dialogue_open_prospect_customers(conn)
         body = _dialogue.list_threads(
             conn,
             awaiting=request.args.get('awaiting'),
@@ -8632,8 +8635,13 @@ def inbox_threads_list():
             updated_after=request.args.get('updated_after'),
             limit=request.args.get('limit') or 50,
             cursor=request.args.get('cursor'),
-            exclude_subjects=_dialogue_orphan_prospect_subjects(conn),
+            exclude_subjects=[subject for subject, customer in customers.items() if customer is None],
         )
+        # Display-only: the list table shows each company's country (the sela body is untouched).
+        for thread in body.get('threads') or []:
+            customer = customers.get(str(thread.get('subject') or ''))
+            if customer and customer.get('country'):
+                thread['country'] = str(customer['country'])
         return jsonify(body)
     except _dialogue.DialogueError as error:
         return _dialogue_error_response(error)

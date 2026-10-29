@@ -278,24 +278,26 @@
     <!-- ==================== DIALOGUE (S3: sela ↔ human) ==================== -->
     <div class="page-section" id="page-dialogue">
       <div class="page-header dialogue-page-header">
-        <div class="page-heading">
-          <div class="page-eyebrow">待判断</div>
-          <h2>Inbox</h2>
-          <p class="page-lede dialogue-overview" id="dialogueOverview">每条对话会用一句话说明要你决定什么，你回一句话即可；今天聊了什么，点「记一笔」发给助手。</p>
-        </div>
+        <div class="page-heading"><h2>Inbox</h2></div>
       </div>
       <div class="page-body dialogue-page-body">
         <div class="dialogue-workspace" id="dialogueWorkspace">
-          <aside class="dialogue-list-pane" aria-label="对话列表">
-            <div class="dialogue-list-head">
+          <div class="dialogue-stats">
+            <div class="dialogue-overview" id="dialogueOverview" role="status" aria-live="polite"></div>
+            <div class="dialogue-stats-act">
               <button type="button" class="dialogue-note-btn" onclick="startDialogueNote()" title="把今天和客户聊的发给助手记下来"><span class="ui-icon ui-icon-edit" aria-hidden="true"></span><span>记一笔</span></button>
             </div>
-            <div class="dialogue-list" id="dialogueList"><div class="dialogue-loading" data-state="loading" role="status">正在加载对话…</div></div>
-          </aside>
-          <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容"
-            ondragover="return dialogueDragOver(event)" ondragleave="dialogueDragLeave(event)" ondrop="dropDialogueAttachment(event)">
-            <div class="dialogue-empty" data-state="empty" role="status"><p>从左边的列表选一条对话。</p></div>
-          </section>
+          </div>
+          <div class="dialogue-body">
+            <aside class="dialogue-list-pane" aria-label="对话列表">
+              <div class="dialogue-list-cols" aria-hidden="true"><span></span><span>公司</span><span>国家</span><span>等了</span></div>
+              <div class="dialogue-list" id="dialogueList"><div class="dialogue-loading" data-state="loading" role="status">正在加载对话…</div></div>
+            </aside>
+            <section class="dialogue-thread-pane" id="dialogueThreadPane" aria-label="对话内容"
+              ondragover="return dialogueDragOver(event)" ondragleave="dialogueDragLeave(event)" ondrop="dropDialogueAttachment(event)">
+              <div class="dialogue-empty" data-state="empty" role="status"><p>从左边的列表选一条对话。</p></div>
+            </section>
+          </div>
         </div>
       </div>
     </div>

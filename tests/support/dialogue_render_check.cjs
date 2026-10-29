@@ -1,7 +1,7 @@
 // 对话界面回归检查：通过真实 loadDialogue / selectDialogueThread / submitDialogueReply
 // 数据流驱动 renderDialogueList / renderDialogueThreadHtml。
 //
-//   * 列表按「等你 / 处理中 / 已归档」分组，行内显示标题、摘要、轮到谁与多久。
+//   * 列表按「等你 / 处理中 / 已归档」分组，每行是公司、国家、等了多久；最后一句话在悬停提示里。
 //   * 打开一条对话后显示消息（含 system）；不给现成的回复选项，回话就是自己写一句。
 //   * 有这家公司的资料时，右栏卷宗显示开发理由与背调；没有就不出这一栏。
 //   * 发送后提示「已收到」，并自动跳到下一条「等你」。
@@ -159,10 +159,10 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.ok(list.textContent.includes('等你') && list.textContent.includes('处理中') && list.textContent.includes('已归档'));
   // 已归档默认折叠：只有标题和数量，行内容要点开才显示；选中的归档对话始终可见。
   assert.equal(list.querySelector('[data-group="done"]').dataset.open, 'false');
-  assert.ok(!list.querySelector('[data-group="done"]').textContent.includes('这件事已完成'));
+  assert.ok(!list.querySelector('[data-group="done"]').textContent.includes('Delta 已完成'));
   win.toggleDialogueArchived();
   assert.equal(doc.getElementById('dialogueList').querySelector('[data-group="done"]').dataset.open, 'true');
-  assert.ok(doc.getElementById('dialogueList').querySelector('[data-group="done"]').textContent.includes('这件事已完成'));
+  assert.ok(doc.getElementById('dialogueList').querySelector('[data-group="done"]').textContent.includes('Delta 已完成'));
   win.toggleDialogueArchived();
   assert.equal(doc.getElementById('dialogueList').querySelector('[data-group="done"]').dataset.open, 'false');
   // 选中一条已归档对话时分组保持展开；此时再点一下标题必须能收起，再点一下又能展开。
@@ -179,7 +179,10 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   await win.selectDialogueThread(A);
   assert.equal(archivedGroup().dataset.open, 'false');
   assert.equal(list.querySelector('[data-group="awaiting"] .dialogue-group-label .tnum').textContent, '2');
-  assert.ok(list.querySelector('[data-group="awaiting"]').textContent.includes('Northwind 是不是已经排除了？'), list.textContent);
+  // 列表是表格：一行写公司、国家、等了多久；最后一句话放在悬停提示里。
+  const alphaRow = list.querySelector('[data-group="awaiting"] .dialogue-row[data-dialogue-id="' + A + '"]');
+  assert.ok(alphaRow && alphaRow.textContent.includes('Alpha 竞品排除'), list.textContent);
+  assert.equal(alphaRow.getAttribute('title'), 'Northwind 是不是已经排除了？');
   assert.ok(doc.getElementById('dialogueOverview').textContent.includes('2'), doc.getElementById('dialogueOverview').textContent);
   assert.equal(doc.getElementById('dialogueNavCount').textContent, '2');
 
@@ -227,7 +230,7 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.ok(dossier, '有公司资料时应有卷宗栏');
   assert.ok(dossier.textContent.includes('巴西'), dossier.textContent);
   assert.ok(dossier.textContent.includes('圣保罗的亚克力加工厂'), '应显示开发理由');
-  assert.ok(dossier.querySelector('.dialogue-dossier-key') && dossier.textContent.includes('切割亚克力板做展示架'), '背调按行显示');
+  assert.ok(Array.from(dossier.querySelectorAll('.dialogue-kv-k')).some((k) => k.textContent === '做什么') && dossier.textContent.includes('切割亚克力板做展示架'), '背调按行显示成登记表的栏');
   assert.ok(dossier.textContent.includes('发过 2 封'), dossier.textContent);
   assert.ok(dossier.querySelector('a[href="https://alpha.example"]'), '应有官网链接');
 

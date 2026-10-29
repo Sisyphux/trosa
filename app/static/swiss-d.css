@@ -267,9 +267,6 @@ svg.hi.hi-illus.hi-draw .s:nth-of-type(n+4){animation-delay:.3s}
 /* 按钮里的笔与勾：只有线，和文字同高 */
 .wait-pen-btn,svg.hi.hi-btn{width:16px;height:16px;margin-right:6px;vertical-align:-3px}
 svg.hi.hi-btn{stroke-width:2}
-/* Inbox：sela 处理中，笔在写 */
-.dialogue-msg--writing{padding:6px 2px;color:var(--dl-ink-3,#595959);font-size:.86rem}
-.dialogue-msg--writing .wait{gap:8px}
 @media (prefers-reduced-motion:reduce){
   .hand-ul path,.hand-strike path,.hand-ink .hand-ul path{animation:none !important}
   .hand-ink{display:none}
