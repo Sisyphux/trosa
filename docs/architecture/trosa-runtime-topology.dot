@@ -81,7 +81,7 @@ digraph trosa_runtime_topology {
     // ---------------------------------------------------------------
 
     subgraph cluster_ecs {
-        label="云主机（ECS / Alibaba Cloud）— 唯一正式运行环境与唯一写入主机";
+        label="云主机（腾讯云 Lighthouse，首尔）— 唯一正式运行环境与唯一写入主机";
         style="filled,rounded";
         fillcolor="#f1f8f2";
         color="#7fb98f";

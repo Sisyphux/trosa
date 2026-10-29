@@ -10,9 +10,9 @@
 ```text
 浏览器 / 浏览器扩展 / Sela 受限集成
         ↓ HTTPS（受限 API）
-ECS trade-os.service → serve.py → Trosa Flask
+腾讯云 trade-os.service → serve.py → Trosa Flask
         ↓
-ECS PostgreSQL（唯一正式业务 writer）
+腾讯云 PostgreSQL 容器（唯一正式业务 writer）
         +── /var/lib/trade-os/uploads、导入来源、回滚材料
 ```
 
@@ -33,7 +33,7 @@ ECS PostgreSQL（唯一正式业务 writer）
 选择入口：
 
 ```bash
-# 完整 PostgreSQL 演练：独立 loopback 集群、独立数据库，不触碰 ECS
+# 完整 PostgreSQL 演练：独立 loopback 集群、独立数据库，不触碰正式服务器
 python3 tools/postgres_rehearsal.py test
 
 # 常规回归（测试自行使用隔离 CRM_DB_PATH）

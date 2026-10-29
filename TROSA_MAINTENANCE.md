@@ -13,7 +13,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 ### 正式运行方式
 
 ```text
-浏览器 → Cloudflare Access / Tunnel → ECS 127.0.0.1:8080
+浏览器 → Cloudflare Access / Tunnel → 腾讯云服务器 127.0.0.1:8080
                                       ↓
                                Waitress / Flask（serve.py、app.py）
                                       ↓
@@ -24,7 +24,7 @@ Trosa 应继续做一件事：让业务员在需要时恢复客户上下文、�
 
 - 正式入口：`https://app.trosa.space`。
 - 正式运行契约：`trosa-postgresql-v1`。`CRM_ENV=production` 必须同时声明 `TRADE_OS_DATA_BACKEND=postgres`、非空 `TRADE_OS_DATABASE_URL`；`serve.py`、`init_all_dbs()` 和健康门均拒绝隐式 SQLite 回退。
-- 正式主机：单台阿里云 ECS；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
+- 正式主机：单台腾讯云 Lighthouse（首尔，43.155.211.57，SSH 别名 `trosa-new`，2026-10-29 起）；`trade-os.service` 运行 `/opt/trade-os/current/serve.py`，通过 `/etc/systemd/system/trade-os.service.d/postgres.conf` 注入 `TRADE_OS_DATA_BACKEND=postgres`、PostgreSQL DSN 和权限 600 的 `PGPASSFILE`。PostgreSQL 由 `/opt/trade-os-postgres` 的容器运行，仅监听 ECS 回环地址。
 - 2026-09-12 发布后只读检查：`trade-os=active/running`、`cloudflared=active`，最近一次运行代码 release 为 `auto-20260912085022-9d7d87b`；公网 ping 返回 `status=ok`、`backend=postgresql`、`formal_runtime=true`、`runtime_contract=trosa-postgresql-v1`。受控 `verify_schema` 已确认当时全部正式迁移通过、schema contract 完整、两个 legacy reference orphan count 均为 0（迁移编号持续增长，最新范围以 `migrations/` 目录和 ECS 账本实时输出为准，不要在本页写死编号）。
 - 普通代码任务先在独立 worktree 中提交为逻辑完整的 commit，再由 `deploy/cloud/auto-publish.sh --commit ...` 或 `--branch ...` 构建干净 release worktree、跑完整门禁、推送 release commit 到 `main`，再由 `trosa-release publish` 让 ECS 后台任务拉取并按阶段发布。调用者的 dirty working tree 不参与发布；当前 ECS release 以 `deploy/cloud/trosa-release status --json` 的实时输出为准。有数据库变化的改动自动先做服务端预迁移备份；疑似破坏性迁移需明确确认（`--allow-destructive-db`）。开发/审查 Agent 会话设置 `TRADE_OS_AGENT_ROLE=dev`（或 `review`），只有 release 角色能执行 publish/rollback；发布配置 `workbench.env` 位于仓库外（`~/.config/trosa/workbench.env`）。每次 `test`/`publish` 的完成证据写入 `trosa-tasks/<id>.verify.log`，任务清单 `status=landed` 才算完成。
 - 工作区可能存在用户未提交的 `deploy/cloud/` 与 `CHANGELOG.md` 运维修改；维护产品时不得覆盖或顺手提交这些修改。
@@ -201,7 +201,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 ## 开工前与每次发布的最小检查
 
 1. **先确认隔离环境**：每个任务在独立 worktree 中开发，主工作区只做集成/验收/发布（见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md)）。会话开始先 `deploy/cloud/agent-worktree.sh status`，再 `preflight`；主工作区若出现无法归属的在途改动，用 `adopt --task <id>` 搬进隔离区，不要直接 commit 或删除。
-2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向 ECS、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
+2. **在隔离数据目录验证**：SQLite 回归设置独立 `CRM_DB_PATH`；禁止指向正式服务器、正式备份或日常 `data/`。PostgreSQL 迁移/运行验收另用隔离 PostgreSQL 或正式 ECS 只读检查，不能用 SQLite 结果代替。
 3. **使用项目依赖跑回归**：根目录使用 `.venv`，由 `requirements.txt` 固定 Python 依赖；浏览器扩展在 `browser-extension/` 中执行 `npm install`，由 `package-lock.json` 固定测试依赖。不要使用系统 Python 或为了让测试绿而放宽测试。
 4. **最少验证集合**：核心 Python 回归、`python3 -m py_compile app.py db.py scheduler.py serve.py serve_rehearsal.py`、`python3 tools/check_migrations.py --dir .`、`node --check app/static/app.js`，以及真实浏览器中的 Customer → 沟通 → Today → Inbox → Search；涉及 PG 时再运行 `python3 tools/postgres_rehearsal.py test`。
 5. **自动发布入口**：普通代码任务先在自己的 worktree 完成 commit（message 以 `[<id>]` 开头），再使用 `deploy/cloud/agent-worktree.sh publish --task <id>` 或 `deploy/cloud/auto-publish.sh --commit <sha>`；多个成果可重复传入 `--commit`，或使用 `--branch <ref>`。入口只从临时 release worktree 发布候选，执行本地回归、发布前只读 ECS 状态、必要备份、推送、原子发布和公网健康检查，不读取调用者的 index、未暂存改动或未跟踪文件。

@@ -200,8 +200,8 @@ deploy/cloud/auto-publish.sh --dry-run --commit <sha>
   `git fetch origin && git merge --ff-only origin/main`。
 - **并发发布是安全的**：本地用共享 git 目录中的可移植锁（崩溃后可回收）把发布候选
   串行化，推送 `origin/main` 仍用 `--force-with-lease` 固定基线，基线上移时后到者
-  被拒绝。ECS 侧发布 runner 也串行执行（有界等待，超时写明确 `busy` 结果）。
-- **production 基线门（关键）**：ECS 在切换流量前会证明候选 commit 仍包含当前
+  被拒绝。服务器侧发布 runner 也串行执行（有界等待，超时写明确 `busy` 结果）。
+- **production 基线门（关键）**：服务器在切换流量前会证明候选 commit 仍包含当前
   production commit。若候选基于旧 production（例如你在等待期间另一个任务已上线），
   发布会被明确 `refused`，production 不变；你必须 `sync` 到最新 `main`、解决冲突后
   重新 `publish`。这个规则保证后上线者包含先前所有已上线改动，任何一方都不会被静默
@@ -226,7 +226,7 @@ deploy/cloud/release-pipeline.sh run --publish
 
 - **分级由流水线算，不由开发方声明**（`tools/release_tier.py`，规则属于流水线一侧）：
   - **T0**：只改 `docs/`、`design/`、`tests/` 或以 `.md` 结尾 → 合入 main，不部署；
-  - **T1**：其余常规代码 → 门禁绿后自动发布，健康检查失败由 ECS 自动回滚；
+  - **T1**：其余常规代码 → 门禁绿后自动发布，健康检查失败由服务器侧自动回滚；
   - **T2**：触及 `migrations/`、`deploy/`、`serve.py`、`config.py`、`AGENTS.md`，
     或发布/迁移/备份工具与流水线自身 → 停在 `awaiting-approval`，人工放行后才发布。
     T2 优先于 T0/T1，所以任何流水线自身的改动永远是 T2。
@@ -299,7 +299,7 @@ deploy/cloud/release-pipeline.sh run --publish
 - 复用按对象身份，不按任务目录：release 侧只比较 tree/实现/外部输入/基线哈希，
   不读取、也不信任任何任务工作区路径；候选树来自 cherry-pick 后的不可变 commit。
 - 复用不绕过健康检查与发布安全：快速语法/迁移完整性检查照跑，production 基线门、
-  切换前已校验备份、ECS 深度健康检查、`--force-with-lease` 推送全部不变。
+  切换前已校验备份、服务器深度健康检查、`--force-with-lease` 推送全部不变。
 - 被验收的内容必须等于 HEAD 的 tree：`test --task` 遇到脏工作树只标记
   `reusable_tree=0`（`verify_result` 仍可为 ok），不产生可复用证据；发布本身仍要求
   任务区完全干净。

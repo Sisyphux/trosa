@@ -20,7 +20,7 @@
 <g id="clust2" class="cluster">
 <title>cluster_ecs</title>
 <path fill="#f1f8f2" stroke="#7fb98f" d="M435,-104.8C435,-104.8 1718,-104.8 1718,-104.8 1724,-104.8 1730,-110.8 1730,-116.8 1730,-116.8 1730,-552.9 1730,-552.9 1730,-558.9 1724,-564.9 1718,-564.9 1718,-564.9 435,-564.9 435,-564.9 429,-564.9 423,-558.9 423,-552.9 423,-552.9 423,-116.8 423,-116.8 423,-110.8 429,-104.8 435,-104.8"/>
-<text xml:space="preserve" text-anchor="middle" x="1076.5" y="-551.9" font-family="Helvetica,sans-Serif" font-size="10.00">云主机（ECS / Alibaba Cloud）— 唯一正式运行环境与唯一写入主机</text>
+<text xml:space="preserve" text-anchor="middle" x="1076.5" y="-551.9" font-family="Helvetica,sans-Serif" font-size="10.00">云主机（腾讯云 Lighthouse，首尔）— 唯一正式运行环境与唯一写入主机</text>
 </g>
 <g id="clust3" class="cluster">
 <title>cluster_local</title>
