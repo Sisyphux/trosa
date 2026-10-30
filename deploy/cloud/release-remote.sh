@@ -357,7 +357,9 @@ deep_health_json() {
     && printf '%s' "$ping_body" | grep -q '"formal_runtime"[[:space:]]*:[[:space:]]*true'; then
     ping_ok=1
   fi
-  if printf '%s' "$app_body" | grep -qi '<!DOCTYPE html>'; then app_ok=1; fi
+  # Not `| grep -q`: the page is >64KB, grep -q exits at the first line, the writer gets SIGPIPE and
+  # pipefail turns a good page into a failed check (a healthy release was rolled back on 2026-10-30).
+  case "$app_body" in *'<!DOCTYPE html>'*|*'<!doctype html>'*) app_ok=1 ;; esac
   if [ "$svc" = "active" ]; then svc_ok=1; fi
   # Migration ledger: every migration file shipped by the CURRENT release must
   # be recorded in audit.schema_migrations. Needs production env for DSN.

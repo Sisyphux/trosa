@@ -396,6 +396,18 @@ class ResultContractTests(unittest.TestCase):
         text = (ROOT / "deploy" / "cloud" / "release-remote.sh").read_text(encoding="utf-8")
         self.assertEqual(text.count('write_result "in_progress" "started"'), 2)
 
+    def test_page_check_does_not_pipe_a_large_body_into_grep_q(self):
+        # The first formal publish on the new server rolled back a healthy release: the page is >64KB,
+        # `printf | grep -q` gets SIGPIPE and pipefail made the check fail every time.
+        text = (ROOT / "deploy" / "cloud" / "release-remote.sh").read_text(encoding="utf-8")
+        line = next(l for l in text.splitlines() if "app_ok=1" in l and "doctype" in l.lower())
+        self.assertNotIn("grep", line)
+        script = ("set -uo pipefail; app_ok=0\n"
+                  "app_body=$(python3 -c \"print('<!DOCTYPE html>' + 'x' * 200000)\")\n" + line.strip() + "\n"
+                  "echo $app_ok")
+        proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.stdout.strip(), "1", proc.stderr)
+
     def test_polling_endpoint_is_single_line_json(self):
         text = (ROOT / "deploy" / "cloud" / "release-remote.sh").read_text(encoding="utf-8")
         self.assertIn("separators=(',',':')", text)
