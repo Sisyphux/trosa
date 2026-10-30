@@ -603,6 +603,7 @@
             </div>
             <div class="settings-nav-group">
               <div class="settings-nav-title">维护</div>
+              <button type="button" class="settings-nav-item" data-settings-target="server" onclick="scrollToSettingsSection('server')">服务器</button>
               <button type="button" class="settings-nav-item" data-settings-target="health" onclick="scrollToSettingsSection('health')">系统健康</button>
               <button type="button" class="settings-nav-item" data-settings-target="system" onclick="scrollToSettingsSection('system')">系统信息</button>
             </div>
@@ -687,6 +688,10 @@
               <button type="button" class="btn btn-sm" onclick="recoverExcelHistory()">开始恢复</button>
             </div>
           </div>
+        </div>
+        <div class="card" data-settings-section="server" id="settings-section-server">
+          <div class="card-header"><h3>服务器</h3></div>
+          <div class="card-body" id="serverStatusPanel"></div>
         </div>
         <div class="card" data-settings-section="health" id="settings-section-health">
           <div class="card-header"><h3>系统健康检测</h3><button class="btn btn-sm btn-primary" onclick="runHealthCheck()" style="font-size:0.78rem;">诊断</button></div>

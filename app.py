@@ -22250,6 +22250,33 @@ def get_operation_logs():
     return jsonify(logs)
 
 
+# ========== 服务器状态（sela 自检结果）==========
+
+SERVER_STATUS_FILE = os.environ.get('TROSA_SERVER_STATUS_FILE', '/opt/sela/data/server_watch/status.json')
+SERVER_STATUS_STALE_SECONDS = 15 * 60
+
+
+@app.route('/api/server-status', methods=['GET'])
+@login_required
+def server_status():
+    """服务器上每 5 分钟一次的自检结果（由 sela 的 tools/server_watch.py 写出）。
+
+    自检本身停了（结果太旧）按有问题处理，不能显示成一切正常。
+    """
+    try:
+        with open(SERVER_STATUS_FILE, 'r', encoding='utf-8') as handle:
+            status = json.load(handle)
+        checked_at = datetime.fromisoformat(status['checked_at'])
+    except (OSError, ValueError, KeyError):
+        return jsonify({'available': False})
+    age = max(0, int((datetime.now(checked_at.tzinfo) - checked_at).total_seconds()))
+    checks = [{'name': str(c.get('name', '')), 'group': str(c.get('group', '')), 'ok': bool(c.get('ok')),
+               'detail': str(c.get('detail', ''))} for c in status.get('checks', [])]
+    stale = age > SERVER_STATUS_STALE_SECONDS
+    return jsonify({'available': True, 'checked_at': status['checked_at'], 'age_seconds': age, 'stale': stale,
+                    'ok': bool(status.get('ok')) and not stale, 'checks': checks})
+
+
 # ========== 系统健康检测 API ==========
 
 @app.route('/api/health', methods=['GET'])

@@ -12498,6 +12498,48 @@ function showGmailOAuthNotice() {
   window.history.replaceState({}, '', window.location.pathname + (query ? '?' + query : '') + window.location.hash);
 }
 
+// 服务器状态：一句结论 + 按组列出的读数。出问题的行排在组内最前，状态靠符号加文字，不靠颜色。
+function serverAgeText(seconds) {
+  if (seconds < 90) return '刚刚';
+  if (seconds < 3600) return Math.round(seconds / 60) + ' 分钟前';
+  return Math.round(seconds / 3600) + ' 小时前';
+}
+
+async function loadServerStatus() {
+  var panel = document.getElementById('serverStatusPanel');
+  if (!panel) return;
+  if (!panel.firstChild) panel.innerHTML = waitHtml('正在读取服务器状态…', 'block');
+  try {
+    var data = await api('/api/server-status');
+    if (!data.available) {
+      panel.innerHTML = '<p class="srv-none">还没有读到服务器自检结果。</p>';
+      return;
+    }
+    var bad = data.checks.filter(function(c) { return !c.ok; });
+    var verdict = data.stale ? '自检停了' : (bad.length ? bad.length + ' 项需要处理' : '一切正常');
+    var html = '<div class="srv-head"><b class="srv-verdict' + (data.ok ? '' : ' is-bad') + '">' + verdict + '</b>' +
+      '<span class="srv-when tnum">' + serverAgeText(data.age_seconds) + '检查</span></div>';
+    var groups = [];
+    data.checks.forEach(function(c) {
+      var g = groups.find(function(x) { return x.name === c.group; });
+      if (!g) groups.push(g = { name: c.group, rows: [] });
+      g.rows.push(c);
+    });
+    groups.forEach(function(g) {
+      g.rows.sort(function(a, b) { return (a.ok ? 1 : 0) - (b.ok ? 1 : 0); });
+      html += '<div class="srv-grp"><h4>' + escapeHtml(g.name) + '</h4>' + g.rows.map(function(c) {
+        return '<div class="srv-row' + (c.ok ? '' : ' is-bad') + '"><span class="srv-n">' +
+          statusGlyph(c.ok ? 'done' : 'alert', c.ok ? '正常' : '有问题') + escapeHtml(c.name) + '</span>' +
+          '<span class="srv-d tnum">' + escapeHtml(c.detail) + '</span></div>';
+      }).join('') + '</div>';
+    });
+    panel.innerHTML = html;
+  } catch (e) {
+    panel.innerHTML = '<p class="srv-none">服务器状态读取失败：' + escapeHtml(e.message || '网络错误') +
+      ' <button class="btn btn-sm" onclick="loadServerStatus()">重试</button></p>';
+  }
+}
+
 async function loadSettings() {
   if (!userPreferences) await loadUserPreferences();
   renderPersonalSettings();
@@ -12506,6 +12548,7 @@ async function loadSettings() {
   if (currentUser && currentUser.role === 'admin') loadTeamMembers();
   loadAiConfig();
   loadGmailIntegrationStatus();
+  loadServerStatus();
   try {
     var sys = await api('/api/system');
     document.getElementById('systemInfo').innerHTML =

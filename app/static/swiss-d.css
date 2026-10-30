@@ -504,3 +504,19 @@ html.motion-reduced .hand-tip{transition:none !important}
   /* 键盘在条内移动时取消渐隐，焦点环与当前项始终清晰 */
   #trosa .ld-views-row:focus-within{-webkit-mask-image:none;mask-image:none}
 }
+
+/* ---- Settings · 服务器: one verdict line, then hairline readouts grouped by kind ---- */
+#trosa .srv-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 0 14px;border-bottom:1px solid var(--dl-ink)}
+#trosa .srv-verdict{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.15;color:var(--dl-ink)}
+#trosa .srv-verdict.is-bad{color:var(--dl-danger,#a4443a)}
+#trosa .srv-when{font-size:12px;color:var(--dl-ink-3);white-space:nowrap}
+#trosa .srv-grp{margin-top:18px}
+#trosa .srv-grp h4{margin:0 0 4px;font-size:11.5px;font-weight:600;color:var(--dl-mut)}
+#trosa .srv-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:baseline;padding:9px 0;border-top:1px solid var(--dl-hair-2);font-size:14px}
+#trosa .srv-row:first-of-type{border-top:1px solid var(--dl-hair)}
+#trosa .srv-n{color:var(--dl-ink);display:inline-flex;align-items:center;gap:.55em;min-width:0}
+#trosa .srv-n .st{color:var(--dl-ink-3)}
+#trosa .srv-d{color:var(--dl-ink-3);font-size:13px;text-align:right}
+#trosa .srv-row.is-bad .srv-n,#trosa .srv-row.is-bad .srv-d,#trosa .srv-row.is-bad .srv-n .st{color:var(--dl-danger,#a4443a)}
+#trosa .srv-none{margin:0;color:var(--dl-ink-3);font-size:14px}
+@media (max-width:560px){#trosa .srv-verdict{font-size:22px}#trosa .srv-row{gap:10px;font-size:13.5px}#trosa .srv-d{font-size:12.5px}}
