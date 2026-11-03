@@ -6,6 +6,7 @@
 //   * 有这家公司的资料时，右栏卷宗显示开发理由与背调；没有就不出这一栏。
 //   * 发送后提示「已收到」，并自动跳到下一条「等你」。
 //   * thread_changed 冲突显示「有新消息，请先看」提示，不静默重试。
+//   * 归档的对话照样有输入框，发一句走 /resume 把它重新打开，不当成新对话。
 //   * 列表为空显示明确空状态；加载失败显示失败原因而不是「没有数据」。
 //   * J/K 在列表内切换，界面里没有按问题类型生成的表单分支。
 //
@@ -99,6 +100,7 @@ let listMode = 'ok';       // 'ok' | 'empty' | 'error'
 let replyMode = 'success'; // 'success' | 'conflict'
 let replyPosts = 0;
 let closePosts = 0;
+let resumePosts = 0;
 
 const jsonResponse = (payload, status) => ({
   ok: (status || 200) < 400, status: status || 200, json: async () => payload,
@@ -113,6 +115,12 @@ win.fetch = async (url, options) => {
   // 保持自动会话探测挂起：解析为“无会话”会退回账号界面，丢掉本检查渲染的状态。
   if (target.indexOf('/api/auth/me') === 0) return new Promise(() => {});
   if (target.indexOf('/api/inbox/threads') !== -1) {
+    if (method === 'POST' && /\/resume$/.test(target)) {
+      resumePosts += 1;
+      const reopened = Object.assign({}, threads[D], { status: 'open', awaiting: 'sela', revision: 5,
+        closed_at: null, closed_by: null, closed_summary: null });
+      return jsonResponse({ success: true, reopened: true, thread: reopened, message: {}, undo_token: null });
+    }
     if (method === 'POST' && /\/reply$/.test(target)) {
       replyPosts += 1;
       if (replyMode === 'conflict') {
@@ -169,6 +177,13 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   await win.selectDialogueThread(D);
   const archivedGroup = () => doc.getElementById('dialogueList').querySelector('[data-group="done"]');
   assert.equal(archivedGroup().dataset.open, 'true', '选中归档对话时分组应展开');
+  // 归档不等于说完：这条对话照样有输入框，发出去是重新打开它。
+  const archivedPane = () => doc.getElementById('dialogueThreadPane');
+  assert.equal(archivedPane().querySelectorAll('form.dialogue-composer textarea').length, 1, '归档对话也要能接着写');
+  assert.ok(archivedPane().querySelector('#dialogueReplyInput').placeholder.includes('重新打开'),
+    archivedPane().querySelector('#dialogueReplyInput').placeholder);
+  assert.ok(archivedPane().querySelector('.dialogue-closed-note').textContent.includes('重新打开'),
+    archivedPane().querySelector('.dialogue-closed-note').textContent);
   win.toggleDialogueArchived();
   assert.equal(archivedGroup().dataset.open, 'false', '选中归档对话时点标题应能收起');
   assert.equal(win.dialogueSelectedId, D, '收起分组不应改变当前选中的对话');
@@ -254,6 +269,17 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.equal(win.dialogueSelectedId, B, '发送后应自动跳到下一条等你对话');
   assert.ok(doc.querySelector('.dialogue-row.is-selected[data-dialogue-id="' + B + '"]'));
   assert.equal(threadPane.querySelectorAll('.dialogue-dossier').length, 0, '没有公司资料时不出卷宗栏');
+  assert.equal(doc.getElementById('toastContainer').textContent.includes('已重新打开'), false, '普通发送不说重新打开');
+
+  // 归档的对话：这一句走 /resume，发出去提示已重新打开，而不是另开一条。
+  await win.selectDialogueThread(D);
+  doc.getElementById('dialogueReplyInput').value = '那就现在单独给她推一封';
+  const resumeBefore = resumePosts;
+  const replyBefore = replyPosts;
+  await win.submitDialogueReply({ preventDefault() {} });
+  assert.equal(resumePosts, resumeBefore + 1, '归档对话的发送应走 /resume');
+  assert.equal(replyPosts, replyBefore, '归档对话不应再走 /reply');
+  assert.ok(doc.getElementById('toastContainer').textContent.includes('已重新打开'), '应提示 已重新打开');
 
   // 键盘 J/K 在列表内切换。
   win.dialogueKeydown({ key: 'k', target: doc.body, preventDefault() {}, defaultPrevented: false, metaKey: false, ctrlKey: false, altKey: false });
