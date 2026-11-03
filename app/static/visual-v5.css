@@ -3284,7 +3284,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-cad-text { display: block; color: var(--dl-ink-2); }
 #trosa .dialogue-flag { display: inline-block; margin: 0 6px 2px 0; padding: 1px 7px; border: 1px solid var(--dl-ink); font-size: var(--dl-fs-caption); font-weight: 600; }
 
-/* 记一笔：记录区是一张等截图的纸 */
+/* 和 sela 说：新开对话是一张等截图、等说话的纸 */
 #trosa .dialogue-thread--note .dialogue-messages { display: flex; padding: 24px; }
 #trosa .dialogue-note-drop {
   flex: 1; min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;

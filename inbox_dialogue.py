@@ -878,7 +878,7 @@ NOTE_ATTACHMENT_ONLY_TEXT = '（见截图）'
 
 def create_human_thread(conn, *, payload, idempotency_key=None, actor='',
                         attachment_lookup=None):
-    """The human opens a conversation ("记一笔"): free text and/or screenshots for sela.
+    """The human opens a conversation ("和 sela 说"): free text and/or screenshots for sela.
 
     The thread starts with the human message and waits for sela.  Its subject is
     ``note:<uuid>`` so it never collides with sela's per-prospect conversations.
@@ -901,7 +901,7 @@ def create_human_thread(conn, *, payload, idempotency_key=None, actor='',
     title = first_line[:NOTE_TITLE_CHARS] + ('…' if len(first_line) > NOTE_TITLE_CHARS else '')
     now = _now()
     _insert_thread(conn, thread_id=thread_id, subject=NOTE_SUBJECT_PREFIX + thread_id,
-                   title=('记一笔（截图）' if text == NOTE_ATTACHMENT_ONLY_TEXT else title) or '记一笔',
+                   title=('和 sela 说（截图）' if text == NOTE_ATTACHMENT_ONLY_TEXT else title) or '和 sela 说',
                    now=now, awaiting='sela', revision=1)
     message_id = _insert_message(
         conn, thread_id=thread_id, seq=1, role='human', text=text, actor=actor or None,

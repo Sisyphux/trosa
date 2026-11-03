@@ -14643,7 +14643,7 @@ var dialogueSending = false;
 var dialogueDraft = '';
 var dialogueAttachments = [];
 var dialogueUploading = false;
-// 「记一笔」：人自己开一条新对话（还没有 thread），右栏显示空白输入框。
+// 「和 sela 说」：人自己开一条新对话（还没有 thread），右栏显示空白输入框。
 var dialogueNoteMode = false;
 var dialogueConflictNote = null;
 var dialogueMobileView = 'list';
@@ -15155,7 +15155,7 @@ function dialogueComposerHtml(placeholder) {
   return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: placeholder || '回一句话…' });
 }
 
-// 回复框与「记一笔」共用一个输入框：文字、附件、发送在同一个框里。
+// 回复框与新开对话共用一个输入框：文字、附件、发送在同一个框里。
 function dialogueComposerFormHtml(opts) {
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
     '<span class="dialogue-composer-who" aria-hidden="true">你</span>' +
@@ -15330,19 +15330,19 @@ function dialogueNoteHtml() {
     '<header class="dialogue-thread-head">' +
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
-        '<div class="dialogue-thread-title">记一笔</div>' +
-        '<div class="dialogue-thread-sub"><span>助手会认出是哪个客户，记下进展和下一步</span></div>' +
+        '<div class="dialogue-thread-title">和 sela 说</div>' +
+        '<div class="dialogue-thread-sub"><span>说一句或贴张截图；认出是哪家，我就去办</span></div>' +
       '</div>' +
     '</header>' +
     '<div class="dialogue-messages" id="dialogueMessages">' +
       '<label class="dialogue-note-drop" for="dialogueAttachInput">' +
         (typeof handIcon === 'function' ? handIcon('message', { cls: 'hi-id dialogue-note-art' }) : '') +
-        '<span class="dialogue-note-drop-title">粘贴、拖入或点这里选聊天截图</span>' +
+        '<span class="dialogue-note-drop-title">粘贴、拖入或点这里选截图、文件</span>' +
       '</label>' +
     '</div>' +
     dialogueComposerFormHtml({
-      label: '记一笔', rows: 3, submitLabel: '发给助手',
-      placeholder: '例如：今天和 Carlos 通了电话，他要 3mm 透明板报价，下周二前给他'
+      label: '对 sela 说', rows: 3, submitLabel: '发送',
+      placeholder: '例如：今天和 Carlos 通了电话，他要 3mm 透明板报价，下周二前给他；或者：今天就给 Polymershapes 的 Terri 发一封'
     }) +
   '</article>';
 }
@@ -15372,7 +15372,7 @@ async function submitDialogueNote() {
   if (notePage) notePage.classList.remove('dialogue-note-open');
   dialogueDraft = '';
   dialogueAttachments = [];
-  showToast('已发给助手', 'success');
+  showToast('已发给 sela', 'success');
   var created = data && data.thread && data.thread.id;
   await loadDialogue();
   if (created) await selectDialogueThread(created, { keepList: true });

@@ -8481,7 +8481,7 @@ def inbox_thread_user_close(thread_id):
 @app.route('/api/inbox/threads', methods=['POST'])
 @login_required
 def inbox_thread_human_create():
-    """"记一笔"：人自己开一条对话，发文字或截图给 sela，由 sela 认客户、记沟通和待办。"""
+    """和 sela 说：人自己开一条对话，发文字或截图给 sela；sela 认客户，能记的记下，能让它办的当场办。"""
     conn = get_db()
     try:
         payload = _dialogue_json_body()
