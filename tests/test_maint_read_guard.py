@@ -80,12 +80,67 @@ class ConfigBoundaryTest(unittest.TestCase):
                 maint.CONFIG_PATH = original
 
 
+class ChannelFreshnessTest(unittest.TestCase):
+    def test_healthy_channel_has_no_issues(self):
+        issues = maint.assess_channel(
+            {'ssh_host': 'trosa-new'},
+            {'db_name': 'tradeos', 'data_lag_hours': 0.5, 'data_watermark': '2026-11-03'},
+        )
+        self.assertEqual(issues, [])
+
+    def test_retired_ecs_host_is_reported(self):
+        issues = maint.assess_channel(
+            {'ssh_host': 'trosa-ecs'},
+            {'db_name': 'tradeos', 'data_lag_hours': 0.5, 'data_watermark': '2026-11-03'},
+        )
+        self.assertTrue(any('trosa-ecs' in issue for issue in issues))
+
+    def test_stale_snapshot_is_reported(self):
+        issues = maint.assess_channel(
+            {'ssh_host': 'trosa-new'},
+            {'db_name': 'tradeos', 'data_lag_hours': 120, 'data_watermark': '2026-10-29'},
+        )
+        self.assertTrue(any('滞后' in issue for issue in issues))
+        self.assertFalse(any('trosa-ecs' in issue for issue in issues))
+
+    def test_other_database_is_reported(self):
+        issues = maint.assess_channel(
+            {'ssh_host': 'trosa-new'},
+            {'db_name': 'trade_os', 'data_lag_hours': 0.5, 'data_watermark': '2026-11-03'},
+        )
+        self.assertTrue(any('tradeos' in issue for issue in issues))
+
+    def test_max_lag_threshold_is_configurable(self):
+        row = {'db_name': 'tradeos', 'data_lag_hours': 10, 'data_watermark': '2026-11-03'}
+        self.assertEqual(maint.assess_channel({'ssh_host': 'trosa-new'}, row, 12), [])
+        self.assertTrue(maint.assess_channel({'ssh_host': 'trosa-new'}, row, 8))
+
+
+class TunnelTargetTest(unittest.TestCase):
+    def test_reads_destination_host(self):
+        self.assertEqual(
+            maint._ssh_tunnel_target('ssh -N -L 15432:127.0.0.1:5432 trosa-new'), 'trosa-new')
+        self.assertEqual(
+            maint._ssh_tunnel_target('ssh -f -N -o BatchMode=yes -L 15433:127.0.0.1:5432 me@trosa-ecs'),
+            'trosa-ecs')
+
+    def test_ignores_non_ssh_commands(self):
+        self.assertEqual(maint._ssh_tunnel_target('python3 -m http.server'), '')
+        self.assertEqual(maint._ssh_tunnel_target(''), '')
+
+
 class RoleScriptTest(unittest.TestCase):
     def test_role_script_is_read_only_and_keeps_secrets_out(self):
         text = (ROOT / 'deploy' / 'postgres-production' / 'maint-readonly-role.sh').read_text()
         self.assertIn('default_transaction_read_only = on', text)
         self.assertNotRegex(text, r'GRANT\s+(INSERT|UPDATE|DELETE|ALL PRIVILEGES|TRUNCATE)')
         self.assertIn('REVOKE ALL ON ALL TABLES IN SCHEMA identity', text)
+
+    def test_role_script_defaults_match_production(self):
+        text = (ROOT / 'deploy' / 'postgres-production' / 'maint-readonly-role.sh').read_text()
+        self.assertIn('TRADE_OS_DB_NAME:-tradeos', text)
+        self.assertIn('TRADE_OS_DB_ADMIN:-tradeos_app', text)
+        self.assertIn('trosa-new', text)
 
 
 if __name__ == '__main__':

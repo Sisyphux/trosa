@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Create / refresh the read-only maintenance role on the production PostgreSQL.
 #
-# Run on the ECS host by the release role or an administrator (it changes
-# production database roles; development sessions never run it).  Idempotent.
+# Run on the production Lighthouse host (SSH alias ``trosa-new``) by the release
+# role or an administrator; it changes production database roles, so development
+# sessions never run it.  The retired ``trosa-ecs`` host only keeps an old
+# rollback copy and must not be used for this channel.  Idempotent.
 #
-#   ./maint-readonly-role.sh            # uses secrets/postgres_password for the admin
+#   ./maint-readonly-role.sh            # reads secrets/postgres_password for the admin
 #
 # The role can SELECT business data of every member and nothing else:
 #   * default_transaction_read_only=on, short statement_timeout
@@ -15,8 +17,8 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
-DB_NAME="${TRADE_OS_DB_NAME:-trade_os}"
-ADMIN_USER="${TRADE_OS_DB_ADMIN:-postgres}"
+DB_NAME="${TRADE_OS_DB_NAME:-tradeos}"
+ADMIN_USER="${TRADE_OS_DB_ADMIN:-tradeos_app}"
 ROLE="trosa_maint_ro"
 SECRET_FILE="secrets/maint_readonly_password"
 
@@ -74,6 +76,9 @@ cat <<'MSG'
 
 Read-only role ready: trosa_maint_ro
 Password: secrets/maint_readonly_password (do not paste into chat or commit)
-Next: put DSN into ~/.config/trosa-maint/readonly.json on the maintainer's Mac
+Next: on the maintainer's Mac set ~/.config/trosa-maint/readonly.json to
+  {"dsn": "postgresql://trosa_maint_ro:<password>@127.0.0.1:15432/tradeos",
+   "ssh_host": "trosa-new", "remote_port": 5432, "local_port": 15432}
+then run: python3 tools/trosa_maint_read.py check
 (see docs/MAINTAINER_DATA_ACCESS.md). The role has no write path.
 MSG

@@ -4,12 +4,14 @@ This directory is the production PostgreSQL target after the cutover. It is
 separate from `deploy/postgres-rehearsal/` and must never share its Docker
 volume, database name, password, or port.
 
-The service binds PostgreSQL to `127.0.0.1:5432` on the ECS host. Trosa uses
-that loopback endpoint directly. The local sela service reaches the same
-database only through the managed SSH tunnel template in the sela repository;
-PostgreSQL is never exposed on the public interface.
+The service binds PostgreSQL to `127.0.0.1:5432` on the production Lighthouse
+host (`trosa-new`). Trosa uses that loopback endpoint directly. The local sela
+service reaches the same database only through the managed SSH tunnel template
+in the sela repository; PostgreSQL is never exposed on the public interface.
+The retired `trosa-ecs` host keeps a rollback copy only; reads against it are
+days behind and must not be used for maintenance work.
 
-Before starting it on ECS:
+Before starting it on `trosa-new`:
 
 ```bash
 cp .env.example .env
