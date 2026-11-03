@@ -244,6 +244,28 @@ class InboxDialogueRoutesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['thread']['closed_by'], 'human')
 
+    def test_human_resume_reopens_archived_thread(self):
+        thread_id = self._create_thread()
+        human = self.module.app.test_client()
+        human.post('/api/auth/login', json={'user': 'hamid'})
+        anon = self.module.app.test_client()
+        self.assertEqual(
+            anon.post(f'/api/inbox/threads/{thread_id}/resume',
+                      json={'text': '接着说', 'seen_revision': 1}).status_code, 401)
+        self.assertEqual(
+            human.post(f'/api/inbox/threads/{thread_id}/close',
+                       json={'seen_revision': 1}).status_code, 200)
+        response = human.post(
+            f'/api/inbox/threads/{thread_id}/resume',
+            json={'text': '还想再补一句', 'seen_revision': 1})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        self.assertTrue(body['reopened'])
+        self.assertEqual(body['thread']['status'], 'open')
+        self.assertEqual(body['thread']['awaiting'], 'sela')
+        self.assertEqual(body['message']['role'], 'human')
+        self.assertEqual(body['message']['text'], '还想再补一句')
+
     def test_idempotency_conflict_returns_error_envelope(self):
         thread_id = self._create_thread()
         first = self.service.post(

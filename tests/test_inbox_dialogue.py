@@ -149,6 +149,57 @@ class InboxDialogueMatrixTest(DialogueTestCase):
                                  payload={'text': '关闭后回复', 'seen_revision': 1})
         self.assert_error(ctx, 'thread_closed')
 
+    def test_resume_reopens_archived_thread_and_keeps_closing_summary(self):
+        thread_id = self.create(subject='prospect:poly')['thread']['id']
+        dialogue.close_thread(self.conn, thread_id=thread_id,
+                              payload={'summary': '联系人已换成 Terri'})
+        body = dialogue.resume_thread(
+            self.conn, thread_id=thread_id,
+            payload={'text': '再单独给她推一封', 'seen_revision': 1})
+        self.assertTrue(body['reopened'])
+        thread = body['thread']
+        self.assertEqual(thread['status'], 'open')
+        self.assertEqual(thread['awaiting'], 'sela')
+        self.assertIsNone(thread['closed_at'])
+        self.assertIsNone(thread['closed_by'])
+        self.assertIsNone(thread['closed_summary'])
+        # 收尾那句不进回收站：它变成一条助手消息，留在记录里。
+        self.assertEqual([m['text'] for m in thread['messages']],
+                         ['sela 提问', '联系人已换成 Terri', '再单独给她推一封'])
+        self.assertEqual(thread['messages'][-1]['role'], 'human')
+        self.assertEqual(thread['revision'], 3)
+        self.assertEqual(body['message']['seq'], 3)
+
+    def test_resume_replay_is_idempotent_by_key(self):
+        thread_id = self.create()['thread']['id']
+        dialogue.close_thread(self.conn, thread_id=thread_id, payload={'summary': '关闭'})
+        first = dialogue.resume_thread(self.conn, thread_id=thread_id,
+                                       payload={'text': '还在吗', 'seen_revision': 1},
+                                       idempotency_key='resume-key-1')
+        again = dialogue.resume_thread(self.conn, thread_id=thread_id,
+                                       payload={'text': '还在吗', 'seen_revision': 1},
+                                       idempotency_key='resume-key-1')
+        self.assertEqual(first['message']['id'], again['message']['id'])
+        self.assertEqual(len(again['thread']['messages']), 3)
+
+    def test_resume_rejects_stale_revision(self):
+        thread_id = self.create()['thread']['id']
+        dialogue.close_thread(self.conn, thread_id=thread_id, payload={'summary': '关闭'})
+        with self.assertRaises(dialogue.DialogueError) as ctx:
+            dialogue.resume_thread(self.conn, thread_id=thread_id,
+                                   payload={'text': '接着说', 'seen_revision': 0})
+        self.assert_error(ctx, 'thread_changed')
+
+    def test_resume_names_the_open_thread_when_subject_is_already_open(self):
+        first = self.create(subject='prospect:dup')['thread']['id']
+        dialogue.close_thread(self.conn, thread_id=first, payload={'summary': '关闭'})
+        second = self.create(subject='prospect:dup')['thread']['id']
+        with self.assertRaises(dialogue.DialogueError) as ctx:
+            dialogue.resume_thread(self.conn, thread_id=first,
+                                   payload={'text': '接着说', 'seen_revision': 1})
+        self.assert_error(ctx, 'subject_open')
+        self.assertEqual(ctx.exception.details['thread_id'], second)
+
     def test_reply_after_system_message_sets_awaiting_sela(self):
         thread_id = self.create()['thread']['id']
         now = dialogue._now()

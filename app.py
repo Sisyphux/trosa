@@ -8427,6 +8427,32 @@ def inbox_thread_reply(thread_id):
         conn.close()
 
 
+@app.route('/api/inbox/threads/<thread_id>/resume', methods=['POST'])
+@login_required
+def inbox_thread_resume(thread_id):
+    """Human continues an archived conversation; it reopens and waits for sela."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        key = _dialogue_idempotency_key(payload)
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.resume_thread(
+            conn, thread_id=thread_id, payload=payload, idempotency_key=key,
+            actor=str(getattr(g, 'current_user', '') or ''),
+            attachment_lookup=_dialogue_attachments,
+        )
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('resume')
+    finally:
+        conn.close()
+
+
 @app.route('/api/inbox/threads/<thread_id>/close', methods=['POST'])
 @login_required
 def inbox_thread_user_close(thread_id):

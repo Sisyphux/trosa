@@ -802,6 +802,75 @@ def reply_human(conn, *, thread_id, payload, idempotency_key=None, actor='',
     return body
 
 
+def resume_thread(conn, *, thread_id, payload, idempotency_key=None, actor='',
+                  attachment_lookup=None):
+    """The human continues an archived conversation: reopen it and say the next thing.
+
+    Archiving used to be one way: a closed thread had no composer, so a person
+    who still had something to add had to open a new conversation and sela lost
+    the thread of the exchange.  Resuming keeps the history in one place — the
+    closing summary stays in the record as sela's last message, the thread
+    reopens, and the human's message waits for sela exactly like a fresh reply.
+    """
+    text = _text(payload.get('text'), field='text')
+    seen = _seen_revision(payload.get('seen_revision'), required=True)
+    attachment_ids = _attachment_ids(payload.get('attachment_ids'))
+    request_hash = _hash({'op': 'resume', 'thread_id': thread_id, 'text': text,
+                          'seen_revision': seen, 'attachment_ids': attachment_ids})
+    replay = _receipt_replay(conn, 'resume', idempotency_key, request_hash)
+    if replay is not None:
+        return replay
+    row = _thread_row(conn, thread_id)
+    if not row:
+        raise DialogueError('not_found', '对话不存在', 404)
+    if seen != int(row['revision']):
+        raise DialogueError('thread_changed', '对话已被更新', 409, {
+            'current_revision': int(row['revision']),
+            'current_awaiting': row['awaiting'],
+        })
+    reopened = row['status'] == 'closed'
+    seq = _next_seq(conn, thread_id)
+    now = _now()
+    if reopened:
+        # Only one open thread may carry a subject; point the person at the one
+        # that is already open instead of failing on the unique index.
+        subject = row.get('subject')
+        if subject:
+            open_row = _find_open_thread_by_subject(conn, subject)
+            if open_row and str(open_row['id']) != str(thread_id):
+                raise DialogueError('subject_open', '这家已经有一条没归档的对话，去那条接着说',
+                                    409, {'thread_id': str(open_row['id'])})
+        # Keep sela's closing line in the transcript before the fields are cleared.
+        summary = (row.get('closed_summary') or '').strip()
+        last = _last_message(conn, thread_id)
+        if summary and not (last and last.get('role') == 'sela'
+                            and (last.get('text') or '').strip() == summary):
+            _insert_message(conn, thread_id=thread_id, seq=seq, role='sela', text=summary,
+                            actor='sela', created_at=now)
+            seq += 1
+        conn.execute(
+            f'UPDATE {_t("inbox_threads")} SET status=\'open\', awaiting=\'sela\', '
+            'closed_at=NULL, closed_by=NULL, closed_summary=NULL, updated_at=? WHERE id=?',
+            (now, thread_id),
+        )
+    attachments = []
+    if attachment_ids and attachment_lookup is not None:
+        attachments = attachment_lookup(conn, attachment_ids) or []
+    message_id = _insert_message(
+        conn, thread_id=thread_id, seq=seq, role='human', text=text,
+        actor=actor or None, attachments=attachments, awaiting_after='sela',
+        idempotency_key=idempotency_key, created_at=now,
+    )
+    _touch_thread(conn, thread_id, revision=seq, awaiting='sela', updated_at=now)
+    body = {'success': True, 'reopened': reopened,
+            'thread': _thread_dict(conn, _thread_row(conn, thread_id)),
+            'message': _msg_dict(_message_row(conn, message_id)),
+            'undo_token': None}
+    _receipt_write(conn, thread_id=thread_id, operation='resume', key=idempotency_key,
+                   request_hash=request_hash, response=body, message_id=message_id)
+    return body
+
+
 NOTE_SUBJECT_PREFIX = 'note:'
 NOTE_TITLE_CHARS = 40
 NOTE_ATTACHMENT_ONLY_TEXT = '（见截图）'

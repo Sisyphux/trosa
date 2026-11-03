@@ -15016,10 +15016,12 @@ function renderDialogueThreadHtml() {
       (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' +
         '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span></div>' +
         '<div class="dialogue-msg-body">' + waitHtml('在处理…', 'inline') + '</div></div>' : '') +
-      (closed ? '<div class="dialogue-closed-note" role="status"><span class="dialogue-msg-head">归档</span><span class="dialogue-msg-body">这条对话已归档</span></div>' : '') +
+      (closed ? '<div class="dialogue-closed-note" role="status"><span class="dialogue-msg-head">归档</span>' +
+        '<span class="dialogue-msg-body">这条对话已归档。还想接着说，就在下面回一句，发出去会重新打开。</span></div>' : '') +
       '</div>' +
     '</div>';
-  var composer = closed ? '' : dialogueComposerHtml();
+  // 归档不等于说完：输入框照样留着，发出去就把这条对话重新打开。
+  var composer = dialogueComposerHtml(closed ? '接着说一句…（发出去会重新打开这条对话）' : '');
   var dossier = dialogueDossierHtml(thread.context);
   return '<article class="dialogue-thread' + (dossier ? ' has-dossier' : '') + '" data-thread-id="' + escapeHtml(thread.id) + '">' +
     '<div class="dialogue-main">' + header + conflict + body + composer + '</div>' + dossier + '</article>';
@@ -15149,8 +15151,8 @@ function openDialogueCustomerById(customerId) {
   return false;
 }
 
-function dialogueComposerHtml() {
-  return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: '回一句话…' });
+function dialogueComposerHtml(placeholder) {
+  return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: placeholder || '回一句话…' });
 }
 
 // 回复框与「记一笔」共用一个输入框：文字、附件、发送在同一个框里。
@@ -15191,8 +15193,9 @@ function dialogueAttachButtonHtml() {
 }
 
 // 把截图或文件拖进对话区，和粘贴、点附件是同一条上传路。
+// 归档的对话也能加：发出去会重新打开它。
 function dialogueCanAttach() {
-  return dialogueNoteMode || Boolean(dialogueThread && dialogueThread.status !== 'closed');
+  return dialogueNoteMode || Boolean(dialogueThread && dialogueThread.id);
 }
 
 function dialogueDragOver(event) {
@@ -15413,13 +15416,15 @@ async function submitDialogueReply(event) {
   var text = (input ? input.value : dialogueDraft || '').trim();
   if (!text) { if (input) input.focus(); return false; }
   var threadId = dialogueThread.id;
+  var closed = dialogueThread.status === 'closed';
   dialogueSending = true;
   setDialogueComposerBusy(true);
   var body = { text: text, seen_revision: dialogueThread.revision };
   var attachmentIds = dialogueAttachments.map(function(a) { return a.file_object_id; }).filter(Boolean);
   if (attachmentIds.length) body.attachment_ids = attachmentIds;
   try {
-    await api('/api/inbox/threads/' + encodeURIComponent(threadId) + '/reply', { method: 'POST', body: JSON.stringify(body) });
+    // 已归档的对话：这一句就是重新打开它，历史留在原处，不当成新对话。
+    await api('/api/inbox/threads/' + encodeURIComponent(threadId) + (closed ? '/resume' : '/reply'), { method: 'POST', body: JSON.stringify(body) });
   } catch (error) {
     dialogueSending = false;
     setDialogueComposerBusy(false);
@@ -15429,13 +15434,19 @@ async function submitDialogueReply(event) {
       showDialogueComposerError({ error: { message: '有新消息，请先看' } });
       return false;
     }
+    if (error && error.error && error.error.code === 'subject_open') {
+      var openId = error.error.details && error.error.details.thread_id;
+      showToast('这家已经有一条没归档的对话，去那条接着说', 'warning');
+      if (openId && openId !== threadId) await selectDialogueThread(openId);
+      return false;
+    }
     showDialogueComposerError(error);
     return false;
   }
   dialogueSending = false;
   dialogueDraft = '';
   dialogueAttachments = [];
-  showToast('已收到', 'success');
+  showToast(closed ? '已重新打开，助手在处理' : '已收到', 'success');
   await loadDialogue({ afterReply: true, sentId: threadId });
   return false;
 }
