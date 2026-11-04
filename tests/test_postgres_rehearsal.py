@@ -1932,6 +1932,49 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(changed.status_code, 200)
         self.assertIn(extra, {item.get('id') for item in changed.get_json()['records']})
 
+    def test_shared_address_or_legal_name_asks_a_person_instead_of_creating_a_customer(self):
+        """Two brands with different names/hosts but one registered address go to REVIEW."""
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+
+        def publish(source_id, company, host, **hints):
+            response = client.post(
+                '/api/integrations/sela/prospects',
+                headers={'X-Idempotency-Key': f'pg-identity-hints:{source_id}'},
+                json={'prospect': {
+                    'source_id': source_id, 'company': company,
+                    'website': f'https://{host}/', 'country': 'TR',
+                    'business_type': 'acrylic distributor', 'status': 'READY TO CONTACT',
+                    'contact': {'name': 'Buyer', 'email': f'buyer@{host}'},
+                    'subject': 'Intro', 'email_draft': 'Hello.',
+                    **hints,
+                }},
+            )
+            self.assertEqual(response.status_code, 200, response.get_json())
+            return response.get_json()
+
+        first = publish(f'pg-hint-{run}', f'Hint Market {run}', f'hint-market-{run}.example',
+                        address=f'Ataturk Mah. 12. Sok. No:{run[:3]}5, Basaksehir, Istanbul',
+                        legal_name=f'Hint Plastik {run} Ltd. Şti.')
+        self.assertEqual(first['status'], 'SYNCED', first)
+        customer_id = first['trosa_id']
+        self.addCleanup(lambda: client.delete(f'/api/customers/{customer_id}'))
+        second = publish(f'pg-hint-{run}-b', f'Ata Hint {run}', f'ata-hint-{run}.example',
+                         address=f'ATATURK MAH 12 SOK NO {run[:3]}5 Basaksehir Istanbul')
+        self.assertEqual(second['status'], 'REVIEW', second)
+        self.assertEqual(second['reason'], 'COMPANY_IDENTITY_SHARED_ENTITY')
+        self.assertEqual([c['customer_id'] for c in second['candidates']], [customer_id])
+        self.assertEqual(second['candidates'][0]['matched_by'], ['address'])
+        third = publish(f'pg-hint-{run}-c', f'Third Hint {run}', f'third-hint-{run}.example',
+                        legal_name=f'HINT PLASTIK {run} LTD STI')
+        self.assertEqual(third['reason'], 'COMPANY_IDENTITY_SHARED_ENTITY', third)
+        # A prospect without clues is unaffected.
+        plain = publish(f'pg-hint-{run}-d', f'Plain Hint {run}', f'plain-hint-{run}.example')
+        self.assertEqual(plain['status'], 'SYNCED', plain)
+        self.addCleanup(lambda: client.delete(f"/api/customers/{plain['trosa_id']}"))
+
     def test_registered_second_domain_is_the_same_company_and_blocks_outreach(self):
         """A host a person registered for a company identifies that company.
 
