@@ -3211,8 +3211,8 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-msg.is-focus .dialogue-msg-ask { order: -1; display: inline-flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: var(--dl-gold-ink); }
 #trosa .dialogue-msg.is-focus .dialogue-msg-ask::before { content: ""; width: 11px; height: 11px; background: var(--dl-gold-ink); }
 #trosa .dialogue-msg.is-focus .dialogue-msg-body { padding: 0 0 14px; }
-#trosa .dialogue-msg.is-focus .dialogue-msg-text { max-width: 58ch; font-size: 1.08rem; line-height: 1.75; color: var(--dl-ink); }
-#trosa .dialogue-msg.is-focus .dialogue-p--ask { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dl-hair); font-size: 1.55rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.4; }
+#trosa .dialogue-msg.is-focus .dialogue-msg-text { max-width: 58ch; font-size: .92rem; line-height: 1.7; color: var(--dl-ink); }
+#trosa .dialogue-msg.is-focus .dialogue-p--ask { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--dl-hair); font-size: 1.25rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.4; }
 #trosa .dialogue-msg.is-focus .dialogue-pt-n { color: var(--dl-gold-ink); }
 #trosa .dialogue-msg--writing .dialogue-msg-body { color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
 #trosa .dialogue-msg--writing .wait { gap: 8px; }
@@ -3427,7 +3427,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-back { grid-area: back; justify-self: start; }
   #trosa .dialogue-stream { padding: 4px 14px 24px; }
   #trosa .dialogue-msg.is-focus { margin: 14px -14px 0; padding: 18px 14px 6px; }
-  #trosa .dialogue-msg.is-focus .dialogue-p--ask { font-size: 1.3rem; }
+  #trosa .dialogue-msg.is-focus .dialogue-p--ask { font-size: 1.1rem; }
   #trosa .dialogue-composer-who { font-size: 1.2rem; }
   #trosa .dialogue-thread-title { font-size: 1.4rem; }
   #trosa .dialogue-msg::before { left: 41px; }

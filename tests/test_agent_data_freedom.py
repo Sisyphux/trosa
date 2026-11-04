@@ -665,8 +665,16 @@ class AgentDataFreedomTest(unittest.TestCase):
             customer_id = created['data']['action']['customer_id']
             self.assertTrue(customer_id)
 
-            updated = run('update-customer', str(customer_id), '--notes', 'CLI 更新资料')
+            updated = run('update-customer', str(customer_id), '--notes', 'CLI 更新资料',
+                          '--industry', 'Plastics distribution', '--company-size', '51-200',
+                          '--website', 'https://example.test')
             update_action = updated['data']['action']['id']
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                self.assertEqual(conn.execute('SELECT industry, company_size FROM customers WHERE id=?',
+                                              (customer_id,)).fetchone(), ('Plastics distribution', '51-200'))
+            finally:
+                conn.close()
             undo = run('undo', update_action)
             self.assertEqual(undo['data']['action']['status'], 'undone')
             conn = sqlite3.connect(db.get_user_db_path('hamid'))

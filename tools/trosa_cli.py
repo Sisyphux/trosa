@@ -402,6 +402,8 @@ def build_parser():
     p.add_argument('--website', default='')
     p.add_argument('--field', default='')
     p.add_argument('--industry', default='')
+    p.add_argument('--company-size', dest='company_size', default='')
+    p.add_argument('--annual-revenue', dest='annual_revenue', default='')
     p.add_argument('--profile', default='')
     p.add_argument('--notes', default='')
     p.add_argument('--tags', default='')
@@ -578,7 +580,8 @@ def run(args, gateway=None, root=None):
         return _with_undo_hint(gateway.act('create_customer', None, _merge_json_payload(base, args.json)))
     if args.command == 'update-customer':
         base = {key: getattr(args, key) for key in
-                ('name', 'company', 'country', 'website', 'field', 'industry', 'profile', 'notes', 'tags')
+                ('name', 'company', 'country', 'website', 'field', 'industry', 'company_size', 'annual_revenue',
+                 'profile', 'notes', 'tags')
                 if getattr(args, key)}
         payload = _merge_json_payload(base, args.json)
         if not payload:

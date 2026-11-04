@@ -20075,7 +20075,8 @@ def restore_customer_profile(customer_id, before_commit=None):
 def update_customer_profile(customer_id, data, before_commit=None):
     """Update only ordinary customer profile fields with the standard undo transaction."""
     data = data or {}
-    allowed = ('name', 'company', 'country', 'website', 'field', 'industry', 'profile', 'notes', 'tags')
+    allowed = ('name', 'company', 'country', 'website', 'field', 'industry', 'company_size', 'annual_revenue',
+               'profile', 'notes', 'tags')
     supplied = {key: data[key] for key in allowed if key in data}
     if not supplied:
         raise CrmWriteError('请提供至少一个可更新的客户资料字段')
@@ -20100,9 +20101,10 @@ def update_customer_profile(customer_id, data, before_commit=None):
         if postgres_mode():
             _update_customer_record(conn, customer_id=customer_id, values=values)
         else:
-            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, profile=?, notes=?, tags=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?''',
+            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, company_size=?, annual_revenue=?, profile=?, notes=?, tags=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?''',
                       (values.get('name', ''), values.get('company', ''), values.get('country', ''), values.get('website', ''),
-                       values.get('field', ''), values.get('industry', ''), values.get('profile', ''), values.get('notes', ''),
+                       values.get('field', ''), values.get('industry', ''), values.get('company_size', ''),
+                       values.get('annual_revenue', ''), values.get('profile', ''), values.get('notes', ''),
                        values.get('tags', ''), values.get('timezone', ''), values.get('timezone_source', ''), now, customer_id))
         after = _snapshot_entity(conn, 'customers', customer_id)
         undo_token = _create_undo_action(conn, 'UPDATE_CUSTOMER_PROFILE', 'customer', customer_id,
