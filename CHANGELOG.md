@@ -4,6 +4,12 @@
 - 修改：选中改为墨底白字（全站）。Inbox 按“书桌”重新设计：顶上读数加“候信尺”（每条等你的对话按等了多久钉成一根刻度，点刻度打开）；左边是一叠条子（撕口、点线、等了多久、最后一句话），选中的条子与信纸连成一体；中间是信纸，要你回答的那一条拆成“来龙去脉 + 放大的问题”，下面是带格线的“答”；右边登记表是独立白卡；打开对话停在要回答的那一块。窄屏和手机相应收起。
 - 影响范围：`app/static/app.js`（对话区渲染）、`app/static/index.html`、`app/static/visual-v5.css`、`app/static/swiss-d.css`、`design/DESIGN_WORLD.md`、`tests/support/dialogue_render_check.cjs`。接口和数据不变。
 
+## 2026-11-04 — 同一家公司把官网写成两种拼法时，sela 不再另建客户并发信
+
+- 现象：客户「Regal Plastics」（regal-plastics.com）早就在谈报价，sela 2026-09-01 仍按另一种拼法（regalplastic.com）新建了「Regal Plastic Supply」，还在 10 月 16 日、31 日继续发开发信。原因是识别公司时只认完全相同的官网域名或完全相同的规范化名称，而这家公司两处都差一点（域名差一个连字符和复数 s，名称差一个 Supply），于是被当成新公司。
+- 修改：sela 建潜客时，如果官网只差连字符（或只差一个字母）且公司名是同一个名字加了限定词（Regal Plastic Supply / Regal Plastics），不再自动新建客户，改为返回 REVIEW 让 sela 停下来等人工确认；纯名称相近、域名为不同公司的（如 Plastic World 的各国站点）仍按不同公司处理，不进人工队列。
+- 影响范围：`app.py`（`_sela_match_customers` 增加域名近似判定，REVIEW 原因 `COMPANY_IDENTITY_VARIANT`）、`tests/test_sela_prospect_api.py`。接口字段不变，只是多了一种 REVIEW 原因。
+
 ## 2026-11-03 — Inbox 的入口从「记一笔」放开成「和 sela 说」：能记，也能当场办事
 
 - 现象：Inbox 右上角只有「记一笔」，人在这里说的话只能被记成沟通记录；想让 sela 换联系人、或者今天单独给某家发一封，它会说“这条是记录类对话，我不能发”，要另走开发流程。可人在这条对话里已经把公司、联系人、要求都说清了。

@@ -3617,6 +3617,122 @@ def _sela_company_identity_matches(rows, payload):
     return name_hits, ''
 
 
+def _sela_domain_variant_key(value):
+    """Domain identity that ignores the hyphen spelling of one host.
+
+    A hyphen is a spelling choice, not an identity boundary, so
+    ``regal-plastics.example`` and ``regalplastics.example`` share one key.
+    """
+    host = _canonical_website_domain(value)
+    if not host:
+        return ''
+    host = host.strip('.').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    return host.replace('-', '')
+
+
+def _sela_name_tokens(value):
+    """Company-name tokens with the plural ``s`` folded into the singular."""
+    tokens = set()
+    for token in _sync_name_key(value).split():
+        if len(token) > 4 and token.endswith('s'):
+            token = token[:-1]
+        tokens.add(token)
+    return tokens
+
+
+def _sela_name_identity_overlap(left, right):
+    """Whether one company name is the other plus qualifying words.
+
+    ``Regal Plastic Supply`` and ``Regal Plastics`` overlap on every word of the
+    shorter name.  The overlap is only a corroborating signal: on its own it
+    does not identify a company (``Plastic World`` ZA and AU are different
+    businesses), so callers also require a near-identical domain.
+    """
+    left_tokens, right_tokens = _sela_name_tokens(left), _sela_name_tokens(right)
+    if not left_tokens or not right_tokens:
+        return False
+    smaller, larger = sorted((left_tokens, right_tokens), key=len)
+    return smaller <= larger and any(len(token) >= 4 for token in smaller)
+
+
+def _sela_domain_keys_near(left, right):
+    """One-character difference between two hyphen-free host keys."""
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        return sum(one != other for one, other in zip(left, right)) == 1
+    shorter, longer = sorted((left, right), key=len)
+    return any(longer[:index] + longer[index + 1:] == shorter
+               for index in range(len(longer)))
+
+
+def _sela_domain_variant_matches(conn, rows, wanted_domain, wanted_company):
+    """Customers whose domain is a near-identical spelling of the prospect's.
+
+    ``regal-plastics.com`` vs ``regalplastic.com`` differ by a hyphen and a
+    plural ``s``; one company publishes both.  A hyphen-free match stands on its
+    own, while a one-character difference also needs the company names to
+    overlap so ``acme-parts.com`` and ``acme-part.com`` of unrelated companies
+    do not meet.
+
+    The hit is not reused automatically: an automatic reuse would move a cold
+    prospect onto a customer the CRM already owns without a person looking.
+    The caller returns it to Sela as REVIEW, so nothing is sent until someone
+    confirms that both domains belong to the same company.
+    """
+    wanted_key = _sela_domain_variant_key(wanted_domain)
+    if not wanted_key or not wanted_key.isascii():
+        return []
+
+    def is_variant(row):
+        row_key = _sela_domain_variant_key(row.get('website'))
+        if not row_key:
+            return False
+        if row_key == wanted_key:
+            return True
+        return (_sela_domain_keys_near(row_key, wanted_key) and
+                _sela_name_identity_overlap(wanted_company, row.get('company') or row.get('name')))
+
+    if postgres_mode():
+        rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM trosa.customer_records WHERE deleted_at IS NULL "
+            "AND strpos(replace(lower(COALESCE(website, '')), '-', ''), ?) > 0 "
+            "ORDER BY updated_at DESC, id DESC",
+            (wanted_key,),
+        ).fetchall()]
+    matches = []
+    seen = set()
+    for row in rows:
+        if not is_variant(row):
+            continue
+        item = dict(row)
+        item['matched_by'] = ['domain_variant']
+        matches.append(item)
+        seen.add(int(row['id']))
+    if postgres_mode():
+        token = next(iter(sorted(_sela_name_tokens(wanted_company), key=len, reverse=True)), '')
+        token = token if len(token) >= 4 else ''
+        if token:
+            for row in conn.execute(
+                "SELECT * FROM trosa.customer_records WHERE deleted_at IS NULL "
+                "AND strpos(lower(COALESCE(NULLIF(company, ''), name)), ?) > 0 "
+                "ORDER BY updated_at DESC, id DESC",
+                (token,),
+            ).fetchall():
+                if int(row['id']) in seen or not is_variant(row):
+                    continue
+                item = dict(row)
+                item['matched_by'] = ['domain_variant']
+                matches.append(item)
+    return matches
+
+
 def _sela_contact_identity_condition(column_prefix, wanted_email, wanted_phones):
     """SQL superset of "this contact row can match the wanted identity".
 
@@ -3837,7 +3953,14 @@ def _sela_match_customers(conn, payload):
         matches.append(item)
     if matches:
         return matches, ''
-    return _sela_company_identity_matches(rows, payload)
+    matches, company_error = _sela_company_identity_matches(rows, payload)
+    if matches or company_error:
+        return matches, company_error
+    variant_matches = _sela_domain_variant_matches(
+        conn, rows, wanted_domain, payload.get('company') or payload.get('name'))
+    if variant_matches:
+        return variant_matches, 'COMPANY_IDENTITY_VARIANT'
+    return [], ''
 
 
 def _sela_canonical_duplicate_match(conn, matches, source_id, company=''):
@@ -14239,6 +14362,7 @@ def _inbox_sela_review_payload(item, conn=None):
         'MULTIPLE_TROSA_MATCHES': '多个客户都匹配到这个来源',
         'SOURCE_IDENTITY_CONFLICT': '来源身份与已有客户冲突',
         'EXTERNAL_IDENTITY_CONFLICT': '外部身份与已有记录冲突',
+        'COMPANY_IDENTITY_VARIANT': '同一公司的另一个域名',
         'IDENTITY_REVIEW': '身份需要人工确认',
     }
     explanation = str(payload.get('reason_note') or payload.get('explanation') or '').strip()
@@ -14247,6 +14371,8 @@ def _inbox_sela_review_payload(item, conn=None):
             explanation = '来源同时匹配到多个客户，系统无法安全地自动选择。'
         elif reason in ('SOURCE_IDENTITY_CONFLICT', 'EXTERNAL_IDENTITY_CONFLICT'):
             explanation = '来源身份与已有客户的资料冲突，需要人工判断是否为同一主体。'
+        elif reason == 'COMPANY_IDENTITY_VARIANT':
+            explanation = '官网域名只差连字符，可能是同一家公司的另一种写法；确认前不会发信。'
     review = {
         'source_id': str(payload.get('source_id') or '').strip(),
         'company': str(payload.get('company') or '').strip(),

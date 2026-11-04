@@ -1193,6 +1193,48 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_domain_variant_key_ignores_only_hyphens(self):
+        key = self.module._sela_domain_variant_key
+        self.assertEqual(key('https://www.regal-plastics.com/'), 'regalplastics.com')
+        self.assertEqual(key('https://regalplastics.com'), 'regalplastics.com')
+        self.assertEqual(key('regalplastic.com/contacto'), 'regalplastic.com')
+        self.assertTrue(self.module._sela_domain_keys_near(
+            key('https://www.regal-plastics.com/'), key('https://regalplastic.com/')))
+        self.assertFalse(self.module._sela_domain_keys_near(
+            key('https://plastic-world.example/'), key('https://plastic-world-other.example/')))
+        self.assertFalse(self.module._sela_domain_keys_near(
+            key('https://plastic-world.example/'), key('https://plastic-world.example.net/')))
+        self.assertTrue(self.module._sela_name_identity_overlap(
+            'Regal Plastic Supply', 'Regal Plastics'))
+        self.assertFalse(self.module._sela_name_identity_overlap(
+            'Regal Plastic Supply', 'Northline Packaging'))
+
+    def test_hyphen_domain_variant_goes_to_review_instead_of_a_new_customer(self):
+        # 同一家公司会把官网写成 regal-plastics.com 和 regalplastic.com 两种拼法。
+        # 只差连字符时必须回给 sela 等人工确认，不能自动新建客户并发信。
+        customer_id = self.add_customer('Regal Plastics', website='https://regal-plastics.example/')
+        body = prospect('domain-variant-prospect')
+        body['company'] = 'Regal Plastic Supply'
+        body['website'] = 'https://regalplastic.example/'
+        body['contact'] = {'name': 'Sales', 'email': 'sales@regalplastic.example', 'is_primary': 1}
+        response = self.post_prospect(body, 'sela-v2:domain-variant:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()
+        self.assertEqual(result['status'], 'REVIEW', result)
+        self.assertEqual(result['reason'], 'COMPANY_IDENTITY_VARIANT')
+        self.assertEqual([candidate['customer_id'] for candidate in result['candidates']], [customer_id])
+        self.assertEqual(result['candidates'][0]['matched_by'], ['domain_variant'])
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM agent_prospect_profiles').fetchone()[0], 0)
+            # REVIEW 只回给 sela，不占用 Inbox。
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM inbox_items WHERE item_type='sela_identity_review'"
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+
     def test_sync_closes_moot_identity_review_for_same_source(self):
         self.add_customer('Moot Plastics', website='https://moot-plastics-au.example/')
         body = prospect('moot-prospect')
