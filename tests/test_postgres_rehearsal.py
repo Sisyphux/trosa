@@ -2053,12 +2053,19 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             module._sela_register_company_identity(
                 self.connection, customer_id, [('name', brand), ('domain', brand_host)])
             self.connection.commit()
+            # The registered brand name together with its registered host.
+            matches, error = module._sela_match_customers(self.connection, {
+                'company': brand, 'website': f'https://{brand_host}/',
+                'contact': {'name': 'Other', 'email': f'other@{brand_host}'},
+            })
+            self.assertEqual(error, '')
+            self.assertEqual([row['id'] for row in matches], [customer_id])
+            # A different company that merely reuses the name stays separate.
             matches, error = module._sela_match_customers(self.connection, {
                 'company': brand, 'website': 'https://unrelated-site.example/',
                 'contact': {'name': 'Other', 'email': 'other@unrelated-site.example'},
             })
-            self.assertEqual(error, '')
-            self.assertEqual([row['id'] for row in matches], [customer_id])
+            self.assertEqual((matches, error), ([], ''))
             matches, error = module._sela_match_customers(self.connection, {
                 'company': 'Something Else', 'website': f'https://{brand_host}/',
                 'contact': {'name': 'Other', 'email': f'other@{brand_host}'},

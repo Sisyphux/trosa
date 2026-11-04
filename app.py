@@ -3609,15 +3609,6 @@ def _sela_row_name_variants(row, registry=None):
     return names
 
 
-def _sela_registered_alias_variants(row, registry=None):
-    """Name keys a person registered as another name of this Customer."""
-    names = set()
-    for alias in _sela_registered_identity(registry, row.get('id')).get('aliases') or []:
-        names.update(_sela_name_variants(alias))
-    names.discard('')
-    return names
-
-
 def _sela_company_identity_matches(rows, payload, registry=None):
     """Reuse an existing Customer by company identity when contacts are absent.
 
@@ -3637,7 +3628,6 @@ def _sela_company_identity_matches(rows, payload, registry=None):
     if not wanted_names and not wanted_domain:
         return [], ''
     domain_hits, name_hits = [], []
-    alias_hit_ids = set()
     for row in rows:
         row_domains = _sela_row_domains(row, registry)
         row_names = _sela_row_name_variants(row, registry)
@@ -3646,8 +3636,6 @@ def _sela_company_identity_matches(rows, payload, registry=None):
             matched.append('domain')
         if wanted_names and row_names and wanted_names & row_names:
             matched.append('company')
-            if wanted_names & _sela_registered_alias_variants(row, registry):
-                alias_hit_ids.add(row.get('id'))
         if not matched:
             continue
         item = dict(row)
@@ -3659,11 +3647,8 @@ def _sela_company_identity_matches(rows, payload, registry=None):
         # Same name under a different recorded domain is a different company
         # ("one company, one domain"), e.g. Plastic World ZA vs Plastic World
         # AU.  It is neither reused nor sent to a human; only name hits that
-        # have no domain of their own remain candidates.  A name a person
-        # registered as this company's alias is the exception: they already
-        # said it is the same company, whatever site it publishes.
-        name_hits = [row for row in name_hits
-                     if row.get('id') in alias_hit_ids or not _sela_row_domains(row, registry)]
+        # have no domain of their own remain candidates.
+        name_hits = [row for row in name_hits if not _sela_row_domains(row, registry)]
     return name_hits, ''
 
 
