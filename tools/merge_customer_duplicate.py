@@ -28,6 +28,7 @@ import datetime
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -217,14 +218,32 @@ def _merge(conn, source, target, note):
         (f'\n[合并] 重复客户 #{source_id} 已合并到 #{target_id}，本条不再单独执行。', source_account),
     )
 
-    moved['prospect_profiles'] = _exec(
-        conn,
-        """UPDATE trosa.agent_prospect_profiles
-              SET customer_id=?, contact_permission='do_not_contact',
-                  suppression_reason=?, suppression_at=?, updated_at=?
-            WHERE customer_id=?""",
-        (target_id, note, now, now, source_id),
-    )
+    # Automation state, not business fact: one sela profile may exist per
+    # Customer (unique key).  When the survivor already has one, keep it (and
+    # block it); the duplicate's profile is dropped with its research.
+    target_profile = conn.execute(
+        'SELECT id FROM trosa.agent_prospect_profiles WHERE customer_id=?', (target_id,)
+    ).fetchone()
+    if target_profile:
+        moved['prospect_profiles'] = _exec(
+            conn,
+            """UPDATE trosa.agent_prospect_profiles
+                  SET contact_permission='do_not_contact', suppression_reason=?,
+                      suppression_at=?, updated_at=?
+                WHERE customer_id=?""",
+            (note, now, now, target_id),
+        )
+        moved['prospect_profiles_removed'] = _exec(
+            conn, 'DELETE FROM trosa.agent_prospect_profiles WHERE customer_id=?', (source_id,))
+    else:
+        moved['prospect_profiles'] = _exec(
+            conn,
+            """UPDATE trosa.agent_prospect_profiles
+                  SET customer_id=?, contact_permission='do_not_contact',
+                      suppression_reason=?, suppression_at=?, updated_at=?
+                WHERE customer_id=?""",
+            (target_id, note, now, now, source_id),
+        )
 
     # Company identity: the duplicate's hosts and names become the survivor's,
     # so the same company cannot be developed a second time.  A duplicate row
@@ -285,6 +304,41 @@ def _merge(conn, source, target, note):
     return moved
 
 
+def _write_audit(conn, user, target_id, details):
+    """Write the merge into the canonical audit log, same shape as the web app.
+
+    Implemented here instead of importing ``app.py``: ``import app`` resolves to
+    the ``app/`` static directory in this checkout, not the Flask module.
+    """
+    now = _now()
+    legacy_id = conn.execute(
+        "SELECT trosa.compat_next_id('operation_logs', trosa.compat_current_user())",
+    ).fetchone()[0]
+    conn.execute(
+        '''INSERT INTO audit.operation_log_events
+           (id, organization_id, legacy_user_id, legacy_id, action, target_type,
+            target_id, target_reference, details, occurred_at)
+           VALUES (?, trosa.compat_org_id(), ?, ?, 'MERGE', 'customer', ?, '', ?,
+                   coalesce(trosa.compat_time(?), now()))
+           ON CONFLICT (organization_id, legacy_user_id, legacy_id) DO UPDATE SET
+             action=excluded.action, target_type=excluded.target_type,
+             target_id=excluded.target_id, details=excluded.details,
+             occurred_at=excluded.occurred_at''',
+        (str(uuid.uuid4()), user, legacy_id, int(target_id), details, now),
+    )
+    # API-id adapter row only; the canonical audit row above is the truth.
+    conn.execute(
+        '''INSERT INTO trade_os_compat.operation_log_rows
+           (legacy_user_id, id, action, target_type, target_id, details, created_at, user_id)
+           VALUES (?, ?, 'MERGE', 'customer', ?, ?, ?, ?)
+           ON CONFLICT (legacy_user_id, id) DO UPDATE SET
+             action=excluded.action, target_type=excluded.target_type,
+             target_id=excluded.target_id, details=excluded.details,
+             created_at=excluded.created_at, user_id=excluded.user_id''',
+        (user, legacy_id, int(target_id), details, now, user),
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--source', type=int, required=True, help='重复客户 id（会被归档）')
@@ -340,9 +394,8 @@ def main(argv=None):
         backup_path = _write_backup(statement, args.backup_dir, args.source, args.target)
         print(f'备份已写入 {backup_path}')
         moved = _merge(conn, source, target, note)
-        import app  # only for the audited operation log writer
-        app._record_operation_log(
-            conn, 'MERGE', 'customer', args.target,
+        _write_audit(
+            conn, args.user, args.target,
             f'合并重复客户 #{args.source}（{source.get("company") or source.get("name")}）到 '
             f'#{args.target}；开发邮件 {moved["outreach_messages"]} 条、联系人 '
             f'{moved["customer_contacts"]} 位、关闭待办 {moved["tasks_closed"]} 条。',
