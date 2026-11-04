@@ -4,6 +4,13 @@
 - 修改：选中改为墨底白字（全站）。Inbox 按“书桌”重新设计：顶上读数加“候信尺”（每条等你的对话按等了多久钉成一根刻度，点刻度打开）；左边是一叠条子（撕口、点线、等了多久、最后一句话），选中的条子与信纸连成一体；中间是信纸，要你回答的那一条拆成“来龙去脉 + 放大的问题”，下面是带格线的“答”；右边登记表是独立白卡；打开对话停在要回答的那一块。窄屏和手机相应收起。
 - 影响范围：`app/static/app.js`（对话区渲染）、`app/static/index.html`、`app/static/visual-v5.css`、`app/static/swiss-d.css`、`design/DESIGN_WORLD.md`、`tests/support/dialogue_render_check.cjs`。接口和数据不变。
 
+## 2026-11-04 — 同一家公司有第二个官网时，sela 认出是老客户，不再重复开发
+
+- 现象：客户「Regal Plastics」有真实往来（2026-05 到 09 的报价、跟进、对方东海岸建库存的回复），但同一家公司还有另一个官网 `regalplastic.com`，sela 按这个域名另建了「Regal Plastic Supply」，并继续发开发信。根因有三层：客户资料里只有一个官网字段，公司域名表 `core.company_domains` 一直没人读；排除清单把所有已联系客户都标成同一个 `trosa_customer`，sela 把它当成“以前联系过、可以重新开发”；名称比对不折叠复数和 Supply 这类限定词。
+- 修改：客户资料里的第二个官网域名、别名现在也是身份的一部分——建潜客时，只要域名是这个人给这家公司登记过的，就复用原客户而不是另建；排除清单也会带上这些域名和别名。人工真实联系过的客户（有沟通记录、对方回信、收件箱捕获）标记为 `trosa_customer_contacted`，sela 见到它就硬排除；只有 sela 自己发过信的客户仍是 `trosa_customer`，它的正常跟进节奏不受影响。
+- 数据修复：新增 `tools/merge_customer_duplicate.py`（默认只预览，`--apply --yes` 才写），把重复客户的开发邮件、联系人移到保留客户上，把重复客户的域名和别名登记到保留客户，关闭按“不是一家”建的待办，停掉 sela 联系，最后归档重复客户；改动前把涉及的行完整备份成 JSON。已用它把 1262「Regal Plastic Supply」合并到 3「Regal Plastics」。
+- 影响范围：`app.py`（`_sela_company_registry`、`_sela_company_identity_matches`、`_sela_domain_variant_matches`、`_sela_record_identity`、排除清单状态）、`tools/merge_customer_duplicate.py`、`tests/test_sela_prospect_api.py`、`tests/test_postgres_rehearsal.py`。sela 侧同步识别新状态与名称变体。
+
 ## 2026-11-04 — 同一家公司把官网写成两种拼法时，sela 不再另建客户并发信
 
 - 现象：客户「Regal Plastics」（regal-plastics.com）早就在谈报价，sela 2026-09-01 仍按另一种拼法（regalplastic.com）新建了「Regal Plastic Supply」，还在 10 月 16 日、31 日继续发开发信。原因是识别公司时只认完全相同的官网域名或完全相同的规范化名称，而这家公司两处都差一点（域名差一个连字符和复数 s，名称差一个 Supply），于是被当成新公司。

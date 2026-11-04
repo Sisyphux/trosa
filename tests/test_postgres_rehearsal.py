@@ -1932,6 +1932,89 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(changed.status_code, 200)
         self.assertIn(extra, {item.get('id') for item in changed.get_json()['records']})
 
+    def test_registered_second_domain_is_the_same_company_and_blocks_outreach(self):
+        """A host a person registered for a company identifies that company.
+
+        The Regal incident: the same company was recorded as ``regal-plastics``
+        (real relationship) and ``regalplastic`` (sela prospect).  Once the
+        second host is registered on the company, a prospect carrying it must
+        reuse the existing Customer and the exclusion must list both hosts with
+        the strong ``trosa_customer_contacted`` status.
+        """
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+        first_source = f'pg-domain-registry-{run}'
+        second_source = f'pg-domain-registry-{run}-b'
+        first_host = f'{first_source}.example'
+        second_host = f'{second_source}.example'
+
+        def publish(source_id, host, email):
+            response = client.post(
+                '/api/integrations/sela/prospects',
+                headers={'X-Idempotency-Key': f'pg-domain-registry:{source_id}'},
+                json={'prospect': {
+                    'source_id': source_id, 'company': 'Regal Fixture Supply',
+                    'website': f'https://{host}/', 'country': 'US',
+                    'business_type': 'acrylic distributor', 'status': 'READY TO CONTACT',
+                    'contact': {'name': 'Buyer', 'email': email},
+                    'subject': 'Intro', 'email_draft': 'Hello.',
+                    'outreach_status': 'SENT', 'sent_at': '2026-10-01T10:00:00+08:00',
+                }},
+            )
+            self.assertEqual(response.status_code, 200, response.get_json())
+            return response.get_json()
+
+        first = publish(first_source, first_host, f'buyer@{first_host}')
+        customer_id = first['trosa_id']
+        self.addCleanup(lambda: client.delete(f'/api/customers/{customer_id}'))
+        recorded = client.post(f'/api/customers/{customer_id}/follow_history', json={
+            'activity_content': '客户回复：请报价', 'direction': 'inbound',
+            'follow_date': '2026-10-02',
+        })
+        self.assertEqual(recorded.status_code, 200, recorded.get_json())
+
+        company_id = self.connection.execute(
+            '''SELECT account.company_id FROM trosa.accounts account
+                 JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
+                WHERE ref.legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()[0]
+        domain_id = str(uuid.uuid4())
+        self.connection.execute(
+            '''INSERT INTO core.company_domains
+                   (id, company_id, normalized_domain, source_url, is_primary, verification_status)
+               VALUES (?, ?, ?, '', false, 'verified')''',
+            (domain_id, company_id, second_host),
+        )
+        self.connection.commit()
+
+        second = publish(second_source, second_host, f'buyer@{second_host}')
+        # A second sela prospect for the same company is sent back for review
+        # instead of becoming a second Customer; identity resolution itself is
+        # what this test proves below.
+        self.assertEqual(second['status'], 'REVIEW', second)
+        self.assertEqual([candidate['customer_id'] for candidate in second['candidates']], [customer_id])
+
+        with module.app.test_request_context():
+            matches, error = module._sela_match_customers(self.connection, {
+                'company': 'Regal Fixture Supply',
+                'website': f'https://{second_host}/',
+                'contact': {'name': 'Second Buyer', 'email': f'other@{second_host}'},
+            })
+        self.assertEqual(error, '')
+        self.assertEqual([row['id'] for row in matches], [customer_id])
+        self.assertIn('domain', matches[0]['matched_by'])
+
+        exclusions = client.get('/api/integrations/sela/exclusions')
+        self.assertEqual(exclusions.status_code, 200, exclusions.get_json())
+        record = next(item for item in exclusions.get_json()['records']
+                      if item.get('record_id') == f'trosa-customer:{customer_id}')
+        self.assertEqual(record['status'], 'trosa_customer_contacted')
+        self.assertIn(first_host, record['domains'])
+        self.assertIn(second_host, record['domains'])
+
     def test_sela_lifecycle_and_structured_request_are_canonical_in_postgres(self):
         module = self._app_module()
         client = module.app.test_client()

@@ -3578,13 +3578,50 @@ def _modern_outreach_rows(conn, *, customer_id=None, source_id=None, source_ids=
     return [dict(row) for row in rows]
 
 
-def _sela_company_identity_matches(rows, payload):
+def _sela_registered_identity(registry, customer_id):
+    """Domains and aliases a person already confirmed for one Customer."""
+    if not registry:
+        return {}
+    entry = registry.get(int(customer_id)) if customer_id is not None else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def _sela_row_domains(row, registry=None):
+    """Every host one Customer is recorded under, website plus registry."""
+    domains = set(_canonical_website_domains(row.get('website')))
+    entry = _sela_registered_identity(registry, row.get('id'))
+    for domain in entry.get('domains') or []:
+        canonical = _canonical_website_domain(domain)
+        if canonical:
+            domains.add(canonical)
+    return domains
+
+
+def _sela_row_name_variants(row, registry=None):
+    """Every normalized name one Customer is recorded under."""
+    names = set(_sela_name_variants(row.get('company') or row.get('name')))
+    if row.get('name') and row.get('name') != row.get('company'):
+        names.update(_sela_name_variants(row.get('name')))
+    entry = _sela_registered_identity(registry, row.get('id'))
+    for alias in entry.get('aliases') or []:
+        names.update(_sela_name_variants(alias))
+    names.discard('')
+    return names
+
+
+def _sela_company_identity_matches(rows, payload, registry=None):
     """Reuse an existing Customer by company identity when contacts are absent.
 
     A canonical website domain is a strong identity key: one company, one
-    domain.  A unique normalized company name corroborates it.  Ambiguous or
-    conflicting identity is returned for a Trosa review instead of silently
-    creating a second Customer for a company already owned by the CRM.
+    domain.  The Customer's own ``website`` field plus the domains a person
+    confirmed in ``core.company_domains`` both count, so a company that
+    publishes two spellings is one identity, not two.  A unique normalized
+    company name corroborates it.  Ambiguous or conflicting identity is
+    returned for a Trosa review instead of silently creating a second Customer
+    for a company already owned by the CRM.
+
+    ``registry`` maps Customer id -> ``{'domains': [...], 'aliases': [...]}``;
+    see ``_sela_company_registry``.
     """
     wanted_names = set(_sela_name_variants(payload.get('company') or payload.get('name')))
     wanted_domain = _canonical_website_domain(payload.get('website') or payload.get('domain'))
@@ -3592,12 +3629,10 @@ def _sela_company_identity_matches(rows, payload):
         return [], ''
     domain_hits, name_hits = [], []
     for row in rows:
-        row_domain = _canonical_website_domain(row.get('website'))
-        row_names = set(_sela_name_variants(row.get('company') or row.get('name')))
-        if row.get('name') and row.get('name') != row.get('company'):
-            row_names.update(_sela_name_variants(row.get('name')))
+        row_domains = _sela_row_domains(row, registry)
+        row_names = _sela_row_name_variants(row, registry)
         matched = []
-        if wanted_domain and row_domain and row_domain == wanted_domain:
+        if wanted_domain and wanted_domain in row_domains:
             matched.append('domain')
         if wanted_names and row_names and wanted_names & row_names:
             matched.append('company')
@@ -3613,7 +3648,7 @@ def _sela_company_identity_matches(rows, payload):
         # ("one company, one domain"), e.g. Plastic World ZA vs Plastic World
         # AU.  It is neither reused nor sent to a human; only name hits that
         # have no domain of their own remain candidates.
-        name_hits = [row for row in name_hits if not _canonical_website_domain(row.get('website'))]
+        name_hits = [row for row in name_hits if not _sela_row_domains(row, registry)]
     return name_hits, ''
 
 
@@ -3672,14 +3707,16 @@ def _sela_domain_keys_near(left, right):
                for index in range(len(longer)))
 
 
-def _sela_domain_variant_matches(conn, rows, wanted_domain, wanted_company):
+def _sela_domain_variant_matches(conn, rows, wanted_domain, wanted_company, registry=None):
     """Customers whose domain is a near-identical spelling of the prospect's.
 
     ``regal-plastics.com`` vs ``regalplastic.com`` differ by a hyphen and a
     plural ``s``; one company publishes both.  A hyphen-free match stands on its
     own, while a one-character difference also needs the company names to
     overlap so ``acme-parts.com`` and ``acme-part.com`` of unrelated companies
-    do not meet.
+    do not meet.  Domains a person already registered for the company count
+    here too, so an alias spelling is not missed just because it is not in the
+    Customer's own ``website`` field.
 
     The hit is not reused automatically: an automatic reuse would move a cold
     prospect onto a customer the CRM already owns without a person looking.
@@ -3690,14 +3727,21 @@ def _sela_domain_variant_matches(conn, rows, wanted_domain, wanted_company):
     if not wanted_key or not wanted_key.isascii():
         return []
 
+    def row_keys(row):
+        keys = {_sela_domain_variant_key(row.get('website'))}
+        entry = _sela_registered_identity(registry, row.get('id'))
+        keys.update(_sela_domain_variant_key(domain) for domain in entry.get('domains') or [])
+        keys.discard('')
+        return keys
+
     def is_variant(row):
-        row_key = _sela_domain_variant_key(row.get('website'))
-        if not row_key:
-            return False
-        if row_key == wanted_key:
-            return True
-        return (_sela_domain_keys_near(row_key, wanted_key) and
-                _sela_name_identity_overlap(wanted_company, row.get('company') or row.get('name')))
+        for row_key in row_keys(row):
+            if row_key == wanted_key:
+                return True
+            if (_sela_domain_keys_near(row_key, wanted_key) and
+                    _sela_name_identity_overlap(wanted_company, row.get('company') or row.get('name'))):
+                return True
+        return False
 
     if postgres_mode():
         rows = [dict(row) for row in conn.execute(
@@ -3706,6 +3750,18 @@ def _sela_domain_variant_matches(conn, rows, wanted_domain, wanted_company):
             "ORDER BY updated_at DESC, id DESC",
             (wanted_key,),
         ).fetchall()]
+        present = {int(row['id']) for row in rows}
+        registered_ids = sorted(
+            int(customer_id) for customer_id, entry in (registry or {}).items()
+            if any(_sela_domain_keys_near(_sela_domain_variant_key(domain), wanted_key)
+                   for domain in entry.get('domains') or [])
+            and int(customer_id) not in present)
+        if registered_ids:
+            rows.extend(dict(row) for row in conn.execute(
+                "SELECT * FROM trosa.customer_records WHERE deleted_at IS NULL AND id IN ("
+                + ','.join('?' for _ in registered_ids) + ") ORDER BY updated_at DESC, id DESC",
+                registered_ids,
+            ).fetchall())
     matches = []
     seen = set()
     for row in rows:
@@ -3803,15 +3859,17 @@ def _sela_company_candidate_condition(wanted_name_keys, wanted_domain, candidate
     return '(' + ' OR '.join(parts) + ')', params
 
 
-def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain):
+def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain,
+                              registry=None):
     """PostgreSQL candidate read for ``_sela_match_customers``.
 
     A fixed number of statements, independent of the Customer count: the
     confirmed-source fact, the contacts that can carry the wanted identity, and
     one Customer read narrowed to what the matcher can pick (contact hits,
-    external owner, same domain, same name).  Returns ``(rows, contact_rows)``
-    in the same order and shape the full-table read produced, or
-    ``(None, row)`` when a human-confirmed source fact selects the Customer.
+    external owner, same domain, same name, a domain a person registered for
+    the company).  Returns ``(rows, contact_rows)`` in the same order and shape
+    the full-table read produced, or ``(None, row)`` when a human-confirmed
+    source fact selects the Customer.
     """
     if candidate_id:
         confirmed = identity_link.active_facts_for_identifier(
@@ -3837,6 +3895,14 @@ def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted
         ).fetchall()]
     hit_ids = sorted({int(row['customer_id']) for row in contact_rows
                       if row.get('customer_id') is not None})
+    # A domain a person registered for the company is as strong as the
+    # Customer's own ``website``; without it, the candidate read would omit the
+    # very record the registry is meant to identify.
+    registered_ids = []
+    if wanted_domain:
+        for customer_id, entry in (registry or {}).items():
+            if wanted_domain in (entry.get('domains') or []):
+                registered_ids.append(int(customer_id))
     company_condition, company_params = _sela_company_candidate_condition(
         _sela_name_variants(payload.get('company') or payload.get('name')), wanted_domain, candidate_id)
     where, query_params = ['deleted_at IS NULL'], []
@@ -3845,6 +3911,9 @@ def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted
         if hit_ids:
             selectors.append('id IN (' + ','.join('?' for _ in hit_ids) + ')')
             selector_params.extend(hit_ids)
+        if registered_ids:
+            selectors.append('id IN (' + ','.join('?' for _ in registered_ids) + ')')
+            selector_params.extend(registered_ids)
         where.append('(' + ' OR '.join(selectors) + ')')
         query_params = selector_params
     rows = [dict(row) for row in conn.execute(
@@ -3876,10 +3945,11 @@ def _sela_match_customers(conn, payload):
         ) if phone
     }
     wanted_domain = _canonical_website_domain(payload.get('website'))
+    registry = _sela_company_registry(conn)
 
     if postgres_mode():
         rows, contact_rows = _sela_match_candidate_rows(
-            conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain)
+            conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain, registry)
         if rows is None:
             item = contact_rows
             return [item], ''
@@ -3953,11 +4023,11 @@ def _sela_match_customers(conn, payload):
         matches.append(item)
     if matches:
         return matches, ''
-    matches, company_error = _sela_company_identity_matches(rows, payload)
+    matches, company_error = _sela_company_identity_matches(rows, payload, registry)
     if matches or company_error:
         return matches, company_error
     variant_matches = _sela_domain_variant_matches(
-        conn, rows, wanted_domain, payload.get('company') or payload.get('name'))
+        conn, rows, wanted_domain, payload.get('company') or payload.get('name'), registry)
     if variant_matches:
         return variant_matches, 'COMPANY_IDENTITY_VARIANT'
     return [], ''
@@ -4623,7 +4693,47 @@ def _sela_contact_domains_by_customer(conn):
     return result
 
 
-def _sela_record_identity(item, contact_domains):
+def _sela_company_registry(conn):
+    """Human-confirmed company identity per Customer: extra hosts and names.
+
+    ``core.company_domains`` and ``core.company_aliases`` hold every spelling a
+    person confirmed for a company; the Customer's ``website`` field holds only
+    one of them.  Reading the registry here is what lets identity matching and
+    the exclusion snapshot see *all* of a company's domains, so a company that
+    publishes ``regal-plastics.com`` and ``regalplastic.com`` cannot be
+    developed twice.  SQLite development/import databases have no registry.
+    """
+    if not postgres_mode():
+        return {}
+    rows = conn.execute(
+        '''SELECT ref.legacy_customer_id AS customer_id,
+                  domain.normalized_domain AS domain, '' AS alias
+             FROM trosa.account_legacy_refs ref
+             JOIN trosa.accounts account ON account.id=ref.account_id
+             JOIN core.company_domains domain ON domain.company_id=account.company_id
+            WHERE ref.organization_id=trosa.compat_org_id()
+              AND ref.legacy_user_id=trosa.compat_current_user()
+           UNION ALL
+           SELECT ref.legacy_customer_id, '' AS domain, company_alias.alias AS alias
+             FROM trosa.account_legacy_refs ref
+             JOIN trosa.accounts account ON account.id=ref.account_id
+             JOIN core.company_aliases company_alias ON company_alias.company_id=account.company_id
+            WHERE ref.organization_id=trosa.compat_org_id()
+              AND ref.legacy_user_id=trosa.compat_current_user()''',
+    ).fetchall()
+    registry = {}
+    for row in rows:
+        entry = registry.setdefault(int(row['customer_id']), {'domains': [], 'aliases': []})
+        domain = _canonical_website_domain(row['domain'])
+        if domain and domain not in entry['domains']:
+            entry['domains'].append(domain)
+        alias = str(row['alias'] or '').strip()
+        if alias and alias not in entry['aliases']:
+            entry['aliases'].append(alias)
+    return registry
+
+
+def _sela_record_identity(item, contact_domains, registered=None):
     """Names and domains one Customer can be recognised by in an exclusion."""
     canonical_name = str(item.get('company') or item.get('name') or '').strip()
     aliases = []
@@ -4633,10 +4743,19 @@ def _sela_record_identity(item, contact_domains):
                 aliases.append(variant)
     if item.get('name') and item.get('name') != canonical_name:
         aliases.insert(0, str(item.get('name')))
+    registered = registered or {}
+    for alias in registered.get('aliases') or []:
+        for variant in _sela_name_variants(alias):
+            if variant != _sync_name_key(canonical_name) and variant not in aliases:
+                aliases.append(variant)
     domains = _canonical_website_domains(item.get('website'))
     for domain in contact_domains:
         if domain not in domains:
             domains.append(domain)
+    for domain in registered.get('domains') or []:
+        canonical = _canonical_website_domain(domain)
+        if canonical and canonical not in domains:
+            domains.append(canonical)
     return aliases, domains
 
 
@@ -4667,6 +4786,7 @@ def _sela_other_member_contact_records(own_records):
                 if not evidence:
                     continue
                 member_contact_domains = _sela_contact_domains_by_customer(member_conn)
+                member_registry = _sela_company_registry(member_conn)
                 if postgres_mode():
                     rows = member_conn.execute(
                         '''SELECT id, name, company, website, country, updated_at
@@ -4689,7 +4809,9 @@ def _sela_other_member_contact_records(own_records):
                 continue
             canonical_name = str(item.get('company') or item.get('name') or '').strip()
             name_key = _sync_name_key(canonical_name)
-            aliases, domains = _sela_record_identity(item, member_contact_domains.get(customer_id, []))
+            aliases, domains = _sela_record_identity(
+                item, member_contact_domains.get(customer_id, []),
+                member_registry.get(customer_id))
             if not canonical_name or not (domains or name_key):
                 continue
             if (name_key and name_key in covered_names) or any(d in covered_domains for d in domains):
@@ -4713,6 +4835,26 @@ def _sela_other_member_contact_records(own_records):
     return extra
 
 
+_SELA_HUMAN_CONTACT_EVIDENCE = frozenset({
+    'recorded_communication', 'customer_reply', 'inbound_capture',
+})
+
+
+def _sela_customer_exclusion_status(evidence):
+    """Exclusion status for one Customer, from the contact fact that proves it.
+
+    ``trosa_customer_contacted`` means a person really talked to the company
+    (a recorded communication, an inbound reply or an inbound capture), so a
+    cold re-development email is wrong.  ``trosa_customer`` covers the weaker
+    delivery-event fact: sela itself already emailed the address, which must
+    block a duplicate *send* but does not prove a relationship, so its own
+    follow-up cadence stays allowed.
+    """
+    if evidence in _SELA_HUMAN_CONTACT_EVIDENCE:
+        return 'trosa_customer_contacted'
+    return 'trosa_customer'
+
+
 def _sela_exclusion_snapshot_records(conn):
     """Return the one authoritative exclusion projection owned by Trosa.
 
@@ -4724,12 +4866,15 @@ def _sela_exclusion_snapshot_records(conn):
     """
     contact_evidence = _sela_customer_contact_evidence(conn)
     contact_domains = _sela_contact_domains_by_customer(conn)
+    registry = _sela_company_registry(conn)
 
     def customer_record(item, customer_id, latest_outreach_date):
         canonical_name = str(item.get('company') or item.get('name') or '')
         if not canonical_name:
             return None
-        aliases, domains = _sela_record_identity(item, contact_domains.get(customer_id, []))
+        aliases, domains = _sela_record_identity(
+            item, contact_domains.get(customer_id, []), registry.get(customer_id))
+        evidence = contact_evidence.get(customer_id, '')
         return {
             'record_id': f'trosa-customer:{customer_id}',
             'canonical_name': canonical_name,
@@ -4737,7 +4882,7 @@ def _sela_exclusion_snapshot_records(conn):
             'aliases': aliases,
             'domains': domains,
             'country': str(item.get('country') or ''),
-            'status': 'trosa_customer', 'match_policy': 'hard',
+            'status': _sela_customer_exclusion_status(evidence), 'match_policy': 'hard',
             'source': 'trosa_customer', 'source_id': str(customer_id),
             'updated_at': str(item.get('updated_at') or ''),
             'id': customer_id, 'name': str(item.get('name') or ''),
@@ -4745,7 +4890,7 @@ def _sela_exclusion_snapshot_records(conn):
             'business_stage': str(item.get('business_stage') or ''),
             'latest_outreach_date': latest_outreach_date,
             'contacted': True,
-            'contact_evidence': contact_evidence.get(customer_id, ''),
+            'contact_evidence': evidence,
         }
 
     if postgres_mode():
@@ -4804,12 +4949,14 @@ def _sela_exclusion_snapshot_records(conn):
             canonical_name = str(item.get('company') or item.get('name') or '')
             if not canonical_name:
                 continue
+            suppression_aliases, suppression_domains = _sela_record_identity(
+                item, [], registry.get(int(item['customer_id'])))
             records.append({
                 'record_id': f'trosa-contact-suppression:{int(item["id"])}',
                 'canonical_name': canonical_name,
                 'normalized_name': _sync_name_key(canonical_name),
-                'aliases': [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else [],
-                'domains': _canonical_website_domains(item.get('website')),
+                'aliases': suppression_aliases,
+                'domains': suppression_domains,
                 'country': str(item.get('country') or ''),
                 'status': 'do_not_contact', 'match_policy': 'hard',
                 'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),
@@ -4858,12 +5005,14 @@ def _sela_exclusion_snapshot_records(conn):
         canonical_name = str(item.get('company') or item.get('name') or '')
         if not canonical_name:
             continue
+        suppression_aliases, suppression_domains = _sela_record_identity(
+            item, [], registry.get(int(item['customer_id'])))
         records.append({
             'record_id': f'trosa-contact-suppression:{int(item["id"])}',
             'canonical_name': canonical_name,
             'normalized_name': _sync_name_key(canonical_name),
-            'aliases': [str(item.get('name') or '')] if item.get('name') and item.get('name') != canonical_name else [],
-            'domains': _canonical_website_domains(item.get('website')),
+            'aliases': suppression_aliases,
+            'domains': suppression_domains,
             'country': str(item.get('country') or ''),
             'status': 'do_not_contact', 'match_policy': 'hard',
             'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),

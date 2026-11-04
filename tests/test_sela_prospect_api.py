@@ -1235,6 +1235,50 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_registered_domain_and_alias_identify_the_existing_customer(self):
+        # 人工确认过的第二个官网域名/别名，和客户自己的 website 一样是强身份。
+        rows = [
+            {'id': 3, 'name': 'Regal Plastics', 'company': 'Regal Plastics',
+             'website': 'https://www.regal-plastics.example/'},
+            {'id': 9, 'name': 'Northline Packaging', 'company': 'Northline Packaging',
+             'website': 'https://northline.example/'},
+        ]
+        registry = {3: {'domains': ['regalplastic.example'],
+                        'aliases': ['Regal Plastic Supply']}}
+        matched, error = self.module._sela_company_identity_matches(
+            rows, {'company': 'Regal Plastic Supply', 'website': 'https://regalplastic.example/'},
+            registry)
+        self.assertEqual(error, '')
+        self.assertEqual([row['id'] for row in matched], [3])
+        self.assertEqual(matched[0]['matched_by'], ['domain', 'company'])
+        # 没注册过的域名仍然按“一家公司一个域名”处理，不误判为同一家。
+        matched, error = self.module._sela_company_identity_matches(
+            rows, {'company': 'Regal Plastic Supply', 'website': 'https://regalplastic-other.example/'},
+            registry)
+        self.assertEqual((matched, error), ([], ''))
+
+    def test_exclusion_status_separates_real_contact_from_sela_delivery(self):
+        status = self.module._sela_customer_exclusion_status
+        self.assertEqual(status('recorded_communication'), 'trosa_customer_contacted')
+        self.assertEqual(status('customer_reply'), 'trosa_customer_contacted')
+        self.assertEqual(status('inbound_capture'), 'trosa_customer_contacted')
+        # 只有 sela 自己的投递事件时，仍然允许它继续自己的跟进节奏。
+        self.assertEqual(status('delivery_event'), 'trosa_customer')
+        self.assertEqual(status(''), 'trosa_customer')
+
+    def test_record_identity_includes_registered_hosts_and_names(self):
+        aliases, domains = self.module._sela_record_identity(
+            {'company': 'Regal Plastics', 'name': 'Regal Plastics',
+             'website': 'https://www.regal-plastics.example/'},
+            ['sales@regalplastic.example'],
+            {'domains': ['regalplastic.example'], 'aliases': ['Regal Plastic Supply']},
+        )
+        self.assertIn('regalplastic.example', domains)
+        self.assertIn('regal-plastics.example', domains)
+        self.assertIn('regal plastic supply', aliases)
+        self.assertEqual(len(domains), len(set(domains)))
+        self.assertEqual(len(aliases), len(set(aliases)))
+
     def test_sync_closes_moot_identity_review_for_same_source(self):
         self.add_customer('Moot Plastics', website='https://moot-plastics-au.example/')
         body = prospect('moot-prospect')
