@@ -3369,7 +3369,9 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-glance-toggle { flex: none; margin-left: auto; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-2); }
   #trosa .dialogue-glance-toggle::after { content: "全部资料 ↓"; }
   #trosa .dialogue-dossier-fold[open] .dialogue-glance-toggle::after { content: "收起 ↑"; }
-  #trosa .dialogue-dossier-fold[open] .dialogue-glance-cells { display: none; }
+  #trosa .dialogue-glance-intro { flex: 1 1 100%; max-width: 78ch; font-size: var(--dl-fs-body-s); line-height: 1.6; color: var(--dl-ink-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  #trosa .dialogue-dossier-fold[open] .dialogue-glance-cells,
+  #trosa .dialogue-dossier-fold[open] .dialogue-glance-intro { display: none; }
   #trosa .dialogue-dossier-head { padding-left: 40px; }
   #trosa .dialogue-kv-k { padding-left: 40px; }
 }

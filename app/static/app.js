@@ -15138,6 +15138,10 @@ function dialogueDossierGlanceHtml(context, place) {
   if (context.do_not_contact) flags.push('不联系');
   if (context.bounced) flags.push('退信');
   if (context.replied) flags.push('回过信');
+  // 基本介绍：开发理由，没有就取背调里“做什么”那一行，再没有取背调第一行。
+  var bgLines = String(context.background || '').split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean);
+  var doing = bgLines.filter(function(line) { return /^做什么[：:]/.test(line); })[0] || bgLines[0] || '';
+  var intro = context.reason || doing || '';
   return '<span class="dialogue-glance-name">' + escapeHtml(context.company) + '</span>' +
     '<span class="dialogue-glance-cells">' +
       cell('', escapeHtml(place.replace(context.company + ' · ', ''))) +
@@ -15146,7 +15150,8 @@ function dialogueDossierGlanceHtml(context, place) {
       cell('', escapeHtml(context.email || '')) +
       activity +
       (flags.length ? cell('状态', flags.map(function(f) { return escapeHtml(f); }).join('、'), 'is-flag') : '') +
-    '</span><span class="dialogue-glance-toggle" aria-hidden="true"></span>';
+    '</span><span class="dialogue-glance-toggle" aria-hidden="true"></span>' +
+    (intro ? '<span class="dialogue-glance-intro">' + escapeHtml(intro) + '</span>' : '');
 }
 
 function dialogueDossierHtml(context) {
