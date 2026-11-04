@@ -2,7 +2,7 @@
 
 - 现象：同一家公司常开几个品牌或公司名（如 Pleksi Market / Ata Pleksi），名字和域名都不同。你在 Inbox 点「是同一主体」后，系统只记住了这一条 sela 来源，下一个带着另一个品牌名或域名来的潜客仍会被当成新公司，重新新建客户、重新发开发信。
 - 修改：确认「是同一主体」时，新的公司名和官网域名会登记到该客户所属公司的别名/域名表里。sela 之后再遇到这个名字（不管官网是什么）或这个域名，直接归到这家客户，不再新建。客户页标题下一行显示「又名 …」（没有又名时不显示）。「同名但官网不同就当成不同公司」的规则不变。
-- 影响范围：`app.py`、`app/static/app.js`、`tests/test_postgres_rehearsal.py`。没有新增表或迁移，沿用已有的 `core.company_aliases` / `core.company_domains`。SQLite 开发库没有这两张表，不显示又名。搜索还不认又名，后续再做。
+- 影响范围：`app.py`、`app/static/app.js`、`tests/test_postgres_rehearsal.py`。没有新增表或迁移，沿用已有的 `core.company_aliases` / `core.company_domains`。SQLite 开发库没有这两张表，不显示又名。客户搜索也认又名：搜另一个品牌名能找到这家客户。
 
 ## 2026-11-04 — Inbox 对话页重做：书桌、候信尺、条子、信纸、落笔回答
 

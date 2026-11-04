@@ -2074,6 +2074,12 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         summary = client.get(f'/api/customers/{customer_id}/summary')
         self.assertEqual(summary.status_code, 200, summary.get_json())
         self.assertEqual(summary.get_json()['aliases'], [brand])
+        # Searching the other brand finds the customer.
+        found = client.get('/api/customers', query_string={'search': brand})
+        self.assertEqual(found.status_code, 200, found.get_json())
+        payload = found.get_json()
+        records = payload['customers'] if isinstance(payload, dict) else payload
+        self.assertIn(customer_id, [item['id'] for item in records])
 
     def test_sela_lifecycle_and_structured_request_are_canonical_in_postgres(self):
         module = self._app_module()

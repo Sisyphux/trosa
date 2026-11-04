@@ -11194,19 +11194,25 @@ def _get_customers_postgres(conn, *, cleaned_search, search_tokens, business_sta
         country_aliases = _country_aliases_for_tokens(cleaned_search, search_tokens)
         country_token_keys = {_search_normalize(token): keys for token, keys in country_aliases.items()}
         related_hits = {}
+        # Other names a person registered for a company ("又名") count as the
+        # company's own name: searching a brand finds the customer.
+        registered_aliases = {customer_id: entry.get('aliases') or []
+                              for customer_id, entry in _sela_company_registry(conn).items()}
         for customer in list(customers):
+            aliases = tuple(registered_aliases.get(customer['id'], ()))
             values = (
                 customer.get('name'), customer.get('company'), customer.get('country'),
                 customer.get('field'), customer.get('industry'), customer.get('type'),
                 customer.get('tags'), customer.get('notes'), customer.get('profile'),
                 customer.get('source'), customer.get('source_detail'),
                 customer_source_display(customer.get('source')),
-            )
+            ) + aliases
             # Names and the company tolerate a small typo; long free text does not.
             field_hits = _search_token_hits(normalized_tokens, values)
             rest = [token for token in normalized_tokens if token not in field_hits]
             if rest:
-                field_hits |= _search_token_hits(rest, (customer.get('name'), customer.get('company')), fuzzy=True)
+                field_hits |= _search_token_hits(
+                    rest, (customer.get('name'), customer.get('company')) + aliases, fuzzy=True)
                 rest = [token for token in rest if token not in field_hits]
             if rest:
                 # Short labels may be typed as pinyin; long notes are not converted.
