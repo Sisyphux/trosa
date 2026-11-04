@@ -192,10 +192,10 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   await win.selectDialogueThread(A);
   assert.equal(archivedGroup().dataset.open, 'false');
   assert.equal(list.querySelectorAll('[data-group="awaiting"] .dialogue-row').length, 2);
-  // 列表是台账：第一行写标题、等了多久，第二行写国家和最后一句话的开头。
+  // 列表是一叠条子：标题、等了多久；有国家时第二行写国家（最后一句话不放在列表里）。
   const alphaRow = list.querySelector('[data-group="awaiting"] .dialogue-row[data-dialogue-id="' + A + '"]');
   assert.ok(alphaRow && alphaRow.textContent.includes('Alpha 竞品排除'), list.textContent);
-  assert.ok(alphaRow.querySelector('.dialogue-row-sub').textContent.includes('Northwind 是不是已经排除了？'), alphaRow.textContent);
+  assert.equal(alphaRow.textContent.includes('Northwind 是不是已经排除了？'), false, '列表不显示最后一句话');
   assert.ok(doc.getElementById('dialogueOverview').textContent.includes('2'), doc.getElementById('dialogueOverview').textContent);
   assert.equal(doc.getElementById('dialogueNavCount').textContent, '2');
 

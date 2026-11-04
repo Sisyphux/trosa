@@ -14883,7 +14883,7 @@ function dialogueRowHtml(thread) {
   // 一条对话是台账里的两行：第一行 标题 ……… 等了多久；第二行 国家 · 最后一句话的开头。
   var preview = (thread.last_message_preview && thread.last_message_preview.text) || '';
   var line = preview.replace(/\s+/g, ' ').trim();
-  var sub = [thread.country, line].filter(Boolean).join(' · ');
+  var sub = thread.country || '';
   return '<div class="dialogue-row dialogue-row--' + group + (selected ? ' is-selected' : '') + '" role="listitem" tabindex="-1"' +
       ' data-dialogue-id="' + escapeHtml(thread.id) + '" aria-current="' + (selected ? 'true' : 'false') + '"' +
       ' onclick="selectDialogueThread(\'' + thread.id + '\')">' +
@@ -15121,7 +15121,7 @@ function dialogueCadenceHtml(sent) {
 // 登记表收起时（窄一些的屏）这一行就是它的“一眼”：公司、地点、行业、联系人、发信/联系情况、状态，能放多少放多少。
 function dialogueDossierGlanceHtml(context, place) {
   var cell = function(label, value, cls) {
-    return value ? '<span class="dialogue-glance-cell' + (cls ? ' ' + cls : '') + '"><i>' + escapeHtml(label) + '</i><b>' + value + '</b></span>' : '';
+    return value ? '<span class="dialogue-glance-cell' + (cls ? ' ' + cls : '') + '">' + (label ? '<i>' + escapeHtml(label) + '</i>' : '') + '<b>' + value + '</b></span>' : '';
   };
   var person = [context.contact_name, context.contact_title].filter(Boolean).join(' · ');
   var activity;
@@ -15140,10 +15140,10 @@ function dialogueDossierGlanceHtml(context, place) {
   if (context.replied) flags.push('回过信');
   return '<span class="dialogue-glance-name">' + escapeHtml(context.company) + '</span>' +
     '<span class="dialogue-glance-cells">' +
-      cell('在哪', escapeHtml(place.replace(context.company + ' · ', ''))) +
-      cell('行业', escapeHtml(context.business_type || '')) +
-      cell('联系人', escapeHtml(person)) +
-      cell('邮箱', escapeHtml(context.email || '')) +
+      cell('', escapeHtml(place.replace(context.company + ' · ', ''))) +
+      cell('', escapeHtml(context.business_type || '')) +
+      cell('', escapeHtml(person)) +
+      cell('', escapeHtml(context.email || '')) +
       activity +
       (flags.length ? cell('状态', flags.map(function(f) { return escapeHtml(f); }).join('、'), 'is-flag') : '') +
     '</span><span class="dialogue-glance-toggle" aria-hidden="true"></span>';

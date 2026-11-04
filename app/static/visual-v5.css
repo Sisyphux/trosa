@@ -3081,13 +3081,13 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-ruler-tick:focus-visible { outline: 2px solid var(--dl-focus); outline-offset: 2px; }
 #trosa .dialogue-stats-act { flex: none; display: flex; align-items: center; padding: 0 0 4px; }
 #trosa .dialogue-note-btn {
-  display: inline-flex; align-items: center; gap: 8px; min-height: var(--dl-tap, 40px); padding: 0 16px; box-sizing: border-box;
-  cursor: pointer; font: inherit; font-size: var(--dl-fs-body-s); font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; width: 48px; min-height: 48px; padding: 0; box-sizing: border-box;
+  cursor: pointer; font: inherit;
   color: var(--dl-ink); background: var(--dl-paper); border: 1px solid var(--dl-ink); border-radius: var(--dl-r-sm);
 }
 #trosa .dialogue-note-btn:hover { background: var(--dl-ink-wash-2); }
 #trosa #page-dialogue.dialogue-note-open .dialogue-note-btn { background: var(--dl-ink); color: var(--dl-paper); }
-#trosa .dialogue-note-btn .ui-icon { width: 16px; height: 16px; }
+#trosa .dialogue-note-btn .ui-icon { width: 22px; height: 22px; }
 
 /* 桌面：灰底的桌面上，左边是一叠条子，右边是摊开的信纸；选中的条子和信纸连成一体 */
 #trosa .dialogue-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); background: var(--desk); }
