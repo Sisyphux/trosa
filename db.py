@@ -1338,6 +1338,9 @@ USER_TABLE_SQL = [
         suppression_reason TEXT DEFAULT '',
         suppression_at TEXT DEFAULT '',
         transport_json TEXT NOT NULL DEFAULT '{}',
+        address_key TEXT NOT NULL DEFAULT '',
+        legal_name_key TEXT NOT NULL DEFAULT '',
+        registration_key TEXT NOT NULL DEFAULT '',
         created_at TEXT DEFAULT (datetime('now', 'localtime')),
         updated_at TEXT DEFAULT (datetime('now', 'localtime')),
         UNIQUE(legacy_user_id, source, source_id),
@@ -1761,6 +1764,11 @@ USER_TABLE_SQL = [
 
 # 用户数据库迁移：为旧库加新列
 USER_MIGRATIONS = {
+    'agent_prospect_profiles': {
+        'address_key': "TEXT NOT NULL DEFAULT ''",
+        'legal_name_key': "TEXT NOT NULL DEFAULT ''",
+        'registration_key': "TEXT NOT NULL DEFAULT ''",
+    },
     'customers': {
         # Older customer databases predate the audit timestamp. Keep this
         # migration explicit because customer list sorting relies on it.

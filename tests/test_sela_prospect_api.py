@@ -1193,6 +1193,65 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def _post_branded(self, source_id, company, domain, **extra):
+        body = prospect(source_id)
+        body['company'] = company
+        body['website'] = f'https://{domain}/'
+        body['contact'] = {'name': 'Sales', 'email': f'sales@{domain}', 'is_primary': 1}
+        body['source_urls'] = [f'https://{domain}/about']
+        body['email_source_url'] = f'https://{domain}/contact'
+        body['evidence'] = []
+        body.update(extra)
+        return self.post_prospect(body, f'sela-v2:{source_id}:one')
+
+    def test_shared_address_or_legal_name_goes_to_review(self):
+        first = self._post_branded(
+            'pleksi-market', 'Pleksi Market', 'pleksimarket.example',
+            address='Atatürk Mah. 12. Sok. No:5, Başakşehir, İstanbul',
+            legal_name='Ata Plastik Sanayi Ltd. Şti.')
+        self.assertEqual(first.get_json()['status'], 'SYNCED', first.get_json())
+        trosa_id = first.get_json()['trosa_id']
+        # 同一地址（写法不同）→ 回 REVIEW，附证据，不新建客户、不入档案。
+        second = self._post_branded(
+            'ata-pleksi', 'Ata Pleksi', 'atapleksi.example',
+            address='ATATURK MAH, 12 SOK NO 5 Basaksehir Istanbul')
+        result = second.get_json()
+        self.assertEqual(result['status'], 'REVIEW', result)
+        self.assertEqual(result['reason'], 'COMPANY_IDENTITY_SHARED_ENTITY')
+        self.assertEqual([c['customer_id'] for c in result['candidates']], [trosa_id])
+        self.assertEqual(result['candidates'][0]['matched_by'], ['address'])
+        self.assertIn('12', result['candidates'][0]['evidence'])
+        # 同一法人全称也算。
+        third = self._post_branded(
+            'ata-pleksi-2', 'Ata Pleksi Plus', 'atapleksiplus.example',
+            legal_name='ATA PLASTIK SANAYI LTD ŞTI')
+        self.assertEqual(third.get_json()['reason'], 'COMPANY_IDENTITY_SHARED_ENTITY')
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM customers').fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_different_address_in_same_building_or_vague_address_does_not_match(self):
+        self._post_branded('first-co', 'First Co', 'firstco.example',
+                           address='Plaza Tower 3, 4th Floor, Dubai Marina, Dubai')
+        # 同一栋楼、不同楼层 → 整串不等，不提示。
+        other = self._post_branded('second-co', 'Second Co', 'secondco.example',
+                                   address='Plaza Tower 3, 7th Floor, Dubai Marina, Dubai')
+        self.assertEqual(other.get_json()['status'], 'SYNCED', other.get_json())
+        # 太笼统的地址（无门牌数字）不具备识别力。
+        self._post_branded('third-co', 'Third Co', 'thirdco.example', address='Istanbul Turkey')
+        vague = self._post_branded('fourth-co', 'Fourth Co', 'fourthco.example', address='Istanbul Turkey')
+        self.assertEqual(vague.get_json()['status'], 'SYNCED', vague.get_json())
+
+    def test_identity_hint_keys(self):
+        module = self.module
+        self.assertEqual(module._identity_address_key('Istanbul Turkey'), '')
+        self.assertEqual(module._identity_legal_name_key('Ltd. Şti.'), '')
+        self.assertEqual(module._identity_registration_key('12345'), '')
+        self.assertEqual(module._identity_legal_name_key('Ata Plastik Ltd. Şti.'),
+                         module._identity_legal_name_key('ATA PLASTIK LTD STI'))
+
     def test_domain_variant_key_ignores_only_hyphens(self):
         key = self.module._sela_domain_variant_key
         self.assertEqual(key('https://www.regal-plastics.com/'), 'regalplastics.com')

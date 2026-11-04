@@ -3926,6 +3926,101 @@ def _sela_match_candidate_rows(conn, candidate_id, payload, wanted_email, wanted
     return rows, contact_rows
 
 
+_LEGAL_SUFFIX_TOKENS = {
+    'ltd', 'limited', 'sti', 'ltd sti', 'as', 'a s', 'inc', 'llc', 'corp', 'co', 'gmbh', 'sa', 'srl',
+    'spa', 'bv', 'pt', 'tbk', 'cv', 'pvt', 'private', 'sdn', 'bhd', 'sirketi', 'sanayi', 'ticaret',
+    'san', 'tic', 'company', 'corporation',
+}
+
+
+def _identity_text_key(value):
+    """Fold case, accents, Turkish dotless i and punctuation into one comparable string."""
+    text = unicodedata.normalize('NFKD', str(value or '').replace('ı', 'i').replace('İ', 'I'))
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch)).casefold()
+    return ' '.join(re.sub(r'[^0-9a-z\u0080-\uffff]+', ' ', text).split())
+
+
+def _identity_address_key(value):
+    """Whole-string address key; too short or number-less addresses are not identifying."""
+    key = _identity_text_key(value)
+    tokens = key.split()
+    if len(tokens) < 4 or not any(ch.isdigit() for ch in key):
+        return ''
+    return key
+
+
+def _identity_legal_name_key(value):
+    """Full legal name key; needs a distinctive word besides company-form words."""
+    key = _identity_text_key(value)
+    tokens = key.split()
+    distinctive = [token for token in tokens if token not in _LEGAL_SUFFIX_TOKENS and len(token) >= 3]
+    if len(tokens) < 2 or not distinctive:
+        return ''
+    return key
+
+
+def _identity_registration_key(value):
+    key = re.sub(r'[^0-9a-z]+', '', _identity_text_key(value))
+    return key if len(key) >= 6 and any(ch.isdigit() for ch in key) else ''
+
+
+def _sela_identity_hints(prospect):
+    """Optional address / legal name / registration id a prospect's website showed."""
+    raw = {
+        'address': _sela_prospect_text(prospect.get('address'), 500),
+        'legal_name': _sela_prospect_text(prospect.get('legal_name'), 300),
+        'registration_id': _sela_prospect_text(prospect.get('registration_id'), 100),
+    }
+    keys = {
+        'address': _identity_address_key(raw['address']),
+        'legal_name': _identity_legal_name_key(raw['legal_name']),
+        'registration_id': _identity_registration_key(raw['registration_id']),
+    }
+    return raw, keys
+
+
+def _sela_identity_hint_matches(conn, hints):
+    """Customers whose Sela profile carries the same address, legal name or registration id.
+
+    Only whole-string equality after normalisation counts, so a different
+    company in the same building does not match.  Returns customer rows with
+    ``matched_by`` naming the shared clue and ``evidence`` showing its value.
+    """
+    keys = (hints or {}).get('keys') or {}
+    raw = (hints or {}).get('raw') or {}
+    columns = (('address', 'address_key'), ('legal_name', 'legal_name_key'),
+               ('registration_id', 'registration_key'))
+    clauses, params = [], []
+    for kind, column in columns:
+        if keys.get(kind):
+            clauses.append(f'{column}=?')
+            params.append(keys[kind])
+    if not clauses:
+        return []
+    relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    scope = 'organization_id=trosa.compat_org_id() AND ' if postgres_mode() else ''
+    profiles = conn.execute(
+        f'SELECT customer_id, address_key, legal_name_key, registration_key FROM {relation} '
+        f'WHERE {scope}legacy_user_id=? AND source=? AND (' + ' OR '.join(clauses) + ')',
+        [_sela_prospect_user(), _SELA_PROSPECT_SOURCE] + params,
+    ).fetchall()
+    shared = {}
+    for profile in profiles:
+        for kind, column in columns:
+            if keys.get(kind) and profile[column] == keys[kind]:
+                shared.setdefault(int(profile['customer_id']), []).append(kind)
+    matches = []
+    for customer_id in sorted(shared):
+        row = _sela_profile_customer(conn, customer_id)
+        if not row:
+            continue
+        item = dict(row)
+        item['matched_by'] = shared[customer_id]
+        item['evidence'] = '；'.join(raw[kind] for kind in shared[customer_id] if raw.get(kind))
+        matches.append(item)
+    return matches
+
+
 def _sela_match_customers(conn, payload):
     """Resolve one sela candidate using auditable identity keys.
 
@@ -4030,6 +4125,12 @@ def _sela_match_customers(conn, payload):
         conn, rows, wanted_domain, payload.get('company') or payload.get('name'), registry)
     if variant_matches:
         return variant_matches, 'COMPANY_IDENTITY_VARIANT'
+    # Different name, domain, mailbox and phone, yet the same registered
+    # address / legal name / registration id: possibly one entity running two
+    # brands.  Only a person may decide, so this is a review, never a reuse.
+    hint_matches = _sela_identity_hint_matches(conn, payload.get('identity_hints'))
+    if hint_matches:
+        return hint_matches, 'COMPANY_IDENTITY_SHARED_ENTITY'
     return [], ''
 
 
@@ -4359,6 +4460,11 @@ def _sela_prospect_research(value):
         'site_hygiene': _sela_prospect_text(value.get('site_hygiene'), 120),
         'email_source_url': _sela_prospect_text(value.get('email_source_url'), 2000),
         'email_type': _sela_prospect_text(value.get('email_type'), 120),
+        **{key: text for key, text in (
+            ('address', _sela_prospect_text(value.get('address'), 500)),
+            ('legal_name', _sela_prospect_text(value.get('legal_name'), 300)),
+            ('registration_id', _sela_prospect_text(value.get('registration_id'), 100)),
+        ) if text},
         'evidence': evidence,
         'source_urls': source_urls,
         'agent_state': _sela_prospect_agent_state(value),
@@ -5141,6 +5247,7 @@ def _sela_review_candidate(row, reason=''):
         'company': _sela_prospect_text(row.get('company') or row.get('name'), 500),
         'website': _sela_prospect_text(row.get('website'), 2000),
         'matched_by': [_sela_prospect_text(method, 40) for method in methods if _sela_prospect_text(method, 40)][:10],
+        **({'evidence': _sela_prospect_text(row.get('evidence'), 800)} if row.get('evidence') else {}),
     }
 
 
@@ -5648,23 +5755,29 @@ def _sela_upsert_profile(conn, customer_id, source_id, prospect, now, existing=N
         requested_stop or not str(prior.get('suppression_at') or '').strip()
     ) else str(prior.get('suppression_at') or '').strip()
     relation = 'trosa.agent_prospect_profiles' if postgres_mode() else 'agent_prospect_profiles'
+    _raw_hints, hint_keys = _sela_identity_hints(prospect)
     conn.execute(
         f'''INSERT INTO {relation}
            (legacy_user_id, source, source_id, customer_id, research_json,
             contact_permission, suppression_reason, suppression_at, transport_json,
+            address_key, legal_name_key, registration_key,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT''' + _sela_conflict_target('legacy_user_id', 'source', 'source_id') + ''' DO UPDATE SET
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT''' + _sela_conflict_target('legacy_user_id', 'source', 'source_id') + f''' DO UPDATE SET
              customer_id=excluded.customer_id,
              research_json=excluded.research_json,
              contact_permission=excluded.contact_permission,
              suppression_reason=excluded.suppression_reason,
              suppression_at=excluded.suppression_at,
              transport_json=excluded.transport_json,
+             address_key=CASE WHEN excluded.address_key<>'' THEN excluded.address_key ELSE {relation}.address_key END,
+             legal_name_key=CASE WHEN excluded.legal_name_key<>'' THEN excluded.legal_name_key ELSE {relation}.legal_name_key END,
+             registration_key=CASE WHEN excluded.registration_key<>'' THEN excluded.registration_key ELSE {relation}.registration_key END,
              updated_at=excluded.updated_at''',
         (_sela_prospect_user(), _SELA_PROSPECT_SOURCE, source_id, customer_id,
          json.dumps(research, ensure_ascii=False), permission, suppression_reason,
-         suppression_at, json.dumps(transport, ensure_ascii=False), now, now),
+         suppression_at, json.dumps(transport, ensure_ascii=False),
+         hint_keys['address'], hint_keys['legal_name'], hint_keys['registration_id'], now, now),
     )
     return research
 
@@ -6095,6 +6208,7 @@ def _sela_upsert_prospect(conn, prospect):
             'contact': prospect.get('contact') if isinstance(prospect.get('contact'), dict) else {
                 'email': prospect.get('email'),
             },
+            'identity_hints': dict(zip(('raw', 'keys'), _sela_identity_hints(prospect))),
         })
         if match_error:
             return {
@@ -14595,6 +14709,7 @@ def _inbox_sela_review_payload(item, conn=None):
         'SOURCE_IDENTITY_CONFLICT': '来源身份与已有客户冲突',
         'EXTERNAL_IDENTITY_CONFLICT': '外部身份与已有记录冲突',
         'COMPANY_IDENTITY_VARIANT': '同一公司的另一个域名',
+        'COMPANY_IDENTITY_SHARED_ENTITY': '可能是同一主体的另一个品牌',
         'IDENTITY_REVIEW': '身份需要人工确认',
     }
     explanation = str(payload.get('reason_note') or payload.get('explanation') or '').strip()
@@ -14605,6 +14720,8 @@ def _inbox_sela_review_payload(item, conn=None):
             explanation = '来源身份与已有客户的资料冲突，需要人工判断是否为同一主体。'
         elif reason == 'COMPANY_IDENTITY_VARIANT':
             explanation = '官网域名只差连字符，可能是同一家公司的另一种写法；确认前不会发信。'
+        elif reason == 'COMPANY_IDENTITY_SHARED_ENTITY':
+            explanation = '名称和域名都不同，但官网上的地址、法人全称或注册号与已有客户一致，可能是同一主体的另一个品牌；确认前不会发信。'
     review = {
         'source_id': str(payload.get('source_id') or '').strip(),
         'company': str(payload.get('company') or '').strip(),
