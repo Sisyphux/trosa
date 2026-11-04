@@ -3609,6 +3609,15 @@ def _sela_row_name_variants(row, registry=None):
     return names
 
 
+def _sela_registered_alias_variants(row, registry=None):
+    """Name keys a person registered as another name of this Customer."""
+    names = set()
+    for alias in _sela_registered_identity(registry, row.get('id')).get('aliases') or []:
+        names.update(_sela_name_variants(alias))
+    names.discard('')
+    return names
+
+
 def _sela_company_identity_matches(rows, payload, registry=None):
     """Reuse an existing Customer by company identity when contacts are absent.
 
@@ -3628,6 +3637,7 @@ def _sela_company_identity_matches(rows, payload, registry=None):
     if not wanted_names and not wanted_domain:
         return [], ''
     domain_hits, name_hits = [], []
+    alias_hit_ids = set()
     for row in rows:
         row_domains = _sela_row_domains(row, registry)
         row_names = _sela_row_name_variants(row, registry)
@@ -3636,6 +3646,8 @@ def _sela_company_identity_matches(rows, payload, registry=None):
             matched.append('domain')
         if wanted_names and row_names and wanted_names & row_names:
             matched.append('company')
+            if wanted_names & _sela_registered_alias_variants(row, registry):
+                alias_hit_ids.add(row.get('id'))
         if not matched:
             continue
         item = dict(row)
@@ -3647,47 +3659,12 @@ def _sela_company_identity_matches(rows, payload, registry=None):
         # Same name under a different recorded domain is a different company
         # ("one company, one domain"), e.g. Plastic World ZA vs Plastic World
         # AU.  It is neither reused nor sent to a human; only name hits that
-        # have no domain of their own remain candidates.
-        name_hits = [row for row in name_hits if not _sela_row_domains(row, registry)]
+        # have no domain of their own remain candidates.  A name a person
+        # registered as this company's alias is the exception: they already
+        # said it is the same company, whatever site it publishes.
+        name_hits = [row for row in name_hits
+                     if row.get('id') in alias_hit_ids or not _sela_row_domains(row, registry)]
     return name_hits, ''
-
-
-def _sela_confirmed_identity_match(conn, payload, wanted_email, wanted_domain):
-    """Customer a person already confirmed for this brand name, domain or email.
-
-    A human "same company" answer is stored as identity facts.  Looking them up
-    here is what lets a second brand of one company land on the first brand's
-    Customer instead of opening (and developing) another one.  Facts that point
-    at different Customers are ambiguous and fall through to the usual rules.
-    """
-    lookups = []
-    for name_key in _sela_name_variants(payload.get('company') or payload.get('name')):
-        lookups.append(('name', name_key, 'alias'))
-    if wanted_domain:
-        lookups.append(('domain', wanted_domain, 'confirmed_domain'))
-    if wanted_email and identity_link.email_domain(wanted_email) not in identity_link.PUBLIC_EMAIL_DOMAINS:
-        lookups.append(('email', wanted_email, 'confirmed_email'))
-    found = {}
-    for identifier_type, value, label in lookups:
-        for fact in identity_link.active_facts_for_identifier(conn, identifier_type, value):
-            if fact.get('customer_id') is not None:
-                found.setdefault(int(fact['customer_id']), label)
-    if len(found) != 1:
-        return None
-    customer_id, label = next(iter(found.items()))
-    if postgres_mode():
-        row = conn.execute(
-            'SELECT * FROM trosa.customer_records WHERE id=? AND deleted_at IS NULL',
-            (customer_id,)).fetchone()
-    else:
-        row = conn.execute(
-            'SELECT * FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)',
-            (customer_id,)).fetchone()
-    if not row:
-        return None
-    item = dict(row)
-    item['matched_by'] = [label]
-    return item
 
 
 def _sela_domain_variant_key(value):
@@ -4061,9 +4038,6 @@ def _sela_match_customers(conn, payload):
         matches.append(item)
     if matches:
         return matches, ''
-    confirmed_match = _sela_confirmed_identity_match(conn, payload, wanted_email, wanted_domain)
-    if confirmed_match:
-        return [confirmed_match], ''
     matches, company_error = _sela_company_identity_matches(rows, payload, registry)
     if matches or company_error:
         return matches, company_error
@@ -4772,6 +4746,55 @@ def _sela_company_registry(conn):
         if alias and alias not in entry['aliases']:
             entry['aliases'].append(alias)
     return registry
+
+
+def _sela_register_company_identity(conn, customer_id, identifiers):
+    """Register the brand name and host a person just confirmed as this company.
+
+    ``core.company_aliases`` / ``core.company_domains`` are what
+    ``_sela_company_registry`` reads, so one "same company" answer is enough for
+    every later prospect carrying that name or host to resolve to this Customer.
+    SQLite development databases have no registry.
+    """
+    if not postgres_mode():
+        return []
+    row = conn.execute(
+        '''SELECT account.company_id AS company_id
+             FROM trosa.accounts account
+             JOIN trosa.account_legacy_refs ref ON ref.account_id=account.id
+            WHERE ref.organization_id=trosa.compat_org_id()
+              AND ref.legacy_user_id=trosa.compat_current_user()
+              AND ref.legacy_customer_id=?''',
+        (int(customer_id),),
+    ).fetchone()
+    if not row or not row['company_id']:
+        return []
+    company_id, applied = row['company_id'], []
+    for identifier_type, value in identifiers:
+        if identifier_type == 'name':
+            key = _sync_name_key(value)
+            if not key:
+                continue
+            conn.execute(
+                '''INSERT INTO core.company_aliases
+                       (id, company_id, alias, normalized_alias, source, confidence)
+                   VALUES (gen_random_uuid(), ?, ?, ?, 'inbox_same_entity', 'confirmed')
+                   ON CONFLICT (company_id, normalized_alias) DO NOTHING''',
+                (company_id, value, key),
+            )
+        elif identifier_type == 'domain':
+            conn.execute(
+                '''INSERT INTO core.company_domains
+                       (id, company_id, normalized_domain, source_url, is_primary, verification_status)
+                   VALUES (gen_random_uuid(), ?, ?, '', false, 'verified')
+                   ON CONFLICT (company_id, normalized_domain) DO NOTHING''',
+                (company_id, value),
+            )
+        else:
+            continue
+        applied.append({'field': 'identity', 'target': 'company', 'decision': 'same',
+                        'customer_id': int(customer_id), 'value': f'{identifier_type}:{value}'})
+    return applied
 
 
 def _sela_record_identity(item, contact_domains, registered=None):
@@ -12091,7 +12114,7 @@ def get_customer_summary(customer_id):
                 for other in _active_customers(conn)
             )
         agent_prospect = _sela_customer_agent_context(_sela_profile_for_customer(conn, customer_id))
-        aliases = _customer_aliases(conn, customer_id)
+        aliases = _customer_aliases(conn, customer_id, customer)
         customer['last_contact'] = business_facts['latest_communication_date']
         customer['next_follow_up'] = business_facts['next_task_date']
         gaps = _customer_information_gaps(customer, len(contacts), duplicate_company)
@@ -12159,7 +12182,7 @@ def get_customer_summary(customer_id):
     # source of truth; retired automatic-development rows stay out of work.
     customer['next_follow_up'] = business_facts['next_task_date']
     information_gaps = _customer_information_gaps(customer, contact_count, duplicate_company)
-    customer['aliases'] = _customer_aliases(conn, customer_id)
+    customer['aliases'] = _customer_aliases(conn, customer_id, customer)
     conn.close()
     # The workspace shell needs one actionable next step.  The complete task
     # lists stay behind the tasks tab so opening a customer does not transfer
@@ -12249,7 +12272,7 @@ def get_customer(customer_id):
         result['contacts'] = contacts
         result['outreach_emails'] = outreach_emails
         result['agent_prospect'] = agent_prospect
-        result['aliases'] = _customer_aliases(conn, customer_id)
+        result['aliases'] = _customer_aliases(conn, customer_id, customer)
         rows = (_modern_file_rows(conn, customer_id) if postgres_mode() else c.execute(
             '''SELECT id, customer_id, original_name, file_size, mime_type, category,
                                        sha256, uploaded_by, created_at, file_path, stored_name
@@ -12267,16 +12290,27 @@ def get_customer(customer_id):
             conn.close()
 
 
-def _customer_aliases(conn, customer_id):
-    """Other names and brands a person confirmed belong to this customer."""
+def _customer_aliases(conn, customer_id, customer=None):
+    """Other names a person registered for this customer's company."""
+    if not postgres_mode():
+        return []
+    own = {_sync_name_key((customer or {}).get(key)) for key in ('company', 'name')}
+    rows = conn.execute(
+        '''SELECT company_alias.alias AS alias
+             FROM trosa.account_legacy_refs ref
+             JOIN trosa.accounts account ON account.id=ref.account_id
+             JOIN core.company_aliases company_alias ON company_alias.company_id=account.company_id
+            WHERE ref.organization_id=trosa.compat_org_id()
+              AND ref.legacy_user_id=trosa.compat_current_user()
+              AND ref.legacy_customer_id=?
+            ORDER BY company_alias.created_at, company_alias.alias''',
+        (int(customer_id),),
+    ).fetchall()
     names = []
-    for fact in identity_link.facts_for_customer(conn, customer_id):
-        if fact.get('identifier_type') != 'name':
-            continue
-        shown = str(fact.get('resolution') or '').strip()
-        shown = shown if shown and not shown.startswith('Inbox ') else fact['identifier_value']
-        if shown not in names:
-            names.append(shown)
+    for row in rows:
+        alias = str(row['alias'] or '').strip()
+        if alias and _sync_name_key(alias) not in own and alias not in names:
+            names.append(alias)
     return names
 
 
@@ -16334,10 +16368,10 @@ def _sela_identity_identifiers(source_id, payload):
     if domain:
         identifiers.append(('domain', domain))
     # The brand name itself: once a person says "same company", the other name
-    # becomes an alias of that customer.
-    name_key = _sync_name_key(payload.get('company') or payload.get('name'))
-    if name_key:
-        identifiers.append(('name', name_key, str(payload.get('company') or payload.get('name')).strip()[:200]))
+    # (and host) is registered on that company so every later prospect that
+    # carries it resolves to the same Customer.
+    if _sync_name_key(payload.get('company') or payload.get('name')):
+        identifiers.append(('name', str(payload.get('company') or payload.get('name')).strip()[:200]))
     return identifiers
 
 
@@ -16353,23 +16387,25 @@ def _sela_record_identity_decision(conn, *, decision, customer_id, identifiers, 
     decision = str(decision or '').strip().lower()
     applied = []
     if decision == 'same' and customer_id:
-        for identifier_type, value, *shown in identifiers:
+        for identifier_type, value in identifiers:
+            if identifier_type not in identity_link.IDENTIFIER_TYPES:
+                continue
             method = {'source': 'confirmed_source', 'email': 'confirmed_email',
-                      'domain': 'confirmed_domain', 'name': 'confirmed_name'}.get(identifier_type, '')
+                      'domain': 'confirmed_domain'}.get(identifier_type, '')
             identity_link.record_identity_fact(
                 conn, identifier_type=identifier_type, identifier_value=value,
                 customer_id=int(customer_id), origin='human_confirmed', method=method,
-                # A name fact keeps the name as written, so the customer page
-                # can show it; the key itself is lower-cased for matching.
-                resolution=(shown[0] if shown else '') or 'Inbox 人工确认同一业务主体',
-                source_inbox_item_id=inbox_item_id,
+                resolution='Inbox 人工确认同一业务主体', source_inbox_item_id=inbox_item_id,
                 created_by=actor,
             )
             applied.append({'field': 'identity', 'target': 'customer', 'decision': 'same',
                             'customer_id': int(customer_id),
                             'value': f'{identifier_type}:{value}'})
+        applied.extend(_sela_register_company_identity(conn, customer_id, identifiers))
     elif decision == 'different':
-        for identifier_type, value, *_shown in identifiers:
+        for identifier_type, value in identifiers:
+            if identifier_type not in identity_link.IDENTIFIER_TYPES:
+                continue
             identity_link.revoke_identity_facts(
                 conn, identifier_type=identifier_type, identifier_value=value)
         applied.append({'field': 'identity', 'target': 'prospect', 'decision': 'different',

@@ -2015,6 +2015,59 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertIn(first_host, record['domains'])
         self.assertIn(second_host, record['domains'])
 
+    def test_same_entity_answer_registers_other_brand_and_shows_it_on_the_customer(self):
+        """A "same company" answer registers the other brand name and host.
+
+        The next prospect that carries either must resolve to the same Customer,
+        and the customer summary lists the other name for the page to show.
+        """
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+        source_id = f'pg-same-entity-{run}'
+        host = f'{source_id}.example'
+        response = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': f'pg-same-entity:{source_id}'},
+            json={'prospect': {
+                'source_id': source_id, 'company': f'Ata Fixture {run}',
+                'website': f'https://{host}/', 'country': 'TR',
+                'business_type': 'acrylic distributor', 'status': 'READY TO CONTACT',
+                'contact': {'name': 'Buyer', 'email': f'buyer@{host}'},
+                'subject': 'Intro', 'email_draft': 'Hello.',
+            }},
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        customer_id = response.get_json()['trosa_id']
+        self.addCleanup(lambda: client.delete(f'/api/customers/{customer_id}'))
+
+        brand = f'Pleksi Fixture {run}'
+        brand_host = f'brand-{run}.example'
+        with module.app.test_request_context():
+            applied = module._sela_register_company_identity(
+                self.connection, customer_id, [('name', brand), ('domain', brand_host)])
+            self.connection.commit()
+            self.assertEqual(len(applied), 2, applied)
+            # Registering twice is harmless.
+            module._sela_register_company_identity(
+                self.connection, customer_id, [('name', brand), ('domain', brand_host)])
+            self.connection.commit()
+            matches, error = module._sela_match_customers(self.connection, {
+                'company': brand, 'website': 'https://unrelated-site.example/',
+                'contact': {'name': 'Other', 'email': 'other@unrelated-site.example'},
+            })
+            self.assertEqual(error, '')
+            self.assertEqual([row['id'] for row in matches], [customer_id])
+            matches, error = module._sela_match_customers(self.connection, {
+                'company': 'Something Else', 'website': f'https://{brand_host}/',
+                'contact': {'name': 'Other', 'email': f'other@{brand_host}'},
+            })
+            self.assertEqual([row['id'] for row in matches], [customer_id])
+        summary = client.get(f'/api/customers/{customer_id}/summary')
+        self.assertEqual(summary.status_code, 200, summary.get_json())
+        self.assertEqual(summary.get_json()['aliases'], [brand])
+
     def test_sela_lifecycle_and_structured_request_are_canonical_in_postgres(self):
         module = self._app_module()
         client = module.app.test_client()
