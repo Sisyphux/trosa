@@ -87,8 +87,16 @@ def _snapshot(conn, source, target):
         'SELECT * FROM trosa.customer_states WHERE legacy_customer_id IN (?, ?)',
         (source['id'], target['id']),
     )
+    # ``trosa.customer_contacts`` is a read view; contacts live per user in
+    # ``trosa.contact_legacy_refs``.
     statement['contacts'] = _rows(
-        conn, 'SELECT * FROM trosa.customer_contacts WHERE customer_id=?', (source['id'],))
+        conn,
+        '''SELECT * FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id IN (?, ?)''',
+        (source['id'], target['id']),
+    )
     statement['outreach_messages'] = _rows(
         conn, 'SELECT * FROM trosa.outreach_messages WHERE account_id=?', (source_account,))
     message_ids = [row['id'] for row in statement['outreach_messages']]
@@ -171,15 +179,29 @@ def _merge(conn, source, target, note):
     # Contacts move as they are, except a second "primary" contact: the target's
     # own primary keeps priority and the duplicate becomes an ordinary contact.
     target_primary = conn.execute(
-        'SELECT count(*) FROM trosa.customer_contacts WHERE customer_id=? AND is_primary=1',
+        '''SELECT count(*) FROM trosa.contact_legacy_refs
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id=? AND is_primary''',
         (target_id,),
     ).fetchone()[0]
     if target_primary:
-        _exec(conn, 'UPDATE trosa.customer_contacts SET is_primary=0 WHERE customer_id=?', (source_id,))
+        _exec(
+            conn,
+            '''UPDATE trosa.contact_legacy_refs SET is_primary=false
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''',
+            (source_id,),
+        )
     moved['customer_contacts'] = _exec(
         conn,
-        'UPDATE trosa.customer_contacts SET customer_id=? WHERE customer_id=?',
-        (target_id, source_id),
+        '''UPDATE trosa.contact_legacy_refs
+              SET legacy_customer_id=?, account_id=?
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id=?''',
+        (target_id, target_account, source_id),
     )
 
     # Tasks created for the duplicate were written on a false premise (the tool
@@ -205,14 +227,9 @@ def _merge(conn, source, target, note):
     )
 
     # Company identity: the duplicate's hosts and names become the survivor's,
-    # so the same company cannot be developed a second time.
-    _exec(
-        conn,
-        """UPDATE core.company_domains
-              SET company_id=?, is_primary=false, verification_status='verified'
-            WHERE company_id=?""",
-        (target_company, source_company),
-    )
+    # so the same company cannot be developed a second time.  A duplicate row
+    # the survivor already has is dropped first: the unique key is per company,
+    # so moving it would fail.
     _exec(
         conn,
         """DELETE FROM core.company_domains duplicate
@@ -223,7 +240,9 @@ def _merge(conn, source, target, note):
     )
     _exec(
         conn,
-        "UPDATE core.company_aliases SET company_id=? WHERE company_id=?",
+        """UPDATE core.company_domains
+              SET company_id=?, is_primary=false, verification_status='verified'
+            WHERE company_id=?""",
         (target_company, source_company),
     )
     _exec(
@@ -233,6 +252,11 @@ def _merge(conn, source, target, note):
             WHERE duplicate.company_id=? AND existing.company_id=?
               AND duplicate.normalized_alias=existing.normalized_alias""",
         (source_company, target_company),
+    )
+    _exec(
+        conn,
+        "UPDATE core.company_aliases SET company_id=? WHERE company_id=?",
+        (target_company, source_company),
     )
     _exec(
         conn,
