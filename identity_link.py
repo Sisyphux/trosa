@@ -35,7 +35,7 @@ PUBLIC_EMAIL_DOMAINS = frozenset({
     '163.com', '126.com', 'yeah.net',
 })
 
-IDENTIFIER_TYPES = ('email', 'domain', 'thread', 'source')
+IDENTIFIER_TYPES = ('email', 'domain', 'thread', 'source', 'name')
 
 _EMAIL_RE = re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+')
 _DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$')
@@ -51,6 +51,7 @@ METHOD_LABELS = {
     'confirmed_thread': '已确认邮件线程',
     'thread_history': '历史邮件线程归属',
     'confirmed_source': '已确认来源关联',
+    'confirmed_name': '已确认又名',
     'source_identity': '来源客户关联',
     'trusted_source_customer': '来源已关联客户',
 }

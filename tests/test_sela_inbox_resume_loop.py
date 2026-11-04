@@ -395,6 +395,19 @@ class SelaInboxResumeLoopTest(unittest.TestCase):
             self.assertEqual(error, '')
             self.assertEqual([int(row['id']) for row in matches], [other_customer_id])
             self.assertEqual(matches[0]['matched_by'], ['confirmed_source'])
+            # 又名：另一个来源再带来同一个品牌名 / 域名，也直接归到该客户，不再另建。
+            matches, error = self.module._sela_match_customers(conn, {
+                'candidate_id': 'loop-identity-same-second-brand', 'company': 'Loop Plastics',
+                'website': 'https://unrelated-site.example/', 'contact': {}})
+            self.assertEqual(error, '')
+            self.assertEqual([int(row['id']) for row in matches], [other_customer_id])
+            self.assertEqual(matches[0]['matched_by'], ['alias'])
+            matches, error = self.module._sela_match_customers(conn, {
+                'candidate_id': 'loop-identity-same-third-brand', 'company': 'Something Else',
+                'website': 'https://loop-plastics.example/', 'contact': {}})
+            self.assertEqual([int(row['id']) for row in matches], [other_customer_id])
+            self.assertEqual(matches[0]['matched_by'], ['confirmed_domain'])
+            self.assertEqual(self.module._customer_aliases(conn, other_customer_id), ['loop plastics'])
         finally:
             conn.close()
 

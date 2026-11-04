@@ -1530,7 +1530,7 @@ USER_TABLE_SQL = [
     CREATE TABLE IF NOT EXISTS identity_link_facts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         identifier_type TEXT NOT NULL
-            CHECK(identifier_type IN ('email', 'domain', 'thread', 'source')),
+            CHECK(identifier_type IN ('email', 'domain', 'thread', 'source', 'name')),
         identifier_value TEXT NOT NULL,
         customer_id INTEGER NOT NULL,
         origin TEXT NOT NULL DEFAULT 'human_confirmed'

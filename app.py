@@ -3652,6 +3652,44 @@ def _sela_company_identity_matches(rows, payload, registry=None):
     return name_hits, ''
 
 
+def _sela_confirmed_identity_match(conn, payload, wanted_email, wanted_domain):
+    """Customer a person already confirmed for this brand name, domain or email.
+
+    A human "same company" answer is stored as identity facts.  Looking them up
+    here is what lets a second brand of one company land on the first brand's
+    Customer instead of opening (and developing) another one.  Facts that point
+    at different Customers are ambiguous and fall through to the usual rules.
+    """
+    lookups = []
+    for name_key in _sela_name_variants(payload.get('company') or payload.get('name')):
+        lookups.append(('name', name_key, 'alias'))
+    if wanted_domain:
+        lookups.append(('domain', wanted_domain, 'confirmed_domain'))
+    if wanted_email and identity_link.email_domain(wanted_email) not in identity_link.PUBLIC_EMAIL_DOMAINS:
+        lookups.append(('email', wanted_email, 'confirmed_email'))
+    found = {}
+    for identifier_type, value, label in lookups:
+        for fact in identity_link.active_facts_for_identifier(conn, identifier_type, value):
+            if fact.get('customer_id') is not None:
+                found.setdefault(int(fact['customer_id']), label)
+    if len(found) != 1:
+        return None
+    customer_id, label = next(iter(found.items()))
+    if postgres_mode():
+        row = conn.execute(
+            'SELECT * FROM trosa.customer_records WHERE id=? AND deleted_at IS NULL',
+            (customer_id,)).fetchone()
+    else:
+        row = conn.execute(
+            'SELECT * FROM customers WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)',
+            (customer_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item['matched_by'] = [label]
+    return item
+
+
 def _sela_domain_variant_key(value):
     """Domain identity that ignores the hyphen spelling of one host.
 
@@ -4023,6 +4061,9 @@ def _sela_match_customers(conn, payload):
         matches.append(item)
     if matches:
         return matches, ''
+    confirmed_match = _sela_confirmed_identity_match(conn, payload, wanted_email, wanted_domain)
+    if confirmed_match:
+        return [confirmed_match], ''
     matches, company_error = _sela_company_identity_matches(rows, payload, registry)
     if matches or company_error:
         return matches, company_error
@@ -12205,6 +12246,7 @@ def get_customer(customer_id):
         result['contacts'] = contacts
         result['outreach_emails'] = outreach_emails
         result['agent_prospect'] = agent_prospect
+        result['aliases'] = _customer_aliases(conn, customer_id)
         rows = (_modern_file_rows(conn, customer_id) if postgres_mode() else c.execute(
             '''SELECT id, customer_id, original_name, file_size, mime_type, category,
                                        sha256, uploaded_by, created_at, file_path, stored_name
@@ -12220,6 +12262,15 @@ def get_customer(customer_id):
     finally:
         if conn is not None:
             conn.close()
+
+
+def _customer_aliases(conn, customer_id):
+    """Other names and brands a person confirmed belong to this customer."""
+    names = []
+    for fact in identity_link.facts_for_customer(conn, customer_id):
+        if fact.get('identifier_type') == 'name' and fact.get('identifier_value') not in names:
+            names.append(fact['identifier_value'])
+    return names
 
 
 def _customer_context_markdown(customer, contacts, follow_history, outreach_emails, reminders, mode='compact', agent_prospect=None):
@@ -16275,6 +16326,11 @@ def _sela_identity_identifiers(source_id, payload):
     domain = _canonical_website_domain(payload.get('website') or payload.get('domain'))
     if domain:
         identifiers.append(('domain', domain))
+    # The brand name itself: once a person says "same company", the other name
+    # becomes an alias of that customer.
+    name_key = _sync_name_key(payload.get('company') or payload.get('name'))
+    if name_key:
+        identifiers.append(('name', name_key))
     return identifiers
 
 
@@ -16292,7 +16348,7 @@ def _sela_record_identity_decision(conn, *, decision, customer_id, identifiers, 
     if decision == 'same' and customer_id:
         for identifier_type, value in identifiers:
             method = {'source': 'confirmed_source', 'email': 'confirmed_email',
-                      'domain': 'confirmed_domain'}.get(identifier_type, '')
+                      'domain': 'confirmed_domain', 'name': 'confirmed_name'}.get(identifier_type, '')
             identity_link.record_identity_fact(
                 conn, identifier_type=identifier_type, identifier_value=value,
                 customer_id=int(customer_id), origin='human_confirmed', method=method,
