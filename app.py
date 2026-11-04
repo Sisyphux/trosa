@@ -32,7 +32,7 @@ from uuid import UUID, uuid4
 from email import policy as email_policy
 from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
-from urllib.parse import urlparse, urlencode
+from urllib.parse import quote, urlparse, urlencode
 from concurrent.futures import ThreadPoolExecutor
 from email_validator import validate_email as validate_email_address, EmailNotValidError
 import dns.resolver
@@ -84,6 +84,9 @@ from gmail_sync import (
 import inbox_questions as _inbox_questions
 import inbox_dialogue as _dialogue
 from inbox_attachment_analysis import analyze_import_file as _analyze_inbox_import_file
+from excel_reader import cell_text as _spreadsheet_cell_text
+from excel_reader import read_sheets as _read_spreadsheet_sheets
+from excel_reader import xls_cell_value as _xls_cell_value
 from inbox_reconcile import reconcile_current_user as _reconcile_inbox_current_user
 from customer_timezone import (
     TIMEZONE_SOURCE_INFERRED as _TIMEZONE_SOURCE_INFERRED,
@@ -394,7 +397,8 @@ def _sela_integration_path_allowed():
         })
         or (request.method == 'GET' and re.fullmatch(
             r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-            r'(?:/attachments/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?',
+            r'(?:/attachments/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+            r'(?:/spreadsheet)?)?',
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
@@ -9001,29 +9005,38 @@ def inbox_dialogue_upload():
                     'name': original_name, 'mime_type': mime, 'size_bytes': size})
 
 
-def _dialogue_attachment_response(thread_id, file_object_id):
-    """Serve one file attached to this (caller-scoped) thread; nothing else is reachable."""
+def _dialogue_attachment_file(thread_id, file_object_id):
+    """Resolve one attachment of this (caller-scoped) thread; nothing else is reachable."""
     if not postgres_mode():
-        return jsonify({'error': '只有正式环境支持对话附件'}), 503
+        return None, (jsonify({'error': '只有正式环境支持对话附件'}), 503)
     conn = get_db()
     try:
         if file_object_id not in _dialogue.thread_attachment_ids(conn, thread_id=thread_id):
-            return jsonify({'error': '附件不存在'}), 404
+            return None, (jsonify({'error': '附件不存在'}), 404)
         row = conn.execute(
             '''SELECT storage_key, original_name, mime_type FROM core.file_objects
                 WHERE id=? AND organization_id=trosa.compat_org_id() AND deleted_at IS NULL''',
             (file_object_id,),
         ).fetchone()
     except _dialogue.DialogueError as error:
-        return _dialogue_error_response(error)
+        return None, _dialogue_error_response(error)
     finally:
         conn.close()
     if not row:
-        return jsonify({'error': '附件不存在或已删除'}), 404
+        return None, (jsonify({'error': '附件不存在或已删除'}), 404)
     stored_path = os.path.join(DB_DIR, row['storage_key'])
     if not os.path.exists(stored_path):
-        return jsonify({'error': '附件本体缺失'}), 404
+        return None, (jsonify({'error': '附件本体缺失'}), 404)
     ext = _customer_file_ext(row['original_name'])
+    return (stored_path, row, ext), None
+
+
+def _dialogue_attachment_response(thread_id, file_object_id):
+    """Serve one file attached to this (caller-scoped) thread; nothing else is reachable."""
+    resolved, error = _dialogue_attachment_file(thread_id, file_object_id)
+    if error:
+        return error
+    stored_path, row, ext = resolved
     download_name = re.sub(r'[\r\n\x00-\x1f]', '', row['original_name']) or 'file' + ext
     return send_from_directory(
         os.path.dirname(stored_path), os.path.basename(stored_path),
@@ -9044,6 +9057,79 @@ def inbox_thread_attachment(thread_id, file_object_id):
 def sela_integration_thread_attachment(thread_id, file_object_id):
     """sela reads a screenshot the human attached, to understand the conversation."""
     return _dialogue_attachment_response(thread_id, file_object_id)
+
+
+@app.route('/api/integrations/sela/threads/<thread_id>/attachments/<file_object_id>/spreadsheet', methods=['GET'])
+@login_required
+def sela_integration_thread_attachment_spreadsheet(thread_id, file_object_id):
+    """Spreadsheet attachments as tab separated rows: sela's runtime has no Excel parser."""
+    resolved, error = _dialogue_attachment_file(thread_id, file_object_id)
+    if error:
+        return error
+    stored_path, row, ext = resolved
+    if ext not in _SPREADSHEET_EXTENSIONS:
+        return jsonify({'error': '这个附件不是表格'}), 415
+    try:
+        text, truncated, row_count = _spreadsheet_attachment_text(stored_path, row['original_name'])
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 422
+    except Exception:
+        logger.exception('sela 表格附件读取失败: %s', file_object_id)
+        return jsonify({'error': '这份表格读取失败，请另存为 XLSX 或 CSV 后重试'}), 500
+    stem = re.sub(r'[\\/:*?"<>|\r\n\x00-\x1f]', '', os.path.splitext(row['original_name'])[0]).strip() or 'table'
+    response = Response(text, mimetype='text/tab-separated-values')
+    response.headers['X-Trosa-Spreadsheet-Rows'] = str(row_count)
+    response.headers['X-Trosa-Spreadsheet-Truncated'] = '1' if truncated else '0'
+    response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(stem + '.tsv', safe='')}"
+    return response
+
+
+_SPREADSHEET_EXTENSIONS = {'.xls', '.xlsx', '.xlsm', '.xltx', '.xltm'}
+_SELA_SPREADSHEET_MAX_ROWS = 3000
+_SELA_SPREADSHEET_MAX_COLUMNS = 80
+_SELA_SPREADSHEET_MAX_CHARS = 400_000
+
+
+def _spreadsheet_attachment_text(path, filename, *, max_rows=_SELA_SPREADSHEET_MAX_ROWS,
+                                 max_columns=_SELA_SPREADSHEET_MAX_COLUMNS,
+                                 max_chars=_SELA_SPREADSHEET_MAX_CHARS):
+    """Tab separated rows for readers without an Excel parser (sela runs on the stdlib).
+
+    Returns ``(text, truncated, row_count)``. Sheet titles are comment lines so the agent can tell
+    where one sheet ends and the next begins; cells never contain tabs or newlines.
+    """
+    sheets = _read_spreadsheet_sheets(path, filename=filename)
+    lines = []
+    size = 0
+    row_count = 0
+    truncated = False
+    for sheet_name, rows in sheets:
+        title = '# 工作表：' + str(sheet_name or '').replace('\r', ' ').replace('\n', ' ')
+        lines.append(title)
+        size += len(title) + 1
+        for row in rows:
+            if row_count >= max_rows:
+                truncated = True
+                break
+            values = [_spreadsheet_cell_text(value).replace('\t', ' ').replace('\r', ' ').replace('\n', ' ')
+                      for value in row[:max_columns]]
+            while values and not values[-1]:
+                values.pop()
+            if not values:
+                continue
+            line = '\t'.join(values)
+            if size + len(line) + 1 > max_chars:
+                truncated = True
+                break
+            lines.append(line)
+            size += len(line) + 1
+            row_count += 1
+        if truncated:
+            break
+    return '\n'.join(lines) + '\n', truncated, row_count
+
+
+
 
 
 def _dialogue_open_prospect_customers(conn):
@@ -12956,7 +13042,9 @@ def _preview_excel_html(path, ext):
         sheet = workbook.sheet_by_index(0)
         total_cols, total_rows = sheet.ncols, sheet.nrows
         sheet_label = sheet.name
-        rows_iter = (sheet.row_values(row_index) for row_index in range(sheet.nrows))
+        rows_iter = ([_xls_cell_value(workbook, sheet.cell(row_index, column_index))
+                      for column_index in range(sheet.ncols)]
+                     for row_index in range(sheet.nrows))
     try:
         rows = []
         for row_index, row in enumerate(rows_iter):
@@ -12966,6 +13054,8 @@ def _preview_excel_html(path, ext):
     finally:
         if ext == '.xlsx':
             workbook.close()
+        else:
+            workbook.release_resources()
     if not rows:
         raise ValueError('没有可读取的内容')
     table = '<table><tr>' + ''.join(
@@ -22251,13 +22341,11 @@ def recover_excel_activities(paths=None):
                       (os.path.basename(path), checksum, now, 'Excel history recovery'))
             batch_id = c.lastrowid
             file_imported = file_skipped = 0
-            workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
             fallback_year = datetime.fromtimestamp(os.path.getmtime(path)).year
 
-            for worksheet in workbook.worksheets:
-                sheet_year_match = re.search(r'20\d{2}', worksheet.title)
+            for sheet_title, rows in _read_spreadsheet_sheets(path):
+                sheet_year_match = re.search(r'20\d{2}', sheet_title)
                 sheet_fallback_year = int(sheet_year_match.group()) if sheet_year_match else fallback_year
-                rows = list(worksheet.iter_rows(values_only=True))
                 if len(rows) < 2:
                     continue
                 header_index = _find_excel_header_row(rows)
@@ -22319,12 +22407,12 @@ def recover_excel_activities(paths=None):
                         country = normalize_country(_excel_text(row[country_col]) if 0 <= country_col < len(row) else '')
                         website = _excel_text(row[website_col]) if 0 <= website_col < len(row) else ''
                         unmatched_hash = hashlib.sha256(
-                            f'{checksum}|{worksheet.title}|{row_number}|{customer_key}'.encode('utf-8')
+                            f'{checksum}|{sheet_title}|{row_number}|{customer_key}'.encode('utf-8')
                         ).hexdigest()
                         c.execute('''INSERT OR IGNORE INTO import_unmatched_customers
                                      (unmatched_hash, batch_id, customer_name, country, website, source_sheet, source_row, reason, created_at)
                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                  (unmatched_hash, batch_id, customer_name[:200], country, website, worksheet.title, row_number,
+                                  (unmatched_hash, batch_id, customer_name[:200], country, website, sheet_title, row_number,
                                    '历史表未匹配到系统客户，未自动创建', now))
                         unmatched_customers += max(c.rowcount, 0)
                         continue
@@ -22336,7 +22424,7 @@ def recover_excel_activities(paths=None):
                         ))
                         source_cell = f'{openpyxl.utils.get_column_letter(column + 1)}{row_number}'
                         source_key = hashlib.sha256(
-                            f'{checksum}|{worksheet.title.strip().casefold()}|{source_cell}'.encode('utf-8')
+                            f'{checksum}|{sheet_title.strip().casefold()}|{source_cell}'.encode('utf-8')
                         ).hexdigest()
                         c.execute('''SELECT iar.id, iar.activity_id, f.content, f.follow_date
                                      FROM imported_activity_rows iar
@@ -22345,7 +22433,7 @@ def recover_excel_activities(paths=None):
                                            (COALESCE(iar.source_key, '') = '' AND iar.customer_id = ?
                                             AND iar.source_sheet = ? AND iar.source_header = ?)
                                      ORDER BY iar.id DESC LIMIT 1''',
-                                  (source_key, customer_id, worksheet.title, header))
+                                  (source_key, customer_id, sheet_title, header))
                         existing_source = c.fetchone()
                         if existing_source:
                             merged_content = _merge_excel_activity_content(existing_source['content'], content)
@@ -22358,7 +22446,7 @@ def recover_excel_activities(paths=None):
                                 c.execute('''UPDATE follow_up_logs
                                              SET content=?, follow_date=?, result=?, activity_type=?, direction='unknown', updated_at=?
                                              WHERE id=?''',
-                                          (merged_content, follow_date, f'来自 Excel：{worksheet.title} / {header}',
+                                          (merged_content, follow_date, f'来自 Excel：{sheet_title} / {header}',
                                            _activity_type_from_excel(merged_content, header), now, existing_source['activity_id']))
                                 c.execute('''UPDATE imported_activity_rows
                                              SET activity_hash=?, source_key=?, batch_id=?, source_name=?, source_cell=?, imported_at=?
@@ -22384,13 +22472,13 @@ def recover_excel_activities(paths=None):
                         c.execute('''INSERT INTO follow_up_logs
                                      (customer_id, content, follow_date, result, next_plan, activity_type, direction, source, created_at)
                                      VALUES (?, ?, ?, ?, '', ?, 'unknown', 'excel_recovery', ?)''',
-                                  (customer_id, content, follow_date, f'来自 Excel：{worksheet.title} / {header}',
+                                  (customer_id, content, follow_date, f'来自 Excel：{sheet_title} / {header}',
                                    _activity_type_from_excel(content, header), now))
                         activity_id = c.lastrowid
                         c.execute('''INSERT INTO imported_activity_rows
                                      (activity_hash, source_key, batch_id, customer_id, source_name, source_sheet, source_cell, source_header, activity_id, imported_at)
                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                  (fingerprint, source_key, batch_id, customer_id, os.path.basename(path), worksheet.title,
+                                  (fingerprint, source_key, batch_id, customer_id, os.path.basename(path), sheet_title,
                                            source_cell, header, activity_id, now))
                         c.execute('''UPDATE customers
                                      SET last_contact=CASE WHEN COALESCE(last_contact, '') < ? THEN ? ELSE last_contact END,
@@ -22422,15 +22510,13 @@ def recover_excel_activities(paths=None):
 
 def sync_from_excel(excel_path=None):
     """从 Excel 导入数据到当前用户的数据库（智能识别表头和列名）"""
-    import openpyxl
     excel_path = excel_path or get_uploaded_excel_path()
     if not excel_path or not os.path.exists(excel_path):
         return {'success': False, 'error': 'Excel 文件未找到，请先上传'}
 
     try:
-        wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(values_only=True))
+        sheets = _read_spreadsheet_sheets(excel_path)
+        rows = sheets[0][1] if sheets else []
         if not rows or len(rows) < 2:
             return {'success': False, 'error': 'Excel 文件为空或只有表头'}
     except Exception as e:

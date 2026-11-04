@@ -59,8 +59,34 @@ class InboxAttachmentAnalysisTest(unittest.TestCase):
         self.assertEqual(result['status'], 'insufficient')
         self.assertIn('OCR', result['missing'][0])
 
-    def test_legacy_xls_is_explicitly_rejected(self):
-        path = self._file('legacy.xls', b'legacy binary')
-        result = analyze_import_file(path, 'legacy.xls')
+    def test_legacy_xls_reads_sheet_rows_chinese_headers_and_dates(self):
+        path = os.path.join(os.path.dirname(__file__), 'fixtures', 'legacy_customs.xls')
+        result = analyze_import_file(path, 'legacy_customs.xls')
+        self.assertEqual(result['status'], 'supported')
+        self.assertEqual(result['citations'][0]['source'], 'US Imports 2024')
+        self.assertEqual(result['citations'][0]['row_or_page'], 3)
+        facts = {(fact['field'], fact['value']) for fact in result['field_facts']}
+        self.assertIn(('importer', 'TAP Plastics'), facts)
+        self.assertIn(('product_description', '亚克力板 1.5mm'), facts)
+        self.assertIn(('date', '2024-03-15'), facts)
+
+    def test_html_table_disguised_as_xls_is_readable(self):
+        html = ('<html><body><table><tr><th>Importer</th><th>Product description</th></tr>'
+                '<tr><td>Acme Imports</td><td>PMMA acrylic sheet</td></tr></table></body></html>')
+        path = self._file('customs.xls', html.encode('utf-8'))
+        result = analyze_import_file(path, 'customs.xls')
+        self.assertEqual(result['status'], 'supported')
+        self.assertEqual(result['citations'][0]['row_or_page'], 2)
+
+    def test_tab_separated_text_disguised_as_xls_is_readable(self):
+        content = '进口商\t商品描述\nTAP Plastics\t亚克力板\n'.encode('utf-8')
+        path = self._file('customs.xls', content)
+        result = analyze_import_file(path, 'customs.xls')
+        self.assertEqual(result['status'], 'supported')
+        self.assertEqual(result['citations'][0]['row_or_page'], 2)
+
+    def test_unreadable_legacy_xls_fails_with_actionable_error(self):
+        path = self._file('broken.xls', b'\x00\x01legacy binary that is not a table')
+        result = analyze_import_file(path, 'broken.xls')
         self.assertEqual(result['status'], 'analysis_failed')
-        self.assertIn('XLS', result['error'])
+        self.assertIn('Excel', result['error'])

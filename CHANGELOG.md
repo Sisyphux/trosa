@@ -4,6 +4,13 @@
 - 修改：sela 读官网时顺带记下公司地址、法人全称（如 xxx Ltd. Şti.）、注册号；新潜客的这些线索与已有客户完全一致（忽略大小写、重音、标点后整串相等）时，不再直接新建，而是交给人确认「是不是同一主体」，并附上相同的地址/法人名作证据；确认前不发信。同一栋楼里的不同公司（楼层、门牌不同）不会被提示；太笼统的地址（没有门牌数字）、只有公司形式词的法人名不参与比对。线索只提示，不会自动合并。
 - 影响范围：`app.py`（`_sela_identity_hints`、`_sela_identity_hint_matches`、`_sela_match_customers`、Inbox 说明）、`db.py`、新增迁移 `0131_company_identity_hints.sql`（给 `agent_prospect_profiles` 加三列规范化线索）、`tests/test_sela_prospect_api.py`。
 
+## 2026-11-04 — 旧版 .xls 海关数据也能读：Inbox 附件证据、Excel 导入和 sela 都认
+
+- 现象：人在 Inbox 发来海关数据表格（旧版 `.xls`），sela 回“那个进口记录表格我这边打不开（旧版 .xls 读不了）”，只能用正文里零散列出的规格和日期；Inbox 的附件证据分析对 `.xls` 也直接报“旧 XLS 格式不受支持”，客户 Excel 导入同样只认 xlsx。
+- 修改：新增共用的表格读取模块 `excel_reader.py`，BIFF `.xls` 走 xlrd，`.xlsx/.xlsm` 走 openpyxl，并识别报关网站常见的“HTML 表格存成 .xls”“制表符/逗号文本存成 .xls”和 Excel 2003 XML；日期、整数和布尔值按原意转成文字，保留工作表名和行号。Inbox 附件证据分析、Excel 客户导入/历史沟通恢复、`.xls` 预览都改用它；中文表头（进口商、商品描述、HS编码、报关日期、数量、金额等）能直接映射，标题行在表头之上也能跳过。
+- sela 侧：新增 `GET /api/integrations/sela/threads/<thread_id>/attachments/<file_object_id>/spreadsheet`，把表格附件转成制表符文本（最多 3000 行 / 80 列 / 40 万字符，超出会标记截断），sela 下载后以 `.tsv` 交给 Inbox agent；sela 运行时不新增 Excel 依赖。
+- 影响范围：`excel_reader.py`（新增）、`inbox_attachment_analysis.py`、`app.py`（Excel 导入/恢复/预览、sela 表格附件接口）、`tests/test_excel_reader.py`（新增）、`tests/test_inbox_attachment_analysis.py`、`tests/test_inbox_dialogue_routes.py`、`tests/fixtures/legacy_customs.xls`（新增）。
+
 ## 2026-11-04 — 同一主体的多个品牌：确认一次，以后自动归到同一客户
 
 - 现象：同一家公司常开几个品牌或公司名（如 Pleksi Market / Ata Pleksi），名字和域名都不同。你在 Inbox 点「是同一主体」后，系统只记住了这一条 sela 来源，下一个带着另一个品牌名或域名来的潜客仍会被当成新公司，重新新建客户、重新发开发信。

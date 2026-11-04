@@ -391,6 +391,37 @@ class HumanNoteRoutesTest(unittest.TestCase):
             f'/api/integrations/sela/threads/{thread_id}/attachments/{file_id}',
             headers=self.service_headers)
         self.assertNotEqual(response.status_code, 401)  # whitelisted; SQLite has no file store
+        spreadsheet = self.service.get(
+            f'/api/integrations/sela/threads/{thread_id}/attachments/{file_id}/spreadsheet',
+            headers=self.service_headers)
+        self.assertNotEqual(spreadsheet.status_code, 401)  # same file, rows as text
         self.assertEqual(
             self.service.get(f'/api/integrations/sela/threads/{thread_id}/attachments/not-a-uuid',
                              headers=self.service_headers).status_code, 401)
+
+
+class SpreadsheetAttachmentTextTest(unittest.TestCase):
+    """sela is stdlib-only: a workbook is handed over as tab separated rows, not bytes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_app()
+
+    def test_legacy_xls_becomes_tab_separated_rows(self):
+        path = ROOT / 'tests' / 'fixtures' / 'legacy_customs.xls'
+        text, truncated, rows = self.module._spreadsheet_attachment_text(str(path), '海关数据.xls')
+        self.assertFalse(truncated)
+        self.assertEqual(rows, 4)
+        lines = text.strip('\n').split('\n')
+        self.assertEqual(lines[0], '# 工作表：US Imports 2024')
+        self.assertEqual(lines[2], '进口商\t商品描述\tHS编码\t报关日期\t数量\t金额\t原产国')
+        self.assertEqual(lines[3], 'TAP Plastics\t亚克力板 1.5mm\t3920510000\t2024-03-15\t1200\t8500\t美国')
+        self.assertEqual(lines[4], '# 工作表：Notes')
+        self.assertEqual(lines[5], 'Nothing to see')
+
+    def test_chars_budget_truncates_instead_of_flooding_the_agent(self):
+        path = ROOT / 'tests' / 'fixtures' / 'legacy_customs.xls'
+        text, truncated, rows = self.module._spreadsheet_attachment_text(
+            str(path), '海关数据.xls', max_rows=2)
+        self.assertTrue(truncated)
+        self.assertEqual(rows, 2)
