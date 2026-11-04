@@ -8353,6 +8353,8 @@ function updateCustomerWorkspaceIdentity(customer) {
   var first = [customer.country, customer.industry || customer.field, level].filter(Boolean).map(escapeHtml).join(' · ');
   var second = [customer.source_detail, customerSourceLabel(customer.source)].filter(Boolean).map(escapeHtml);
   if (site.url) second.push('<a class="cw-site" href="' + escapeHtml(site.url) + '" target="_blank" rel="noopener" title="在新窗口访问 ' + escapeHtml(site.host) + '">' + escapeHtml(site.host) + '</a>');
+  var aliases = (customer.aliases || []).filter(Boolean);
+  if (aliases.length) second.unshift('又名 ' + aliases.map(escapeHtml).join('、'));
   meta.innerHTML = (first ? '<b>' + first + '</b>' : '') + (first && second.length ? '<br>' : '') + second.join(' · ');
 }
 

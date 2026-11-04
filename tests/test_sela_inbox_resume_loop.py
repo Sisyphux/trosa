@@ -407,7 +407,10 @@ class SelaInboxResumeLoopTest(unittest.TestCase):
                 'website': 'https://loop-plastics.example/', 'contact': {}})
             self.assertEqual([int(row['id']) for row in matches], [other_customer_id])
             self.assertEqual(matches[0]['matched_by'], ['confirmed_domain'])
-            self.assertEqual(self.module._customer_aliases(conn, other_customer_id), ['loop plastics'])
+            self.assertEqual(self.module._customer_aliases(conn, other_customer_id), ['Loop Plastics'])
+            summary = self.client.get(f'/api/customers/{other_customer_id}/summary')
+            self.assertEqual(summary.status_code, 200, summary.get_data(as_text=True))
+            self.assertEqual(summary.get_json()['aliases'], ['Loop Plastics'])
         finally:
             conn.close()
 

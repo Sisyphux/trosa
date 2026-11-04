@@ -12091,6 +12091,7 @@ def get_customer_summary(customer_id):
                 for other in _active_customers(conn)
             )
         agent_prospect = _sela_customer_agent_context(_sela_profile_for_customer(conn, customer_id))
+        aliases = _customer_aliases(conn, customer_id)
         customer['last_contact'] = business_facts['latest_communication_date']
         customer['next_follow_up'] = business_facts['next_task_date']
         gaps = _customer_information_gaps(customer, len(contacts), duplicate_company)
@@ -12108,6 +12109,7 @@ def get_customer_summary(customer_id):
             'information_gaps': gaps,
             'data_quality_issues': [gap['label'] for gap in gaps],
             'agent_prospect': agent_prospect,
+            'aliases': aliases,
         })
         judgment = (customer.get('customer_judgment') or '').strip()
         customer['current_judgment'] = {'label': judgment or '未记录人工判断', 'source': '用户记录' if judgment else '待确认'}
@@ -12157,6 +12159,7 @@ def get_customer_summary(customer_id):
     # source of truth; retired automatic-development rows stay out of work.
     customer['next_follow_up'] = business_facts['next_task_date']
     information_gaps = _customer_information_gaps(customer, contact_count, duplicate_company)
+    customer['aliases'] = _customer_aliases(conn, customer_id)
     conn.close()
     # The workspace shell needs one actionable next step.  The complete task
     # lists stay behind the tasks tab so opening a customer does not transfer
@@ -12268,8 +12271,12 @@ def _customer_aliases(conn, customer_id):
     """Other names and brands a person confirmed belong to this customer."""
     names = []
     for fact in identity_link.facts_for_customer(conn, customer_id):
-        if fact.get('identifier_type') == 'name' and fact.get('identifier_value') not in names:
-            names.append(fact['identifier_value'])
+        if fact.get('identifier_type') != 'name':
+            continue
+        shown = str(fact.get('resolution') or '').strip()
+        shown = shown if shown and not shown.startswith('Inbox ') else fact['identifier_value']
+        if shown not in names:
+            names.append(shown)
     return names
 
 
@@ -16330,7 +16337,7 @@ def _sela_identity_identifiers(source_id, payload):
     # becomes an alias of that customer.
     name_key = _sync_name_key(payload.get('company') or payload.get('name'))
     if name_key:
-        identifiers.append(('name', name_key))
+        identifiers.append(('name', name_key, str(payload.get('company') or payload.get('name')).strip()[:200]))
     return identifiers
 
 
@@ -16346,20 +16353,23 @@ def _sela_record_identity_decision(conn, *, decision, customer_id, identifiers, 
     decision = str(decision or '').strip().lower()
     applied = []
     if decision == 'same' and customer_id:
-        for identifier_type, value in identifiers:
+        for identifier_type, value, *shown in identifiers:
             method = {'source': 'confirmed_source', 'email': 'confirmed_email',
                       'domain': 'confirmed_domain', 'name': 'confirmed_name'}.get(identifier_type, '')
             identity_link.record_identity_fact(
                 conn, identifier_type=identifier_type, identifier_value=value,
                 customer_id=int(customer_id), origin='human_confirmed', method=method,
-                resolution='Inbox 人工确认同一业务主体', source_inbox_item_id=inbox_item_id,
+                # A name fact keeps the name as written, so the customer page
+                # can show it; the key itself is lower-cased for matching.
+                resolution=(shown[0] if shown else '') or 'Inbox 人工确认同一业务主体',
+                source_inbox_item_id=inbox_item_id,
                 created_by=actor,
             )
             applied.append({'field': 'identity', 'target': 'customer', 'decision': 'same',
                             'customer_id': int(customer_id),
                             'value': f'{identifier_type}:{value}'})
     elif decision == 'different':
-        for identifier_type, value in identifiers:
+        for identifier_type, value, *_shown in identifiers:
             identity_link.revoke_identity_facts(
                 conn, identifier_type=identifier_type, identifier_value=value)
         applied.append({'field': 'identity', 'target': 'prospect', 'decision': 'different',
