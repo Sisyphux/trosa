@@ -276,7 +276,7 @@ def _merge(conn, source, target, note):
         conn,
         """UPDATE trosa.account_legacy_refs
               SET legacy_payload=coalesce(legacy_payload, '{}'::jsonb)
-                   || jsonb_build_object('is_deleted', '1', 'deleted_at', ?)
+                   || jsonb_build_object('is_deleted', '1'::text, 'deleted_at', ?::text)
             WHERE organization_id=trosa.compat_org_id()
               AND legacy_user_id=trosa.compat_current_user()
               AND legacy_customer_id=?""",
