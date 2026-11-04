@@ -520,3 +520,6 @@ html.motion-reduced .hand-tip{transition:none !important}
 #trosa .srv-row.is-bad .srv-n,#trosa .srv-row.is-bad .srv-d,#trosa .srv-row.is-bad .srv-n .st{color:var(--dl-danger,#a4443a)}
 #trosa .srv-none{margin:0;color:var(--dl-ink-3);font-size:14px}
 @media (max-width:560px){#trosa .srv-verdict{font-size:22px}#trosa .srv-row{gap:10px;font-size:13.5px}#trosa .srv-d{font-size:12.5px}}
+
+/* 选中文字：墨底白字。旧规则沿用了 --dl-gold-soft(#f2f2f2)，落在 #f5f5f5 的焦点消息上几乎看不见，无法复制文字。 */
+html[data-type="swiss"] ::selection,#trosa ::selection{background:var(--dl-ink);color:var(--dl-paper)}
