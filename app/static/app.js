@@ -14749,8 +14749,7 @@ function renderDialogueOverview() {
   overview.innerHTML =
     '<div class="dialogue-lead' + (awaiting > 0 ? ' is-on' : '') + '">' +
       '<span class="dialogue-lead-n tnum">' + awaiting + '</span>' +
-      '<span class="dialogue-lead-t"><span class="dialogue-lead-l">等你回复</span>' +
-        '<span class="dialogue-lead-s">处理中 ' + processing + ' · 本周归档 ' + archived + '</span></span>' +
+      '<span class="dialogue-lead-t"><span class="dialogue-lead-l">' + handUnderlined('等你回复') + '</span></span>' +
     '</div>' + dialogueRulerHtml();
 }
 
@@ -14861,15 +14860,15 @@ function renderDialogueList() {
       var open = dialogueArchivedIsOpen();
       html += '<section class="dialogue-group dialogue-group--archived" data-group="done" data-open="' + (open ? 'true' : 'false') + '">' +
           '<button type="button" class="dialogue-group-label dialogue-group-toggle" aria-expanded="' + (open ? 'true' : 'false') + '"' +
-            ' onclick="toggleDialogueArchived()"><span>' + DIALOGUE_GROUP_LABELS[group] + (open ? '' : '（点开查看）') + '</span>' +
+            ' onclick="toggleDialogueArchived()"><span>' + DIALOGUE_GROUP_LABELS[group] + '' + '</span>' +
             '<span class="tnum">' + rows.length + '</span></button>' +
           (open ? '<div class="dialogue-rows" role="list">' + rows.map(dialogueRowHtml).join('') + '</div>' : '') +
         '</section>';
       return;
     }
     html += '<section class="dialogue-group" data-group="' + group + '">' +
-        '<div class="dialogue-group-label"><span>' + (group === 'awaiting' ? handUnderlined(DIALOGUE_GROUP_LABELS[group]) : DIALOGUE_GROUP_LABELS[group]) + '</span>' +
-          '<span class="tnum">' + rows.length + '</span></div>' +
+        (group === 'awaiting' ? '' : '<div class="dialogue-group-label"><span>' + DIALOGUE_GROUP_LABELS[group] + '</span>' +
+          '<span class="tnum">' + rows.length + '</span></div>') +
         '<div class="dialogue-rows" role="list">' + rows.map(dialogueRowHtml).join('') + '</div>' +
       '</section>';
   });
@@ -15030,7 +15029,7 @@ function renderDialogueThreadHtml() {
       '<button type="button" class="dialogue-back" onclick="showDialogueList()" aria-label="返回对话列表">← 列表</button>' +
       '<div class="dialogue-thread-titles">' +
         '<div class="dialogue-thread-kicker">' + (place ? '<span>' + escapeHtml(place) + '</span>' : '') +
-          '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span></div>' +
+          (group === 'awaiting' ? '' : '<span class="dialogue-thread-status dialogue-thread-status--' + group + '">' + DIALOGUE_GROUP_LABELS[group] + '</span>') + '</div>' +
         '<div class="dialogue-thread-title" role="heading" aria-level="3">' + titleInner + '</div>' +
       '</div>' +
       '<div class="dialogue-thread-tools">' + stepper + archive + '</div>' +
@@ -15059,11 +15058,11 @@ function renderDialogueThreadHtml() {
         '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span></div>' +
         '<div class="dialogue-msg-body">' + waitHtml('在处理…', 'inline') + '</div></div>' : '') +
       (closed ? '<div class="dialogue-closed-note" role="status"><span class="dialogue-msg-head">归档</span>' +
-        '<span class="dialogue-msg-body">这条对话已归档。还想接着说，就在下面回一句，发出去会重新打开。</span></div>' : '') +
+        '<span class="dialogue-msg-body">已归档</span></div>' : '') +
       '</div>' +
     '</div>';
   // 归档不等于说完：输入框照样留着，发出去就把这条对话重新打开。
-  var composer = dialogueComposerHtml(closed ? '接着说一句…（发出去会重新打开这条对话）' : '');
+  var composer = dialogueComposerHtml('');
   var dossier = dialogueDossierHtml(thread.context);
   return '<article class="dialogue-thread' + (dossier ? ' has-dossier' : '') + '" data-thread-id="' + escapeHtml(thread.id) + '">' +
     '<div class="dialogue-main">' + header + conflict + body + composer + '</div>' + dossier + '</article>';
@@ -15229,7 +15228,7 @@ function openDialogueCustomerById(customerId) {
 }
 
 function dialogueComposerHtml(placeholder) {
-  return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: placeholder || '回一句话…' });
+  return dialogueComposerFormHtml({ label: '回复', rows: 1, submitLabel: '发送', placeholder: placeholder || '' });
 }
 
 // 回复框与新开对话共用一个输入框：文字、附件、发送在同一个框里。
@@ -15249,7 +15248,6 @@ function dialogueComposerFormHtml(opts) {
         '<button type="submit" class="btn btn-sm btn-primary dialogue-send"' + (dialogueSending || dialogueUploading ? ' disabled' : '') + '>' + escapeHtml(opts.submitLabel) + '</button>' +
       '</div>' +
     '</div>' +
-    '<div class="dialogue-hint" aria-hidden="true"><span><kbd>↵</kbd> 发送</span><span><kbd>⇧</kbd><kbd>↵</kbd> 换行</span><span>可粘贴截图</span></div>' +
     '<div class="dialogue-composer-error" role="alert" hidden></div>' +
   '</form>';
 }

@@ -180,9 +180,7 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   // 归档不等于说完：这条对话照样有输入框，发出去是重新打开它。
   const archivedPane = () => doc.getElementById('dialogueThreadPane');
   assert.equal(archivedPane().querySelectorAll('form.dialogue-composer textarea').length, 1, '归档对话也要能接着写');
-  assert.ok(archivedPane().querySelector('#dialogueReplyInput').placeholder.includes('重新打开'),
-    archivedPane().querySelector('#dialogueReplyInput').placeholder);
-  assert.ok(archivedPane().querySelector('.dialogue-closed-note').textContent.includes('重新打开'),
+  assert.ok(archivedPane().querySelector('.dialogue-closed-note').textContent.includes('已归档'),
     archivedPane().querySelector('.dialogue-closed-note').textContent);
   win.toggleDialogueArchived();
   assert.equal(archivedGroup().dataset.open, 'false', '选中归档对话时点标题应能收起');
@@ -193,7 +191,7 @@ const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms || 0));
   assert.equal(archivedGroup().dataset.open, 'false');
   await win.selectDialogueThread(A);
   assert.equal(archivedGroup().dataset.open, 'false');
-  assert.equal(list.querySelector('[data-group="awaiting"] .dialogue-group-label .tnum').textContent, '2');
+  assert.equal(list.querySelectorAll('[data-group="awaiting"] .dialogue-row').length, 2);
   // 列表是台账：第一行写标题、等了多久，第二行写国家和最后一句话的开头。
   const alphaRow = list.querySelector('[data-group="awaiting"] .dialogue-row[data-dialogue-id="' + A + '"]');
   assert.ok(alphaRow && alphaRow.textContent.includes('Alpha 竞品排除'), list.textContent);
