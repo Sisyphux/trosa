@@ -3056,15 +3056,18 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   border-top: 2px solid var(--dl-ink); border-bottom: 1px solid var(--dl-ink);
 }
 
-/* 读数栏：一排大数字，等你回复的那个是橙红 */
-#trosa .dialogue-stats { flex: none; display: flex; align-items: stretch; border-bottom: 1px solid var(--dl-ink); }
-#trosa .dialogue-overview { flex: 1; display: flex; min-width: 0; }
-#trosa .dialogue-stat { flex: 0 1 200px; min-width: 0; padding: 14px 22px 13px; border-right: 1px solid var(--dl-hair); }
-#trosa .dialogue-stat-n { font-size: 2.1rem; font-weight: 600; letter-spacing: -.03em; line-height: 1; color: var(--dl-ink); }
-#trosa .dialogue-stat-u { margin-left: 4px; font-size: 1rem; font-weight: 500; letter-spacing: 0; color: var(--dl-ink-3); }
-#trosa .dialogue-stat-l { margin-top: 6px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); white-space: nowrap; }
-#trosa .dialogue-stat.is-on .dialogue-stat-n { color: var(--dl-gold-ink); }
-#trosa .dialogue-stats-act { flex: none; display: flex; align-items: center; padding: 0 20px; }
+/* 读数：最重要的一个读数放大（等你回复），其余收小排在后面 */
+#trosa .dialogue-stats { flex: none; display: flex; align-items: flex-end; gap: 24px; padding: 16px 4px 14px; border-bottom: 1px solid var(--dl-ink); }
+#trosa .dialogue-overview { flex: 1; display: flex; align-items: flex-end; gap: 36px; min-width: 0; }
+#trosa .dialogue-stat { flex: none; display: flex; flex-direction: column-reverse; gap: 4px; min-width: 0; }
+#trosa .dialogue-stat-n { font-size: 1.7rem; font-weight: 600; letter-spacing: -.03em; line-height: 1; color: var(--dl-ink-2); }
+#trosa .dialogue-stat-u { margin-left: 4px; font-size: .9rem; font-weight: 500; letter-spacing: 0; color: var(--dl-ink-3); }
+#trosa .dialogue-stat-l { font-size: var(--dl-fs-caption); color: var(--dl-ink-3); white-space: nowrap; }
+#trosa .dialogue-stat.is-lead { margin-right: 12px; padding-right: 36px; border-right: 1px solid var(--dl-hair); }
+#trosa .dialogue-stat.is-lead .dialogue-stat-n { font-size: 3.2rem; letter-spacing: -.05em; color: var(--dl-ink); }
+#trosa .dialogue-stat.is-lead.is-on .dialogue-stat-n { color: var(--dl-gold-ink); }
+#trosa .dialogue-stat.is-lead .dialogue-stat-l { font-size: var(--dl-fs-body-s); font-weight: 600; color: var(--dl-ink); }
+#trosa .dialogue-stats-act { flex: none; display: flex; align-items: center; padding: 0 0 4px; }
 #trosa .dialogue-note-btn {
   display: inline-flex; align-items: center; gap: 8px; min-height: var(--dl-tap, 40px); padding: 0 16px; box-sizing: border-box;
   cursor: pointer; font: inherit; font-size: var(--dl-fs-body-s); font-weight: 600;
@@ -3074,72 +3077,75 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa #page-dialogue.dialogue-note-open .dialogue-note-btn { background: var(--dl-ink); color: var(--dl-paper); }
 #trosa .dialogue-note-btn .ui-icon { width: 16px; height: 16px; }
 
-/* 三栏：表格 | 记录 | 登记表 */
-#trosa .dialogue-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); }
+/* 三栏：台账 | 记录 | 登记表 */
+#trosa .dialogue-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(300px, 350px) minmax(0, 1fr); }
 #trosa .dialogue-list-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; border-right: 1px solid var(--dl-hair); }
 #trosa .dialogue-thread-pane { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; background: var(--dl-paper); }
 
-/* 列表：表头 + 分组 + 行 */
-#trosa .dialogue-list-cols,
-#trosa .dialogue-row { display: grid; grid-template-columns: 12px minmax(0, 1fr) 72px 52px; gap: 10px; align-items: baseline; padding: 0 16px; }
-#trosa .dialogue-list-cols {
-  flex: none; height: 34px; align-items: center; border-bottom: 1px solid var(--dl-hair);
-  font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3);
-}
-#trosa .dialogue-list-cols span:last-child { text-align: right; }
-#trosa .dialogue-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* 列表：分组标题是大字，行是两行台账（标题 …… 等了多久 / 国家 · 最后一句话） */
+#trosa .dialogue-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 24px; }
 #trosa .dialogue-group-label {
-  display: flex; justify-content: space-between; gap: 10px;
-  padding: 14px 16px 6px; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: 22px 20px 8px; font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em; color: var(--dl-ink);
 }
 #trosa .dialogue-group-toggle {
   width: 100%; background: none; border: 0; cursor: pointer; text-align: left; font: inherit;
-  font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3); min-height: 40px; align-items: center;
+  font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em; color: var(--dl-ink-3); min-height: 48px;
 }
 #trosa .dialogue-group-toggle:hover { color: var(--dl-ink); }
-#trosa .dialogue-group-label .tnum { font-weight: 500; }
+#trosa .dialogue-group-label .tnum { font-size: var(--dl-fs-body-s); font-weight: 500; color: var(--dl-ink-3); }
 #trosa .dialogue-row {
-  min-height: 44px; padding-top: 12px; padding-bottom: 12px; box-sizing: border-box;
-  border-bottom: 1px solid var(--dl-hair-2); cursor: pointer; font-size: var(--dl-fs-body-s); color: var(--dl-ink-2);
+  display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 10px; row-gap: 3px; align-items: baseline;
+  padding: 13px 20px 13px 20px; box-sizing: border-box; min-height: 44px;
+  border-bottom: 1px solid var(--dl-hair-2); cursor: pointer; color: var(--dl-ink-2);
 }
 #trosa .dialogue-row:hover { background: var(--dl-ink-wash); }
-#trosa .dialogue-row-mark { width: 9px; height: 9px; box-sizing: border-box; border: 1.5px solid var(--dl-ink); align-self: center; }
+#trosa .dialogue-row-mark { width: 9px; height: 9px; box-sizing: border-box; border: 1.5px solid var(--dl-ink); align-self: center; grid-row: 1; }
 #trosa .dialogue-row--awaiting .dialogue-row-mark { background: var(--dl-ink); }
 #trosa .dialogue-row--done .dialogue-row-mark { border-color: transparent; }
-#trosa .dialogue-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dl-fs-body); font-weight: 600; color: var(--dl-ink); }
+#trosa .dialogue-row-top { grid-column: 2; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+#trosa .dialogue-row-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dl-fs-body); font-weight: 600; color: var(--dl-ink); }
 #trosa .dialogue-row--sela .dialogue-row-title,
 #trosa .dialogue-row--done .dialogue-row-title { font-weight: 500; }
 #trosa .dialogue-row--done .dialogue-row-title { color: var(--dl-ink-2); }
-#trosa .dialogue-row-country { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#trosa .dialogue-row-time { text-align: right; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); white-space: nowrap; }
+#trosa .dialogue-row-leader { flex: 1 1 12px; min-width: 12px; height: 0; border-bottom: 1px dotted var(--dl-hair-strong); transform: translateY(-3px); }
+#trosa .dialogue-row-time { flex: none; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); white-space: nowrap; }
+#trosa .dialogue-row-sub { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
 /* 选中行整行反黑 */
 #trosa .dialogue-row.is-selected { background: var(--dl-ink); color: #fff; border-bottom-color: var(--dl-ink); }
 #trosa .dialogue-row.is-selected .dialogue-row-title,
 #trosa .dialogue-row.is-selected .dialogue-row-time { color: #fff; }
+#trosa .dialogue-row.is-selected .dialogue-row-sub { color: rgba(255, 255, 255, .72); }
+#trosa .dialogue-row.is-selected .dialogue-row-leader { border-bottom-color: rgba(255, 255, 255, .45); }
 #trosa .dialogue-row.is-selected .dialogue-row-mark { border-color: #fff; }
 #trosa .dialogue-row--awaiting.is-selected .dialogue-row-mark { background: #fff; }
 #trosa .dialogue-list-empty,
-#trosa .dialogue-empty { padding: 20px 16px; color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
-
-/* 对话记录 */
+#trosa .dialogue-empty { padding: 20px 20px; color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
+/* 对话记录：一张纸。标题是大字；消息挂在一根时间线上（实心 = 助手，空心 = 你） */
 #trosa .dialogue-thread { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #trosa .dialogue-main { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 #trosa .dialogue-thread-head {
-  flex: none; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px 0 24px;
+  flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "kicker tools" "title title";
+  align-items: center; column-gap: 16px; row-gap: 4px; padding: 14px 20px 16px 40px;
   border-bottom: 1px solid var(--dl-hair);
 }
+#trosa .dialogue-thread-titles { display: contents; }
+#trosa .dialogue-thread-kicker { grid-area: kicker; }
+#trosa .dialogue-thread-title { grid-area: title; }
+#trosa .dialogue-thread-tools { grid-area: tools; }
 #trosa .dialogue-back {
   display: none; align-items: center; gap: 4px;
   background: none; border: 0; padding: 2px 4px; cursor: pointer;
   font: inherit; font-size: var(--dl-fs-body-s); color: var(--dl-ink-2);
 }
-#trosa .dialogue-thread-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; overflow: hidden; white-space: nowrap; }
-#trosa .dialogue-thread-kicker { flex: none; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3); }
-#trosa .dialogue-thread-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--dl-fs-body); font-weight: 600; color: var(--dl-ink); }
+#trosa .dialogue-thread-kicker { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 14px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+#trosa .dialogue-thread-status { font-weight: 600; color: var(--dl-ink); }
+#trosa .dialogue-thread-status--awaiting { color: var(--dl-gold-ink); }
+#trosa .dialogue-thread-title { font-size: 1.5rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.3; color: var(--dl-ink); overflow-wrap: anywhere; }
+#trosa .dialogue-thread-title .hand-under { display: inline; padding-bottom: .12em; }
 #trosa .dialogue-thread-title-link { color: inherit; text-decoration: none; }
 #trosa .dialogue-thread-title-link:hover,
-#trosa .dialogue-thread-title-link:focus-visible { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-#trosa .dialogue-thread-status { flex: none; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3); }
+#trosa .dialogue-thread-title-link:focus-visible { text-decoration: underline; text-underline-offset: 5px; text-decoration-thickness: 1px; }
 #trosa .dialogue-thread-tools { flex: none; display: flex; align-items: center; gap: 4px; }
 #trosa .dialogue-stepper { display: inline-flex; align-items: center; }
 #trosa .dialogue-step-count { min-width: 3.2em; text-align: center; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-2); }
@@ -3157,36 +3163,46 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-close-btn .ui-icon { width: 15px; height: 15px; }
 
 #trosa .dialogue-messages { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-#trosa .dialogue-stream { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
-/* 一条消息一行：左栏 96px 写谁和时间，右栏正文 */
+#trosa .dialogue-stream { max-width: 880px; padding: 10px 40px 40px; }
+/* 一条消息：左边“谁 / 几点”，中间是时间线上的一个点，右边正文 */
 #trosa .dialogue-msg,
-#trosa .dialogue-closed-note { display: grid; grid-template-columns: 104px minmax(0, 1fr); border-top: 1px solid var(--dl-hair-2); }
-#trosa .dialogue-msg-head { padding: 14px 8px 14px 24px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); line-height: 1.5; }
+#trosa .dialogue-closed-note { position: relative; display: grid; grid-template-columns: 68px minmax(0, 1fr); column-gap: 30px; }
+#trosa .dialogue-msg::before { content: ""; position: absolute; left: 77px; top: 0; bottom: 0; width: 1px; background: var(--dl-hair-strong); }
+#trosa .dialogue-msg:first-child::before { top: 30px; }
+#trosa .dialogue-msg::after {
+  content: ""; position: absolute; left: 73px; top: 26px; width: 9px; height: 9px; box-sizing: border-box;
+  border: 1.5px solid var(--dl-ink); background: var(--dl-paper);
+}
+#trosa .dialogue-msg--sela::after { background: var(--dl-ink); }
+#trosa .dialogue-msg--system::after { left: 75px; top: 28px; width: 5px; height: 5px; border-color: var(--dl-hair-strong); background: var(--dl-hair-strong); }
+#trosa .dialogue-msg-head { padding: 22px 0 14px; text-align: right; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); line-height: 1.5; }
 #trosa .dialogue-msg-who { display: block; font-weight: 600; color: var(--dl-ink); }
 #trosa .dialogue-msg-time { display: block; }
 #trosa .dialogue-msg-time span { display: block; }
-#trosa .dialogue-msg-body { padding: 14px 28px 14px 0; min-width: 0; }
-#trosa .dialogue-msg.is-cont { border-top-color: transparent; }
+#trosa .dialogue-msg-body { padding: 18px 0 20px; min-width: 0; }
 #trosa .dialogue-msg.is-cont .dialogue-msg-who { visibility: hidden; height: 0; }
 #trosa .dialogue-msg.is-cont .dialogue-msg-head,
-#trosa .dialogue-msg.is-cont .dialogue-msg-body { padding-top: 2px; }
-#trosa .dialogue-msg-text {
-  max-width: 64ch; font-size: var(--dl-fs-body); line-height: 1.7; color: var(--dl-ink-2);
-  white-space: pre-wrap; overflow-wrap: anywhere;
-}
-#trosa .dialogue-msg--human .dialogue-msg-text,
-#trosa .dialogue-msg--summary .dialogue-msg-text { color: var(--dl-ink); }
-#trosa .dialogue-msg--human .dialogue-msg-who::before { content: "→ "; color: var(--dl-ink-3); font-weight: 500; }
+#trosa .dialogue-msg.is-cont .dialogue-msg-body { padding-top: 8px; }
+#trosa .dialogue-msg.is-cont::after { display: none; }
+#trosa .dialogue-msg-text { max-width: 62ch; font-size: var(--dl-fs-body); line-height: 1.75; color: var(--dl-ink); overflow-wrap: anywhere; }
 #trosa .dialogue-msg--system .dialogue-msg-text { font-size: var(--dl-fs-body-s); color: var(--dl-ink-3); }
-/* 等你回答的那一行：浅灰底，左边一道橙红线，整屏唯一的强调 */
-#trosa .dialogue-msg.is-focus { background: var(--dl-paper-3); box-shadow: inset 3px 0 0 var(--dl-gold-ink); border-top-color: var(--dl-hair); }
-#trosa .dialogue-msg.is-focus .dialogue-msg-text { font-size: 1.06rem; line-height: 1.7; color: var(--dl-ink); font-weight: 500; }
-#trosa .dialogue-msg-ask { display: block; margin-top: 6px; font-weight: 600; color: var(--dl-gold-ink); }
+#trosa .dialogue-p { margin: 0; }
+#trosa .dialogue-p + .dialogue-p,
+#trosa .dialogue-p + .dialogue-pts,
+#trosa .dialogue-pts + .dialogue-p { margin-top: 12px; }
+/* 编号条目：大号码 + 一行细线，像台账的序号列 */
+#trosa .dialogue-pts { list-style: none; margin: 4px 0; padding: 0; border-top: 1px solid var(--dl-ink); }
+#trosa .dialogue-pts li { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; padding: 11px 0 12px; border-bottom: 1px solid var(--dl-hair-2); }
+#trosa .dialogue-pt-n { font-size: 1.35rem; font-weight: 600; letter-spacing: -.03em; color: var(--dl-ink-3); line-height: 1.2; }
+/* 轮到你回答的那一条：点是橙红的、字放大，整屏唯一的强调 */
+#trosa .dialogue-msg.is-focus::after { left: 71px; top: 24px; width: 13px; height: 13px; border-color: var(--dl-gold-ink); background: var(--dl-gold-ink); }
+#trosa .dialogue-msg.is-focus .dialogue-msg-text { font-size: 1.12rem; line-height: 1.75; font-weight: 500; }
+#trosa .dialogue-msg.is-focus .dialogue-pt-n { color: var(--dl-gold-ink); }
+#trosa .dialogue-msg-ask { display: block; margin-top: 4px; font-weight: 600; color: var(--dl-gold-ink); }
 #trosa .dialogue-msg--writing .dialogue-msg-body { color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
 #trosa .dialogue-msg--writing .wait { gap: 8px; }
-#trosa .dialogue-closed-note .dialogue-msg-head { font-weight: 600; }
-#trosa .dialogue-closed-note .dialogue-msg-body { color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
-
+#trosa .dialogue-closed-note .dialogue-msg-head { font-weight: 600; padding-top: 18px; }
+#trosa .dialogue-closed-note .dialogue-msg-body { padding-top: 18px; color: var(--dl-ink-3); font-size: var(--dl-fs-body-s); }
 #trosa .dialogue-msg-refs,
 #trosa .dialogue-msg-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 #trosa .dialogue-ref,
@@ -3212,10 +3228,11 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   border-radius: var(--dl-r-sm); font-size: var(--dl-fs-body-s);
 }
 
-/* 回复：同样是一行——左栏“你”，右边输入框与「发送」 */
-#trosa .dialogue-composer { flex: none; display: grid; grid-template-columns: 104px minmax(0, 1fr); border-top: 1px solid var(--dl-ink); }
-#trosa .dialogue-composer-who { padding: 18px 8px 0 24px; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink); }
-#trosa .dialogue-field { display: flex; flex-wrap: wrap; align-items: flex-end; min-width: 0; padding: 8px 12px 8px 0; }
+/* 回复：时间线上的下一格——左边“你”，右边一个方框，框下是键位提示 */
+#trosa .dialogue-composer { flex: none; display: grid; grid-template-columns: 68px minmax(0, 1fr); column-gap: 30px; max-width: 880px; box-sizing: border-box; padding: 14px 40px 20px; border-top: 1px solid var(--dl-hair); }
+#trosa .dialogue-composer-who { padding: 12px 0 0; text-align: right; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink); }
+#trosa .dialogue-field { display: flex; flex-wrap: wrap; align-items: flex-end; min-width: 0; padding: 4px 6px 4px 12px; border: 1px solid var(--dl-ink); border-radius: var(--dl-r-sm); background: var(--dl-paper); }
+#trosa .dialogue-field:focus-within { box-shadow: 0 0 0 1px var(--dl-ink); }
 #trosa .dialogue-composer-attachments { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 4px; }
 #trosa .dialogue-reply-input {
   order: 2; flex: 1 1 0; min-width: 0; display: block; box-sizing: border-box; margin: 0;
@@ -3225,7 +3242,6 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 }
 #trosa .dialogue-field .dialogue-reply-input:focus,
 #trosa .dialogue-field .dialogue-reply-input:focus-visible { outline: none !important; box-shadow: none !important; }
-#trosa .dialogue-composer:focus-within { box-shadow: inset 0 2px 0 var(--dl-ink); }
 #trosa .dialogue-reply-input::placeholder { color: var(--dl-ink-3); opacity: 1; }
 #trosa .dialogue-composer-actions { display: contents; }
 #trosa .dialogue-attach-btn {
@@ -3239,6 +3255,9 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-uploading { order: 3; align-self: center; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); padding-right: 8px; }
 #trosa button.dialogue-send { order: 4; flex: none; min-height: 36px; margin: 4px 0; padding: 0 20px; font-weight: 600; }
 #trosa button.dialogue-send:disabled { opacity: .45; cursor: default; }
+#trosa .dialogue-hint { grid-column: 2; display: flex; gap: 16px; padding-top: 8px; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+#trosa .dialogue-hint kbd { padding: 0 5px; margin-right: 3px; min-width: 18px; text-align: center; border: 1px solid var(--dl-hair-strong); border-radius: var(--dl-r-sm); background: var(--dl-paper); color: var(--dl-ink-2); font-size: .72rem; letter-spacing: 0; line-height: 1.5; }
+#trosa .dialogue-hint kbd + kbd { margin-left: -1px; }
 #trosa .dialogue-attachment-name { max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #trosa .dialogue-attachment--thumb { position: relative; padding: 0; width: 64px; height: 64px; overflow: hidden; }
 #trosa .dialogue-attachment--thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
@@ -3253,7 +3272,7 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-composer-error[hidden] { display: none; }
 
 /* 开发登记表：标签一栏、内容一栏，一格一格往下 */
-#trosa .dialogue-thread.has-dossier { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); }
+#trosa .dialogue-thread.has-dossier { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 310px); }
 #trosa .dialogue-dossier { min-height: 0; min-width: 0; overflow: auto; overscroll-behavior: contain; border-left: 1px solid var(--dl-hair); }
 #trosa .dialogue-dossier-summary { display: none; }
 #trosa .dialogue-dossier-head { padding: 16px 22px 14px; border-bottom: 1px solid var(--dl-ink); }
@@ -3317,29 +3336,25 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 #trosa .dialogue-row:focus-visible { outline-offset: -2px; }
 
 /* 窄一些的宽屏（iPad、小笔记本）：登记表收成记录上方的一行，点开看全部 */
-@media (max-width: 1100px) {
-  #trosa .dialogue-body { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
-  #trosa .dialogue-list-cols,
-  #trosa .dialogue-row { grid-template-columns: 12px minmax(0, 1fr) 46px; }
-  #trosa .dialogue-list-cols span:nth-child(3),
-  #trosa .dialogue-row-country { display: none; }
-  #trosa .dialogue-close-btn span:not(.ui-icon) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  #trosa .dialogue-thread-kicker { display: none; }
-  #trosa .dialogue-stat { padding: 12px 16px; }
-  #trosa .dialogue-stat-n { font-size: 1.7rem; }
+@media (max-width: 1360px) {
   #trosa .dialogue-thread.has-dossier { display: flex; flex-direction: column; }
   #trosa .dialogue-thread.has-dossier .dialogue-main { order: 1; }
   #trosa .dialogue-thread.has-dossier .dialogue-dossier { order: 0; flex: none; max-height: 45%; border-left: 0; border-bottom: 1px solid var(--dl-hair); }
   #trosa .dialogue-dossier-summary {
-    display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 16px 0 24px; box-sizing: border-box;
+    display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 16px 0 40px; box-sizing: border-box;
     cursor: pointer; list-style: none; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3);
   }
   #trosa .dialogue-dossier-summary::-webkit-details-marker { display: none; }
   #trosa .dialogue-dossier-summary .dialogue-dossier-sum-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--dl-ink-2); }
   #trosa .dialogue-dossier-summary::after { content: "展开"; flex: none; margin-left: auto; color: var(--dl-ink-2); }
   #trosa .dialogue-dossier-fold[open] .dialogue-dossier-summary::after { content: "收起"; }
-  #trosa .dialogue-dossier-head { padding-left: 24px; }
-  #trosa .dialogue-kv-k { padding-left: 24px; }
+  #trosa .dialogue-dossier-head { padding-left: 40px; }
+  #trosa .dialogue-kv-k { padding-left: 40px; }
+}
+@media (max-width: 1100px) {
+  #trosa .dialogue-body { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+  #trosa .dialogue-close-btn span:not(.ui-icon) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  #trosa .dialogue-stat.is-lead .dialogue-stat-n { font-size: 2.6rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3363,17 +3378,17 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
 @media (max-width: 760px) {
   #trosa .dialogue-workspace { height: auto; border-bottom: 0; }
   #trosa .dialogue-stats { flex-wrap: wrap; }
-  #trosa .dialogue-stat { flex: 1 1 0; padding: 10px 12px; }
+  #trosa .dialogue-stats { padding: 14px 12px 12px; gap: 12px; }
+  #trosa .dialogue-overview { gap: 20px; }
   #trosa .dialogue-stat:nth-child(n+3) { display: none; }
-  #trosa .dialogue-stat-n { font-size: 1.6rem; }
-  #trosa .dialogue-stats-act { padding: 0 12px; }
+  #trosa .dialogue-stat.is-lead { margin-right: 0; padding-right: 20px; }
+  #trosa .dialogue-stat.is-lead .dialogue-stat-n { font-size: 2.4rem; }
+  #trosa .dialogue-stat-n { font-size: 1.4rem; }
   #trosa .dialogue-body { grid-template-columns: minmax(0, 1fr); }
   #trosa .dialogue-list-pane { border-right: 0; overflow: visible; }
   #trosa .dialogue-list { overflow: visible; }
-  #trosa .dialogue-list-cols,
-  #trosa .dialogue-row { grid-template-columns: 12px minmax(0, 1fr) 64px 46px; padding-left: 12px; padding-right: 12px; }
-  #trosa .dialogue-list-cols span:nth-child(3),
-  #trosa .dialogue-row-country { display: block; }
+  #trosa .dialogue-row { padding-left: 12px; padding-right: 12px; }
+  #trosa .dialogue-group-label { padding-left: 12px; padding-right: 12px; }
   #trosa .dialogue-thread-pane { display: none; overflow: visible; }
   #trosa #page-dialogue.dialogue-thread-open .dialogue-list-pane,
   #trosa #page-dialogue.dialogue-thread-open .dialogue-stats { display: none; }
@@ -3381,18 +3396,22 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-back { display: inline-flex; flex: none; white-space: nowrap; min-height: 44px; }
   #trosa .dialogue-thread { min-height: calc(100dvh - var(--room-bar, 48px) * 2 - 24px); }
   #trosa .dialogue-thread.has-dossier .dialogue-dossier { max-height: none; overflow: visible; }
-  #trosa .dialogue-thread-head { padding: 0 8px 0 4px; }
+  #trosa .dialogue-thread-head { padding: 8px 8px 12px 12px; grid-template-areas: "back tools" "kicker kicker" "title title"; }
+  #trosa .dialogue-back { grid-area: back; justify-self: start; }
+  #trosa .dialogue-stream { padding: 4px 14px 24px; }
+  #trosa .dialogue-msg::before { left: 41px; }
+  #trosa .dialogue-msg::after { left: 37px; }
+  #trosa .dialogue-msg.is-focus::after { left: 35px; }
+  #trosa .dialogue-msg--system::after { left: 39px; }
   #trosa .dialogue-step-count { display: none; }
   #trosa .dialogue-messages { overflow: visible; }
   #trosa .dialogue-msg,
-  #trosa .dialogue-closed-note,
-  #trosa .dialogue-composer { grid-template-columns: 64px minmax(0, 1fr); }
-  #trosa .dialogue-msg-head,
-  #trosa .dialogue-composer-who { padding-left: 12px; }
-  #trosa .dialogue-msg-body { padding-right: 14px; }
+  #trosa .dialogue-closed-note { grid-template-columns: 32px minmax(0, 1fr); column-gap: 24px; }
+  #trosa .dialogue-composer { grid-template-columns: 32px minmax(0, 1fr); column-gap: 24px; padding: 10px 14px 12px; }
+  #trosa .dialogue-hint { display: none; }
   #trosa .dialogue-dossier-summary,
   #trosa .dialogue-dossier-head,
-  #trosa .dialogue-kv-k { padding-left: 12px; }
+  #trosa .dialogue-kv-k { padding-left: 14px; }
   #trosa .dialogue-kv-v { padding-right: 12px; }
   /* 贴在底部状态条（.room-bot，高 --room-bar）正上方，与设置页保存栏同一做法 */
   #trosa .dialogue-composer { position: sticky; bottom: var(--room-bar, 48px); z-index: 50; background: var(--dl-paper); }
