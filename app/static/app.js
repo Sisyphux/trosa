@@ -14745,12 +14745,38 @@ function renderDialogueOverview() {
     if (group === 'done' && thread.closed_at && new Date(thread.closed_at) >= weekStart) archived += 1;
     if (group === 'awaiting' && thread.updated_at && (!oldest || thread.updated_at < oldest)) oldest = thread.updated_at;
   });
-  var wait = awaiting ? dialogueWaitShort(oldest) : null;
+  var processing = Number(dialogueCounts.awaiting_sela || 0);
   overview.innerHTML =
-    dialogueStatHtml(awaiting, '等你回复', { on: awaiting > 0, lead: true }) +
-    dialogueStatHtml(Number(dialogueCounts.awaiting_sela || 0), '助手处理中') +
-    dialogueStatHtml(archived, '本周已归档') +
-    (wait ? dialogueStatHtml(wait.n, '等你最久的一条', { unit: wait.u }) : '');
+    '<div class="dialogue-lead' + (awaiting > 0 ? ' is-on' : '') + '">' +
+      '<span class="dialogue-lead-n tnum">' + awaiting + '</span>' +
+      '<span class="dialogue-lead-t"><span class="dialogue-lead-l">等你回复</span>' +
+        '<span class="dialogue-lead-s">处理中 ' + processing + ' · 本周归档 ' + archived + '</span></span>' +
+    '</div>' + dialogueRulerHtml();
+}
+
+// 候信尺：每条等你的对话按“等了多久”钉在一把尺上（开方刻度，新的在左、久的在右），点一下就打开它。
+var _RULER_STROKE = '<svg class="dialogue-ruler-stroke" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M1 5c16-3 33-2 50-1s33 1 48-2"/></svg>';
+function dialogueRulerHtml() {
+  var now = Date.now();
+  var items = (dialogueThreads || []).filter(function(thread) { return dialogueGroup(thread) === 'awaiting' && thread.updated_at; })
+    .map(function(thread) {
+      var minutes = Math.max(0, (now - new Date(thread.updated_at).getTime()) / 60000);
+      return { thread: thread, minutes: isNaN(minutes) ? 0 : minutes };
+    });
+  if (!items.length) return '';
+  var max = Math.max(1440, Math.max.apply(null, items.map(function(item) { return item.minutes; })) * 1.06);
+  var pos = function(minutes) { return Math.min(100, Math.sqrt(minutes / max) * 100); };
+  var marks = [[60, '1 小时'], [360, '6 小时'], [1440, '1 天'], [2880, '2 天'], [10080, '7 天']].filter(function(mark) { return mark[0] <= max; })
+    .map(function(mark) { return '<span class="dialogue-ruler-mark" style="left:' + pos(mark[0]).toFixed(1) + '%">' + mark[1] + '</span>'; }).join('');
+  var ticks = items.map(function(item) {
+    var thread = item.thread;
+    var wait = dialogueWaitShort(thread.updated_at);
+    var title = (thread.title || dialogueSubjectText(thread.subject) || '对话') + (wait ? ' · 等了 ' + wait.n + ' ' + wait.u : '');
+    return '<button type="button" class="dialogue-ruler-tick' + (thread.id === dialogueSelectedId ? ' is-selected' : '') + '"' +
+      ' style="left:' + pos(item.minutes).toFixed(1) + '%" aria-label="' + escapeHtml(title) + '" title="' + escapeHtml(title) + '"' +
+      ' onclick="selectDialogueThread(\'' + thread.id + '\')"></button>';
+  }).join('');
+  return '<div class="dialogue-ruler" role="group" aria-label="等你的对话各等了多久">' + _RULER_STROKE + marks + ticks + '</div>';
 }
 
 // 对话区占满一屏：列表与消息各自滚动，回复框始终在屏幕底部，不随页面滚走。
@@ -14889,6 +14915,7 @@ async function selectDialogueThread(id, options) {
     if (page) page.classList.add('dialogue-thread-open');
   }
   renderDialogueList();
+  renderDialogueOverview();
   var token = ++dialogueThreadToken;
   dialogueThreadError = null;
   if (!dialogueThread || dialogueThread.id !== id) { dialogueThread = null; dialogueDraft = ''; dialogueAttachments = []; }
@@ -15173,7 +15200,7 @@ function dialogueComposerHtml(placeholder) {
 // 回复框与新开对话共用一个输入框：文字、附件、发送在同一个框里。
 function dialogueComposerFormHtml(opts) {
   return '<form class="dialogue-composer" id="dialogueComposer" onsubmit="return submitDialogueReply(event)">' +
-    '<span class="dialogue-composer-who" aria-hidden="true">你</span>' +
+    '<span class="dialogue-composer-who" aria-hidden="true">答</span>' +
     '<div class="dialogue-field">' +
       dialogueComposerAttachmentsHtml() +
       '<label class="sr-only" for="dialogueReplyInput">' + escapeHtml(opts.label) + '</label>' +
@@ -15270,11 +15297,28 @@ function dialogueClockHtml(value) {
 
 // 每条消息是台账里的一行：左边一栏写谁、什么时候，右边是正文。轮到你回答的那一行被点亮（focus）。
 // 助手的长回复不是一整块字：空行分段，“1. …”这样的编号行变成带大号码的条目。
-function dialogueTextHtml(text) {
+function dialogueTextHtml(text, asking) {
   var lines = String(text || '').replace(/\r/g, '').split('\n');
   var out = '';
   var items = [];
   var para = [];
+  // 要你回答的那一句：整条消息最后一行若是问句，取它的最后一个分句放大成“问题”。
+  var askIndex = -1;
+  var askHead = '';
+  var askText = '';
+  if (asking) {
+    for (var k = lines.length - 1; k >= 0; k--) {
+      if (!lines[k].trim()) continue;
+      var tail = lines[k].trim();
+      if (/[？?]$/.test(tail) && !/^\d{1,2}[.、．)）]/.test(tail)) {
+        var cut = Math.max(tail.lastIndexOf('。', tail.length - 2), tail.lastIndexOf('！', tail.length - 2), tail.lastIndexOf('. ', tail.length - 2));
+        askHead = cut >= 0 ? tail.slice(0, cut + 1) : '';
+        askText = cut >= 0 ? tail.slice(cut + 1).trim() : tail;
+        if (askText.length <= 120) askIndex = k; else askHead = askText = '';
+      }
+      break;
+    }
+  }
   function flushItems() {
     if (!items.length) return;
     out += '<ol class="dialogue-pts">' + items.map(function(item) {
@@ -15287,8 +15331,14 @@ function dialogueTextHtml(text) {
     out += '<p class="dialogue-p">' + para.map(function(line) { return renderRichText(line); }).join('<br>') + '</p>';
     para = [];
   }
-  lines.forEach(function(raw) {
+  lines.forEach(function(raw, index) {
     var line = raw.trim();
+    if (index === askIndex) {
+      if (askHead) para.push(askHead);
+      flushPara(); flushItems();
+      out += '<p class="dialogue-p dialogue-p--ask">' + renderRichText(askText) + '</p>';
+      return;
+    }
     if (!line) { flushPara(); flushItems(); return; }
     var m = /^(\d{1,2})[.、．)）]\s*(.+)$/.exec(line);
     if (m) { flushPara(); items.push({ n: m[1], t: m[2] }); return; }
@@ -15311,7 +15361,7 @@ function renderDialogueMessageHtml(message, index, messages, focus) {
         dialogueClockHtml(message.created_at) +
         (focus ? '<span class="dialogue-msg-ask">等你回答</span>' : '') + '</div>' +
       '<div class="dialogue-msg-body">' +
-        '<div class="dialogue-msg-text">' + dialogueTextHtml(message.text || '') + '</div>' +
+        '<div class="dialogue-msg-text">' + dialogueTextHtml(message.text || '', focus) + '</div>' +
         (attachments ? '<div class="dialogue-msg-attachments">' + attachments + '</div>' : '') +
         (refs ? '<div class="dialogue-msg-refs">' + refs + '</div>' : '') +
       '</div>' +
