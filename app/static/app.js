@@ -15119,6 +15119,37 @@ function dialogueCadenceHtml(sent) {
   return '<span class="dialogue-cad" role="img" aria-label="发过 ' + sent + ' 封">' + cells + '</span>';
 }
 
+// 登记表收起时（窄一些的屏）这一行就是它的“一眼”：公司、地点、行业、联系人、发信/联系情况、状态，能放多少放多少。
+function dialogueDossierGlanceHtml(context, place) {
+  var cell = function(label, value, cls) {
+    return value ? '<span class="dialogue-glance-cell' + (cls ? ' ' + cls : '') + '"><i>' + escapeHtml(label) + '</i><b>' + value + '</b></span>' : '';
+  };
+  var person = [context.contact_name, context.contact_title].filter(Boolean).join(' · ');
+  var activity;
+  if (context.kind === 'prospect') {
+    var last = dialogueDossierDate(context.last_sent_at);
+    activity = cell('开发信', context.sent_count ? escapeHtml('发过 ' + context.sent_count + ' 封' + (last ? ' · 最近 ' + last : '')) : '还没发过');
+  } else {
+    var lastContact = dialogueDossierDate(context.last_contact);
+    var nextDate = dialogueDossierDate(context.next_follow_up);
+    activity = cell('上次联系', lastContact ? escapeHtml(lastContact) : '没有记录') +
+      cell('下次跟进', nextDate ? escapeHtml(nextDate) : '') + cell('级别', escapeHtml(context.level || ''));
+  }
+  var flags = [];
+  if (context.do_not_contact) flags.push('不联系');
+  if (context.bounced) flags.push('退信');
+  if (context.replied) flags.push('回过信');
+  return '<span class="dialogue-glance-name">' + escapeHtml(context.company) + '</span>' +
+    '<span class="dialogue-glance-cells">' +
+      cell('在哪', escapeHtml(place.replace(context.company + ' · ', ''))) +
+      cell('行业', escapeHtml(context.business_type || '')) +
+      cell('联系人', escapeHtml(person)) +
+      cell('邮箱', escapeHtml(context.email || '')) +
+      activity +
+      (flags.length ? cell('状态', flags.map(function(f) { return escapeHtml(f); }).join('、'), 'is-flag') : '') +
+    '</span><span class="dialogue-glance-toggle" aria-hidden="true"></span>';
+}
+
 function dialogueDossierHtml(context) {
   if (!context || !context.company) return '';
   var place = [context.country, context.city].filter(Boolean).join(' · ');
@@ -15151,14 +15182,18 @@ function dialogueDossierHtml(context) {
       '<span class="dialogue-cad-text">' + (context.sent_count ? '发过 ' + context.sent_count + ' 封' + (last ? '，最近 ' + last : '') : '还没发过') + '</span>');
     if (flags.length) rows += dialogueKvHtml('状态', flags.map(function(flag) { return '<span class="dialogue-flag">' + flag + '</span>'; }).join(''));
   } else {
+    var person2 = [context.contact_name, context.contact_title].filter(Boolean).join(' · ');
+    rows += dialogueKvHtml('联系人', person2 ? escapeHtml(person2) : '');
+    rows += dialogueKvHtml('邮箱', context.email ? escapeHtml(context.email) : '');
+    rows += dialogueKvHtml('级别', escapeHtml(context.level || ''));
     var lastContact = dialogueDossierDate(context.last_contact);
     rows += dialogueKvHtml('上次联系', lastContact || '<span class="is-empty">没有记录</span>');
+    rows += dialogueKvHtml('下次跟进', dialogueDossierDate(context.next_follow_up) ? escapeHtml(dialogueDossierDate(context.next_follow_up)) : '');
   }
   var wide = !window.matchMedia || window.matchMedia('(min-width: 1361px)').matches;
   return '<aside class="dialogue-dossier" aria-label="这家公司">' +
     '<details class="dialogue-dossier-fold"' + (wide ? ' open' : '') + '>' +
-      '<summary class="dialogue-dossier-summary"><span>' + (context.kind === 'prospect' ? '开发登记' : '客户') + '</span>' +
-        '<span class="dialogue-dossier-sum-id">' + escapeHtml(place || context.company) + '</span></summary>' +
+      '<summary class="dialogue-dossier-summary">' + dialogueDossierGlanceHtml(context, place) + '</summary>' +
       head + '<div class="dialogue-kvs">' + rows + '</div>' +
     '</details>' +
   '</aside>';

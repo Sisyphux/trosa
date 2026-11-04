@@ -3356,13 +3356,20 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-thread.has-dossier .dialogue-main { order: 1; }
   #trosa .dialogue-thread.has-dossier .dialogue-dossier { order: 0; flex: none; max-height: 45%; }
   #trosa .dialogue-dossier-summary {
-    display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 16px 0 40px; box-sizing: border-box;
-    cursor: pointer; list-style: none; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-3);
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; min-height: 40px; padding: 12px 20px 12px 44px; box-sizing: border-box;
+    cursor: pointer; list-style: none; position: relative;
   }
   #trosa .dialogue-dossier-summary::-webkit-details-marker { display: none; }
-  #trosa .dialogue-dossier-summary .dialogue-dossier-sum-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--dl-ink-2); }
-  #trosa .dialogue-dossier-summary::after { content: "展开"; flex: none; margin-left: auto; color: var(--dl-ink-2); }
-  #trosa .dialogue-dossier-fold[open] .dialogue-dossier-summary::after { content: "收起"; }
+  #trosa .dialogue-glance-name { flex: none; font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; color: var(--dl-ink); }
+  #trosa .dialogue-glance-cells { flex: 1 1 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px 22px; }
+  #trosa .dialogue-glance-cell { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; font-size: var(--dl-fs-body-s); }
+  #trosa .dialogue-glance-cell i { font-style: normal; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
+  #trosa .dialogue-glance-cell b { font-weight: 500; color: var(--dl-ink); overflow-wrap: anywhere; }
+  #trosa .dialogue-glance-cell.is-flag b { font-weight: 600; color: var(--dl-gold-ink); }
+  #trosa .dialogue-glance-toggle { flex: none; margin-left: auto; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-2); }
+  #trosa .dialogue-glance-toggle::after { content: "全部资料 ↓"; }
+  #trosa .dialogue-dossier-fold[open] .dialogue-glance-toggle::after { content: "收起 ↑"; }
+  #trosa .dialogue-dossier-fold[open] .dialogue-glance-cells { display: none; }
   #trosa .dialogue-dossier-head { padding-left: 40px; }
   #trosa .dialogue-kv-k { padding-left: 40px; }
 }

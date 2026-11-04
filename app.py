@@ -8760,7 +8760,17 @@ def _dialogue_attach_context(conn, thread):
             'website': str(customer.get('website') or ''),
             'business_type': str(customer.get('field') or customer.get('industry') or ''),
             'last_contact': str(customer.get('last_contact') or ''),
+            'level': str(customer.get('level') or ''),
+            'next_follow_up': str(customer.get('next_follow_up') or ''),
         }
+        try:
+            contacts = [dict(item) for item in (_customer_contacts(conn, customer_id) or [])]
+        except Exception:
+            contacts = []
+        primary = next((item for item in contacts if item.get('email') or item.get('name')), None)
+        thread['context']['contact_name'] = str((primary or {}).get('name') or customer.get('name') or '')
+        thread['context']['contact_title'] = str((primary or {}).get('title') or '')
+        thread['context']['email'] = str((primary or {}).get('email') or '')
     except Exception:
         app.logger.warning('inbox thread context unavailable', exc_info=True)
 
