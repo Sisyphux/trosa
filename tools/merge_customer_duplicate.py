@@ -154,6 +154,27 @@ def _write_backup(statement, backup_dir, source_id, target_id):
     return path
 
 
+def _rebind_payload(conn, tables, target_account, source_id, target_id):
+    """Point the moved rows' legacy payload at the surviving Customer.
+
+    The read models bind a history row to a Customer through
+    ``compat_customer_binding``: when ``legacy_payload->>'customer_id'`` exists
+    it must equal the account's Customer id, or the row drops out of the
+    timeline.  Moving the account alone would make the emails vanish.
+    """
+    rebound = {}
+    for table, column in tables:
+        rebound[f'{table}.{column}'] = _exec(
+            conn,
+            f'''UPDATE {table}
+                   SET {column} = coalesce({column}, '{{}}'::jsonb)
+                       || jsonb_build_object('customer_id', ?::text)
+                 WHERE account_id=? AND {column}->>'customer_id'=?''',
+            (str(target_id), target_account, str(source_id)),
+        )
+    return rebound
+
+
 def _merge(conn, source, target, note):
     source_id, target_id = int(source['id']), int(target['id'])
     source_account, target_account = source['account_id'], target['account_id']
@@ -176,6 +197,12 @@ def _merge(conn, source, target, note):
         'UPDATE trosa.inbox_items SET account_id=? WHERE account_id=?',
         (target_account, source_account),
     )
+    moved['payload_rebound'] = _rebind_payload(
+        conn, (('trosa.outreach_messages', 'legacy_payload'),
+               ('trosa.timeline_events', 'payload'),
+               ('trosa.inbox_items', 'legacy_payload'),
+               ('trosa.contact_legacy_refs', 'legacy_payload')),
+        target_account, source_id, target_id)
 
     # Contacts move as they are, except a second "primary" contact: the target's
     # own primary keeps priority and the duplicate becomes an ordinary contact.
@@ -346,6 +373,8 @@ def main(argv=None):
     parser.add_argument('--note', default='', help='写入客户备注的合并说明')
     parser.add_argument('--backup-dir', default=DEFAULT_BACKUP_DIR)
     parser.add_argument('--apply', action='store_true', help='真正写入（默认只预览）')
+    parser.add_argument('--repair', action='store_true',
+                        help='合并已完成但历史绑定仍指向旧客户时，补齐 legacy_payload 的 customer_id')
     parser.add_argument('--yes', action='store_true', help='与 --apply 一起确认写入')
     parser.add_argument('--user', default=os.environ.get('TRADE_OS_AGENT_USER') or 'hamid')
     args = parser.parse_args(argv)
@@ -365,6 +394,25 @@ def main(argv=None):
     try:
         source = _customer(conn, args.source)
         target = _customer(conn, args.target)
+        if source is None and target is not None and args.repair:
+            if not args.apply or not args.yes:
+                print(json.dumps({'repair': 'dry-run', 'source': args.source,
+                                  'target': args.target}, ensure_ascii=False))
+                print('补绑定预览：加 --apply --yes 写入。')
+                return 0
+            moved = _rebind_payload(
+                conn,
+                (('trosa.outreach_messages', 'legacy_payload'),
+                 ('trosa.timeline_events', 'payload'),
+                 ('trosa.inbox_items', 'legacy_payload'),
+                 ('trosa.contact_legacy_refs', 'legacy_payload')),
+                target['account_id'], args.source, args.target,
+            )
+            _write_audit(conn, args.user, args.target,
+                         f'补全合并 #{args.source} → #{args.target} 的历史绑定：{moved}')
+            conn.commit()
+            print(json.dumps(moved, ensure_ascii=False, indent=2))
+            return 0
         if not source or not target:
             missing = args.source if not source else args.target
             print(f'客户 {missing} 不存在或已归档；若已合并，无需重复执行。')
