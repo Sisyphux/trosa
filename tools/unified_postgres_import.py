@@ -1452,6 +1452,9 @@ class Importer:
                  if row.get("consumed_message_id") else None,
                  parse_time(row.get("created_at")) or datetime.now(timezone.utc)))
 
+        # inbox_thread_progress is a 30-second live status line, never carried over.
+        rows.get("inbox_thread_progress", [])
+
         for row in rows.get("inbox_legacy_route_hits", []):
             day = parse_time(row.get("day"))
             if day is None:
