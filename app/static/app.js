@@ -902,7 +902,7 @@ document.addEventListener('visibilitychange', function() {
 });
 
 function runViewUpdate(update, type) {
-  if (_motionReduced || isMotionLite() || !document.startViewTransition) {
+  if (_bgRefreshing || _motionReduced || isMotionLite() || !document.startViewTransition) {
     update();
     return null;
   }
@@ -2208,6 +2208,113 @@ function startInboxAutoRefresh() {
 
 // 其他人 / Sela / 导入写入的新内容：轮询一个轻量指纹，变了就静默刷新当前页，
 // 不用手动整页刷新。正在编辑（弹窗、输入框有焦点）时不打断，等下一轮。
+// ---- 无感刷新：只改变化的节点 ----
+// 后台刷新期间，所有 el.innerHTML = html 都改为"对比后只改不同的部分"：
+// 没变的行原封不动（不闪、滚动位置不跳、悬停/焦点保留），只有新增/变化的才动。
+var _bgRefreshing = false;
+(function installMorphingInnerHTML() {
+  var desc = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  if (!desc || !desc.set) return;
+  function keyOf(node) {
+    if (node.nodeType !== 1) return '';
+    return node.id || node.getAttribute('data-id') || node.getAttribute('data-key') ||
+      node.getAttribute('data-question-id') || node.getAttribute('data-customer-id') || '';
+  }
+  function sameKind(a, b) {
+    return a.nodeType === b.nodeType && a.nodeName === b.nodeName && keyOf(a) === keyOf(b);
+  }
+  function syncAttrs(oldEl, newEl) {
+    var i, name;
+    for (i = oldEl.attributes.length - 1; i >= 0; i--) {
+      name = oldEl.attributes[i].name;
+      if (!newEl.hasAttribute(name)) oldEl.removeAttribute(name);
+    }
+    for (i = 0; i < newEl.attributes.length; i++) {
+      name = newEl.attributes[i].name;
+      if (oldEl.getAttribute(name) !== newEl.attributes[i].value) oldEl.setAttribute(name, newEl.attributes[i].value);
+    }
+  }
+  function morphNode(oldNode, newNode) {
+    if (oldNode.isEqualNode(newNode)) return;
+    if (oldNode.nodeType !== 1) { oldNode.nodeValue = newNode.nodeValue; return; }
+    var tag = oldNode.nodeName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      if (oldNode === document.activeElement) return;
+      syncAttrs(oldNode, newNode);
+      if (tag !== 'SELECT' && oldNode.value !== newNode.value && newNode.value !== undefined) oldNode.value = newNode.value;
+      if (oldNode.type === 'checkbox' || oldNode.type === 'radio') oldNode.checked = newNode.checked;
+      return;
+    }
+    syncAttrs(oldNode, newNode);
+    morphChildren(oldNode, newNode);
+  }
+  function morphChildren(oldParent, newParent) {
+    var keyed = {};
+    Array.prototype.forEach.call(oldParent.childNodes, function(node) {
+      var key = keyOf(node);
+      if (key) keyed[key] = node;
+    });
+    var oldNode = oldParent.firstChild;
+    var newNode = newParent.firstChild;
+    while (newNode) {
+      var nextNew = newNode.nextSibling;
+      var key = keyOf(newNode);
+      var match = key && keyed[key] && keyed[key].parentNode === oldParent ? keyed[key] : null;
+      if (match) {
+        if (match !== oldNode) oldParent.insertBefore(match, oldNode);
+        else oldNode = oldNode.nextSibling;
+        morphNode(match, newNode);
+      } else if (oldNode && !keyOf(oldNode) && !key && sameKind(oldNode, newNode)) {
+        var following = oldNode.nextSibling;
+        morphNode(oldNode, newNode);
+        oldNode = following;
+      } else {
+        oldParent.insertBefore(newNode, oldNode);
+      }
+      newNode = nextNew;
+    }
+    while (oldNode) {
+      var next = oldNode.nextSibling;
+      oldParent.removeChild(oldNode);
+      oldNode = next;
+    }
+  }
+  Object.defineProperty(Element.prototype, 'innerHTML', {
+    get: desc.get,
+    set: function(html) {
+      if (!_bgRefreshing || !this.isConnected || !this.firstChild || /^(SCRIPT|STYLE|TABLE|TBODY|THEAD|TR|SELECT|TEXTAREA)$/.test(this.nodeName)) {
+        return desc.set.call(this, html);
+      }
+      try {
+        var holder = document.createElement('div');
+        desc.set.call(holder, html);
+        morphChildren(this, holder);
+      } catch (e) {
+        desc.set.call(this, html);
+      }
+    },
+    configurable: true
+  });
+})();
+
+async function backgroundRefreshPage() {
+  if (_bgRefreshing) return;
+  _bgRefreshing = true;
+  _lastMutationAt = Date.now();
+  try {
+    refreshInboxBadge();
+    refreshDialogueBadge();
+    if (currentPage === 'inbox') await loadInbox();
+    else if (currentPage === 'dashboard') await loadDashboard();
+    else if (currentPage === 'customers') await loadCustomers({ preservePosition: true });
+    else if (currentPage === 'overview') await loadOverview();
+    else if (currentPage === 'calendar') await loadCalendar({ background: true });
+  } catch (e) {
+  } finally {
+    _bgRefreshing = false;
+  }
+}
+
 var _changesTimer = null;
 var _changesToken = null;
 var _changesDirty = false;
@@ -2232,8 +2339,7 @@ async function checkForRemoteChanges() {
     }
     if (_changesDirty && !_userIsEditing()) {
       _changesDirty = false;
-      _lastMutationAt = Date.now();
-      scheduleGlobalSync();
+      await backgroundRefreshPage();
     }
   } catch (e) {
   } finally {
@@ -2264,6 +2370,7 @@ var _listPendingTimers = {};
 
 function setListPending(element, pending) {
   if (!element || !element.id) return;
+  if (_bgRefreshing && pending) return;
   clearTimeout(_listPendingTimers[element.id]);
   if (!pending) {
     element.classList.remove('is-refreshing');
