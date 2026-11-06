@@ -1,3 +1,10 @@
+## 2026-11-06 — Inbox 对话里实时显示助手“正在做什么”
+
+- 现象：你发完话等助手回复时，页面上什么都看不到，不知道它在忙什么、是不是卡住了。
+- 修改：助手处理你那句话时，在你的消息下面出现一行小字（橙红小圆点 + 一句话，如“正在查 Northwind 的资料”“正在保存邮箱 ana@northwind.com”），同时在你自己那句话里把被用到的公司名画一笔橙红下划线、邮箱用橙红细框框起来；换下一句时上一处擦掉，助手回话后整行和标记一起淡出。原话里找不到的内容不画；没有进度时页面和以前完全一样。进度只是临时状态：不进沟通记录、不进时间线、不改对话版本、不触发“有更新”；30 秒没有新进度就当过期。仅在这条对话等助手回话时，每约 2 秒取一次很小的状态。
+- 接口：sela 用服务令牌 `POST /api/integrations/sela/threads/<id>/progress`（`{text, marks, run_id, seq}`；清除 `{clear:true}`）；对话读取多一个 `progress`（没有就是 `null`），`GET /api/inbox/threads/<id>?brief=1` 只返回状态和进度。
+- 影响范围：`inbox_dialogue.py`、`app.py`、`db.py`、新增迁移 `0132_inbox_thread_progress.sql`（一张 UNLOGGED 临时表）、`app/static/app.js`、`app/static/swiss-d.css`、`tests/test_inbox_progress.py`、`tools/repro_inbox_progress.cjs`、`docs/repro/inbox-progress/`。
+
 ## 2026-11-04 — 名字和域名都不同的两个品牌，靠地址、法人全称发现是同一主体
 
 - 现象：Pleksi Market 与 Ata Pleksi 这类同一主体的两个品牌，名字、域名、邮箱都不同，系统无从发现，会各开发一次。

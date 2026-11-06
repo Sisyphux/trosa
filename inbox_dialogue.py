@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -520,6 +521,7 @@ def _insert_message(conn, *, thread_id, seq, role, text, actor=None,
 
 
 def _touch_thread(conn, thread_id, *, revision, awaiting, updated_at):
+    clear_progress(conn, thread_id)
     conn.execute(
         f'UPDATE {_t("inbox_threads")} SET revision=?, awaiting=?, updated_at=? WHERE id=?',
         (revision, awaiting, updated_at, thread_id),
@@ -710,6 +712,7 @@ def close_thread(conn, *, thread_id, payload, idempotency_key=None, closed_by='s
                 'current_awaiting': row['awaiting'],
             })
         now = _now()
+        clear_progress(conn, thread_id)
         conn.execute(
             f'UPDATE {_t("inbox_threads")} SET status=\'closed\', awaiting=\'none\', '
             'closed_at=?, closed_by=?, closed_summary=?, updated_at=? WHERE id=?',
@@ -746,6 +749,7 @@ def user_close(conn, *, thread_id, payload, idempotency_key=None, actor=''):
             })
         now = _now()
         summary = '用户关闭：' + note.strip() if (note and note.strip()) else '用户关闭'
+        clear_progress(conn, thread_id)
         conn.execute(
             f'UPDATE {_t("inbox_threads")} SET status=\'closed\', awaiting=\'none\', '
             "closed_at=?, closed_by='human', closed_summary=?, updated_at=? WHERE id=?",
@@ -926,6 +930,133 @@ def thread_attachment_ids(conn, *, thread_id):
             if file_id and file_id not in ids:
                 ids.append(file_id)
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Live progress: the one-line "what sela is doing now" (temporary, not a record)
+# ---------------------------------------------------------------------------
+
+PROGRESS_TTL_SECONDS = 30
+PROGRESS_MAX_TEXT = 80
+PROGRESS_MAX_MARKS = 4
+PROGRESS_MAX_MARK = 80
+PROGRESS_MAX_RUN_ID = 80
+_CONTROL = re.compile(r'[\x00-\x1f\x7f\u2028\u2029\s]+')
+
+
+def _clean_line(value, limit):
+    if not isinstance(value, str):
+        return ''
+    return _CONTROL.sub(' ', value).strip()[:limit].strip()
+
+
+def clear_progress(conn, thread_id):
+    conn.execute(f'DELETE FROM {_t("inbox_thread_progress")} WHERE thread_id=?', (thread_id,))
+
+
+def set_progress(conn, *, thread_id, payload):
+    """Store or clear the live progress line.  Never touches revision or messages."""
+    row = _thread_row(conn, thread_id)
+    if not row:
+        raise DialogueError('not_found', '对话不存在', 404)
+    run_id = _clean_line(payload.get('run_id'), PROGRESS_MAX_RUN_ID)
+    if payload.get('clear') is True:
+        clear_progress(conn, thread_id)
+        return {'success': True, 'stored': False}
+    if row['status'] != 'open' or row['awaiting'] != 'sela':
+        clear_progress(conn, thread_id)
+        return {'success': True, 'stored': False}
+    text = _clean_line(payload.get('text'), PROGRESS_MAX_TEXT)
+    if not text:
+        raise DialogueError('invalid_request', 'text 不能为空')
+    raw_marks = payload.get('marks')
+    if raw_marks is None:
+        raw_marks = []
+    if not isinstance(raw_marks, list):
+        raise DialogueError('invalid_request', 'marks 必须是列表')
+    marks = []
+    for item in raw_marks:
+        mark = _clean_line(item, PROGRESS_MAX_MARK)
+        if mark and mark not in marks:
+            marks.append(mark)
+        if len(marks) >= PROGRESS_MAX_MARKS:
+            break
+    seq = payload.get('seq')
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+        raise DialogueError('invalid_request', 'seq 必须是非负整数')
+    current = conn.execute(
+        f'SELECT run_id, seq FROM {_t("inbox_thread_progress")} WHERE thread_id=?',
+        (thread_id,),
+    ).fetchone()
+    current = _row_dict(current) if current else None
+    if current and current['run_id'] == run_id and seq < int(current['seq']):
+        return {'success': True, 'stored': False}
+    now = _now()
+    marks_json = _dump(marks)
+    if is_postgres():
+        conn.execute(
+            f'INSERT INTO {_t("inbox_thread_progress")} (thread_id, run_id, seq, text, marks, at) '
+            'VALUES (?, ?, ?, ?, ?::jsonb, ?) '
+            'ON CONFLICT (thread_id) DO UPDATE SET run_id=EXCLUDED.run_id, seq=EXCLUDED.seq, '
+            'text=EXCLUDED.text, marks=EXCLUDED.marks, at=EXCLUDED.at',
+            (thread_id, run_id, seq, text, marks_json, now),
+        )
+    else:
+        conn.execute(
+            'INSERT INTO inbox_thread_progress (thread_id, run_id, seq, text, marks, at) '
+            'VALUES (?, ?, ?, ?, ?, ?) '
+            'ON CONFLICT (thread_id) DO UPDATE SET run_id=excluded.run_id, seq=excluded.seq, '
+            'text=excluded.text, marks=excluded.marks, at=excluded.at',
+            (thread_id, run_id, seq, text, marks_json, now),
+        )
+    return {'success': True, 'stored': True}
+
+
+def attach_progress(conn, threads):
+    """Add ``progress`` to thread dicts (human read routes only).
+
+    Only a still-open thread waiting for sela, with a line younger than the TTL,
+    shows one; everything else gets ``None``.
+    """
+    items = [t for t in threads if t]
+    for thread in items:
+        thread['progress'] = None
+    ids = [t['id'] for t in items if t.get('status') == 'open' and t.get('awaiting') == 'sela']
+    if not ids:
+        return
+    where, params = _scope('th')
+    rows = conn.execute(
+        f'SELECT p.thread_id, p.text, p.marks, p.at FROM {_t("inbox_thread_progress")} p '
+        f'JOIN {_t("inbox_threads")} th ON th.id=p.thread_id '
+        f'WHERE {where} AND p.thread_id IN (' + ','.join('?' * len(ids)) + ')',
+        params + ids,
+    ).fetchall()
+    by_id = {t['id']: t for t in items}
+    cutoff = _utcnow().timestamp() - PROGRESS_TTL_SECONDS
+    for row in rows:
+        data = _row_dict(row)
+        at = _ts_val(data.get('at'))
+        if not at or _parse_ts(at).timestamp() < cutoff:
+            continue
+        marks = _load(data.get('marks'), [])
+        by_id[str(data['thread_id'])]['progress'] = {
+            'text': data['text'],
+            'marks': marks if isinstance(marks, list) else [],
+            'at': at,
+        }
+
+
+def get_thread_brief(conn, *, thread_id):
+    """Cheap poll body: state + live progress only (no messages)."""
+    row = _thread_row(conn, thread_id)
+    if not row:
+        raise DialogueError('not_found', '对话不存在', 404)
+    thread = {
+        'id': str(row['id']), 'status': row['status'], 'awaiting': row['awaiting'],
+        'revision': int(row['revision']), 'updated_at': _ts_val(row.get('updated_at')),
+    }
+    attach_progress(conn, [thread])
+    return {'success': True, 'thread': thread}
 
 
 def get_thread(conn, *, thread_id):

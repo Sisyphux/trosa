@@ -1,0 +1,200 @@
+{
+  "checks": [
+    {
+      "name": "wide: 没有进度时不显示状态行",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 没有进度时没有标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 显示状态行",
+      "ok": true,
+      "detail": "正在查 Northwind 的资料"
+    },
+    {
+      "name": "wide: 原话里公司名被标出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 状态行里命中的字更重",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 状态行是 aria-live=polite",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 标记有下划线形状（不只靠颜色）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 换句后只剩邮箱一处标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 旧标记已擦掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "wide: 原话里找不到的不画",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 助手回话后状态行消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 助手回话后标记消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "wide: 新回话已显示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 没有进度时不显示状态行",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 没有进度时没有标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 显示状态行",
+      "ok": true,
+      "detail": "正在查 Northwind 的资料"
+    },
+    {
+      "name": "zoom200: 原话里公司名被标出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 状态行里命中的字更重",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 状态行是 aria-live=polite",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 标记有下划线形状（不只靠颜色）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 换句后只剩邮箱一处标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 旧标记已擦掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "zoom200: 原话里找不到的不画",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 助手回话后状态行消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 助手回话后标记消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "zoom200: 新回话已显示",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 没有进度时不显示状态行",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 没有进度时没有标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 显示状态行",
+      "ok": true,
+      "detail": "正在查 Northwind 的资料"
+    },
+    {
+      "name": "reduced: 原话里公司名被标出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 状态行里命中的字更重",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 状态行是 aria-live=polite",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 标记有下划线形状（不只靠颜色）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 换句后只剩邮箱一处标记",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 旧标记已擦掉",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "name": "reduced: 原话里找不到的不画",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 助手回话后状态行消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 助手回话后标记消失",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reduced: 新回话已显示",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "errors": []
+}

@@ -15102,6 +15102,7 @@ function reconcileDialogueListEntry(thread) {
 function renderDialogueThread() {
   var pane = document.getElementById('dialogueThreadPane');
   if (!pane) return;
+  dialogueProgressStop();
   if (dialogueNoteMode) { pane.innerHTML = dialogueNoteHtml(); return; }
   if (dialogueThreadError) {
     pane.innerHTML = loadFailureHtml(dialogueThreadError, '对话', "selectDialogueThread('" + String(dialogueSelectedId || '') + "')");
@@ -15126,6 +15127,7 @@ function renderDialogueThread() {
   };
   settle();
   if (window.requestAnimationFrame) window.requestAnimationFrame(settle);
+  dialogueProgressStart();
 }
 
 // 在“等你”的对话里，第一条（或下一条）的位置，例如 2 / 4。
@@ -15145,6 +15147,148 @@ function dialogueFocusIndex(messages, group) {
     if (messages[i] && messages[i].role === 'human') return -1;
   }
   return -1;
+}
+
+// ---- sela 正在做什么：一行小字 + 原话里被用到的字面内容画一笔 ----------------------
+// 进度是临时状态：只在这条对话等着助手回话时，每 ~1.8 秒取一次很小的状态；
+// 只改状态行和标记那一小块，不重绘整页。助手回话出现后整体淡出，再正常刷新对话。
+var DIALOGUE_PROGRESS_POLL_MS = 1800;
+var dialogueProgressTimer = null;
+var dialogueProgressKey = '';
+var dialogueProgressBusy = false;
+var dialogueProgressSeen = false;
+
+function dialogueProgressStop() {
+  if (dialogueProgressTimer) { clearTimeout(dialogueProgressTimer); dialogueProgressTimer = null; }
+  dialogueProgressKey = '';
+  dialogueProgressSeen = false;
+}
+
+function dialogueProgressStart() {
+  dialogueProgressStop();
+  if (!dialogueThread || dialogueThread.status !== 'open' || dialogueThread.awaiting !== 'sela') return;
+  paintDialogueProgress(dialogueThread.progress || null);
+  dialogueProgressTimer = setTimeout(dialogueProgressTick, DIALOGUE_PROGRESS_POLL_MS);
+}
+
+async function dialogueProgressTick() {
+  dialogueProgressTimer = null;
+  var thread = dialogueThread;
+  if (!thread || thread.status !== 'open' || thread.awaiting !== 'sela') return;
+  var page = document.getElementById('page-dialogue');
+  var idle = document.hidden || !page || !page.classList.contains('active');
+  if (!idle && !dialogueProgressBusy) {
+    dialogueProgressBusy = true;
+    var data = null;
+    try { data = await api('/api/inbox/threads/' + encodeURIComponent(thread.id) + '?brief=1'); }
+    catch (error) { data = null; }
+    dialogueProgressBusy = false;
+    if (dialogueThread !== thread) return;
+    var brief = data && data.thread;
+    if (brief && (brief.status !== 'open' || brief.awaiting !== 'sela' || brief.revision !== thread.revision)) {
+      dialogueProgressLeave();
+      return;
+    }
+    paintDialogueProgress(brief ? brief.progress : null);
+  }
+  if (dialogueThread === thread) dialogueProgressTimer = setTimeout(dialogueProgressTick, DIALOGUE_PROGRESS_POLL_MS);
+}
+
+// 助手回话了（或对话换了状态）：状态行和标记一起淡出，然后照常刷新对话。
+function dialogueProgressLeave() {
+  var row = document.querySelector('#dialogueMessages .dialogue-msg--writing');
+  if (row) row.classList.add('is-leaving');
+  paintDialogueMarks([]);
+  var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var id = dialogueSelectedId;
+  setTimeout(function() { if (dialogueSelectedId === id) reloadDialogueThread(); }, reduced ? 0 : 300);
+}
+
+function dialogueProgressLineHtml(text, marks) {
+  var ranges = [];
+  marks.forEach(function(mark) {
+    var at = text.indexOf(mark);
+    if (at < 0) return;
+    for (var i = 0; i < ranges.length; i++) { if (at < ranges[i][1] && at + mark.length > ranges[i][0]) return; }
+    ranges.push([at, at + mark.length]);
+  });
+  ranges.sort(function(a, b) { return a[0] - b[0]; });
+  var html = '';
+  var cursor = 0;
+  ranges.forEach(function(range) {
+    html += escapeHtml(text.slice(cursor, range[0])) + '<b>' + escapeHtml(text.slice(range[0], range[1])) + '</b>';
+    cursor = range[1];
+  });
+  return html + escapeHtml(text.slice(cursor));
+}
+
+function paintDialogueProgress(progress) {
+  var row = document.querySelector('#dialogueMessages .dialogue-msg--writing');
+  if (!row) return;
+  var line = row.querySelector('.dialogue-progress');
+  if (!line) return;
+  var text = progress && typeof progress.text === 'string' ? progress.text : '';
+  var marks = text && Array.isArray(progress.marks) ? progress.marks.filter(function(m) { return typeof m === 'string' && m; }) : [];
+  var key = text + '\u0001' + marks.join('\u0001');
+  if (key === dialogueProgressKey) return;
+  dialogueProgressKey = key;
+  row.classList.toggle('has-progress', !!text);
+  line.innerHTML = text
+    ? '<i class="dialogue-progress-dot" aria-hidden="true"></i><span class="dialogue-progress-text">' + dialogueProgressLineHtml(text, marks) + '</span>'
+    : '';
+  paintDialogueMarks(marks);
+  // 矮屏（比如 200% 缩放）里输入框会盖住它：状态行首次出现时把它带进视野。
+  if (text && !dialogueProgressSeen) { dialogueProgressSeen = true; if (row.scrollIntoView) row.scrollIntoView({ block: 'nearest' }); }
+}
+
+// 只标人自己最后一条消息；只亮一处（第一个在原话里找得到的）；找不到就不画。
+function paintDialogueMarks(marks) {
+  var host = document.getElementById('dialogueMessages');
+  if (!host) return;
+  var messages = dialogueThread && dialogueThread.messages || [];
+  var last = messages[messages.length - 1];
+  var humans = host.querySelectorAll('.dialogue-msg--human');
+  var target = last && last.role === 'human' && humans.length ? humans[humans.length - 1].querySelector('.dialogue-msg-text') : null;
+  if (!target) return;
+  var wanted = '';
+  var plain = target.textContent.toLowerCase();
+  for (var i = 0; i < marks.length; i++) {
+    if (plain.indexOf(String(marks[i]).toLowerCase()) >= 0) { wanted = String(marks[i]); break; }
+  }
+  var current = target.querySelector('.dialogue-mark:not(.is-erasing)');
+  if (current && wanted && current.getAttribute('data-mark') === wanted.toLowerCase()) return;
+  if (current) {
+    current.classList.add('is-erasing');
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var gone = current;
+    setTimeout(function() {
+      var parent = gone.parentNode;
+      if (!parent) return;
+      while (gone.firstChild) parent.insertBefore(gone.firstChild, gone);
+      parent.removeChild(gone);
+      parent.normalize();
+    }, reduced ? 0 : 320);
+  }
+  if (!wanted) return;
+  var needle = wanted.toLowerCase();
+  var walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT, {
+    acceptNode: function(node) {
+      return node.parentNode.closest && node.parentNode.closest('.is-erasing') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  var node;
+  while ((node = walker.nextNode())) {
+    var at = node.data.toLowerCase().indexOf(needle);
+    if (at < 0) continue;
+    var range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + needle.length);
+    var mark = document.createElement('span');
+    mark.className = 'dialogue-mark' + (needle.indexOf('@') >= 0 ? ' dialogue-mark--mail' : '');
+    mark.setAttribute('data-mark', needle);
+    range.surroundContents(mark);
+    return;
+  }
 }
 
 function renderDialogueThreadHtml() {
@@ -15203,7 +15347,8 @@ function renderDialogueThreadHtml() {
       closingSummary +
       (group === 'sela' ? '<div class="dialogue-msg dialogue-msg--writing" data-state="sela-writing">' +
         '<div class="dialogue-msg-head"><span class="dialogue-msg-who">助手</span></div>' +
-        '<div class="dialogue-msg-body">' + waitHtml('在处理…', 'inline') + '</div></div>' : '') +
+        '<div class="dialogue-msg-body">' + waitHtml('在处理…', 'inline') +
+        '<div class="dialogue-progress" aria-live="polite"></div></div></div>' : '') +
       (closed ? '<div class="dialogue-closed-note" role="status"><span class="dialogue-msg-head">归档</span>' +
         '<span class="dialogue-msg-body">已归档</span></div>' : '') +
       '</div>' +

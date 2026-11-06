@@ -402,7 +402,7 @@ def _sela_integration_path_allowed():
             request.path,
         ))
         or (request.method == 'POST' and re.fullmatch(
-            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions|facts)',
+            r'/api/integrations/sela/threads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/(?:messages|close|irreversible-actions|facts|progress)',
             request.path,
         ))
         or (request.method == 'GET' and re.fullmatch(
@@ -8551,6 +8551,27 @@ def sela_integration_append_thread_message(thread_id):
         conn.close()
 
 
+@app.route('/api/integrations/sela/threads/<thread_id>/progress', methods=['POST'])
+@login_required
+def sela_integration_thread_progress(thread_id):
+    """Temporary "what sela is doing now" line; not a record (no audit, no revision)."""
+    conn = get_db()
+    try:
+        payload = _dialogue_json_body()
+        conn.execute('BEGIN IMMEDIATE')
+        body = _dialogue.set_progress(conn, thread_id=thread_id, payload=payload)
+        conn.commit()
+        return jsonify(body)
+    except _dialogue.DialogueError as error:
+        conn.rollback()
+        return _dialogue_error_response(error)
+    except Exception:
+        conn.rollback()
+        return _dialogue_write_failure('progress')
+    finally:
+        conn.close()
+
+
 @app.route('/api/integrations/sela/threads/<thread_id>/close', methods=['POST'])
 @login_required
 def sela_integration_close_thread(thread_id):
@@ -9184,6 +9205,7 @@ def inbox_threads_list():
             cursor=request.args.get('cursor'),
             exclude_subjects=[subject for subject, customer in customers.items() if customer is None],
         )
+        _dialogue.attach_progress(conn, body.get('threads') or [])
         # Display-only: the list table shows each company's country (the sela body is untouched).
         for thread in body.get('threads') or []:
             customer = customers.get(str(thread.get('subject') or ''))
@@ -9302,7 +9324,10 @@ def inbox_thread_get(thread_id):
     """Human read of one Inbox conversation (S3 dialogue window)."""
     conn = get_db()
     try:
+        if request.args.get('brief') == '1':
+            return jsonify(_dialogue.get_thread_brief(conn, thread_id=thread_id))
         body = _dialogue.get_thread(conn, thread_id=thread_id)
+        _dialogue.attach_progress(conn, [body.get('thread')])
         _dialogue_attach_customer_id(conn, body.get('thread'))
         _dialogue_attach_context(conn, body.get('thread'))
         return jsonify(body)

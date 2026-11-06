@@ -1736,6 +1736,17 @@ USER_TABLE_SQL = [
         WHERE consumed_message_id IS NOT NULL
     ''',
     '''
+    CREATE TABLE IF NOT EXISTS inbox_thread_progress (
+        thread_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL DEFAULT '',
+        seq INTEGER NOT NULL DEFAULT 0,
+        text TEXT NOT NULL,
+        marks TEXT NOT NULL DEFAULT '[]',
+        at TEXT,
+        FOREIGN KEY (thread_id) REFERENCES inbox_threads(id) ON DELETE CASCADE
+    )
+    ''',
+    '''
     CREATE TABLE IF NOT EXISTS inbox_legacy_route_hits (
         organization_id TEXT NOT NULL DEFAULT '',
         legacy_user_id TEXT NOT NULL DEFAULT '',

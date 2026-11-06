@@ -523,3 +523,29 @@ html.motion-reduced .hand-tip{transition:none !important}
 
 /* 选中文字：墨底白字。旧规则沿用了 --dl-gold-soft(#f2f2f2)，落在 #f5f5f5 的焦点消息上几乎看不见，无法复制文字。 */
 html[data-type="swiss"] ::selection,#trosa ::selection{background:var(--dl-ink);color:var(--dl-paper)}
+
+/* ---- Inbox：助手正在做什么（一行小字 + 原话里画一笔）-----------------------------
+   唯一强调色橙红；没有进度时这些规则不生效，对话和以前完全一样。 */
+html[data-type="swiss"]{--dl-accent:#e8431f}
+#trosa .dialogue-progress{display:none;align-items:baseline;gap:8px;font-size:var(--dl-fs-body-s);color:var(--dl-ink-2);line-height:1.6}
+#trosa .dialogue-msg--writing.has-progress .dialogue-progress{display:flex}
+#trosa .dialogue-msg--writing.has-progress .wait{display:none}
+#trosa .dialogue-progress-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dl-accent,#e8431f);transform:translateY(-1px)}
+#trosa .dialogue-progress-text{animation:dlProgressIn var(--dl-dur,.28s) var(--dl-ease,ease) both}
+#trosa .dialogue-progress-text b{font-weight:700;color:var(--dl-ink)}
+#trosa .dialogue-msg--writing{scroll-margin-bottom:200px;transition:opacity var(--dl-dur,.28s) var(--dl-ease,ease)}
+#trosa .dialogue-msg--writing.is-leaving{opacity:0}
+#trosa .dialogue-mark{background:linear-gradient(var(--dl-accent,#e8431f),var(--dl-accent,#e8431f)) 0 100%/100% 1.5px no-repeat;
+  padding-bottom:2px;animation:dlMarkIn var(--dl-dur-slow,.55s) var(--dl-ease,ease) both}
+#trosa .dialogue-mark--mail{outline:1.5px solid var(--dl-accent,#e8431f);outline-offset:1px;background:none;padding-bottom:0}
+#trosa .dialogue-mark.is-erasing{animation:dlMarkOut var(--dl-dur,.28s) var(--dl-ease,ease) both}
+@keyframes dlProgressIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes dlMarkIn{from{background-size:0 1.5px;outline-color:transparent}to{background-size:100% 1.5px}}
+@keyframes dlMarkOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){
+  #trosa .dialogue-progress-text,#trosa .dialogue-mark,#trosa .dialogue-mark.is-erasing{animation:none !important}
+  #trosa .dialogue-mark.is-erasing{opacity:0}
+  #trosa .dialogue-msg--writing{transition:none}
+}
+html.motion-reduced #trosa :is(.dialogue-progress-text,.dialogue-mark,.dialogue-mark.is-erasing){animation:none !important}
+html.motion-reduced #trosa .dialogue-mark.is-erasing{opacity:0}
