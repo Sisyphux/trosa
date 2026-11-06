@@ -2203,9 +2203,46 @@ function startInboxAutoRefresh() {
     // Keep the count current without rebuilding the visible list or interrupting edits.
     refreshInboxBadge();
   }, 60000);
+  if (!_changesTimer) { _changesTimer = setInterval(checkForRemoteChanges, 20000); checkForRemoteChanges(); }
+}
+
+// 其他人 / Sela / 导入写入的新内容：轮询一个轻量指纹，变了就静默刷新当前页，
+// 不用手动整页刷新。正在编辑（弹窗、输入框有焦点）时不打断，等下一轮。
+var _changesTimer = null;
+var _changesToken = null;
+var _changesDirty = false;
+var _changesBusy = false;
+function _userIsEditing() {
+  if (document.querySelector('.modal-overlay.show')) return true;
+  var el = document.activeElement;
+  if (!el) return false;
+  var tag = (el.tagName || '').toLowerCase();
+  if (tag === 'textarea' || el.isContentEditable) return true;
+  return tag === 'input' && ['checkbox', 'radio', 'button', 'submit', 'range'].indexOf(el.type) < 0;
+}
+async function checkForRemoteChanges() {
+  if (!currentUser || document.hidden || _changesBusy) return;
+  _changesBusy = true;
+  try {
+    var data = await api('/api/changes', { silentError: true, skipGlobalSync: true, retryAttempts: 1 });
+    var token = data && data.token;
+    if (token) {
+      if (_changesToken !== null && token !== _changesToken) _changesDirty = true;
+      _changesToken = token;
+    }
+    if (_changesDirty && !_userIsEditing()) {
+      _changesDirty = false;
+      _lastMutationAt = Date.now();
+      scheduleGlobalSync();
+    }
+  } catch (e) {
+  } finally {
+    _changesBusy = false;
+  }
 }
 
 function stopInboxAutoRefresh() {
+  if (_changesTimer) { clearInterval(_changesTimer); _changesTimer = null; }
   if (!_inboxAutoRefreshTimer) return;
   clearInterval(_inboxAutoRefreshTimer);
   _inboxAutoRefreshTimer = null;
@@ -2216,6 +2253,7 @@ document.addEventListener('visibilitychange', function() {
   else if (currentUser) {
     startInboxAutoRefresh();
     refreshInboxBadge();
+    checkForRemoteChanges();
   }
 });
 

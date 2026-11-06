@@ -23772,6 +23772,48 @@ def api_version():
     return resp
 
 
+@app.route('/api/changes')
+@login_required
+def api_changes():
+    """Cheap fingerprint of "has anything changed", polled by open pages.
+
+    Writes made elsewhere (teammates, Sela, imports) otherwise stay invisible
+    until a manual reload. The browser compares this token and refetches only
+    the visible page when it differs.
+    """
+    probes = (
+        "SELECT COALESCE(MAX(id), 0) FROM operation_logs",
+        "SELECT COALESCE(MAX(id), 0) FROM follow_up_logs",
+        "SELECT COALESCE(MAX(id), 0) FROM inbox_items",
+        "SELECT COUNT(*) FROM inbox_items WHERE status = 'open'",
+        "SELECT COALESCE(MAX(id), 0) FROM reminders",
+        "SELECT COUNT(*) FROM reminders WHERE is_done = 0",
+        "SELECT COALESCE(MAX(updated_at), '') FROM customers",
+        "SELECT COALESCE(MAX(updated_at), '') FROM follow_up_logs",
+        "SELECT COALESCE(MAX(updated_at), '') FROM inbox_threads",
+    )
+    parts = []
+    conn = get_db()
+    try:
+        c = conn.cursor()
+        for sql in probes:
+            try:
+                row = c.execute(sql).fetchone()
+                parts.append(str(row[0]) if row is not None else '')
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                parts.append('?')
+    finally:
+        conn.close()
+    token = hashlib.sha1('|'.join(parts).encode('utf-8')).hexdigest()[:16]
+    resp = jsonify({'token': token})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 _source_watchdog_started = False
 
 

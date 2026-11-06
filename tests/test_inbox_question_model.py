@@ -441,6 +441,15 @@ class InboxQuestionModelTest(unittest.TestCase):
         need = next(item for item in resolved if item['trosa_inbox_id'] == item_id)
         self.assertEqual(need['human_response']['selected_option'], '板材')
 
+    def test_changes_token_moves_when_new_content_arrives(self):
+        first = self.client.get('/api/changes').get_json()['token']
+        self.assertEqual(first, self.client.get('/api/changes').get_json()['token'])
+        self._insert_question(
+            'sela_agent_request', 'approval', '公司：X\n类型：SEND_APPROVAL\n\n新内容。',
+            dedupe_key='sela:agent-request:changes-token',
+        )
+        self.assertNotEqual(first, self.client.get('/api/changes').get_json()['token'])
+
     def test_retired_send_approval_can_only_be_closed_without_sending(self):
         item_id = self._insert_question(
             'sela_agent_request', 'approval',
