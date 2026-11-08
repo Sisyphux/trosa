@@ -8698,6 +8698,9 @@ async function openEditModal(id) {
     closeCwForms();
     renderFollowTimeline(c.follow_history || [], c.outreach_emails || []);
     renderCustomerFactsBrief(c);
+    _customerFollowHint = c.follow_hint || null;
+    _customerClockTz = c.timezone || '';
+    _customerReplyHabit = c.reply_habit || '';
     renderCustomerNextTask(c.reminders || []);
     _customerDetailCache = c;
     _customerTimelinePage = 1;
@@ -8835,6 +8838,54 @@ function cwWhen(iso) {
   return (date.getMonth() + 1) + ' 月 ' + date.getDate() + ' 日 · ' + CW_WEEKDAYS[date.getDay()] + ' · ' + relative;
 }
 
+// One quiet line from the daily scan; a newer record or a dated next step clears it.
+var _customerFollowHint = null;
+function customerFollowHintHtml() {
+  var text = _customerFollowHint && _customerFollowHint.reason;
+  return text ? '<p class="cw-reason" id="customerFollowHint">' + escapeHtml(text) + '</p>' : '';
+}
+
+// The same two clocks as the Today dock: the customer's local time (with working / off hours)
+// and ours, so "is it a good moment to write" is clear at a glance.  Nothing renders without a timezone.
+var _customerClockTz = '';
+var _customerReplyHabit = '';
+// 业务员自己手写的一句「一般什么时候回」；没填就什么都不显示，系统不推算。
+function customerReplyHabitHtml() {
+  var text = String(_customerReplyHabit || '').trim();
+  return text ? '<p class="cw-clock-habit" id="customerReplyHabit"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5 2.5 7l4 3.5M2.5 7H10a3.5 3.5 0 0 1 3.5 3.5V12"/></svg>' + escapeHtml(text) + '</p>' : '';
+}
+function customerClockHtml() {
+  var tz = _customerClockTz;
+  if (!tz) { var only = customerReplyHabitHtml(); return only ? '<div class="cw-clock">' + only + '</div>' : ''; }
+  function hm(p) { return (p.hh < 10 ? '0' : '') + p.hh + ':' + (p.mm < 10 ? '0' : '') + p.mm; }
+  try {
+    var now = Date.now();
+    var theirs = tideDateParts(tz, now);
+    var option = CUSTOMER_TIMEZONE_OPTIONS.filter(function(item) { return item.value === tz; })[0];
+    var place = option ? option.label.split(' · ')[0] : tz;
+    var mine = new Date(now);
+    var working = tideIsWorking(tz, now);
+    var weekend = theirs.wd === 'Sat' || theirs.wd === 'Sun';
+    // 一条色带 = 对方的一天（他们的 0–24 点），色段是上班时间，竖线是他们此刻。
+    var t = theirs.hh * 60 + theirs.mm;
+    var ws = TIDE_WORK_START * 60, we = TIDE_WORK_END * 60;
+    var win = '<span class="tide-win' + (weekend ? ' is-gone' : (working ? ' is-open' : '')) + '" style="left:' + ((ws / 1440) * 100).toFixed(3) +
+      '%;width:' + (((we - ws) / 1440) * 100).toFixed(3) + '%' + (working ? ';--done:' + (((t - ws) / (we - ws)) * 100).toFixed(2) + '%' : '') + '"></span>';
+    var hrs = '';
+    for (var h = 0; h <= 24; h += 6) hrs += '<span style="left:' + ((h / 24) * 100) + '%">' + (h < 10 ? '0' : '') + h + '</span>';
+    return '<div class="cw-clock" id="customerClock">' +
+      '<div class="cw-clock-row">' +
+      '<div class="cw-clock-item"><span class="cw-clock-label">' + escapeHtml(place) + '</span><span class="cw-clock-time">' +
+      '<i class="cw-clock-dot' + (working ? ' is-on' : '') + '"></i>' + hm(theirs) + '</span></div>' +
+      '<div class="cw-clock-item"><span class="cw-clock-label">我们</span><span class="cw-clock-time">' +
+      hm({ hh: mine.getHours(), mm: mine.getMinutes() }) + '</span></div></div>' +
+      '<div class="cw-tide"><div class="cw-tide-track">' + win +
+      '<span class="cw-tide-now" style="left:' + ((t / 1440) * 100).toFixed(3) + '%"></span></div>' +
+      '<div class="cw-tide-hrs">' + hrs + '</div></div>' +
+      customerReplyHabitHtml() + '</div>';
+  } catch (err) { return ''; }
+}
+
 function renderCustomerNextTask(reminders) {
   var el = document.getElementById('customerNextTask');
   var quickActions = document.getElementById('customerTaskQuickActions');
@@ -8844,7 +8895,7 @@ function renderCustomerNextTask(reminders) {
   el.hidden = false;
   if (!next) {
     // A record without a next step is a normal state, not a warning.
-    el.innerHTML = '<h2 class="cw-h2 is-empty">还没有安排下一步</h2>';
+    el.innerHTML = '<h2 class="cw-h2 is-empty">还没有安排下一步</h2>' + customerFollowHintHtml() + customerClockHtml();
     if (actions) actions.innerHTML =
       '<button type="button" class="cw-act cw-primary" id="customerTaskActionButton" onclick="openCustomerTaskModal(\'create\')">安排下一步</button>' +
       '<button type="button" class="cw-act" onclick="openCustomerFollowComposer()">记录沟通</button>';
@@ -8855,7 +8906,7 @@ function renderCustomerNextTask(reminders) {
   var title = next.title || next.content || '联系客户';
   el.innerHTML = '<h2 class="cw-h2">' + handUnderlined(escapeHtml(title)) + '</h2>' +
     '<p class="cw-when tnum">' + escapeHtml(cwWhen(next.remind_date)) + '</p>' +
-    (next.reason ? '<p class="cw-reason">' + escapeHtml(next.reason) + '</p>' : '');
+    (next.reason ? '<p class="cw-reason">' + escapeHtml(next.reason) + '</p>' : '') + customerClockHtml();
   if (actions) actions.innerHTML =
     '<button type="button" class="cw-act cw-primary" onclick="openCustomerFollowComposer()">记录沟通</button>' +
     '<button type="button" class="cw-act" id="customerTaskActionButton" onclick="openCustomerTaskModal()">调整</button>' +
@@ -9105,6 +9156,7 @@ function customerProfileHtml(customer) {
     row('公司', text(customer.company || customer.name) + (customer.name && customer.company && customer.name !== customer.company ? '<span class="cw-none"> · ' + escapeHtml(customer.name) + '</span>' : '')) +
     row('国家 / 地区', text(customer.country)) +
     row('时区', customerTimezoneControl(customer)) +
+    row('一般什么时候回', '<input type="text" class="cw-habit-input" maxlength="200" aria-label="这个客户一般什么时候回复，自己写一句" value="' + escapeHtml(customer.reply_habit || '') + '" onchange="saveCustomerReplyHabit(this)">') +
     row('行业领域', text(customer.industry || customer.field)) +
     row('客户来源', text([customerSourceLabel(customer.source), customer.source_detail].filter(Boolean).join(' · '))) +
     row('等级 · 角色', levelControl + (customer.business_role ? ' · ' + escapeHtml(customer.business_role) : '')) +
@@ -9225,6 +9277,9 @@ async function refreshCustomerWorkspace() {
   _customerDetailCache = customer;
   updateCustomerWorkspaceIdentity(customer);
   renderCustomerFactsBrief(customer);
+  _customerFollowHint = customer.follow_hint || null;
+  _customerClockTz = customer.timezone || '';
+  _customerReplyHabit = customer.reply_habit || '';
   renderCustomerNextTask(customer.reminders || []);
   renderCustomerTasks(customer.tasks);
   document.getElementById('editNextFollowUp').value = customer.next_follow_up || '';
@@ -9406,6 +9461,30 @@ async function quickUpdateCustomerTimezone(select) {
 }
 
 // Drop a manual override and let the server re-infer from the country again.
+async function saveCustomerReplyHabit(input) {
+  if (!input) return;
+  var id = Number((document.getElementById('editCustomerId') || {}).value || 0);
+  if (!id) return;
+  var previous = String((_customerDetailCache && _customerDetailCache.reply_habit) || '');
+  var next = String(input.value || '').replace(/\s+/g, ' ').trim();
+  if (next === previous) return;
+  var scope = beginCustomerScope(id);
+  try {
+    await api('/api/customers/' + id, { method: 'PUT', body: JSON.stringify({ reply_habit: next }) });
+    var cache = liveCustomerCache(scope);
+    if (cache) {
+      cache.reply_habit = next;
+      _customerReplyHabit = next;
+      renderCustomerFactsBrief(cache);
+      renderCustomerNextTask(cache.reminders || []);
+      markModalClean('customerEditModal');
+    }
+  } catch (e) {
+    input.value = previous;
+    showToast(e && e.message ? e.message : '没有保存成功，请重试', 'error');
+  }
+}
+
 async function resetCustomerTimezone() {
   var idField = document.getElementById('editCustomerId');
   var id = Number(idField && idField.value || 0);
@@ -10892,6 +10971,9 @@ async function addFollowHistory() {
         date: saved.next_step.remind_date || '', source: '待办记录'
       } : { label: '尚无下一步', date: '', source: '系统事实' };
       document.getElementById('editNextFollowUp').value = cache.next_follow_up;
+      _customerFollowHint = null;
+      _customerClockTz = '';
+      cache.follow_hint = null;
       renderCustomerNextTask(cache.reminders || []);
       syncCustomerWorkspaceAfterCommunication(id, activity, changedKey);
       // The composer reset and the programmatic 下次跟进 write above are saved
@@ -15901,9 +15983,10 @@ async function submitDialogueReply(event) {
   var body = { text: text, seen_revision: dialogueThread.revision };
   var attachmentIds = dialogueAttachments.map(function(a) { return a.file_object_id; }).filter(Boolean);
   if (attachmentIds.length) body.attachment_ids = attachmentIds;
+  var sent;
   try {
     // 已归档的对话：这一句就是重新打开它，历史留在原处，不当成新对话。
-    await api('/api/inbox/threads/' + encodeURIComponent(threadId) + (closed ? '/resume' : '/reply'), { method: 'POST', body: JSON.stringify(body) });
+    sent = await api('/api/inbox/threads/' + encodeURIComponent(threadId) + (closed ? '/resume' : '/reply'), { method: 'POST', body: JSON.stringify(body) });
   } catch (error) {
     dialogueSending = false;
     setDialogueComposerBusy(false);
@@ -15925,8 +16008,10 @@ async function submitDialogueReply(event) {
   dialogueSending = false;
   dialogueDraft = '';
   dialogueAttachments = [];
-  showToast(closed ? '已重新打开，助手在处理' : '已收到', 'success');
-  await loadDialogue({ afterReply: true, sentId: threadId });
+  // 助手当场答了（轮到你了）：留在这条对话里看答案，别跳去下一条。
+  var answered = !!(sent && sent.answered);
+  if (!answered) showToast(closed ? '已重新打开，助手在处理' : '已收到', 'success');
+  await loadDialogue(answered ? {} : { afterReply: true, sentId: threadId });
   return false;
 }
 
