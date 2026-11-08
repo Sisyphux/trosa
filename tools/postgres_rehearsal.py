@@ -467,6 +467,7 @@ def run_integration_tests() -> int:
     result = subprocess.run(
         [sys.executable, "-m", "unittest",
          "tests.test_inbox_dialogue_postgres",
+         "tests.test_followup_store_postgres",
          "tests.test_postgres_rehearsal", "-v"],
         cwd=ROOT,
         env=env,

@@ -49,6 +49,18 @@ def _run_email_verification_jobs():
     set_db_user(None)
 
 
+def _run_followup_suggestions():
+    """Every weekday morning, leave each member their follow-up suggestions."""
+    try:
+        import db
+        if not db.postgres_mode():
+            return
+        import followup_job
+        followup_job.run_daily(USERS, lambda user: True)
+    except Exception:
+        logger.exception('跟进建议每日任务异常')
+
+
 def _run_gmail_sync_jobs():
     """Kick off bounded, account-scoped Gmail sync workers without blocking APScheduler."""
     try:
@@ -104,6 +116,17 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1,
         )
+
+    scheduler.add_job(
+        func=_run_followup_suggestions,
+        trigger=CronTrigger(day_of_week='mon-fri', hour=8, minute=0, timezone=SCHEDULER_TIMEZONE),
+        id='followup_suggestions_daily',
+        name='每日跟进建议',
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
 
     # Gmail is optional and is registered only after OAuth credentials and a
     # token-encryption secret are present. Connected accounts are still

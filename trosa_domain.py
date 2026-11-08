@@ -1553,6 +1553,7 @@ def update_customer(conn: Any, *, customer_id: int, values: dict[str, Any]) -> N
         ('next_follow_up', ('next_follow_up',)), ('source', ('source',)),
         ('source_detail', ('source_detail',)),
         ('timezone', ('timezone',)), ('timezone_source', ('timezone_source',)),
+        ('reply_habit', ('reply_habit',)),
     )
     customer_payload: dict[str, Any] = {}
     for target, sources in payload_fields:

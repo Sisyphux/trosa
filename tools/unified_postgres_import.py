@@ -1468,6 +1468,32 @@ class Importer:
                  day.date() if hasattr(day, "date") else day,
                  self.legacy_id(row.get("hits")) or 0))
 
+        # Follow-up suggestions only ever exist in PostgreSQL; a SQLite mirror row
+        # is carried over only when it already names a real account uuid.
+        for row in rows.get("followup_suggestions", []):
+            try:
+                account_id = uuid.UUID(str(row.get("account_id")))
+            except (TypeError, ValueError):
+                continue
+            self.execute(
+                """insert into trosa.followup_suggestions
+                   (id,organization_id,legacy_user_id,account_id,suggestion_date,rule,certainty,
+                    evidence_event_id,priority,reason,facts,status,snooze_until,feedback_reason,
+                    dedupe_key,created_at,updated_at)
+                   select %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    where exists (select 1 from trosa.accounts where id=%s)
+                   on conflict (organization_id,legacy_user_id,dedupe_key) do nothing""",
+                (as_uuid(row.get("id"), f"followup:{user}:{row.get('id')}"), ORG_ID, user, account_id,
+                 clean(row.get("suggestion_date"))[:10], clean(row.get("rule")),
+                 clean(row.get("certainty")) or "hint",
+                 as_uuid(row.get("evidence_event_id"), "") if row.get("evidence_event_id") else None,
+                 self.legacy_id(row.get("priority")) or 0, clean(row.get("reason")),
+                 Jsonb(json_value(row.get("facts")) or {}), clean(row.get("status")) or "new",
+                 clean(row.get("snooze_until"))[:10] or None, clean(row.get("feedback_reason")) or None,
+                 clean(row.get("dedupe_key")),
+                 parse_time(row.get("created_at")) or datetime.now(timezone.utc),
+                 parse_time(row.get("updated_at")) or datetime.now(timezone.utc), account_id))
+
         for row in rows.get("legacy_row_refs", []):
             legacy_id = self.legacy_id(row.get("legacy_id"))
             if legacy_id is None or not row.get("target_id"):

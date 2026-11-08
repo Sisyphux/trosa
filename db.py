@@ -1145,6 +1145,7 @@ USER_TABLE_SQL = [
         source_detail TEXT DEFAULT '',
         timezone TEXT DEFAULT '',
         timezone_source TEXT DEFAULT '',
+        reply_habit TEXT DEFAULT '',
         attention_state TEXT DEFAULT '',
         attention_reason TEXT DEFAULT '',
         attention_updated_at TEXT DEFAULT '',
@@ -1657,6 +1658,40 @@ USER_TABLE_SQL = [
         FOREIGN KEY (file_id) REFERENCES customer_files(id) ON DELETE CASCADE
     )
     ''',
+    # Follow-up suggestions (migrations/0123_followup_suggestions.sql).  SQLite
+    # mirror for the default test suite; PostgreSQL is the production store.
+    '''
+    CREATE TABLE IF NOT EXISTS followup_suggestions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL DEFAULT '',
+        legacy_user_id TEXT NOT NULL DEFAULT '',
+        account_id TEXT NOT NULL,
+        suggestion_date TEXT NOT NULL,
+        rule TEXT NOT NULL CHECK(rule IN ('R1', 'R2', 'R3', 'R4')),
+        certainty TEXT NOT NULL DEFAULT 'hint' CHECK(certainty IN ('certain', 'hint')),
+        evidence_event_id TEXT,
+        priority INTEGER NOT NULL DEFAULT 0,
+        reason TEXT NOT NULL,
+        facts TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'new'
+            CHECK(status IN ('new', 'handled', 'dismissed', 'snoozed', 'expired', 'voided')),
+        snooze_until TEXT,
+        feedback_reason TEXT,
+        handled_at TEXT,
+        dismissed_at TEXT,
+        snoozed_at TEXT,
+        expired_at TEXT,
+        voided_at TEXT,
+        dedupe_key TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT,
+        UNIQUE(organization_id, legacy_user_id, dedupe_key)
+    )
+    ''',
+    '''
+    CREATE INDEX IF NOT EXISTS followup_suggestions_member_status_idx
+        ON followup_suggestions (organization_id, legacy_user_id, status, suggestion_date DESC)
+    ''',
     # Inbox dialogue (see sela docs/proposals/inbox-dialogue-contract.md and
     # migrations/0114_inbox_dialogue.sql).  PostgreSQL is the production store;
     # these SQLite mirrors keep the default test suite able to exercise the
@@ -1799,6 +1834,7 @@ USER_MIGRATIONS = {
         'source_detail': "TEXT DEFAULT ''",
         'timezone': "TEXT DEFAULT ''",
         'timezone_source': "TEXT DEFAULT ''",
+        'reply_habit': "TEXT DEFAULT ''",
         'attention_state': "TEXT DEFAULT ''",
         'attention_reason': "TEXT DEFAULT ''",
         'attention_updated_at': "TEXT DEFAULT ''",

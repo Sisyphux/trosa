@@ -83,6 +83,8 @@ from gmail_sync import (
 )
 import inbox_questions as _inbox_questions
 import inbox_dialogue as _dialogue
+import followup_store as _followup_store
+import ask_customer as _ask_customer
 from inbox_attachment_analysis import analyze_import_file as _analyze_inbox_import_file
 from excel_reader import cell_text as _spreadsheet_cell_text
 from excel_reader import read_sheets as _read_spreadsheet_sheets
@@ -8861,6 +8863,160 @@ def sela_integration_get_thread(thread_id):
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# "X 是不是该跟进了？" in the Inbox conversation: answered from the customer's
+# real records by fixed rules (ask_customer.py).  Postponing uses the existing
+# dated-task feature, only after the member replies 确认.
+# ---------------------------------------------------------------------------
+
+def _ask_customer_events(conn, customer_id):
+    events = []
+    for item in _customer_interactions(conn, customer_id, limit=100):
+        events.append({
+            'account_id': str(customer_id), 'event_id': f"{item.get('kind')}-{item.get('id')}",
+            'event_type': item.get('activity_type') or item.get('kind') or '',
+            'direction': item.get('direction') or 'unknown', 'content': item.get('content') or '',
+            'result': item.get('result') or '', 'next_plan': item.get('next_plan') or '',
+            'source_module': item.get('source') or '', 'occurred_at': item.get('occurred_on'), 'payload': {},
+        })
+    return events
+
+
+def _ask_customer_load(conn, customer_id):
+    if postgres_mode():
+        customer = _customer_record(conn, customer_id)
+    else:
+        customer = conn.execute('SELECT id, name, company, country, is_deleted FROM customers WHERE id=?',
+                                (customer_id,)).fetchone()
+    return dict(customer) if customer else None
+
+
+def _ask_customer_search(name):
+    payload = _customer_list_payload({'search': name, 'per_page': '10'})
+    return list(payload.get('customers') or [])
+
+
+def _ask_customer_label(customer):
+    extra = '，'.join(x for x in (_ask_customer_clean(customer.get('name')) if customer.get('company') else '',
+                                  _ask_customer_clean(customer.get('country'))) if x)
+    return _ask_customer.display_name(customer) + (f'（{extra}）' if extra else '')
+
+
+def _ask_customer_clean(value):
+    return re.sub(r'\s+', ' ', str(value or '')).strip()
+
+
+def _ask_customer_ref(messages):
+    """The customer the conversation was last about (a numeric customer ref on a message)."""
+    for message in reversed(messages):
+        for ref in message.get('refs') or []:
+            if ref.get('type') == 'customer' and str(ref.get('id')).isdigit():
+                return int(ref['id'])
+    return None
+
+
+def _ask_customer_reply_for(conn, thread, last):
+    """The assistant's reply to the member's last message, or ``None`` to leave it to the normal assistant."""
+    messages = thread['messages']
+    previous = messages[-2] if len(messages) > 1 else None
+    parsed = _ask_customer.parse_question(last['text'])
+    if not parsed:
+        return None
+    kind, value = parsed
+    today = _calendar_today()
+    after_answer = bool(previous and previous['role'] == 'sela'
+                        and (previous['text'].startswith(_ask_customer.ANSWER_MARK) or _ask_customer.CONFIRM_MARK in previous['text']))
+    known = _ask_customer_ref([previous]) if previous else None
+    if kind == 'confirm':
+        day = _ask_customer.parse_proposal(previous['text']) if previous and _ask_customer.CONFIRM_MARK in previous['text'] else None
+        if not (day and known):
+            return None
+        customer = _ask_customer_load(conn, known)
+        if not customer:
+            return None
+        name = _ask_customer.display_name(customer)
+        conn.commit()
+        create_customer_follow_up_task(known, {'title': f'跟进 {name}', 'due_date': day.isoformat(),
+                                               'reason': '在收件箱对话里确认的推迟'})
+        return {'text': f'已记下：{_ask_customer.full_date(day)} 跟进 {name}。', 'refs': [{'type': 'customer', 'id': str(known)}]}
+    if kind == 'postpone':
+        if not (after_answer and known):
+            return None
+        customer = _ask_customer_load(conn, known)
+        day = _ask_customer.parse_when(value, today)
+        if not customer:
+            return None
+        if not day:
+            return {'text': '推迟到哪一天？回我「11月5日」或者「下周三」这样的就行。',
+                    'refs': [{'type': 'customer', 'id': str(known)}]}
+        return {'text': _ask_customer.proposal_text(_ask_customer.display_name(customer), day),
+                'refs': [{'type': 'customer', 'id': str(known)}]}
+    customer_id = None
+    if kind == 'choose':
+        query = _ask_customer.choose_query(previous['text']) if previous and previous['role'] == 'sela' else None
+        if not query:
+            return None
+        _, candidates = _ask_customer.pick(_ask_customer_search(query), query)
+        if not 1 <= value <= len(candidates):
+            return None
+        customer_id = int(candidates[value - 1]['id'])
+    context = _ask_customer_ref(messages[:-1])
+    if customer_id is None and not value:
+        customer_id = context
+        if customer_id is None:
+            return {'text': _ask_customer.ask_who()}
+    if customer_id is None:
+        customer, candidates = _ask_customer.pick(_ask_customer_search(value), value)
+        if customer is None and not candidates:
+            return {'text': _ask_customer.not_found(value)}
+        if customer is None:
+            return {'text': _ask_customer.choose_text(value, [_ask_customer_label(c) for c in candidates])}
+        customer_id = int(customer['id'])
+    customer = _ask_customer_load(conn, customer_id)
+    if not customer:
+        return {'text': _ask_customer.not_found(value or '这位')}
+    name = _ask_customer.display_name(customer)
+    account = {'account_id': str(customer_id), 'name': name,
+               'deleted_at': '1' if customer.get('is_deleted') or customer.get('deleted_at') else ''}
+    result = _ask_customer.assess(account, _ask_customer_events(conn, customer_id),
+                                  _customer_tasks(conn, customer_id), today)
+    return {'text': _ask_customer.compose(name, result, today),
+            'refs': [{'type': 'customer', 'id': str(customer_id)}]}
+
+
+def _ask_customer_answer(thread_id, message_id):
+    """Answer the member's newest message when it is a follow-up question.  Never raises.
+
+    Returns the refreshed thread, or ``None`` when nothing was answered here.
+    """
+    conn = get_db()
+    try:
+        thread = _dialogue.get_thread(conn, thread_id=thread_id)['thread']
+        last = thread['messages'][-1] if thread['messages'] else None
+        if (not last or last['id'] != message_id or last['role'] != 'human'
+                or thread['status'] == 'closed' or last.get('attachments')):
+            return None
+        reply = _ask_customer_reply_for(conn, thread, last)
+        if not reply:
+            return None
+        conn.execute('BEGIN IMMEDIATE')
+        _dialogue.append_message(
+            conn, thread_id=thread_id, idempotency_key='ask-customer:' + message_id, actor='trosa',
+            payload={'text': reply['text'], 'refs': reply.get('refs') or [], 'awaiting': 'human',
+                                          'seen_revision': thread['revision']})
+        conn.commit()
+        return _dialogue.get_thread(conn, thread_id=thread_id)['thread']
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.exception('ask-customer answer failed')
+        return None
+    finally:
+        conn.close()
+
+
 @app.route('/api/inbox/threads/<thread_id>/reply', methods=['POST'])
 @login_required
 def inbox_thread_reply(thread_id):
@@ -8876,6 +9032,9 @@ def inbox_thread_reply(thread_id):
             attachment_lookup=_dialogue_attachments,
         )
         conn.commit()
+        answered = _ask_customer_answer(thread_id, (body.get('message') or {}).get('id'))
+        if answered:
+            body = {**body, 'thread': answered, 'answered': True}
         return jsonify(body)
     except _dialogue.DialogueError as error:
         conn.rollback()
@@ -8953,6 +9112,10 @@ def inbox_thread_human_create():
             attachment_lookup=_dialogue_attachments,
         )
         conn.commit()
+        first = ((body.get('thread') or {}).get('messages') or [{}])[0].get('id')
+        answered = _ask_customer_answer(body['thread']['id'], first) if first and body.get('created') else None
+        if answered:
+            body = {**body, 'thread': answered}
         return jsonify(body)
     except _dialogue.DialogueError as error:
         conn.rollback()
@@ -12334,8 +12497,10 @@ def get_customer_summary(customer_id):
         customer['last_contact'] = business_facts['latest_communication_date']
         customer['next_follow_up'] = business_facts['next_task_date']
         gaps = _customer_information_gaps(customer, len(contacts), duplicate_company)
+        follow_hint = _customer_follow_hint(conn, account_id) if account_id else None
         conn.close()
         customer.update({
+            'follow_hint': follow_hint,
             'next_task': business_facts['next_task'],
             'next_task_date': business_facts['next_task_date'],
             'next_task_title': business_facts['next_task_title'],
@@ -12361,7 +12526,7 @@ def get_customer_summary(customer_id):
         return jsonify(customer)
     row = conn.execute('''SELECT id, name, company, country, website, field, industry, business_stage, business_role, level,
                                  tags, profile, notes, last_contact, next_follow_up, customer_judgment,
-                                 import_source, source, source_detail, timezone, timezone_source,
+                                 import_source, source, source_detail, timezone, timezone_source, reply_habit,
                                  created_at, updated_at
                           FROM customers
                           WHERE id=? AND (is_deleted=0 OR is_deleted IS NULL)''', (customer_id,)).fetchone()
@@ -12398,6 +12563,7 @@ def get_customer_summary(customer_id):
     # source of truth; retired automatic-development rows stay out of work.
     customer['next_follow_up'] = business_facts['next_task_date']
     information_gaps = _customer_information_gaps(customer, contact_count, duplicate_company)
+    customer['follow_hint'] = _customer_follow_hint(conn, customer_id)
     customer['aliases'] = _customer_aliases(conn, customer_id, customer)
     conn.close()
     # The workspace shell needs one actionable next step.  The complete task
@@ -13625,6 +13791,7 @@ def update_customer(customer_id):
         except CrmWriteError as error:
             conn.close()
             return jsonify({'error': error.message}), error.status
+        reply_habit = ' '.join(str(data.get('reply_habit', existing.get('reply_habit', '')) or '').split())[:200]
         business_stage = data.get('business_stage', existing.get('business_stage', ''))
         if business_stage not in ('', '成交', '流失'):
             conn.close()
@@ -13656,6 +13823,8 @@ def update_customer(customer_id):
             'timezone': customer_timezone,
             'timezone_source': customer_timezone_source,
         }
+        if 'reply_habit' in data:
+            updated_values['reply_habit'] = reply_habit
         if source_update:
             updated_values['source'] = customer_source
             updated_values['source_detail'] = customer_source_detail
@@ -13670,13 +13839,13 @@ def update_customer(customer_id):
         else:
             c.execute('''
                 UPDATE customers SET name=?, company=?, country=?, level=?, type=?, business_role=?, business_stage=?, customer_judgment=?, website=?, profile=?, field=?, notes=?, system_notes=?,
-                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, source=?, source_detail=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?
+                last_contact=?, next_follow_up=?, manual_next_follow=?, industry=?, company_size=?, annual_revenue=?, tags=?, source=?, source_detail=?, timezone=?, timezone_source=?, reply_habit=?, updated_at=? WHERE id=?
             ''', (updated_values['name'], updated_values['company'], updated_values['country'], customer_level,
                   existing.get('type', ''), business_role, business_stage, customer_judgment, updated_values['website'],
                   updated_values['profile'], updated_values['field'], updated_values['notes'], updated_values['system_notes'],
                   last_contact, new_next_follow, is_manual_date, updated_values['industry'], updated_values['company_size'],
                   updated_values['annual_revenue'], updated_values['tags'], customer_source, customer_source_detail,
-                  customer_timezone, customer_timezone_source, now, customer_id))
+                  customer_timezone, customer_timezone_source, reply_habit, now, customer_id))
         new_date = new_next_follow if 'next_follow_up' in data else ''
         if new_date and new_date != old_date:
             _complete_open_follow_up_tasks(conn, customer_ids=[customer_id], completed_at=now)
@@ -18568,6 +18737,20 @@ def create_agent_proposal():
         conn.close()
     log_operation('CREATE_AGENT_PROPOSAL', 'agent_proposal', proposal_id, f'{proposal_type} 提议待确认')
     return jsonify({'success': True, 'id': proposal_id, 'status': 'pending', 'requires_confirmation': True}), 201
+
+
+# ---------------------------------------------------------------------------
+# Follow-up suggestions: the daily scan leaves at most one quiet line per
+# customer.  It is shown on the customer page and mentioned once in the Inbox
+# conversation; nobody has to answer it, and a newer record clears it.
+# ---------------------------------------------------------------------------
+
+def _customer_follow_hint(conn, account_id):
+    try:
+        return _followup_store.open_hint(conn, account_id, _calendar_today())
+    except Exception:
+        logger.exception('followup hint read failed')
+        return None
 
 
 @app.route('/api/agent/proposals/<int:proposal_id>', methods=['GET', 'PUT'])
