@@ -1,0 +1,134 @@
+{
+  "label": "merged",
+  "url": "http://127.0.0.1:18311",
+  "generatedAt": "2026-11-08T14:48:37.403Z",
+  "checks": [
+    {
+      "id": "today-unchanged",
+      "title": "今天页没有新增「该联系一下了」区块，也看不到这些建议",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-shows-reason",
+      "title": "客户页「下一步」下面有一行带日期的理由",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "hint-under-next-step",
+      "title": "这一行在「下一步」区域里",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-has-no-controls",
+      "title": "这一行没有按钮或输入框，不需要任何操作",
+      "pass": true,
+      "detail": "0 个控件"
+    },
+    {
+      "id": "no-explanations",
+      "title": "这一行没有解释文字",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "record-saved",
+      "title": "给这位客户补了一条沟通记录",
+      "pass": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "newer-record-clears-it",
+      "title": "记了新沟通后，这一行自己消失",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "task-created",
+      "title": "给第二位客户安排了带日期的下一步",
+      "pass": true,
+      "detail": "HTTP 201"
+    },
+    {
+      "id": "dated-next-step-hides-it",
+      "title": "有带日期的下一步时不再出现这一行",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "third-customer-has-own-hint",
+      "title": "第三位客户有自己的一行",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "no-leftover-after-switch",
+      "title": "换回第一位客户时没有残留上一位的那一行",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-visible-ipad-820",
+      "title": "ipad-820：能看到这一行",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "no-overflow-ipad-820",
+      "title": "ipad-820：没有横向滚动，这一行不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-visible-iphone-390",
+      "title": "iphone-390：能看到这一行",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "no-overflow-iphone-390",
+      "title": "iphone-390：没有横向滚动，这一行不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-visible-win10-1366",
+      "title": "win10-1366：能看到这一行",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "no-overflow-win10-1366",
+      "title": "win10-1366：没有横向滚动，这一行不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "hint-visible-zoom200-720",
+      "title": "zoom200-720：能看到这一行",
+      "pass": true,
+      "detail": "客户 10月20日来信，之后还没有回复"
+    },
+    {
+      "id": "no-overflow-zoom200-720",
+      "title": "zoom200-720：没有横向滚动，这一行不被裁切",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "screenshots": [
+    "01-today-1440.png",
+    "02-customer-hint-1440.png",
+    "03-customer-cleared-1440.png",
+    "0-ipad-820.png",
+    "0-iphone-390.png",
+    "0-win10-1366.png",
+    "0-zoom200-720.png"
+  ],
+  "pageErrors": [
+    "Transition was skipped. New ViewTransition started"
+  ],
+  "browser": "chromium 153.0.8010.12"
+}

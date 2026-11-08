@@ -1,0 +1,25 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18310",
+  "checks": [
+    {
+      "id": "row",
+      "expect": "资料里有一行手写文字栏，不是下拉",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "empty-quiet",
+      "expect": "没填时首屏什么都不显示",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "no-page-errors",
+      "expect": "页面没有报错",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "pageErrors": []
+}

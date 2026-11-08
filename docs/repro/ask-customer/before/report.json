@@ -1,0 +1,145 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18311",
+  "generatedAt": "2026-10-30T01:04:28.354Z",
+  "checks": [
+    {
+      "id": "answer-has-verdict",
+      "title": "助手回答以「结论：可以跟」开头",
+      "pass": false,
+      "detail": "助手没有回答"
+    },
+    {
+      "id": "answer-has-dates",
+      "title": "回答里有带日期的依据",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "answer-says-what-it-cannot-see",
+      "title": "回答明说「之后的情况我看不到」",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "answer-links-customer",
+      "title": "回答带「打开客户」，能点开原记录",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "no-new-buttons",
+      "title": "回答里没有新增的按钮",
+      "pass": true,
+      "detail": "0 个"
+    },
+    {
+      "id": "postpone-asks-confirm",
+      "title": "说推迟后，助手先问「确认」",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "nothing-written-before-confirm",
+      "title": "确认之前没有新建待办",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "confirm-says-done",
+      "title": "确认后助手说「已记下」",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "dated-task-created",
+      "title": "客户出现一个 11月5日 的待办",
+      "pass": false,
+      "detail": "[]"
+    },
+    {
+      "id": "ambiguous-asks-which",
+      "title": "名字对得上两位时，让人选",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "pick-then-answers",
+      "title": "回复序号后给出结论",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "not-found-plain",
+      "title": "找不到时直接说没找到",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "notes-untouched",
+      "title": "普通的记一笔不会被当成提问",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-visible-ipad-820",
+      "title": "ipad-820：能看到回答",
+      "pass": false,
+      "detail": "没有回答"
+    },
+    {
+      "id": "no-overflow-ipad-820",
+      "title": "ipad-820：没有横向滚动，回答不被裁切",
+      "pass": false,
+      "detail": "被裁切"
+    },
+    {
+      "id": "answer-visible-iphone-390",
+      "title": "iphone-390：能看到回答",
+      "pass": false,
+      "detail": "没有回答"
+    },
+    {
+      "id": "no-overflow-iphone-390",
+      "title": "iphone-390：没有横向滚动，回答不被裁切",
+      "pass": false,
+      "detail": "被裁切"
+    },
+    {
+      "id": "answer-visible-win10-1366",
+      "title": "win10-1366：能看到回答",
+      "pass": false,
+      "detail": "没有回答"
+    },
+    {
+      "id": "no-overflow-win10-1366",
+      "title": "win10-1366：没有横向滚动，回答不被裁切",
+      "pass": false,
+      "detail": "被裁切"
+    },
+    {
+      "id": "answer-visible-zoom200-720",
+      "title": "zoom200-720：能看到回答",
+      "pass": false,
+      "detail": "没有回答"
+    },
+    {
+      "id": "no-overflow-zoom200-720",
+      "title": "zoom200-720：没有横向滚动，回答不被裁切",
+      "pass": false,
+      "detail": "被裁切"
+    }
+  ],
+  "screenshots": [
+    "01-answer-1440.png",
+    "02-postpone-1440.png",
+    "03-confirmed-1440.png",
+    "04-pick-1440.png",
+    "0-ipad-820.png",
+    "0-iphone-390.png",
+    "0-win10-1366.png",
+    "0-zoom200-720.png"
+  ],
+  "pageErrors": [],
+  "browser": "chromium 153.0.8010.12"
+}

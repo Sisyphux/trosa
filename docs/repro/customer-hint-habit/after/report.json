@@ -1,0 +1,29 @@
+{
+  "label": "after",
+  "checks": [
+    {
+      "id": "rich-has-clock",
+      "title": "有时区的客户：下一步下面有「对方当地时间」和「我们这边」两个时钟",
+      "pass": true,
+      "detail": "对方当地时间 13:10 工作时间 · 西班牙 我们这边 20:10 周五 00 06 12 18 24 按我们这边的一天画 · 色条是对方的上班时段"
+    },
+    {
+      "id": "reason-unchanged",
+      "title": "理由那一行保持原样，不夹带时间",
+      "pass": true,
+      "detail": "客户 10月29日来信，之后还没有回复"
+    },
+    {
+      "id": "rich-one-line-group",
+      "title": "时钟区没有按钮",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "thin-reason-unchanged",
+      "title": "另一位客户：理由原样",
+      "pass": true,
+      "detail": "客户 10月29日来信，之后还没有回复"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "label": "after",
+  "url": "http://127.0.0.1:18311",
+  "checks": [
+    {
+      "id": "row",
+      "expect": "资料里有一行手写文字栏，不是下拉",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "empty-quiet",
+      "expect": "没填时首屏什么都不显示",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "shown",
+      "expect": "填写后在对方时钟旁显示这一句",
+      "pass": true,
+      "detail": "欧洲时间下午，周一最快"
+    },
+    {
+      "id": "beside-clock",
+      "expect": "这句话在时钟块里",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "persist",
+      "expect": "刷新后仍在",
+      "pass": true,
+      "detail": "欧洲时间下午，周一最快"
+    },
+    {
+      "id": "clear",
+      "expect": "清空后又什么都不显示",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "no-page-errors",
+      "expect": "页面没有报错",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "pageErrors": []
+}

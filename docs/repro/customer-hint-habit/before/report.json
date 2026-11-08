@@ -1,0 +1,29 @@
+{
+  "label": "before",
+  "checks": [
+    {
+      "id": "rich-has-clock",
+      "title": "有时区的客户：理由后面带「对方现在 HH:MM」",
+      "pass": false,
+      "detail": "客户 10月29日来信，之后还没有回复"
+    },
+    {
+      "id": "rich-has-habit",
+      "title": "来往够多的客户：带「一般隔 N 天回」",
+      "pass": false,
+      "detail": "客户 10月29日来信，之后还没有回复"
+    },
+    {
+      "id": "rich-one-line-group",
+      "title": "仍然只有一行小字，没有按钮",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "thin-no-habit",
+      "title": "来往少的客户：不写回信习惯（不乱猜）",
+      "pass": true,
+      "detail": "客户 10月29日来信，之后还没有回复"
+    }
+  ]
+}

@@ -1,0 +1,147 @@
+{
+  "label": "merged",
+  "url": "http://127.0.0.1:18311",
+  "generatedAt": "2026-11-08T14:51:19.328Z",
+  "checks": [
+    {
+      "id": "answer-has-verdict",
+      "title": "助手回答以「结论：可以跟」开头",
+      "pass": true,
+      "detail": "结论：可以跟。客户最后一次来信在约 1 周前（10月29日），之后没有回复记录。\n\n依据：\n· 10月29日 客户来信：客户问了 3mm 透明板的最新价格和交期"
+    },
+    {
+      "id": "answer-has-dates",
+      "title": "回答里有带日期的依据",
+      "pass": true,
+      "detail": "结论：可以跟。客户最后一次来信在约 1 周前（10月29日），之后没有回复记录。\n\n依据：\n· 10月29日 客户来信：客户问了 3mm 透明板的最新价格和交期，说下周要定。\n\n系统里最后一条记录是 10月29日，之后的情况我看不到。\n\n要推迟，回我一句「推迟到某月某日」就行。"
+    },
+    {
+      "id": "answer-says-what-it-cannot-see",
+      "title": "回答明说「之后的情况我看不到」",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-links-customer",
+      "title": "回答带「打开客户」，能点开原记录",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "no-new-buttons",
+      "title": "回答里没有新增的按钮",
+      "pass": true,
+      "detail": "0 个"
+    },
+    {
+      "id": "postpone-asks-confirm",
+      "title": "说推迟后，助手先问「确认」",
+      "pass": true,
+      "detail": "记下：2027年11月5日 跟进 Harbor Plastics 79171。请回复「确认」，我就加进待办。"
+    },
+    {
+      "id": "nothing-written-before-confirm",
+      "title": "确认之前没有新建待办",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "confirm-says-done",
+      "title": "确认后助手说「已记下」",
+      "pass": true,
+      "detail": "已记下：2027年11月5日 跟进 Harbor Plastics 79171。"
+    },
+    {
+      "id": "dated-task-created",
+      "title": "客户出现一个 11月5日 的待办",
+      "pass": true,
+      "detail": "[\"2027-11-05\"]"
+    },
+    {
+      "id": "ambiguous-asks-which",
+      "title": "名字对得上两位时，让人选",
+      "pass": true,
+      "detail": "「Bluewave」有几位对得上，你指的是哪一位？回复序号就行。\n\n1\nBluewave Trading 79171（Contact，Peru）\n2\nBluewave Films 79171（Contact，Chile）\n3\nBluewave Trading 44479（Contact，Peru）"
+    },
+    {
+      "id": "pick-then-answers",
+      "title": "回复序号后给出结论",
+      "pass": true,
+      "detail": "结论：不建议。系统里没有这位客户的沟通记录，我没有依据判断。\n\n这位客户的沟通我这边一条都看不到。"
+    },
+    {
+      "id": "not-found-plain",
+      "title": "找不到时直接说没找到",
+      "pass": true,
+      "detail": "没有找到「根本不存在的虚构公司」这位客户。\n\n换个名字、拼音或者邮箱再试试？"
+    },
+    {
+      "id": "notes-untouched",
+      "title": "普通的记一笔不会被当成提问",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-visible-ipad-820",
+      "title": "ipad-820：能看到回答",
+      "pass": true,
+      "detail": "结论：建议再等。已经安排了 11月5日 的下一步。\n\n依据：\n· 11月5日 待办：跟进 Harbor Plastics"
+    },
+    {
+      "id": "no-overflow-ipad-820",
+      "title": "ipad-820：没有横向滚动，回答不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-visible-iphone-390",
+      "title": "iphone-390：能看到回答",
+      "pass": true,
+      "detail": "结论：建议再等。已经安排了 11月5日 的下一步。\n\n依据：\n· 11月5日 待办：跟进 Harbor Plastics"
+    },
+    {
+      "id": "no-overflow-iphone-390",
+      "title": "iphone-390：没有横向滚动，回答不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-visible-win10-1366",
+      "title": "win10-1366：能看到回答",
+      "pass": true,
+      "detail": "结论：建议再等。已经安排了 11月5日 的下一步。\n\n依据：\n· 11月5日 待办：跟进 Harbor Plastics"
+    },
+    {
+      "id": "no-overflow-win10-1366",
+      "title": "win10-1366：没有横向滚动，回答不被裁切",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "answer-visible-zoom200-720",
+      "title": "zoom200-720：能看到回答",
+      "pass": true,
+      "detail": "结论：建议再等。已经安排了 11月5日 的下一步。\n\n依据：\n· 11月5日 待办：跟进 Harbor Plastics"
+    },
+    {
+      "id": "no-overflow-zoom200-720",
+      "title": "zoom200-720：没有横向滚动，回答不被裁切",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "screenshots": [
+    "01-answer-1440.png",
+    "02-postpone-1440.png",
+    "03-confirmed-1440.png",
+    "04-pick-1440.png",
+    "0-ipad-820.png",
+    "0-iphone-390.png",
+    "0-win10-1366.png",
+    "0-zoom200-720.png"
+  ],
+  "pageErrors": [
+    "Transition was skipped. New ViewTransition started"
+  ],
+  "browser": "chromium 153.0.8010.12"
+}
