@@ -549,3 +549,22 @@ html[data-type="swiss"]{--dl-accent:#e8431f}
 }
 html.motion-reduced #trosa :is(.dialogue-progress-text,.dialogue-mark,.dialogue-mark.is-erasing){animation:none !important}
 html.motion-reduced #trosa .dialogue-mark.is-erasing{opacity:0}
+/* 客户工作区可读性与点击区（2026-11-09）：版式不变，只修小字、浅字和过小的点击目标。
+   “下一步”小标签原为 #8f8f8f（白底约 3.3:1），改用 --dl-mut；沟通行内操作与快捷顺延等 10px 左右的字提到 12px 以上，
+   点击区不小于 36px；分区图标补足点击区；空的“当前等待”加下划线，看得出可点。 */
+#trosa #customerEditModal .cw-k{color:var(--dl-mut);font-size:.74em;letter-spacing:.04em;text-transform:none}
+#trosa #customerEditModal .cw-act{font-size:13px}
+#trosa #customerEditModal .cw-quick{font-size:.84em}
+#trosa #customerEditModal .cw-quick .cw-link,#trosa #customerEditModal .cw-more .cw-link{display:inline-flex;align-items:center;min-height:36px;padding:0 .35rem}
+#trosa #customerEditModal .cw-more{font-size:.8em;letter-spacing:0}
+#trosa #customerEditModal .cw-row-acts{font-size:.78em;letter-spacing:0}
+#trosa #customerEditModal .cw-row-acts .cw-link{display:inline-flex;align-items:center;min-height:36px;padding:0 .4rem}
+#trosa #customerEditModal .cw-rs{font-size:.78em}
+#trosa #customerEditModal .cw-dt{font-size:.78em}
+#trosa #customerEditModal .cw-nav .cw-tab{min-width:36px;min-height:36px;justify-content:center}
+#trosa #customerEditModal .cw-readouts{font-size:.86em}
+#trosa #customerEditModal .cw-waitv{display:inline-flex;align-items:center;min-height:36px;font-size:.95em}
+#trosa #customerEditModal .cw-waitv.is-empty{color:var(--dl-ink-3);text-decoration:underline;text-decoration-color:var(--dl-hair-strong);text-underline-offset:.28em}
+#trosa #customerEditModal .cw-pact .cw-link{display:inline-flex;align-items:center;min-height:36px;padding:0 .3rem}
+#trosa #customerEditModal .cw-tab .cw-tab-n{font-size:1em}
+#trosa #customerEditModal .cw-bot > :first-child{font-size:.78em}
