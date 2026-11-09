@@ -8683,6 +8683,7 @@ async function openEditModal(id) {
       .forEach(function(fieldId) { var field = document.getElementById(fieldId); if (field) { if (field.isContentEditable) field.innerHTML = ''; else field.value = ''; } });
     document.getElementById('followHistoryDirectionOverride').value = 'auto';
     document.getElementById('followHistoryReport').checked = false;
+    resetFollowHistoryDate();
     _communicationAnalyses.history = null;
     updateAutoDirectionPreview('history');
     var historyAnalysis = document.getElementById('followHistoryAnalysis');
@@ -10601,7 +10602,8 @@ function timelineItemHtml(item) {
   var isEmail = item.type === 'email';
   var typeLabel = isEmail ? '开发信' : communicationTypeLabel(item.activity_type);
   var reportType = isEmail ? 'outreach' : 'follow';
-  var reportLabel = item.is_reported ? '移出本周' : '加入本周';
+  var reportWeek = reportWeekLabel(item.date || item.follow_date || item.occurred_on);
+  var reportLabel = item.is_reported ? '移出周报' : '加入周报';
   var tail = '';
   if (isEmail) tail = CW_REPLY_LABELS[item.reply_status] || '';
   else if (item.meta_text) tail = '结果 — <span data-rich-log-id="' + item.id + '" data-rich-field="result">' + renderRichText(item.meta_text) + '</span>';
@@ -10615,7 +10617,7 @@ function timelineItemHtml(item) {
     '<span class="cw-dt tnum">' + escapeHtml(cwMonthDay(item.date)) + '</span>' +
     '<div class="cw-rmain"><div class="cw-tx"' + richAttrs + '>' + renderRichText(item.title) + '</div>' +
     (!isEmail && item.next_plan ? '<p class="cw-plan">由此安排：<span data-rich-log-id="' + item.id + '" data-rich-field="next_plan">' + renderRichText(item.next_plan) + '</span></p>' : '') +
-    '<span class="cw-rs">' + escapeHtml(typeLabel) + (tail ? ' · ' + tail : '') + (item.is_reported ? ' · 已纳入本周' : '') + '</span>' +
+    '<span class="cw-rs">' + escapeHtml(typeLabel) + (tail ? ' · ' + tail : '') + (item.is_reported ? ' · 已纳入' + (reportWeek || '本周') + '周报' : '') + '</span>' +
     acts + '</div></div>';
 }
 
@@ -10745,19 +10747,56 @@ async function toggleReport(type, id) {
   // 不再等时间线读取回来才动。
   if (previous !== null) applyTimelineReportState(scope, recordType, id, optimistic);
   var actionId = beginActionStatus('report-' + recordType + '-' + id,
-    optimistic ? '正在加入本周工作…' : '正在移出本周工作…');
+    optimistic ? '正在加入周报…' : '正在移出周报…');
   try {
     var res = await api(url, { method: 'POST', silentError: true });
     var isReported = !!res.is_reported;
     applyTimelineReportState(scope, recordType, id, isReported);
-    showToast(isReported ? '已加入本周工作' : '已从本周工作中移除', 'success');
-    finishActionStatus(actionId, 'success', isReported ? '已加入本周工作' : '已从本周工作中移除');
+    showToast(isReported ? '已加入周报' : '已从周报中移除', 'success');
+    finishActionStatus(actionId, 'success', isReported ? '已加入周报' : '已从周报中移除');
     reconcileCustomerTimeline().catch(function() {});
   } catch(e) {
     if (previous !== null) applyTimelineReportState(scope, recordType, id, previous);
-    showToast('本周工作状态未能保存，请重试', 'error');
-    finishActionStatus(actionId, 'error', '本周工作状态未保存', function() { toggleReport(type, id); });
+    showToast('周报状态未能保存，请重试', 'error');
+    finishActionStatus(actionId, 'error', '周报状态未保存', function() { toggleReport(type, id); });
   }
+}
+
+
+// 周报按“沟通日期”归周：记录写在哪天，就进那一天所在那周的周报。
+function reportWeekLabel(dateText) {
+  var day = String(dateText || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+  var ws = getWeekStart(0);
+  if (day >= ws && day <= weekEndOf(ws)) return '本周';
+  var prev = getWeekStart(-1);
+  if (day >= prev && day < ws) return '上周';
+  return formatWeekLabel(weekStartOf(day));
+}
+function weekStartOf(day) {
+  var parts = day.split('-');
+  var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
+  var w = d.getDay();
+  d.setDate(d.getDate() - w + (w === 0 ? -6 : 1));
+  return localDateString(d);
+}
+function weekEndOf(ws) {
+  var parts = ws.split('-');
+  var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12);
+  d.setDate(d.getDate() + 6);
+  return localDateString(d);
+}
+function resetFollowHistoryDate() {
+  var field = document.getElementById('followHistoryDate');
+  if (field) field.value = localDateString();
+  updateFollowHistoryReportHint();
+}
+function updateFollowHistoryReportHint() {
+  var hint = document.getElementById('followHistoryReportHint');
+  var box = document.getElementById('followHistoryReport');
+  var field = document.getElementById('followHistoryDate');
+  if (!hint || !box || !field) return;
+  hint.textContent = box.checked ? '（进' + reportWeekLabel(field.value) + '周报）' : '';
 }
 
 function updateFollowHistorySaveLabel() {
@@ -10780,6 +10819,7 @@ async function addFollowHistory() {
   var nextTask = document.getElementById('followHistoryNextTask').value.trim();
   var nextDate = document.getElementById('followHistoryNext').value;
   if (nextTask && !nextDate) { showToast('安排下一步时需要选择日期', 'warning'); return false; }
+  var followDate = document.getElementById('followHistoryDate').value || localDateString();
   var data = {
     activity_type: (document.getElementById('followHistoryType').value || '其他跟进').trim(),
     direction: direction,
@@ -10787,6 +10827,7 @@ async function addFollowHistory() {
     activity_result: richTextHtml(document.getElementById('followHistoryResult')),
     next_task: nextTask,
     next_follow_up: nextTask ? nextDate : '',
+    follow_date: followDate,
     is_reported: document.getElementById('followHistoryReport').checked
   };
   var workspaceModal = document.getElementById('customerEditModal');
@@ -10808,13 +10849,14 @@ async function addFollowHistory() {
       setAiFieldTag('followHistoryNextTask', 'followHistoryNextTaskAi', false);
       document.getElementById('followHistoryNext').value = '';
       document.getElementById('followHistoryReport').checked = false;
+      resetFollowHistoryDate();
       document.getElementById('followHistoryDirectionOverride').value = 'auto';
       _communicationAnalyses.history = null;
       updateAutoDirectionPreview('history');
       setCwForm('followCompose', false);
     }
     var activity = Object.assign({ type: 'follow' }, saved.activity || {
-      id: saved.id, follow_date: saved.recent_contact_date || localDateString(),
+      id: saved.id, follow_date: followDate,
       content: data.activity_content, result: data.activity_result, next_plan: data.next_task,
       activity_type: data.activity_type, direction: direction, is_reported: data.is_reported
     });

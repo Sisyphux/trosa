@@ -3775,3 +3775,4 @@ html.perf-lite #trosa .action-status {
   /* 大模糊阴影改成细线：层级仍然可见，绘制成本接近零。 */
   box-shadow: 0 0 0 1px rgba(36, 34, 29, .08), 0 1px 0 rgba(36, 34, 29, .05) !important;
 }
+#trosa #customerEditModal .cw-check-hint { color: var(--dl-ink-3, var(--dl-ink-2)); }
