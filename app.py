@@ -19678,6 +19678,11 @@ def update_customer_communication(log_id, data, before_commit=None):
             direction=direction, content=sanitize_mark_html(content),
             result=sanitize_mark_html(result), next_plan=sanitize_mark_html(next_plan),
         )
+        if data.get('is_reported') is not None:
+            # Weekly report membership: a communication that is not real customer work
+            # (an automatic reply) is taken out of the weekly report, or put back.
+            _set_interaction_flag(conn, interaction_id=log_id, field='is_reported',
+                                  value=bool(data.get('is_reported')))
         now = _calendar_now_text()
         _refresh_customer_activity_rollups(c, customer_id, now)
         log_after = _snapshot_entity(conn, 'follow_up_logs', log_id)

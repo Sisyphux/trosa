@@ -186,6 +186,13 @@ class DirectWriteCliTest(unittest.TestCase):
         self.assertTrue(payload['strip_quotes'])
         self.assertIn('undo', result['undo_hint'])
 
+    def test_update_communication_weekly_flag(self):
+        gateway = FakeGateway()
+        trosa_cli.run(self.parse('update-communication', '42', '--weekly', 'no'), gateway)
+        self.assertIs(gateway.actions[0][2]['is_reported'], False)
+        trosa_cli.run(self.parse('update-communication', '42', '--weekly', 'yes'), gateway)
+        self.assertIs(gateway.actions[1][2]['is_reported'], True)
+
     def test_write_idempotency_key_is_deterministic(self):
         sent = []
         original = trosa_cli.request_json

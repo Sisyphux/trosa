@@ -184,6 +184,38 @@ class AgentDataFreedomTest(unittest.TestCase):
             conn.close()
         self.assertEqual(restored, quoted)
 
+    def test_update_communication_can_leave_the_weekly_report_and_undo(self):
+        module = self._load_module()
+        customer_id = self._insert_customer('hamid', 'Auto', 'Auto Co')
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute('''INSERT INTO follow_up_logs
+                            (customer_id, content, follow_date, activity_type, direction, source, is_reported, created_at)
+                            VALUES (?, 'Thanks for your request', '2026-09-01', 'customer_reply', 'inbound', 'trosa', 1,
+                                    '2026-09-01 09:00:00')''', (customer_id,))
+            log_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.commit()
+        finally:
+            conn.close()
+        token = self._mint(module, ('crm:write',))['token']
+        gateway = module.app.test_client()
+
+        def reported():
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                return conn.execute('SELECT is_reported FROM follow_up_logs WHERE id=?', (log_id,)).fetchone()[0]
+            finally:
+                conn.close()
+
+        updated = self._action(gateway, token, 'update_communication', None,
+                               {'log_id': log_id, 'is_reported': False}, 'unreport-1')
+        self.assertEqual(updated.status_code, 201, updated.get_json())
+        self.assertEqual(reported(), 0)
+        undone = gateway.post('/api/gateway/actions/' + updated.get_json()['data']['action']['id'] + '/undo',
+                              headers={'Authorization': 'Bearer ' + token})
+        self.assertEqual(undone.status_code, 200, undone.get_json())
+        self.assertEqual(reported(), 1)
+
     def test_update_communication_requires_an_existing_log(self):
         module = self._load_module()
         token = self._mint(module, ('crm:write',))['token']

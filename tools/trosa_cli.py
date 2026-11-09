@@ -447,6 +447,8 @@ def build_parser():
     p.add_argument('--direction', choices=DIRECTIONS, default='')
     p.add_argument('--strip-quotes', dest='strip_quotes', action='store_true',
                    help='剥离邮件引用历史与签名，只保留当前正文')
+    p.add_argument('--weekly', choices=('yes', 'no'), default='',
+                   help='是否计入周报：no 把这条（如自动回复）从周报移除，yes 放回')
     p.add_argument('--json', default='')
     p = sub.add_parser('create-task', help='新建待办（可逆；需 crm:write）')
     p.add_argument('customer', type=int)
@@ -633,9 +635,11 @@ def run(args, gateway=None, root=None):
             payload['direction'] = args.direction
         if args.strip_quotes:
             payload['strip_quotes'] = True
+        if args.weekly:
+            payload['is_reported'] = args.weekly == 'yes'
         payload = _merge_json_payload(payload, args.json)
         if len(payload) <= 1:
-            raise CliError('请至少提供一个要修改的字段或 --strip-quotes', 2)
+            raise CliError('请至少提供一个要修改的字段、--strip-quotes 或 --weekly', 2)
         return _with_undo_hint(gateway.act('update_communication', None, payload))
     if args.command == 'create-task':
         if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', args.due):
