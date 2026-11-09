@@ -1202,7 +1202,8 @@
         </div>
       </div>
       <div class="quick-reply-row">
-        <div class="form-group"><label class="form-label" for="inboxReplyDate">沟通日期</label><input type="date" class="form-control" id="inboxReplyDate"></div>
+        <div class="form-group"><label class="form-label" for="inboxReplyDate">沟通日期</label><input type="date" class="form-control" id="inboxReplyDate" onchange="updateInboxReplyReportHint()"></div>
+        <div class="form-group cw-check"><label><input type="checkbox" id="inboxReplyReport" onchange="updateInboxReplyReportHint()"> 加入周报 <span class="cw-check-hint" id="inboxReplyReportHint"></span></label></div>
       </div>
       <div class="form-group" id="communicationConfirmNext">
         <div class="form-label-row"><label class="form-label" for="inboxReplyNextTask">下一步做什么？</label><span class="ai-tag ai-field-tag" id="inboxReplyNextTaskAi" hidden>AI 建议</span></div>

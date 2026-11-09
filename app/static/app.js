@@ -3716,6 +3716,8 @@ async function openCommunicationConfirm(options) {
     directionSelect.value = ['outbound', 'inbound', 'two_way'].indexOf(context.direction) >= 0 ? context.direction : 'auto';
   }
   document.getElementById('inboxReplyDate').value = context.followDate || localDateString();
+  document.getElementById('inboxReplyReport').checked = false;
+  updateInboxReplyReportHint();
   resetInboxReplyNextStep(!context.agentProposalId);
   if (rawDetails && rawText) {
     var hasRaw = !!(context.rawContent && context.rawContent !== context.content);
@@ -3868,6 +3870,7 @@ async function analyzeInboxReply(force, options) {
     var analysis = result.analysis || {};
     if (analysis.message_date && /^\d{4}-\d{2}-\d{2}$/.test(analysis.message_date) && !document.getElementById('inboxReplyDate').value) {
       document.getElementById('inboxReplyDate').value = analysis.message_date;
+      updateInboxReplyReportHint();
     }
     // 摘要直接进记录框（可编辑），原始文本保留在下方“原始记录”里。
     var summary = String(analysis.summary || '').trim();
@@ -4276,6 +4279,7 @@ async function saveInboxReply() {
   var customerId = context.customerId || document.getElementById('inboxReplyCustomer').value;
   var content = document.getElementById('inboxReplyContent').value.trim();
   var followDate = document.getElementById('inboxReplyDate').value || localDateString();
+  var reportIt = document.getElementById('inboxReplyReport').checked;
   var savedDirection = resolvedInboxReplyDirection();
   if (!content) {
     setFieldInlineError('inboxReplyContent', 'inboxReplyContentError', '请先记录沟通内容');
@@ -4314,7 +4318,7 @@ async function saveInboxReply() {
         method: 'PUT', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: savedDirection,
-          next_task: next.task, next_follow_up: next.date, is_reported: 0
+          next_task: next.task, next_follow_up: next.date, is_reported: reportIt ? 1 : 0
         })
       });
     } else {
@@ -4322,7 +4326,7 @@ async function saveInboxReply() {
         method: 'POST', body: JSON.stringify({
           activity_content: content, activity_result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
           activity_type: context.activityType || 'follow_up', direction: savedDirection,
-          follow_date: followDate, next_task: next.task, next_follow_up: next.date,
+          follow_date: followDate, next_task: next.task, next_follow_up: next.date, is_reported: reportIt,
           source: context.source || 'manual', inbox_item_id: context.inboxItemId || '', contact_id: context.contactId || null
         })
       });
@@ -4333,7 +4337,7 @@ async function saveInboxReply() {
         follow_date: followDate, content: content,
         result: (_inboxReplyAnalysis && _inboxReplyAnalysis.summary) || '',
         next_plan: next.task, activity_type: context.activityType || 'customer_reply',
-        direction: savedDirection, is_reported: false
+        direction: savedDirection, is_reported: reportIt
       }, saved && saved.activity ? saved.activity : {});
       if (activity.id) {
         var changedKey = upsertCustomerTimelineEntry(activity);
@@ -10790,6 +10794,13 @@ function resetFollowHistoryDate() {
   var field = document.getElementById('followHistoryDate');
   if (field) field.value = localDateString();
   updateFollowHistoryReportHint();
+}
+function updateInboxReplyReportHint() {
+  var hint = document.getElementById('inboxReplyReportHint');
+  var box = document.getElementById('inboxReplyReport');
+  var field = document.getElementById('inboxReplyDate');
+  if (!hint || !box || !field) return;
+  hint.textContent = box.checked ? '（进' + reportWeekLabel(field.value) + '周报）' : '';
 }
 function updateFollowHistoryReportHint() {
   var hint = document.getElementById('followHistoryReportHint');
