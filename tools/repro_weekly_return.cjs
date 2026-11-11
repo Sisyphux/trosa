@@ -161,7 +161,7 @@ async function runScenario(browser, options, outDir, report) {
         '只看周报时点个人入口，不会弹出“登录已过期”并跳回登录页',
         true,
         '周报模式不提供个人入口，无法误点');
-      await page.click('#roomIndex .room-index-more button[aria-label="切换账号"]');
+      await page.click('#roomIndex .room-index-more button#accountButton');
     }
 
     // 4. Get back to the workbench through the account chooser.  The chooser is
@@ -189,7 +189,7 @@ async function runScenario(browser, options, outDir, report) {
     await shot('04-workbench-after-return-945.png');
     const returnPaths = unauthorized.slice(returnStart);
     check('way-back-lands-on-today',
-      '从周报经“切换账号”选择成员后，回到个人操作台（今天）',
+      '从周报经导航里的“登录”选择成员后，回到个人操作台（今天）',
       backOnToday,
       backOnToday ? `今天页已显示（选择成员尝试 ${attempts} 次）` : `选择成员 ${attempts} 次后仍没有回到今天页`);
     check('way-back-no-401',

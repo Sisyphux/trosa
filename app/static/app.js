@@ -1778,6 +1778,33 @@ function updateSidebarIdentity() {
   var name = currentUser && (currentUser.name || currentUser.label || currentUser.id) || '当前用户';
   var label = document.getElementById('sidebarUserName');
   if (label) label.textContent = name;
+  syncAccountButton();
+}
+
+// 导航里同一个按钮：已登录时是“退出登录”（真正结束服务器上的登录，
+// 避免共用电脑上刷新就回到上一个人的账号），只看周报时是“登录”。
+function syncAccountButton() {
+  var button = document.getElementById('accountButton');
+  if (!button) return;
+  var text = currentUser ? '退出登录' : '登录';
+  button.setAttribute('aria-label', text);
+  button.title = text;
+  var label = button.querySelector('.sidebar-tool-label');
+  if (label) label.textContent = text;
+}
+
+async function accountButtonAction() {
+  if (!currentUser) { showLogin(); return; }
+  try {
+    var resp = await fetch('/api/auth/logout', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if (!resp.ok) throw new Error('logout ' + resp.status);
+  } catch (error) {
+    showToast('退出没有成功，请检查网络后再试', 'error');
+    return;
+  }
+  showLogin();
 }
 
 // ========== API Helper ==========

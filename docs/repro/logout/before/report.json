@@ -1,0 +1,91 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18191",
+  "generatedAt": "2026-11-11T06:34:10.726Z",
+  "checks": [
+    {
+      "id": "weekly-viewer-can-sign-in-1440",
+      "title": "只看周报、未登录时，导航里有进入账号选择的按钮，且不叫“退出登录”（1440px）",
+      "pass": true,
+      "detail": "{\"text\":\"切换账号\",\"aria\":\"切换账号\",\"shown\":true}"
+    },
+    {
+      "id": "signed-in-1440",
+      "title": "选择成员后进入今天页（1440px）",
+      "pass": true,
+      "detail": "已进入"
+    },
+    {
+      "id": "sign-out-button-named-1440",
+      "title": "登录后，导航里有“退出登录”按钮（1440px）",
+      "pass": false,
+      "detail": "{\"text\":\"切换账号\",\"aria\":\"切换账号\",\"shown\":true}"
+    },
+    {
+      "id": "chooser-after-sign-out-1440",
+      "title": "点击后回到账号选择（1440px）",
+      "pass": true,
+      "detail": "已显示"
+    },
+    {
+      "id": "session-ended-1440",
+      "title": "点击后服务器上的登录已结束（1440px）",
+      "pass": false,
+      "detail": "服务器仍认为已登录"
+    },
+    {
+      "id": "reload-stays-signed-out-1440",
+      "title": "刷新页面后不会回到刚才的账号（1440px）",
+      "pass": false,
+      "detail": "刷新后服务器仍是 hamid 登录（办公网外会直接进入账号）"
+    },
+    {
+      "id": "weekly-viewer-can-sign-in-375",
+      "title": "只看周报、未登录时，导航里有进入账号选择的按钮，且不叫“退出登录”（375px）",
+      "pass": true,
+      "detail": "{\"text\":\"切换账号\",\"aria\":\"切换账号\",\"shown\":true}"
+    },
+    {
+      "id": "signed-in-375",
+      "title": "选择成员后进入今天页（375px）",
+      "pass": true,
+      "detail": "已进入"
+    },
+    {
+      "id": "sign-out-button-named-375",
+      "title": "登录后，导航里有“退出登录”按钮（375px）",
+      "pass": false,
+      "detail": "{\"text\":\"切换账号\",\"aria\":\"切换账号\",\"shown\":true}"
+    },
+    {
+      "id": "chooser-after-sign-out-375",
+      "title": "点击后回到账号选择（375px）",
+      "pass": true,
+      "detail": "已显示"
+    },
+    {
+      "id": "session-ended-375",
+      "title": "点击后服务器上的登录已结束（375px）",
+      "pass": false,
+      "detail": "服务器仍认为已登录"
+    },
+    {
+      "id": "reload-stays-signed-out-375",
+      "title": "刷新页面后不会回到刚才的账号（375px）",
+      "pass": false,
+      "detail": "刷新后服务器仍是 hamid 登录（办公网外会直接进入账号）"
+    }
+  ],
+  "screenshots": [
+    "01-weekly-index-1440.png",
+    "02-signed-in-index-1440.png",
+    "03-after-sign-out-1440.png",
+    "04-after-reload-1440.png",
+    "01-weekly-index-375.png",
+    "02-signed-in-index-375.png",
+    "03-after-sign-out-375.png",
+    "04-after-reload-375.png"
+  ],
+  "pageErrors": [],
+  "browser": "chromium 153.0.8010.12"
+}
