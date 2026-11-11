@@ -13,7 +13,7 @@ Nothing is written to any database and nothing is published.
 
 Usage::
 
-    /Users/luoxin/Desktop/Trosa/.venv/bin/python tools/followup_shadow.py
+    /Users/luoxin/Workspace/Trosa/.venv/bin/python tools/followup_shadow.py
     ... tools/followup_shadow.py --date 2026-10-28 --members hamid amy
 """
 

@@ -1,3 +1,9 @@
+## 2026-11-11 — 仓库搬进 ~/Workspace
+
+- 现象：Trosa 和 Sela 各放在桌面、用户目录等不同位置，文档和脚本里写死了旧路径。
+- 修改：主仓库移到 `~/Workspace/Trosa`，隔离区仍在仓库同级的 `~/Workspace/trosa-worktrees/`（`agent-worktree.sh` 按仓库位置自己推算，无需改）；`MULTI_AGENT_WORKFLOW.md`、`deploy/macos/` 默认路径、`tools/followup_shadow.py`、`tools/repro_timeline_window.cjs`、Sela 路径说明里的旧路径改为新位置。历史记录和研究笔记里的旧路径原样保留。
+- 影响范围：只有文档、注释和默认路径；不动正式服务器、数据和业务代码。
+
 ## 2026-11-08 — 客户资料里可以手写「一般什么时候回」
 
 - 现象：不同客户回信习惯不一样（有的欧洲下午、有的周一最快），没处记。

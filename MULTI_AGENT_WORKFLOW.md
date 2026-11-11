@@ -9,7 +9,7 @@
 
 | 角色 | 目录 | 允许做什么 | 不允许做什么 |
 |---|---|---|---|
-| 主工作区 | `~/Desktop/Trosa` | 集成、验收、发布（fetch / merge / cherry-pick / release-commit） | 直接写业务代码、堆叠来源不明的未提交改动 |
+| 主工作区 | `~/Workspace/Trosa` | 集成、验收、发布（fetch / merge / cherry-pick / release-commit） | 直接写业务代码、堆叠来源不明的未提交改动 |
 | 任务隔离区 | `<仓库同级>/trosa-worktrees/<id>` | 本任务改代码、跑测试、commit | 改其它任务目录、修改主工作区 |
 | 发布候选 | 临时 release worktree | 由 `release-commit.sh` 自动创建与回收 | 人工进入修改 |
 
@@ -48,7 +48,7 @@
   停下来问人，也不要在原目录继续写**，照做即可：
 
   ```bash
-  cd ~/Desktop/Trosa
+  cd ~/Workspace/Trosa
   TRADE_OS_AGENT_ROLE=dev deploy/cloud/agent-worktree.sh create \
     --task <id>-b --base agent/<id> --owner <name> --goal "..." --scope "..."
   ```
@@ -79,7 +79,7 @@
 推荐用一个命令走完“闸门 + 环境 + 体检 + 建区”：
 
 ```bash
-cd ~/Desktop/Trosa
+cd ~/Workspace/Trosa
 deploy/cloud/agent-worktree.sh start --task <id> \
   --owner <负责人/Agent 名> \
   --goal "一句话目标" \

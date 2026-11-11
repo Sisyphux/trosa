@@ -4,7 +4,7 @@
 # private settings and logs untouched.
 set -euo pipefail
 
-SOURCE_DIR="${TRADE_OS_SOURCE_DIR:-/Users/luoxin/Desktop/Trosa}"
+SOURCE_DIR="${TRADE_OS_SOURCE_DIR:-/Users/luoxin/Workspace/Trosa}"
 SERVICE_DIR="${TRADE_OS_SERVICE_DIR:-/Users/luoxin/Library/Application Support/TradeOS}"
 RUNTIME_DIR="$SERVICE_DIR/runtime"
 TUNNEL_DIR="$SERVICE_DIR/tunnel"

@@ -11,7 +11,7 @@ contract without any test-time reference to the sela repository.
 - `examples/*.json` — copied from `docs/proposals/inbox-dialogue-schemas/examples/*.json`
 - `validator.py` — adapted from `tools/check_inbox_contract.py`
 
-The upstream repository is **sela** (source checkout at `/Users/luoxin/Sela`).
+The upstream repository is **sela** (source checkout at `/Users/luoxin/Workspace/Sela`).
 
 ## Copy date
 

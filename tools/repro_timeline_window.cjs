@@ -38,7 +38,7 @@ function parseArgs(argv) {
 function loadPlaywright() {
   const candidates = [
     path.join(ROOT, 'browser-extension', 'node_modules', 'playwright'),
-    path.join('/Users/luoxin/Desktop/Trosa', 'browser-extension', 'node_modules', 'playwright'),
+    path.join('/Users/luoxin/Workspace/Trosa', 'browser-extension', 'node_modules', 'playwright'),
   ];
   for (const candidate of candidates) {
     try { return require(candidate); } catch (error) { /* try next */ }

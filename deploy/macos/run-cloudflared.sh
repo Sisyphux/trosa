@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="${0:A:h}"
-PROJECT_DIR="${TRADE_OS_PROJECT_DIR:-/Users/luoxin/Desktop/Trosa}"
+PROJECT_DIR="${TRADE_OS_PROJECT_DIR:-/Users/luoxin/Workspace/Trosa}"
 if [[ -r "$SCRIPT_DIR/cloudflared.yml" && -r "$SCRIPT_DIR/cloudflared-connect-proxy.py" ]]; then
   CONFIG_FILE="$SCRIPT_DIR/cloudflared.yml"
   PROXY_HELPER="$SCRIPT_DIR/cloudflared-connect-proxy.py"
