@@ -7962,6 +7962,33 @@ def customer_agent_prospect_exclusion_decision(customer_id):
     return _sela_exclusion_decision_response(source_id, request.get_json(silent=True))
 
 
+def _sela_toggle_own_business_exclusion(conn, source_id, *, active, now):
+    """Switch this prospect's own exclusion record on/off; return its record ids.
+
+    Only the row keyed ``(source='sela', source_id=<this prospect>)`` is
+    touched: it is written solely by ``_sela_mark_prospect_excluded`` (a human
+    Inbox "exclude" answer or Sela's cold non-fit block) for exactly this
+    prospect.  Historical imports (``legacy_*``) and every other source keep
+    their own lifecycle.  The row is deactivated, never deleted, so its reason
+    stays for audit and a later human block switches it back on.
+    """
+    relation = 'trosa.business_exclusions' if postgres_mode() else 'business_exclusions'
+    scope = 'organization_id=trosa.compat_org_id() AND ' if postgres_mode() else ''
+    wanted = 1 if active else 0
+    rows = conn.execute(
+        f'''SELECT id FROM {relation}
+            WHERE {scope}legacy_user_id=? AND source=? AND source_id=? AND is_active<>?''',
+        (_sela_prospect_user(), _SELA_PROSPECT_SOURCE, source_id, wanted),
+    ).fetchall()
+    ids = [int(row['id']) for row in rows]
+    for row_id in ids:
+        conn.execute(
+            f'''UPDATE {relation} SET is_active=?, updated_at=? WHERE {scope}id=?''',
+            (wanted, now, row_id),
+        )
+    return [f'business-exclusion:{row_id}' for row_id in ids]
+
+
 def _sela_set_contact_permission(conn, profile, permission, note, now, actor):
     """Human-only contact-permission change with an audit trail.
 
@@ -7979,16 +8006,21 @@ def _sela_set_contact_permission(conn, profile, permission, note, now, actor):
         raise CrmWriteError('请填写解禁/停止联系的原因（至少 2 个字），用于审计')
     research = _sela_json_value(profile.get('research_json'), {})
     state = research.get('agent_state') if isinstance(research.get('agent_state'), dict) else {}
+    toggled = _sela_toggle_own_business_exclusion(
+        conn, str(profile['source_id']), active=permission != 'allowed', now=now)
     changes = state.get('contact_permission_changes')
     if not isinstance(changes, list):
         changes = []
-    changes.append({
+    change = {
         'at': now,
         'actor': str(actor or ''),
         'from': str(profile.get('contact_permission') or 'allowed'),
         'to': permission,
         'note': note_text.strip(),
-    })
+    }
+    if toggled:
+        change['business_exclusions'] = toggled
+    changes.append(change)
     state['contact_permission_changes'] = changes[-20:]
     if permission == 'allowed':
         state['exclusion_resolution'] = 'HUMAN_UNBLOCKED'
@@ -8014,7 +8046,7 @@ def _sela_set_contact_permission(conn, profile, permission, note, now, actor):
          '' if permission == 'allowed' else note_text.strip(),
          '' if permission == 'allowed' else now, now, profile['id']),
     )
-    return _sela_profile_by_source(conn, str(profile['source_id']))
+    return _sela_profile_by_source(conn, str(profile['source_id'])), toggled
 
 
 @app.route('/api/customers/<int:customer_id>/agent-prospect/contact-permission', methods=['POST'])
@@ -8034,7 +8066,7 @@ def customer_agent_prospect_contact_permission(customer_id):
             conn.rollback()
             return jsonify({'success': False, 'error': '该客户没有潜在客户资料'}), 404
         try:
-            updated = _sela_set_contact_permission(
+            updated, toggled = _sela_set_contact_permission(
                 conn, profile, payload.get('permission'),
                 payload.get('note') or payload.get('reason'),
                 _sela_now(), getattr(g, 'current_user', ''),
@@ -8045,10 +8077,14 @@ def customer_agent_prospect_contact_permission(customer_id):
         prospect = _sela_prospect_view(conn, updated)
         wanted = str(payload.get('permission') or '').strip().lower()
         audit_note = str(payload.get('note') or payload.get('reason') or '').strip()[:500]
+        toggled_note = ''
+        if toggled:
+            toggled_note = (f'；{"停用" if wanted == "allowed" else "重新启用"}排除记录 '
+                            + ', '.join(toggled))
         _record_operation_log(
             conn, 'UNBLOCK' if wanted == 'allowed' else 'BLOCK',
             'sela_prospect', customer_id,
-            f'{getattr(g, "current_user", "")} 将联系权限改为 {wanted}：{audit_note}',
+            f'{getattr(g, "current_user", "")} 将联系权限改为 {wanted}：{audit_note}{toggled_note}',
             _sela_now(),
         )
         conn.commit()

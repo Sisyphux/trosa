@@ -269,6 +269,65 @@ class SelaContactBlockTest(unittest.TestCase):
         self.assertIn(unblock.status_code, (401, 403), unblock.get_data(as_text=True))
         self.assertTrue(self.view(source_id)['do_not_contact'])
 
+    def snapshot_rows(self, source, source_id):
+        records = self.client.get('/api/integrations/sela/exclusions', headers=self.headers()).get_json()['records']
+        return [row for row in records
+                if row.get('source') == source and row.get('source_id') == source_id]
+
+    def test_human_restore_lifts_the_block_exclusion_and_reblock_brings_it_back(self):
+        source_id = 'block-restore-1'
+        other_id = 'block-restore-other'
+        customer_id = self.create_prospect(source_id)
+        self.create_prospect(other_id)
+        self.assertEqual(self.direct_block(source_id, key='block:restore:one').status_code, 200)
+        self.assertEqual(self.direct_block(other_id, key='block:restore:other').status_code, 200)
+        # A historical import naming the same company is a different fact.
+        legacy_key = 'block:restore:legacy'
+        legacy = self.client.post(
+            '/api/integrations/sela/exclusions',
+            json={'record': {'source': 'legacy_exclusion_registry', 'source_id': 'cust_restore_1',
+                             'canonical_name': f'Block Co {source_id}', 'reason': '历史排除'},
+                  'idempotency_key': legacy_key},
+            headers=self.headers(legacy_key),
+        )
+        self.assertEqual(legacy.status_code, 200, legacy.get_data(as_text=True))
+        self.assertEqual(len(self.snapshot_rows('sela', source_id)), 1)
+
+        human = self.human()
+        restored = human.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': '人工核实是目标买家，恢复联系'},
+        )
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        self.assertFalse(restored.get_json()['prospect']['do_not_contact'])
+        self.assertEqual(self.snapshot_rows('sela', source_id), [],
+                         '恢复联系后 Sela 的排除快照里不应再有这家公司的排除记录')
+        self.assertEqual(len(self.snapshot_rows('sela', other_id)), 1)
+        self.assertEqual(len(self.snapshot_rows('legacy_exclusion_registry', 'cust_restore_1')), 1)
+
+        conn = self.hamid_db()
+        try:
+            row = conn.execute(
+                "SELECT id, is_active, reason FROM business_exclusions WHERE source='sela' AND source_id=?",
+                (source_id,),
+            ).fetchone()
+            self.assertEqual(row['is_active'], 0)
+            self.assertIn('Competitor', row['reason'])  # kept for audit, only deactivated
+            audit = conn.execute(
+                "SELECT details FROM operation_logs WHERE action='UNBLOCK' AND target_type='sela_prospect'"
+                " ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+            self.assertIn(f'business-exclusion:{row["id"]}', audit['details'])
+        finally:
+            conn.close()
+
+        reblocked = human.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'do_not_contact', 'note': '还是停止联系'},
+        )
+        self.assertEqual(reblocked.status_code, 200, reblocked.get_data(as_text=True))
+        self.assertEqual(len(self.snapshot_rows('sela', source_id)), 1)
+
     def test_cold_prospect_is_blocked_with_audit_and_inbox_decision_resolved(self):
         source_id = 'block-cold-1'
         customer_id = self.create_prospect(source_id)
