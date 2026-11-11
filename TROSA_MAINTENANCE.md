@@ -165,7 +165,7 @@ Inbox 的理念正确：只留下需要判断的信号。但手工“记录客�
 
 - 页面：Inbox、全局 Search、Customer 工作区。
 - 前端：`app/static/app.js`、`app/static/index.html`、相关 CSS。
-- API：`GET /api/inbox`、`POST /api/inbox/reply`、`POST /api/inbox/<id>/record-reply`、`GET /api/customers?search=...`；必要时为搜索结果增加受限的 `match_context`，不返回整段联系人隐私或完整历史。
+- API：`GET /api/inbox`、`POST /api/inbox/<id>/record-reply`、`GET /api/customers?search=...`；必要时为搜索结果增加受限的 `match_context`，不返回整段联系人隐私或完整历史。
 - 保护测试：Inbox 去重/归档/稍后处理、客户回复记录、搜索分页和跨用户隔离。
 
 **最小修改范围**
