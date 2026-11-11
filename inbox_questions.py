@@ -115,5 +115,3 @@ def question_key_for(item_type, dedupe_key, identity=''):
     if item_type == 'sela_agent_request':
         return dedupe_key or 'approval:' + identity
     return dedupe_key or (item_type + ':' + identity)
-
-

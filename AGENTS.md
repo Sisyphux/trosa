@@ -4,7 +4,7 @@
 
 Trosa 是目前四人使用（设计上不限于四人，可按需增加使用者）的外贸 CRM，定位是“外贸业务员的客户记忆和成交线索本”：系统负责记住、算出、预填，人负责判断、确认、说话（详见 [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md)，依据见 [`docs/research/`](docs/research/)）。核心闭环是：沟通进来 → 系统整理、人确认成记录 → 系统每天从事实算出跟进建议 → 人确认后才成为待办 → 到期再出现。沟通记录可以没有下一步，业务员不必在记录时就定下次跟进日期；跟进建议不是承诺，不形成逾期、不确认即过期；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 正式服务器，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（从 `followup-scan-rules` 开始）；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 正式服务器，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（打地基阶段的规则引擎、数据护栏、影子名单已完成，从路线图里下一个未完成的任务接着做）；不要跳过路线图直接扩张其他页面。
 
 ## 多 Agent 并行开发（强制）
 
