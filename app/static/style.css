@@ -585,11 +585,12 @@ select.form-control {
   font-size: clamp(0.98rem, 1.25vw, 1.2rem); font-weight: 500;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--entry-ink-soft); white-space: nowrap; pointer-events: none;
-  transition: opacity 0.6s var(--entry-ease), transform 0.9s var(--entry-ease-out);
+  transition: opacity 0.6s var(--entry-ease), transform 0.9s var(--entry-ease-out), color 0.6s var(--entry-ease);
   animation: entrySpineIn 1.05s var(--entry-ease-out) backwards;
   animation-delay: calc(var(--entry-d, 0s) + 0.05s);
 }
-#loginOverlay .entry-field.is-active .entry-spine { opacity: 0; transform: translateY(0.9rem) rotate(180deg); }
+/* 入场动画播放时会盖过 opacity，所以选中栏的竖排名字同时用透明文字隐藏，避免和大字叠在一起。 */
+#loginOverlay .entry-field.is-active .entry-spine { opacity: 0; color: transparent; transform: translateY(0.9rem) rotate(180deg); }
 
 #loginOverlay .entry-body {
   position: relative; z-index: 2; display: block; width: 100%;

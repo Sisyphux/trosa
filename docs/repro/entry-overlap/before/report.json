@@ -1,0 +1,50 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18191",
+  "generatedAt": "2026-11-11T06:50:46.074Z",
+  "checks": [
+    {
+      "id": "no-overlap-while-hovered",
+      "title": "鼠标停在某人那一栏时，大字出现后竖排小字已隐藏",
+      "pass": false,
+      "detail": "重叠：400ms 竖排=0.78 大字=0.96；700ms 竖排=0.98 大字=1.00；1100ms 竖排=1.00 大字=1.00"
+    }
+  ],
+  "samples": {
+    "150ms": {
+      "active": true,
+      "spine": 0,
+      "body": 0.631595
+    },
+    "400ms": {
+      "active": true,
+      "spine": 0.77833,
+      "body": 0.962315
+    },
+    "700ms": {
+      "active": true,
+      "spine": 0.975456,
+      "body": 1
+    },
+    "1100ms": {
+      "active": true,
+      "spine": 0.999994,
+      "body": 1
+    },
+    "1700ms": {
+      "active": true,
+      "spine": 0,
+      "body": 1
+    },
+    "3000ms": {
+      "active": true,
+      "spine": 0,
+      "body": 1
+    }
+  },
+  "screenshots": [
+    "700ms-hover-hamid.png",
+    "3000ms-hover-hamid.png"
+  ],
+  "browser": "chromium 153.0.8010.12"
+}
