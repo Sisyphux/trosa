@@ -1616,34 +1616,6 @@ class SelaProspectApiTest(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_business_exclusion_view_exposes_is_active_and_supports_deactivate(self):
-        login = self.client.post('/api/auth/login', json={'user': 'hamid'})
-        self.assertEqual(login.status_code, 200, login.get_data(as_text=True))
-        created = self.client.post('/api/business-exclusions', json={
-            'canonical_name': 'Block Co', 'source_id': 'block-co-1', 'reason': '测试排除',
-        })
-        self.assertEqual(created.status_code, 201, created.get_data(as_text=True))
-        record_id = created.get_json()['record']['record_id']
-        exclusion_id = int(record_id.split(':')[1])
-        listed = self.client.get('/api/business-exclusions').get_json()['records']
-        self.assertTrue(next(row for row in listed if row['record_id'] == record_id)['is_active'])
-        removed = self.client.delete(
-            f'/api/business-exclusions/{exclusion_id}', json={'reason': '误标，人工停用'})
-        self.assertEqual(removed.status_code, 200, removed.get_data(as_text=True))
-        self.assertFalse(removed.get_json()['record']['is_active'])
-        self.assertFalse(any(
-            row.get('record_id') == record_id for row in self.exclusion_records()))
-        conn = self.hamid_db()
-        try:
-            audit = conn.execute(
-                "SELECT action, target_type, target_id FROM operation_logs"
-                " WHERE target_type='business_exclusion' ORDER BY rowid DESC LIMIT 1"
-            ).fetchone()
-            self.assertEqual(audit['action'], 'UNBLOCK')
-            self.assertEqual(audit['target_id'], exclusion_id)
-        finally:
-            conn.close()
-
     def _publish(self, source_id, **fields):
         body = prospect(source_id)
         body['company'] = f'{source_id} Co'

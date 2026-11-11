@@ -266,6 +266,8 @@ class CalendarAndAccessTest(unittest.TestCase):
             ('GET', '/api/inbox/capture-matches'), ('POST', '/api/inbox/undo-record-reply'),
             ('POST', '/api/reminders/batch/complete'), ('GET', '/api/undo/latest'),
             ('POST', '/api/customers/recycle-bin/empty'), ('GET', '/api/customers/recycle-bin/count'),
+            ('GET', '/api/business-exclusions'), ('POST', '/api/business-exclusions'),
+            ('PUT', '/api/business-exclusions/1'), ('DELETE', '/api/business-exclusions/1'),
         ):
             response = client.open(path, method=method, json={})
             self.assertIn(response.status_code, (404, 405), (method, path, response.status_code))
