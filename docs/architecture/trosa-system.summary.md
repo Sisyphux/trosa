@@ -59,7 +59,7 @@ Trosa 是一个**目前四人使用的外贸 CRM 工作台**（设计上不限�
 | integrations（Sela 16 + Gmail 5） | 21 | reminders | 9 |
 | inbox | 8 | agent | 8 |
 | auth / team / follow-history | 各 5 | backup | 4 |
-| ai / business-exclusions / contacts / extension / outreach / overview / undo | 各 3 | agent-gateway / calendar / emails / excel / invitations / network / weekly-summary | 各 2 |
+| ai / contacts / extension / outreach / overview / undo | 各 3 | agent-gateway / calendar / emails / excel / invitations / network / weekly-summary | 各 2 |
 | health / logs / my-weekly-logs / preferences / stats / system / version | 各 1 | | |
 
 ## 组件依赖（L3）

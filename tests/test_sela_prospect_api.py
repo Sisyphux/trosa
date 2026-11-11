@@ -495,6 +495,21 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(imported['source'], 'legacy_exclusion_registry')
         self.assertEqual(imported['domains'], ['110uae.com'])
 
+    def test_deactivated_business_exclusion_leaves_the_snapshot(self):
+        record = {
+            'source': 'legacy_exclusion_registry', 'source_id': 'cust_deactivate_1',
+            'canonical_name': 'Deactivate Co', 'domains': ['https://deactivate.example/'],
+            'status': 'confirmed_exclude', 'match_policy': 'hard', 'reason': '测试排除',
+        }
+        for key, active in (('sela-v2-exclusion:deactivate:on', True), ('sela-v2-exclusion:deactivate:off', False)):
+            response = self.client.post(
+                '/api/integrations/sela/exclusions',
+                json={'record': dict(record, is_active=active), 'idempotency_key': key}, headers=self.headers(key),
+            )
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            listed = any(row.get('source_id') == 'cust_deactivate_1' for row in self.exclusion_records())
+            self.assertEqual(listed, active, f'is_active={active}')
+
     def test_exclusion_identity_decision_lives_in_trosa_profile_and_inbox(self):
         body = prospect()
         body['agent_state'] = {'exclusion_review': {
