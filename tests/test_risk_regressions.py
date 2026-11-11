@@ -252,21 +252,23 @@ class CalendarAndAccessTest(unittest.TestCase):
     def test_scheduler_uses_shanghai_time(self):
         self.assertEqual(str(scheduler.SCHEDULER_TIMEZONE), 'Asia/Shanghai')
 
-    def test_postgres_backup_routes_do_not_expose_sqlite_operations(self):
-        spec = importlib.util.spec_from_file_location('crm_app_postgres_backup_routes_test', ROOT / 'app.py')
+    def test_retired_routes_stay_removed(self):
+        """Routes with no caller were retired; the recycle-bin purge in particular
+        must not come back without a confirmed page flow."""
+        spec = importlib.util.spec_from_file_location('crm_app_retired_routes_test', ROOT / 'app.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         client = module.app.test_client()
         self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
-        with mock.patch.object(module, 'postgres_mode', return_value=True):
-            manual = client.post('/api/backup')
-            self.assertEqual(manual.status_code, 409)
-            self.assertTrue(manual.get_json()['managed_externally'])
-            listed = client.get('/api/backup/list')
-            self.assertEqual(listed.status_code, 200)
-            self.assertEqual(listed.get_json()['backups'], [])
-            restored = client.post('/api/backup/restore', json={'date': '2026-01-01/000000'})
-            self.assertEqual(restored.status_code, 409)
+        for method, path in (
+            ('POST', '/api/backup'), ('GET', '/api/backup/list'), ('POST', '/api/backup/restore'),
+            ('GET', '/api/backup/integrity'), ('POST', '/api/inbox/reply'),
+            ('GET', '/api/inbox/capture-matches'), ('POST', '/api/inbox/undo-record-reply'),
+            ('POST', '/api/reminders/batch/complete'), ('GET', '/api/undo/latest'),
+            ('POST', '/api/customers/recycle-bin/empty'), ('GET', '/api/customers/recycle-bin/count'),
+        ):
+            response = client.open(path, method=method, json={})
+            self.assertIn(response.status_code, (404, 405), (method, path, response.status_code))
 
     def test_overview_routes_require_login(self):
         spec = importlib.util.spec_from_file_location('crm_app_for_test', ROOT / 'app.py')
@@ -2193,8 +2195,6 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             'dedupe_key': 'boundary-archive', 'item_type': 'customer_reply', 'customer_id': '',
         })
         self.assertEqual(archived.status_code, 200, archived.get_json())
-        reply = client.post('/api/inbox/reply', json={'customer_id': '', 'content': '回复'})
-        self.assertEqual(reply.status_code, 400, reply.get_json())
 
         malformed_batch_requests = (
             ('/api/customers/batch/business-stage', {'ids': [''], 'value': '成交'}),
@@ -2203,7 +2203,6 @@ class InputBoundaryRegressionTest(unittest.TestCase):
             ('/api/customers/batch/follow_history', {'ids': [''], 'content': '批量记录'}),
             ('/api/customers/batch/delete', {'ids': ['']}),
             ('/api/customers/priority/order', {'ids': ['']}),
-            ('/api/reminders/batch/complete', {'ids': ['']}),
             ('/api/reminders/today/order', {'ids': ['']}),
         )
         for path, payload in malformed_batch_requests:

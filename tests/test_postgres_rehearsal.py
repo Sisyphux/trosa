@@ -44,6 +44,27 @@ def _loopback(dsn: str) -> bool:
     )
 
 
+
+def _seed_inbox_reply(module, customer_id, content):
+    """Create an open customer_reply Inbox item the way the retired paste route did."""
+    import hashlib as _hashlib
+    from datetime import datetime as _datetime
+    module.set_db_user('hamid')
+    now = _datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    dedupe_key = 'customer_reply:' + _hashlib.sha256(f'{customer_id}|{content}|{now}'.encode('utf-8')).hexdigest()
+    conn = module.get_db()
+    try:
+        item_id = module._create_inbox_item(
+            conn, item_type='customer_reply', customer_id=customer_id,
+            title='客户回复待记录', content=content, dedupe_key=dedupe_key,
+            status='open', created_at=now,
+            **module._inbox_question_meta('customer_reply', dedupe_key, str(customer_id)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return item_id
+
 class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
     """Run canonical Trosa writes and compatibility boundary checks in PG."""
 
@@ -1315,11 +1336,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(browser_capture.status_code, 200, browser_capture.get_json())
         module._INBOX_CACHE.clear()
 
-        inbox_reply = client.post('/api/inbox/reply', json={
-            'customer_id': customer_id, 'content': 'A pasted reply for API acceptance.',
-        })
-        self.assertEqual(inbox_reply.status_code, 200, inbox_reply.get_json())
-        inbox_id = inbox_reply.get_json()['id']
+        inbox_id = _seed_inbox_reply(module, customer_id, 'A pasted reply for API acceptance.')
         recorded = client.post(f'/api/inbox/{inbox_id}/record-reply')
         self.assertEqual(recorded.status_code, 200, recorded.get_json())
         module._INBOX_CACHE.clear()
@@ -3460,9 +3477,7 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(client.post(f'/api/customers/{customer_id}/outreach', json={
             'subject': 'Cascade quote', 'content': 'Cascade body', 'sent_date': '2026-09-13',
         }).status_code, 201)
-        inbox_id = client.post('/api/inbox/reply', json={
-            'customer_id': customer_id, 'content': 'Cascade inbox reply.',
-        }).get_json()['id']
+        inbox_id = _seed_inbox_reply(module, customer_id, 'Cascade inbox reply.')
         hamid_account = self.connection.execute(
             '''SELECT account_id FROM trosa.account_legacy_refs
                 WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid'

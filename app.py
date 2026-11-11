@@ -37,7 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 from email_validator import validate_email as validate_email_address, EmailNotValidError
 import dns.resolver
 from datetime import datetime, timedelta, timezone
-from flask import Flask, jsonify, request, send_from_directory, session, g, Response, redirect, url_for, has_request_context
+from flask import Flask, jsonify, request, send_from_directory, session, g, Response, redirect, url_for
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_cors import CORS
@@ -48,7 +48,7 @@ from db import (
     runtime_contract_status,
     init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
     init_user_tables, refresh_users_registry,
-    backup_database, cancel_safety_backup, list_backups, restore_from_backup, check_integrity, schedule_safety_backup,
+    backup_database, cancel_safety_backup, list_backups, schedule_safety_backup,
     DB_DIR, run_startup_maintenance, entry_field_color,
 )
 from scheduler import start_scheduler, stop_scheduler, get_scheduler_status
@@ -635,48 +635,6 @@ _WEEKLY_SUMMARY_REFRESHING = set()
 _WEEKLY_SUMMARY_CACHE_VERSION = 0
 
 
-class _MaintenanceGate:
-    """Let normal requests drain before a database restore replaces files."""
-    def __init__(self):
-        self._condition = threading.Condition()
-        self._readers = 0
-        self._writer = False
-        self._waiting_writers = 0
-
-    def enter_request(self):
-        with self._condition:
-            while self._writer or self._waiting_writers:
-                self._condition.wait()
-            self._readers += 1
-
-    def leave_request(self):
-        with self._condition:
-            self._readers = max(0, self._readers - 1)
-            if not self._readers:
-                self._condition.notify_all()
-
-    def run_exclusive(self, callback):
-        with self._condition:
-            self._waiting_writers += 1
-            while self._writer or self._readers:
-                self._condition.wait()
-            self._waiting_writers -= 1
-            self._writer = True
-        try:
-            return callback()
-        finally:
-            with self._condition:
-                self._writer = False
-                self._condition.notify_all()
-
-
-_maintenance_gate = _MaintenanceGate()
-
-
-def _leave_request_gate():
-    if getattr(g, '_maintenance_gate_entered', False):
-        _maintenance_gate.leave_request()
-        g._maintenance_gate_entered = False
 def _calendar_today():
     """Use one Asia/Shanghai business date for tasks and calendars."""
     return datetime.now(_CALENDAR_TZ).date()
@@ -898,8 +856,6 @@ def _log_slow_request(response):
 
 @app.before_request
 def before_request():
-    _maintenance_gate.enter_request()
-    g._maintenance_gate_entered = True
     """在每个请求前设置当前用户"""
     # The former public-IP/cookie share remains retired.  The optional Mac LAN
     # gateway authenticates every proxied request independently and receives
@@ -928,11 +884,6 @@ def before_request():
     else:
         set_db_user(None)
         g.current_user = ''
-
-
-@app.teardown_request
-def release_request_gate(_error=None):
-    _leave_request_gate()
 
 
 def login_required(f):
@@ -14529,72 +14480,6 @@ def _permanent_delete_customer_pg(conn, customer_id):
             'file_paths': file_paths, 'files_dir': customer_id}
 
 
-@app.route('/api/customers/recycle-bin/empty', methods=['POST'])
-@login_required
-def empty_recycle_bin():
-    conn = get_db()
-    c = conn.cursor()
-    if postgres_mode():
-        deleted = [item for item in _active_customers(conn, include_deleted=True) if item.get('deleted_at')]
-        if not deleted:
-            conn.close()
-            return jsonify({'message': '回收站已为空'})
-        removed = []
-        try:
-            for item in deleted:
-                removed.append(_permanent_delete_customer_pg(conn, int(item['id'])))
-            conn.commit()
-        except CrmWriteError as error:
-            conn.rollback()
-            conn.close()
-            return jsonify({'error': error.message}), error.status
-        except Exception as error:
-            conn.rollback()
-            conn.close()
-            logger.error(f'empty_recycle_bin error: {error}', exc_info=True)
-            return jsonify({'error': '清空回收站失败，未更改任何数据'}), 500
-        conn.close()
-        for entry in removed:
-            _remove_customer_files_selective(entry['files_dir'], entry['file_paths'])
-        log_operation('EMPTY_RECYCLE_BIN', 'customer', None, f'清空回收站，永久删除 {len(removed)} 个客户')
-        return jsonify({'message': f'清空回收站，永久删除 {len(removed)} 个客户'})
-    c.execute('SELECT COUNT(*) as cnt FROM customers WHERE is_deleted = 1')
-    count = c.fetchone()['cnt']
-    if count == 0:
-        conn.close()
-        return jsonify({'message': '回收站已为空'})
-    c.execute('SELECT id, name FROM customers WHERE is_deleted = 1')
-    deleted = c.fetchall()
-    for row in deleted:
-        c.execute('DELETE FROM follow_up_logs WHERE customer_id = ?', (row['id'],))
-        c.execute('DELETE FROM reminders WHERE customer_id = ?', (row['id'],))
-        c.execute('DELETE FROM contacts WHERE customer_id = ?', (row['id'],))
-        c.execute('DELETE FROM outreach_emails WHERE customer_id = ?', (row['id'],))
-        c.execute('DELETE FROM customer_files WHERE customer_id = ?', (row['id'],))
-        c.execute('DELETE FROM customers WHERE id = ?', (row['id'],))
-    conn.commit()
-    conn.close()
-    for row in deleted:
-        _remove_customer_files_dir(row['id'])
-    log_operation('EMPTY_RECYCLE_BIN', 'customer', None, f'清空回收站，永久删除 {count} 个客户')
-    return jsonify({'message': f'已清空回收站，永久删除 {count} 个客户'})
-
-
-@app.route('/api/customers/recycle-bin/count', methods=['GET'])
-@login_required
-def get_recycle_bin_count():
-    conn = get_db()
-    c = conn.cursor()
-    if postgres_mode():
-        count = sum(1 for item in _active_customers(conn, include_deleted=True) if item.get('deleted_at'))
-        conn.close()
-        return jsonify({'count': count})
-    c.execute('SELECT COUNT(*) as cnt FROM customers WHERE is_deleted = 1')
-    count = c.fetchone()['cnt']
-    conn.close()
-    return jsonify({'count': count})
-
-
 # ========== Inbox API ==========
 
 def _reconcile_inbox_after_write():
@@ -15663,42 +15548,6 @@ def get_inbox_counts():
     return jsonify(counts)
 
 
-@app.route('/api/inbox/reply', methods=['POST'])
-@login_required
-def add_inbox_reply():
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        data = {}
-    try:
-        customer_id = _normalize_positive_id(data.get('customer_id'), '客户编号', allow_empty=False)
-    except CrmWriteError as error:
-        return jsonify({'error': error.message}), error.status
-    content = str(data.get('content') or '').strip()
-    if not content:
-        return jsonify({'error': '请选择客户并粘贴回复内容'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    customer = _customer_record(conn, customer_id) if postgres_mode() else c.execute(
-        'SELECT id, name, company FROM customers WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL)',
-        (customer_id,),
-    ).fetchone()
-    if not customer:
-        conn.close()
-        return jsonify({'error': '客户不存在'}), 404
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    dedupe_key = 'customer_reply:' + hashlib.sha256(f'{customer_id}|{content}|{now}'.encode('utf-8')).hexdigest()
-    item_id = _create_inbox_item(
-        conn, item_type='customer_reply', customer_id=customer_id,
-        title='客户回复待记录', content=content, dedupe_key=dedupe_key,
-        status='open', created_at=now,
-        **_inbox_question_meta('customer_reply', dedupe_key, str(customer_id)),
-    )
-    conn.commit()
-    conn.close()
-    log_operation('CREATE_INBOX_REPLY', 'inbox_item', item_id, f'粘贴客户回复: {customer["name"]}')
-    return jsonify({'success': True, 'id': item_id})
-
-
 def _speaker_key(value):
     return re.sub(r'[^a-z0-9\u00c0-\u024f\u4e00-\u9fff]+', '', (value or '').casefold())
 
@@ -16218,46 +16067,6 @@ def _capture_customer_matches(captures, customer_rows):
         if best and best['score'] >= 60:
             matches.append(best)
     return matches
-
-
-@app.route('/api/inbox/capture-matches', methods=['GET'])
-@login_required
-def inbox_capture_matches():
-    """Sender-based customer suggestions for open 待归属沟通 items."""
-    conn = get_db()
-    try:
-        if postgres_mode():
-            raw_rows = _modern_inbox_rows(conn, status='open', item_type=tuple(sorted(_CAPTURE_INBOX_TYPES)))
-            customers = []
-            for customer in _active_customers(conn):
-                customers.append({
-                    'id': int(customer['id']), 'name': customer.get('name', ''),
-                    'company': customer.get('company', ''), 'country': customer.get('country', ''),
-                    'website': customer.get('website', ''),
-                    'contacts': [{'email': contact.get('email', ''), 'name': contact.get('name', '')}
-                                 for contact in _customer_contacts(conn, int(customer['id']))],
-                })
-        else:
-            raw_rows = conn.execute(
-                """SELECT * FROM inbox_items WHERE status='open' AND item_type IN ('browser_capture','gmail_capture')
-                    ORDER BY created_at DESC""").fetchall()
-            grouped = {}
-            for row in conn.execute(
-                    """SELECT c.id, c.name, c.company, c.country, c.website, ct.email, ct.name AS contact_name
-                       FROM customers c LEFT JOIN contacts ct ON ct.customer_id=c.id
-                       WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)""").fetchall():
-                entry = grouped.setdefault(int(row['id']), {
-                    'id': int(row['id']), 'name': row['name'], 'company': row['company'],
-                    'country': row['country'] or '', 'website': row['website'] or '', 'contacts': [],
-                })
-                if row['email'] or row['contact_name']:
-                    entry['contacts'].append({'email': row['email'] or '', 'name': row['contact_name'] or ''})
-            customers = list(grouped.values())
-    finally:
-        conn.close()
-    matches = _capture_customer_matches(raw_rows, customers)
-    matches.sort(key=lambda entry: (-entry['score'], entry['item_id']))
-    return jsonify({'matches': matches})
 
 
 @app.route('/api/inbox/auto-attribute', methods=['POST'])
@@ -17413,14 +17222,6 @@ def record_inbox_reply(item_id):
         return jsonify({'error': '记录客户回复失败，未保存任何更改'}), 500
     return jsonify({'success': True, 'activity_id': result['id'],
                     'undo_token': result['undo_token'], 'undo_description': result['undo_description']})
-
-
-@app.route('/api/inbox/undo-record-reply', methods=['POST'])
-@login_required
-def undo_record_inbox_reply():
-    """Compatibility alias for the durable, shared undo mechanism."""
-    token = ((request.get_json(silent=True) or {}).get('undo_token') or '').strip()
-    return undo_action(token)
 
 
 # ========== 提醒 API ==========
@@ -19012,40 +18813,6 @@ def get_upcoming_reminders():
     return jsonify(reminders)
 
 
-@app.route('/api/reminders/batch/complete', methods=['POST'])
-@login_required
-def batch_complete_reminders():
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        data = {}
-    try:
-        ids = _normalize_id_list(data.get('ids', []), '待办列表')
-    except CrmWriteError:
-        return jsonify({'error': '待办列表无效'}), 400
-    conn = get_db()
-    c = conn.cursor()
-    now = _calendar_now_text()
-    for rid in ids:
-        reminder = (_reminder_with_customer(conn, rid) if postgres_mode() else c.execute(
-            '''SELECT r.*, c.name as customer_name
-                 FROM reminders r JOIN customers c ON r.customer_id = c.id
-                 WHERE r.id = ?
-                   AND COALESCE(r.reminder_type, 'follow_up') NOT LIKE 'outreach_%' ''', (rid,)).fetchone())
-        if reminder:
-            activity_id = _record_interaction(
-                conn, customer_id=reminder['customer_id'],
-                content=f'完成任务：{reminder["title"] or reminder["content"]}',
-                occurred_on=_calendar_today().isoformat(), result='批量完成',
-                activity_type='task_completed', direction='unknown', source='manual', related_task_id=rid,
-            )
-            _complete_task(conn, task_id=rid, completed_at=now, source_interaction_id=activity_id)
-            _refresh_customer_activity_rollups(c, reminder['customer_id'], now)
-    conn.commit()
-    conn.close()
-    log_operation('BATCH_COMPLETE', 'reminder', None, f'批量完成 {len(ids)} 条提醒')
-    return jsonify({'message': f'已完成 {len(ids)} 条提醒'})
-
-
 @app.route('/api/reminders/<int:reminder_id>', methods=['GET'])
 @login_required
 def get_reminder(reminder_id):
@@ -19514,15 +19281,6 @@ def get_undo_actions():
     rows = _undo_action_list(conn, limit)
     conn.close()
     return jsonify({'actions': [_available_undo_payload(row) for row in rows]})
-
-
-@app.route('/api/undo/latest', methods=['GET'])
-@login_required
-def get_latest_undo_action():
-    conn = get_db()
-    row = next(iter(_undo_action_list(conn, 1)), None)
-    conn.close()
-    return jsonify({'action': _available_undo_payload(row) if row else None})
 
 
 @app.route('/api/undo/<token>', methods=['POST'])
@@ -23864,79 +23622,6 @@ def overview_customer_detail(user, customer_id):
 
 
 # ========== 备份与恢复 API ==========
-
-@app.route('/api/backup', methods=['POST'])
-@login_required
-def api_backup():
-    """手动触发数据库备份"""
-    if postgres_mode():
-        return jsonify({
-            'success': False,
-            'database': 'postgresql',
-            'managed_externally': True,
-            'error': '正式 PostgreSQL 备份由 deploy/cloud/backup-workbench.sh 和 PostgreSQL 运维链路执行，应用不会伪造 SQLite 快照。',
-        }), 409
-    result = backup_database()
-    if result.get('failed'):
-        return jsonify({'success': False, 'error': f'部分备份失败: {result["failed"]}'}), 500
-    return jsonify({'success': True, 'path': result.get('path', ''), 'files': result.get('backed_up', [])})
-
-
-@app.route('/api/backup/list', methods=['GET'])
-@login_required
-def api_backup_list():
-    """列出所有可用备份"""
-    if postgres_mode():
-        return jsonify({
-            'backups': [],
-            'database': 'postgresql',
-            'managed_externally': True,
-            'message': '正式备份由 PostgreSQL dump 与附件 bundle 管理。',
-        })
-    backups = list_backups()
-    return jsonify({'backups': backups})
-
-
-@app.route('/api/backup/restore', methods=['POST'])
-@login_required
-def api_backup_restore():
-    """从指定日期恢复数据库"""
-    if postgres_mode():
-        return jsonify({
-            'success': False,
-            'database': 'postgresql',
-            'managed_externally': True,
-            'error': '正式运行使用 PostgreSQL；不能从 SQLite 快照恢复。请执行经过验证的 PostgreSQL 恢复演练。',
-        }), 409
-    data = request.get_json(silent=True) or {}
-    backup_date = data.get('date', '')
-    if not backup_date:
-        return jsonify({'error': '请指定备份日期'}), 400
-    _leave_request_gate()
-
-    def restore_with_quiesced_scheduler():
-        was_running = get_scheduler_status().get('running', False)
-        if was_running:
-            stop_scheduler()
-        try:
-            return restore_from_backup(backup_date)
-        finally:
-            if was_running:
-                start_scheduler()
-
-    result = _maintenance_gate.run_exclusive(restore_with_quiesced_scheduler)
-    if result.get('success'):
-        return jsonify({'success': True, 'restored': result.get('restored', [])})
-    return jsonify({'success': False, 'error': result.get('error', '恢复失败')}), 500
-
-
-@app.route('/api/backup/integrity', methods=['GET'])
-@login_required
-def api_integrity():
-    """检查所有数据库完整性"""
-    integrity = check_integrity()
-    return jsonify({'integrity': integrity})
-
 
 @app.route('/api/version')
 def api_version():
