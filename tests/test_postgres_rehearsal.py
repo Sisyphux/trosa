@@ -1949,6 +1949,78 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(changed.status_code, 200)
         self.assertIn(extra, {item.get('id') for item in changed.get_json()['records']})
 
+    def test_human_restore_lifts_own_sela_exclusion_and_blocks_sela_reblock(self):
+        """Restore deactivates only this prospect's source='sela' row; Sela may not re-block alone."""
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+        source_id = f'pg-restore-{run}'
+
+        def publish(key, subject):
+            response = client.post(
+                '/api/integrations/sela/prospects',
+                headers={'X-Idempotency-Key': key},
+                json={'prospect': {
+                    'source_id': source_id, 'company': f'{source_id} Co',
+                    'website': f'https://{source_id}.example/', 'country': 'US',
+                    'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+                    'subject': subject,
+                }},
+            )
+            self.assertEqual(response.status_code, 200, response.get_json())
+            return response.get_json()['trosa_id']
+
+        customer_id = publish(f'pg-restore:{run}:one', 'Intro')
+        self.addCleanup(lambda: client.delete(f'/api/customers/{customer_id}'))
+        legacy = client.post(
+            '/api/integrations/sela/exclusions',
+            headers={'X-Idempotency-Key': f'pg-restore:{run}:legacy'},
+            json={'record': {'source': 'legacy_exclusion_registry', 'source_id': f'cust-{run}',
+                             'canonical_name': f'{source_id} Co', 'reason': 'history'}},
+        )
+        self.assertEqual(legacy.status_code, 200, legacy.get_json())
+
+        def block(key):
+            return client.post(
+                f'/api/integrations/sela/prospects/{source_id}/contact-block',
+                headers={'X-Idempotency-Key': key},
+                json={'reason': 'Competitor, sells acrylic sheet', 'idempotency_key': key},
+            )
+
+        def active(source, sid):
+            row = self.connection.execute(
+                "SELECT is_active FROM trosa.business_exclusions "
+                "WHERE organization_id=trosa.compat_org_id() AND source=? AND source_id=?",
+                (source, sid),
+            ).fetchone()
+            self.connection.commit()
+            return None if row is None else int(row['is_active'])
+
+        self.assertEqual(block(f'pg-restore:{run}:block').status_code, 200)
+        self.assertEqual(active('sela', source_id), 1)
+        restored = client.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': 'human restore'},
+        )
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertEqual(active('sela', source_id), 0)
+        self.assertEqual(active('legacy_exclusion_registry', f'cust-{run}'), 1)
+        records = client.get('/api/integrations/sela/exclusions').get_json()['records']
+        self.assertFalse(any(r.get('source') == 'sela' and r.get('source_id') == source_id for r in records))
+
+        publish(f'pg-restore:{run}:resave', 'Second draft')
+        refused = block(f'pg-restore:{run}:again')
+        self.assertEqual(refused.status_code, 409, refused.get_json())
+        self.assertEqual(active('sela', source_id), 0)
+
+        reblocked = client.post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'do_not_contact', 'note': 'human block again'},
+        )
+        self.assertEqual(reblocked.status_code, 200, reblocked.get_json())
+        self.assertEqual(active('sela', source_id), 1)
+
     def test_shared_address_or_legal_name_asks_a_person_instead_of_creating_a_customer(self):
         """Two brands with different names/hosts but one registered address go to REVIEW."""
         module = self._app_module()

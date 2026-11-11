@@ -8139,6 +8139,35 @@ def _sela_resolve_exclusion_inbox_items(conn, source_id, note, now):
     return resolved
 
 
+def _sela_human_restored_contact(conn, customer_id):
+    """Whether the latest contact-permission audit fact for this prospect is a human UNBLOCK.
+
+    Read from the operation log rather than the profile's ``agent_state``:
+    Sela's routine prospect save replaces ``agent_state`` wholesale, so a
+    marker kept there would be lost, while the audit log is append-only and
+    outside Sela's reach.  Every later block (human, or a human-confirmed
+    dialogue stop) writes a newer ``BLOCK`` fact and ends the protection.
+    """
+    if postgres_mode():
+        row = conn.execute(
+            '''SELECT action FROM audit.operation_log_events
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=?
+                  AND target_type='sela_prospect' AND target_id=?
+                  AND action IN ('UNBLOCK', 'BLOCK')
+                ORDER BY legacy_id DESC LIMIT 1''',
+            (_db_scope_user(), customer_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            '''SELECT action FROM operation_logs
+                WHERE target_type='sela_prospect' AND target_id=?
+                  AND action IN ('UNBLOCK', 'BLOCK')
+                ORDER BY id DESC LIMIT 1''',
+            (customer_id,),
+        ).fetchone()
+    return bool(row) and str(row['action']) == 'UNBLOCK'
+
+
 def _sela_block_cold_prospect(conn, source_id, reason, now, *, human_confirmed=False):
     """Shared cold-prospect stop-contact write (contract §4.3).
 
@@ -8156,9 +8185,7 @@ def _sela_block_cold_prospect(conn, source_id, reason, now, *, human_confirmed=F
         view = _sela_prospect_view(conn, profile)
         if not view:
             raise CrmWriteError('Prospect 不存在', 404)
-        state = (_sela_json_value(profile.get('research_json'), {}) or {}).get('agent_state')
-        if (not human_confirmed and isinstance(state, dict)
-                and state.get('exclusion_resolution') == 'HUMAN_UNBLOCKED'):
+        if not human_confirmed and _sela_human_restored_contact(conn, int(profile['customer_id'])):
             raise CrmWriteError(
                 '这家公司已由人工在 Trosa 恢复联系，Sela 不能自行再停止联系；'
                 '如仍认为不是目标买家，请在对话里向人确认', 409)

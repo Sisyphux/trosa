@@ -323,6 +323,15 @@ class SelaContactBlockTest(unittest.TestCase):
 
         # The human decision stands: Sela's own non-fit block may not undo it,
         # only a human-confirmed dialogue action may.
+        # Sela's routine re-save replaces the profile's agent_state; the
+        # protection must survive it.
+        resave_key = 'block:restore:resave'
+        resave = self.client.post(
+            '/api/integrations/sela/prospects',
+            json={'prospect': prospect(source_id, subject='new draft'), 'idempotency_key': resave_key},
+            headers=self.headers(resave_key),
+        )
+        self.assertEqual(resave.status_code, 200, resave.get_data(as_text=True))
         again = self.direct_block(source_id, key='block:restore:again')
         self.assertEqual(again.status_code, 409, again.get_data(as_text=True))
         self.assertFalse(self.view(source_id)['do_not_contact'])
