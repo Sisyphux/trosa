@@ -8139,7 +8139,7 @@ def _sela_resolve_exclusion_inbox_items(conn, source_id, note, now):
     return resolved
 
 
-def _sela_block_cold_prospect(conn, source_id, reason, now):
+def _sela_block_cold_prospect(conn, source_id, reason, now, *, human_confirmed=False):
     """Shared cold-prospect stop-contact write (contract §4.3).
 
     Used by both the standalone contact-block route and the confirmation-gated
@@ -8156,6 +8156,12 @@ def _sela_block_cold_prospect(conn, source_id, reason, now):
         view = _sela_prospect_view(conn, profile)
         if not view:
             raise CrmWriteError('Prospect 不存在', 404)
+        state = (_sela_json_value(profile.get('research_json'), {}) or {}).get('agent_state')
+        if (not human_confirmed and isinstance(state, dict)
+                and state.get('exclusion_resolution') == 'HUMAN_UNBLOCKED'):
+            raise CrmWriteError(
+                '这家公司已由人工在 Trosa 恢复联系，Sela 不能自行再停止联系；'
+                '如仍认为不是目标买家，请在对话里向人确认', 409)
         if (view.get('lifecycle_stage') != 'cold_prospect'
                 or view.get('customer_linked') or view.get('lifecycle_rejected')):
             stage = str(view.get('lifecycle_stage') or '未知阶段')
@@ -8433,7 +8439,7 @@ def _dialogue_irreversible_handler(action):
                 raise _dialogue.DialogueError('invalid_request', '缺少停止联系原因')
             try:
                 body, _changed, customer_id = _sela_block_cold_prospect(
-                    conn, source_id, reason, now)
+                    conn, source_id, reason, now, human_confirmed=True)
             except CrmWriteError as error:
                 code = 'not_found' if error.status == 404 else 'guardrail_rejected'
                 raise _dialogue.DialogueError(code, error.message, error.status)

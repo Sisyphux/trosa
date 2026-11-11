@@ -321,11 +321,32 @@ class SelaContactBlockTest(unittest.TestCase):
         finally:
             conn.close()
 
+        # The human decision stands: Sela's own non-fit block may not undo it,
+        # only a human-confirmed dialogue action may.
+        again = self.direct_block(source_id, key='block:restore:again')
+        self.assertEqual(again.status_code, 409, again.get_data(as_text=True))
+        self.assertFalse(self.view(source_id)['do_not_contact'])
+        self.assertEqual(self.snapshot_rows('sela', source_id), [])
+
         reblocked = human.post(
             f'/api/customers/{customer_id}/agent-prospect/contact-permission',
             json={'permission': 'do_not_contact', 'note': '还是停止联系'},
         )
         self.assertEqual(reblocked.status_code, 200, reblocked.get_data(as_text=True))
+        self.assertEqual(len(self.snapshot_rows('sela', source_id)), 1)
+
+    def test_human_confirmed_stop_still_works_after_a_human_restore(self):
+        source_id = 'block-restore-confirmed'
+        customer_id = self.create_prospect(source_id)
+        self.assertEqual(self.direct_block(source_id, key='block:restore-confirmed:one').status_code, 200)
+        restored = self.human().post(
+            f'/api/customers/{customer_id}/agent-prospect/contact-permission',
+            json={'permission': 'allowed', 'note': '先恢复联系'},
+        )
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        response = self.block(source_id, key='block:restore-confirmed:dialogue')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(self.view(source_id)['do_not_contact'])
         self.assertEqual(len(self.snapshot_rows('sela', source_id)), 1)
 
     def test_cold_prospect_is_blocked_with_audit_and_inbox_decision_resolved(self):
