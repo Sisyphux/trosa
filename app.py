@@ -5788,17 +5788,6 @@ def _sela_upsert_profile(conn, customer_id, source_id, prospect, now, existing=N
     return research
 
 
-def _sela_profile_contact(conn, customer_id):
-    if postgres_mode():
-        contacts = _customer_contacts(conn, customer_id)
-        return contacts[0] if contacts else None
-    return conn.execute(
-        '''SELECT * FROM contacts WHERE customer_id=?
-           ORDER BY is_primary DESC, created_at ASC, id ASC LIMIT 1''',
-        (customer_id,),
-    ).fetchone()
-
-
 def _sela_latest_reply_event(conn, customer_id):
     """Read the latest reply outcome from Trosa's canonical timeline.
 
@@ -10852,18 +10841,6 @@ def _customer_information_gaps(customer, contact_count=0, duplicate_company=Fals
             'target': 'editTabBasic', 'source': '系统检查'
         })
     return gaps
-
-
-def _customer_attention_label(state):
-    return {
-        'waiting_reply': '等待客户回复',
-        'no_response': '等待客户回复',
-        'no_near_term_need': '近期无需求',
-        'monitoring': '暂时观察',
-        'no_next_plan': '暂未安排下一步',
-        'custom': '按实际情况观察',
-        'not_investing_now': '当前不投入',
-    }.get(state or '', '')
 
 
 _CAPTURE_INBOX_TYPES = frozenset(('browser_capture', 'gmail_capture'))
@@ -19255,22 +19232,6 @@ def _normalize_id_list(value, label='编号列表'):
             seen.add(item_id)
     if not normalized:
         raise CrmWriteError(f'{label}不能为空')
-    return normalized
-
-
-def _normalize_bounded_int(value, label, default, minimum, maximum):
-    """Parse a bounded integer parameter without leaking conversion errors."""
-    if value is None or (isinstance(value, str) and not value.strip()):
-        normalized = default
-    else:
-        if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
-            raise CrmWriteError(f'{label}无效')
-        try:
-            normalized = int(value)
-        except (TypeError, ValueError, OverflowError):
-            raise CrmWriteError(f'{label}无效')
-    if normalized < minimum or normalized > maximum:
-        raise CrmWriteError(f'{label}必须在 {minimum} 到 {maximum} 之间')
     return normalized
 
 

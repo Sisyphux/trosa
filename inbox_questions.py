@@ -117,5 +117,3 @@ def question_key_for(item_type, dedupe_key, identity=''):
     return dedupe_key or (item_type + ':' + identity)
 
 
-def is_question(item_type):
-    return str(item_type or '').strip() in ITEM_TYPE_QUESTION

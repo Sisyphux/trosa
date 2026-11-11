@@ -10,7 +10,6 @@
 
 import os
 import sys
-import time
 import socket
 import threading
 import subprocess
@@ -88,18 +87,6 @@ except Exception as e:
 
 HOST = '127.0.0.1'
 PORT = 8080
-
-
-def _wait_for_port(host, port, timeout=15):
-    """等待端口可连接"""
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            with socket.create_connection((host, port), timeout=1):
-                return True
-        except (ConnectionRefusedError, OSError):
-            time.sleep(0.3)
-    return False
 
 
 def _find_browser():

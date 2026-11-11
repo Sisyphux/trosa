@@ -34,7 +34,6 @@ live ledger state passes ``applied_names`` explicitly.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -147,14 +146,6 @@ def _strip_sql_comments_and_strings(sql_text: str) -> str:
     # Remove double-quoted identifiers.
     text = re.sub(r'"(?:[^"]|"")*"', '""', text)
     return text
-
-
-def sha256_file(path: str) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def list_migration_files(migrations_dir: str) -> list[str]:
