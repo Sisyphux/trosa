@@ -61,6 +61,7 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 - 涉及 UI 时先读 `design/DESIGN_WORLD.md`（现行基准：瑞士式外观 + 今天潮汐 / Inbox 对话 / 客户账页 / 客户工作区的页面结构，事实来源 `app/static/swiss-d.css`）和 `design/UI_QUALITY_BASELINE.md`；旧 Daylight 规范、房间文档与原型已删除，不再作依据；真实浏览器验收宽屏、iPad、iPhone、旧 Win10、键盘、200% 缩放与性能模式。
 - 界面文案遵循「说人话」与术语表，见 [`PRODUCT_DESIGN_STANDARD.md`](PRODUCT_DESIGN_STANDARD.md) §13 交互与语言 和 [`design/UI_QUALITY_BASELINE.md`](design/UI_QUALITY_BASELINE.md) §4 按钮与文案；新页面按此写。
 - 写入、导入、附件、备份、恢复必须保留来源、校验与审计；删除必须有明确目标、确认与可恢复快照。
+- 每个任务 `ship` 之前按 [`REVIEW.md`](REVIEW.md) 做一次不带背景的独立审查；红区改动要给用户白话摘要并等点头。门禁绿不能代替审查。
 
 ## 开发与验证
 
