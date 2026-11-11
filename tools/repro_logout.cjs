@@ -154,6 +154,27 @@ async function runScenario(browser, options, outDir, report, width) {
     await shot(`04-after-reload-${width}.png`);
     check('reload-stays-signed-out', '刷新页面后不会回到刚才的账号', !backInApp && !sessionAfterReload,
       backInApp ? '刷新后直接回到了 hamid 的今天页' : (sessionAfterReload ? '刷新后服务器仍是 hamid 登录（办公网外会直接进入账号）' : '保持未登录'));
+
+    // 6. Office LAN: sign in, reload (the app opens the weekly board even with a
+    // live session), then use the button there.  The leftover session must end.
+    if (await page.evaluate(() => getComputedStyle(document.getElementById('loginOverlay')).display === 'none')) {
+      await openIndex(page);
+      await page.click(ACCOUNT_BUTTON);
+    }
+    await page.waitForSelector('#loginUsers [data-user-id="hamid"]', { state: 'visible', timeout: 8000 });
+    await page.waitForTimeout(600);
+    await page.click('#loginUsers [data-user-id="hamid"]', { timeout: 5000 }).catch(() => {});
+    await page.waitForSelector('#page-dashboard.active', { timeout: 8000 }).catch(() => {});
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForSelector('#page-overview.active', { timeout: 20000 });
+    await hideLan();
+    const leftover = await signedIn(page);
+    await openIndex(page);
+    await page.click(ACCOUNT_BUTTON);
+    await page.waitForFunction(LOGIN_SHOWN, null, { timeout: 8000 }).catch(() => {});
+    const leftoverAfter = await signedIn(page);
+    check('lan-leftover-session-ended', '办公网里登录后刷新、再点导航按钮，残留的登录会被结束',
+      leftover && !leftoverAfter, `刷新后仍登录=${leftover}，点击后仍登录=${leftoverAfter}`);
   } catch (error) {
     const message = String(error && error.message ? error.message : error).split('\n')[0];
     if (/ERR_CONNECTION|ECONNREFUSED|net::ERR_/.test(message)) throw Object.assign(new Error(message), { infra: true });

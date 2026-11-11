@@ -1794,7 +1794,17 @@ function syncAccountButton() {
 }
 
 async function accountButtonAction() {
-  if (!currentUser) { showLogin(); return; }
+  if (!currentUser) {
+    // 办公网里刷新后总是先进周报，此时服务器上可能还留着上一个人的登录：
+    // 顺手结束它。周报网关会拒绝这个请求（405），不影响进入账号选择。
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+    } catch (error) {}
+    showLogin();
+    return;
+  }
   try {
     var resp = await fetch('/api/auth/logout', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: '{}',
