@@ -4,18 +4,23 @@
 
 Trosa 是目前四人使用（设计上不限于四人，可按需增加使用者）的外贸 CRM，定位是“外贸业务员的客户记忆和成交线索本”：系统负责记住、算出、预填，人负责判断、确认、说话（详见 [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md)，依据见 [`docs/research/`](docs/research/)）。核心闭环是：沟通进来 → 系统整理、人确认成记录 → 系统每天从事实算出跟进建议 → 人确认后才成为待办 → 到期再出现。沟通记录可以没有下一步，业务员不必在记录时就定下次跟进日期；跟进建议不是承诺，不形成逾期、不确认即过期；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务必须先在独立 worktree 中完成逻辑完整的 commit；验证通过后，由发布角色使用 `deploy/cloud/auto-publish.sh --commit <sha>` 或 `--branch <ref>`（或 `agent-worktree.sh publish --task <id>`）构建干净候选并发布 正式服务器，发布不读取主工作区的 dirty 改动。开发/审查 Agent 只负责产出可发布的 commit 与完成证据，不自行发布。只有明确要求只本地运行/不发布，或检测到不可逆高风险操作时才暂停。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（打地基阶段的规则引擎、数据护栏、影子名单已完成，从路线图里下一个未完成的任务接着做）；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务在独立 worktree 中完成逻辑完整的 commit；验证通过并得到用户同意后，用 `agent-worktree.sh publish --task <id>`（底层是 `deploy/cloud/auto-publish.sh`）构建干净候选并发布正式服务器，发布不读取主工作区的 dirty 改动。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（从 `followup-scan-rules` 开始）；不要跳过路线图直接扩张其他页面。
 
-## 多 Agent 并行开发（强制）
+## 改代码到上线（唯一流程）
 
-- 主工作区只做集成、验收和发布，禁止直接写业务代码或堆积来源不明的未提交改动。每个任务在独立 worktree + `agent/<id>` 分支中完成，完整流程见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md)。
-- 会话开始先运行 `deploy/cloud/agent-worktree.sh guard` 判断“现在能否开始任务”，再运行 `status` 看环境、`preflight` 看主工作区与迁移编号冲突。新任务用 `create --task <id> --owner ... --goal ... --scope ...`。
-- 发现主工作区有无法归属的在途改动时，用 `adopt --task <id>` 搬进隔离区，不要直接 commit、覆盖或删除；adopt 会保留 stash 备份。
-- 每个 commit 以 `[<id>]` 开头且只承载一个任务的改动；发布用 `agent-worktree.sh publish --task <id>`（底层是 commit 驱动入口），只接受 commit / branch。
-- **一个隔离区同一时刻只归一个会话**：`guard` 会认领会话租约，提交时 `pre-commit` 再查一次。若被告知隔离区已被另一个存活会话占用（退出码 42），不要停下来问人、也不要在原目录继续写：按提示在主工作区 `create --task <id>-b --base agent/<id>` 另开分叉任务；要改的文件是对方未提交的文件时，等对方 commit 后 `sync` 再做。详见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md)。
-- **角色边界**：开发/审查 Agent 会话必须 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；只有发布角色（`release`，也是未设置时的默认）能执行 `publish`。开发/审查会话一律不得调用 `publish`/`ship`，也不得发起发布权限申请（权限配置里已明确 deny，申请也不会通过）；`gate` 显示 ready 后直接把准确的发布命令贴出来，由用户手动执行。开发/审查会话在动任何文件前先运行 `agent-worktree.sh guard`：在主工作区（或非 `agent/<id>` 目录）会被明确拒绝，要求先 create/adopt，避免主工作区先被写脏；release/人工集成与只读 status 不受影响。发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 600），开发 worktree 不携带它；仓库内旧位置仅兼容读取并提示迁移。`agent-worktree.sh` 还会把版本化的 git 护栏安装到共享 git 目录作为提交兜底：`pre-commit` 拒绝 dev/review 在 `main` 上提交，`commit-msg` 拒绝 `main` 上任何 `[<id>]` 任务提交（`create`/`adopt` 也只能在主工作区执行）。护栏只在写命令（create/adopt/start/sync/test/ship/publish/remove/hooks 等）里刷新，status/guard/preflight/list/evidence/gate/flakes 等只读命令不写共享 hooks。回收隔离区用 `remove --task <id>`：删除前检查进程占用（默认拒绝、可 `--ignore-processes`）、预览被 gitignore 的删除内容、非交互需 `--yes`、删除任务清单前备份到 `trosa-tasks/removed/`；`--delete-branch` 只对已发布或已等价合入的分支安全删除。
-- **完成定义与证据**：`test --task <id>` 和 `publish --task <id>` 会把 tree commit、门禁结果和发布 release 写入共享证据 `trosa-tasks/<id>.verify.log` 并更新任务清单状态。任务完成 = `status=landed`（已发布且健康），仅有绿色门禁只是“开发完成”，不得声称已修复；用 `agent-worktree.sh evidence --task <id>` 查看。**先 sync 后 test**：`sync` 变基到最新 `origin/main` 并让旧证据失效，`publish` 只接受证据对应当前 HEAD 且 HEAD 已包含最新 main 的任务（`gate --task <id>` 可只读核对）；直接 `release-commit.sh --branch agent/<id>` 也走同一判定。
-- `migrations/` 目录是数据库迁移的唯一事实源：新增迁移先在 create/adopt 预留编号，并通过 `tools/check_migrations.py`；`sync`/`publish` 会自动调用 `tools/reconcile_migrations.py` 把并行冲突的编号改名到空号。详见 [`migrations/README.md`](migrations/README.md)。
+完整说明见 [`MULTI_AGENT_WORKFLOW.md`](MULTI_AGENT_WORKFLOW.md) §0，日常只用这几步：
+
+1. **开工**：`deploy/cloud/agent-worktree.sh start --task <id> --owner claude --goal ... --scope ...`，在 `trosa-worktrees/<id>`（分支 `agent/<id>`）里改；主工作区有无法归属的在途改动时用 `adopt --task <id>`，不要直接 commit、覆盖或删除。只改文档/规则文件的小改动可直接在主工作区提交。
+2. **提交**：写一句白话说明即可，不强制 `[<id>]` 前缀。每个任务只放自己的改动，不碰别的任务留下的未提交文件。
+3. **验证**：`sync --task <id>`（变基到最新 main）后 `test --task <id>`。门禁绿只是“开发完成”，界面问题以真实浏览器里的表现为准。
+4. **红区**（迁移、权限、备份、发布脚本、Sela 接口）上线前给用户一段白话摘要：影响谁、怎么发现问题、怎么撤销。
+5. **上线**：`publish --task <id>`（只接受 commit/branch，会推送 GitHub 并部署服务器）。推送远程、改线上必须先得到用户明确同意；同意后由我执行，不让用户手动跑。完成 = `status=landed`（已发布且健康），用 `evidence --task <id>` 核对，不得凭“测试通过”声称已修复。
+6. **收尾**：`remove --task <id> --delete-branch`（只会安全删除已发布或已等价合入的分支）。
+
+已取消：开发/发布角色拆分（不必设 `TRADE_OS_AGENT_ROLE`）、`guard` 开工闸门、开发会话不得发布、会话租约（默认关闭，设 `TRADE_OS_ENFORCE_LEASE=1` 才启用）。
+
+- `migrations/` 是数据库迁移的唯一事实源：新增迁移先 `reserve-migration` 预留编号，并通过 `tools/check_migrations.py`；`sync`/`publish` 会自动把并行冲突的编号改名到空号。详见 [`migrations/README.md`](migrations/README.md)。
+- 任务清单和证据在 `trosa-tasks/<id>.json`、`<id>.verify.log`（共享 git 目录里，不进版本库）。
 
 ## 运行与数据边界
 
@@ -29,7 +34,7 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 - `app.py`、`desktop.py` 和根目录启动器不是正式启动命令：根目录入口只打开已验证的正式工作台；需要 SQLite 旧形状回归时必须显式设置 `CRM_ENV=development TRADE_OS_DEV_SQLITE=1`，PostgreSQL 演练使用 `serve_rehearsal.py` 或 `tools/postgres_rehearsal.py`，并且只允许 loopback 固定演练库。
 - 修改前先查看 `git status --short`。工作区可能有用户未提交的改动，绝不覆盖、回退、删除或格式化无关文件。
 - 自动发布时只传入已完成的 commit 或 branch，不传文件路径；release 候选在独立临时 worktree 中组装，主工作区已有的无关修改必须保留，不能混入发布。
-- 发布配置与角色解析由 `deploy/cloud/release-env.sh` 统一实现；不要在脚本里各自硬编码 `workbench.env` 路径。开发 Agent 没有发布配置即没有发布能力。
+- 发布配置由 `deploy/cloud/release-env.sh` 统一解析；不要在脚本里各自硬编码 `workbench.env` 路径。开发 Agent 没有发布配置即没有发布能力。
 
 ## 核心模块与不可破坏能力
 
@@ -61,7 +66,6 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 - 涉及 UI 时先读 `design/DESIGN_WORLD.md`（现行基准：瑞士式外观 + 今天潮汐 / Inbox 对话 / 客户账页 / 客户工作区的页面结构，事实来源 `app/static/swiss-d.css`）和 `design/UI_QUALITY_BASELINE.md`；旧 Daylight 规范、房间文档与原型已删除，不再作依据；真实浏览器验收宽屏、iPad、iPhone、旧 Win10、键盘、200% 缩放与性能模式。
 - 界面文案遵循「说人话」与术语表，见 [`PRODUCT_DESIGN_STANDARD.md`](PRODUCT_DESIGN_STANDARD.md) §13 交互与语言 和 [`design/UI_QUALITY_BASELINE.md`](design/UI_QUALITY_BASELINE.md) §4 按钮与文案；新页面按此写。
 - 写入、导入、附件、备份、恢复必须保留来源、校验与审计；删除必须有明确目标、确认与可恢复快照。
-- 每个任务 `ship` 之前按 [`REVIEW.md`](REVIEW.md) 做一次不带背景的独立审查；红区改动要给用户白话摘要并等点头。门禁绿不能代替审查。
 
 ## 开发与验证
 

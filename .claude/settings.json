@@ -86,10 +86,6 @@
       "Bash(.venv/bin/python tools/trosa_maint_read.py:*)"
     ],
     "deny": [
-      "Bash(deploy/cloud/agent-worktree.sh publish:*)",
-      "Bash(deploy/cloud/agent-worktree.sh ship:*)",
-      "Bash(bash deploy/cloud/agent-worktree.sh publish:*)",
-      "Bash(bash deploy/cloud/agent-worktree.sh ship:*)",
       "Bash(*issue-token*)",
       "Bash(*revoke-token*)",
       "Bash(*workbench.env*)",
@@ -97,19 +93,6 @@
       "Read(~/.config/trosa/*.env)",
       "Read(~/.config/trosa-maint/**)",
       "Bash(*trosa-maint/readonly.json*)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/deploy/cloud/agent-lease-pretool.sh"
-          }
-        ]
-      }
     ]
   }
 }

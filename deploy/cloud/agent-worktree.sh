@@ -377,6 +377,8 @@ write_lease() {
 lease_acquire() {
   local task=$1 wt=$2 takeover=${3:-0} quiet=${4:-0}
   local sid file lock tries=0 rc=0
+  # 会话租约默认关闭：同一个人的多个会话不再互相拦截。需要时设 TRADE_OS_ENFORCE_LEASE=1。
+  [[ "${TRADE_OS_ENFORCE_LEASE:-}" == 1 ]] || return 0
   sid="$(agent_session_id)"
   [[ -n "$sid" ]] || return 0
   [[ "${TRADE_OS_ALLOW_SHARED_WORKTREE:-}" == 1 ]] && return 0

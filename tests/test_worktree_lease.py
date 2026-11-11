@@ -61,7 +61,8 @@ class WorktreeLeaseTests(unittest.TestCase):
     def _env(self, session, _no_pid=False, **extra):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("TRADE_OS_", "CLAUDE_"))}
-        env.update(TRADE_OS_AGENT_ROLE="dev", TRADE_OS_WORKTREE_ROOT=str(self.worktrees))
+        env.update(TRADE_OS_AGENT_ROLE="dev", TRADE_OS_WORKTREE_ROOT=str(self.worktrees),
+                   TRADE_OS_ENFORCE_LEASE="1")
         if not _no_pid:
             env["CLAUDE_PID"] = str(os.getpid())
         if session:
@@ -139,14 +140,8 @@ class WorktreeLeaseTests(unittest.TestCase):
                          "只读 lease check 不应写共享 commit-msg")
 
     def _settings_hook_command(self):
-        """Parse the hook command exactly as Claude Code would from settings.json."""
-        import json
-        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
-        for entry in settings["hooks"]["PreToolUse"]:
-            for hook in entry.get("hooks", []):
-                if hook.get("type") == "command" and hook.get("command"):
-                    return hook["command"]
-        raise AssertionError("settings.json 里没有 PreToolUse command 钩子")
+        """租约钩子默认不再挂在 .claude/settings.json 里；这里按原调用形态直接运行脚本。"""
+        return 'bash "$CLAUDE_PROJECT_DIR"/deploy/cloud/agent-lease-pretool.sh'
 
     def _pretool(self, session, path, _no_pid=False, payload=None):
         """Run the shipped hook through the real settings.json command form.

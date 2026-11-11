@@ -3,120 +3,52 @@
 > 唯一正式说明。任何 Agent / 开发会话在改动代码前先读这一页。
 > 命令实现：`deploy/cloud/agent-worktree.sh`；发布实现：`deploy/cloud/release-commit.sh`。
 
-## 1. 目录边界与 Agent 权限
-
-### 目录边界
-
-| 角色 | 目录 | 允许做什么 | 不允许做什么 |
-|---|---|---|---|
-| 主工作区 | `~/Workspace/Trosa` | 集成、验收、发布（fetch / merge / cherry-pick / release-commit） | 直接写业务代码、堆叠来源不明的未提交改动 |
-| 任务隔离区 | `<仓库同级>/trosa-worktrees/<id>` | 本任务改代码、跑测试、commit | 改其它任务目录、修改主工作区 |
-| 发布候选 | 临时 release worktree | 由 `release-commit.sh` 自动创建与回收 | 人工进入修改 |
-
-原则：**一个任务 = 一个 worktree = 一个 `agent/<id>` 分支 = 一个逻辑完整的 commit（或一组 commit）**。
-主工作区只承载集成结果，始终保持干净或只有明确归属的发布操作。
-
-入口隔离是硬护栏，不只是一条约定，分任务开始时和提交时两层：
-`agent-worktree.sh guard` 是**任务开始闸门** —— dev/review 角色如果在主工作区
-（或任何非 `agent/<id>` 目录）运行它，会被明确拒绝并要求先 `create`/`adopt`，
-因此在改写任何文件之前就会发现走错目录，而不是等到 commit；`release` 角色与
-人工集成调用 `guard` 不受影响，只读的 `status` 也不受影响。
-`agent-worktree.sh` 还会把版本化的 git 护栏（`deploy/cloud/git-hooks/`）安装到
-共享 git 目录，作为**提交时兜底**：`pre-commit` 拒绝 `dev`/`review` 角色在集成分支
-（默认 `main`）上的提交；`commit-msg` 再拒绝集成分支上任何 `[<id>]` 任务提交（即使
-会话忘记设置角色）。必须先 `create`/`adopt` 进入 `agent/<id>` 隔离区；`release` 角色
-与人工集成提交不受影响（人工集成可用 `TRADE_OS_ALLOW_MAIN_COMMIT=1`）。
-`create`/`adopt` 本身也只能在主工作区执行，不能在某个任务隔离区里再建任务。
-护栏只在会改动仓库状态的写命令（`create`/`adopt`/`start`/`reserve-migration`/
-`reconcile`/`sync`/`test`/`ship`/`publish`/`remove`/`hooks`）里刷新；只读命令
-（`status`/`guard`/`preflight`/`list`/`evidence`/`gate`/`flakes`）不写共享 `.git/hooks`，
-因此只读调用没有副作用。
-
-### 一个隔离区同一时刻只归一个会话（会话租约）
-
-两个 Agent 会话共写同一个 `agent/<id>` 隔离区，会在“要改的文件正好是对方未提交的文件”
-时卡死：`git add` 会把对方 stage 的工作扫进自己的 commit（AGENTS.md 禁止），继续写又会
-互相覆盖，最后只能停下来问人。所以租约把它挡在写文件之前：
-
-- `guard` 在任务隔离区里会认领租约（`trosa-tasks/<id>.lease`，按 `TRADE_OS_AGENT_SESSION`
-  或 `CLAUDE_CODE_SESSION_ID` 识别会话）；`pre-commit` 提交时再检查一次，并在空闲时自动认领。
-- **写文件前也查**：仓库里的 `.claude/settings.json` 给 Edit/Write/NotebookEdit 挂了 PreToolUse 钩子
-  （`deploy/cloud/agent-lease-pretool.sh`）。目标文件在别人占用的隔离区里，写入直接被拒绝（退出码 2，
-  提示回传给模型）；没跑过 `guard` 的会话在第一次写入时也会自动认领。目标不在 `agent/*` 隔离区、
-  输入异常或脚本故障一律放行，护栏自身出问题不会阻断开发。
-- 另一个存活会话已持有 → `guard`/`commit` 以退出码 42 拒绝，并直接打印分叉命令。**遇到这个提示不要
-  停下来问人，也不要在原目录继续写**，照做即可：
-
-  ```bash
-  cd ~/Workspace/Trosa
-  TRADE_OS_AGENT_ROLE=dev deploy/cloud/agent-worktree.sh create \
-    --task <id>-b --base agent/<id> --owner <name> --goal "..." --scope "..."
-  ```
-
-  分叉任务基于原任务**已提交**的 HEAD，看不到对方未提交改动；若要改的文件正是对方未提交的文件，
-  等对方 commit 后在分叉任务里 `sync`，不要抢。两个分叉最终各自 `test`/`publish`，冲突走普通 git 合并。
-- 持有者进程已退出或心跳过期（有 pid 时 12 小时、无 pid 时 30 分钟）会自动视为空闲，可直接认领。
-  只有人工确认对方会话确已停止，才用 `guard --takeover` 接管。
-- `lease show` 只读查看，`lease release` 在任务收尾时释放；`remove` 会一并清理。
-- 没有会话标识（人工终端）时租约不启用；确需共用同一目录可设 `TRADE_OS_ALLOW_SHARED_WORKTREE=1`。
-- 每个 Agent 会话应对应**自己的**任务 id：接手别人的任务先看 `status` 里的“会话租约”行，
-  不要因为目录已存在就直接进去写。
-
-### Agent 权限（`TRADE_OS_AGENT_ROLE`）
-
-| 角色 | 允许 | 不允许 |
-|---|---|---|
-| 开发 Agent `dev` | create/adopt/test/sync/remove、改本任务代码、commit | publish、读发布配置、改主工作区 |
-| 审查 Agent `review` | `status` / `preflight` / `test`、查看 `evidence` / `flakes` | 改代码、publish |
-| 发布 Agent `release` | 主工作区集成、`publish`、真实验收 | 在主工作区写业务代码 |
-
-- 开发/审查会话开始前设置 `export TRADE_OS_AGENT_ROLE=dev`（或 `review`）；未设置时默认按 `release` 处理，以保持人工操作不变。
-- 发布配置 `workbench.env` 的正式位置是 `~/.config/trosa/workbench.env`（仓库外，权限 0600），由 `deploy/cloud/release-env.sh` 统一解析；开发 worktree 不携带它，因此没有发布能力。仓库内旧位置仍兼容读取并提示迁移。
-- 角色变量是同机护栏，真正边界是文件权限：发布配置不在仓库里。`publish` 对 dev/review 角色会明确拒绝，而不是静默放行。
-
-## 2. 开新任务（每个 Agent 会话开始时）
-
-推荐用一个命令走完“闸门 + 环境 + 体检 + 建区”：
+## 0. 日常流程（只记这一段）
 
 ```bash
-cd ~/Workspace/Trosa
-deploy/cloud/agent-worktree.sh start --task <id> \
-  --owner <负责人/Agent 名> \
-  --goal "一句话目标" \
-  --scope "预期修改的文件/模块"
+# 1 开工：一条命令建好隔离区（有在途改动改用 adopt）
+deploy/cloud/agent-worktree.sh start --task <id> --owner claude --goal "一句话目标" --scope "改哪些文件/模块"
+cd ~/Workspace/trosa-worktrees/<id>
+# 2 改代码、commit（提交说明写一句白话，不强制 [<id>] 前缀）
+# 3 验证：先同步最新 main，再跑完整门禁
+deploy/cloud/agent-worktree.sh sync --task <id>
+deploy/cloud/agent-worktree.sh test --task <id>
+# 4 上线（会推送 GitHub 并部署服务器，必须先得到用户明确同意）
+deploy/cloud/agent-worktree.sh publish --task <id>
+# 5 收尾
+deploy/cloud/agent-worktree.sh remove --task <id> --delete-branch
 ```
 
-`start` 要求主工作区干净；有在途改动时会拒绝并提示改用 `adopt`（它专门搬运在途
-改动并保留 stash 备份），避免把来源不明的改动留在主工作区。需要分步执行时，下面
-四个命令仍然可用（`start` 就是它们的组合）：
+- 只改文档、规则文件的小改动，可以直接在主工作区提交，不需要建任务。
+- 红区改动（迁移、权限、备份、发布脚本、Sela 接口）上线前给用户一段白话摘要：影响谁、怎么发现问题、怎么撤销。
+- 完成 = `status=landed`（已发布且健康）。门禁绿只是“开发完成”，以真实页面表现为准。
+- 已取消的旧规则：开发/发布角色拆分（`TRADE_OS_AGENT_ROLE` 不用设置）、`guard` 开工闸门、
+  `[<id>]` 提交前缀强制、开发会话不得发布。会话租约默认关闭（设 `TRADE_OS_ENFORCE_LEASE=1` 才启用）。
+  下面各节里提到这些的地方，以本节为准。
 
-```bash
-deploy/cloud/agent-worktree.sh guard         # 任务开始闸门：dev/review 在主工作区会被拒绝
-deploy/cloud/agent-worktree.sh status        # 先确认自己在哪个环境（同时刷新入口护栏）
-deploy/cloud/agent-worktree.sh preflight     # 体检：主区是否干净、迁移编号是否冲突
-deploy/cloud/agent-worktree.sh create --task <id> \
-  --owner <负责人/Agent 名> \
-  --goal "一句话目标" \
-  --scope "预期修改的文件/模块"
-```
+## 1. 目录边界
 
-开发/审查会话在动任何文件之前先运行 `guard`：它会告诉你“现在能否开始任务”。
-若输出“可以开始任务”，说明你已经在自己的 `agent/<id>` 隔离区；若被拒绝，按提示
-先在主工作区 `start`/`create`/`adopt`。`release` 角色或未设置角色（人工集成）运行
-`guard` 始终放行。进入隔离区后再确认身份：
+| 目录 | 用途 |
+|---|---|
+| 主工作区 `~/Workspace/Trosa` | 集成、验收、发布；业务代码改动放到任务隔离区 |
+| 任务隔离区 `~/Workspace/trosa-worktrees/<id>` | 本任务改代码、跑测试、commit（分支 `agent/<id>`） |
+| 发布候选 | 临时 release worktree，由 `release-commit.sh` 自动创建与回收 |
 
-```bash
-cd ../trosa-worktrees/<id>
-deploy/cloud/agent-worktree.sh status   # 确认“任务=<id>”再动手
-```
+原则：**一个任务 = 一个 worktree = 一个 `agent/<id>` 分支**。发布只认 commit，不读任何人的工作区。
+发布配置 `workbench.env` 在 `~/.config/trosa/`（仓库外，权限 0600），由 `deploy/cloud/release-env.sh` 统一解析，
+开发 worktree 不携带它。
+
+## 2. 开新任务
+
+`start` 要求主工作区干净；有在途改动时会拒绝并提示改用 `adopt`（搬运在途改动并保留 stash 备份）。
+`status` 看当前环境，`preflight` 看主工作区是否干净、迁移编号是否冲突。
 
 任务清单保存在共享 git 目录 `trosa-tasks/<id>.json`（负责人 / 目标 / 修改范围 / 预留迁移号），
-它不进入版本库、不参与发布，因此不会污染 `git status`。
+不进入版本库、不参与发布。
 
 迁移编号是**懒预留**的：`start`/`create` 默认不取号，只有确实要新增 `migrations/`
 文件时才运行 `deploy/cloud/agent-worktree.sh reserve-migration --task <id>`（幂等，
-已预留则原样返回），避免无数据库改动的任务消耗单调计数器。需要建区即取号可给
-`create` 加 `--reserve-migration`。
+已预留则原样返回）。需要建区即取号可给 `create` 加 `--reserve-migration`。
 
 ## 3. 主工作区出现无法归属的在途改动时
 
@@ -339,7 +271,7 @@ deploy/cloud/release-pipeline.sh run --publish
 
 - 每个 release 有唯一 `release-id` 与 commit SHA（`deploy/cloud/trosa-release status --json`）。
 - release commit 内含 `(cherry picked from commit <原始 sha>)`。
-- 任务清单记录 owner / goal / scope / status；commit 以 `[<id>]` 开头。
+- 任务清单记录 owner / goal / scope / status。
 - 完成证据 `trosa-tasks/<id>.verify.log` 记录被验证的 commit 与结果；`status` 为 `active` / `landed`。
 - 主工作区不干净即流程违规，`preflight` 会报告。
 
@@ -349,7 +281,6 @@ deploy/cloud/release-pipeline.sh run --publish
 - **主工作区又有脏文件？** → `preflight` 列出，`adopt` 搬走。
 - **发布冲突了？** → `release-commit.sh` 会 abort 且不动 `origin/main`；在隔离区 `sync` 后重试。
 - **任务失败 / 暂停** → 离开隔离区即可，其它任务不受影响；恢复时回到原目录继续。
-- **`publish` 报“当前角色没有发布权限”？** → 你的会话是 dev/review 角色；把 commit 和证据交给 release 角色发布，这是设计边界，不是错误。
 - **门禁绿了但没人说已修复？** → 只有 `status=landed` 才算完成；`evidence --task <id>` 可核对 commit 与 release。
 - **旧的任务分支 / 隔离区堆积？** → `list` 查看，确认已发布后用
   `remove --task <id> --delete-branch` 回收。`--delete-branch` 对已发布任务
