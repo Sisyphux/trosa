@@ -5,7 +5,7 @@ Reads every member's accounts, timeline and open tasks through the maintainer
 read-only channel (``tools/trosa_maint_read.py``: one SELECT per call, date
 windows / id chunks so no single query is large), runs
 ``followup_candidates.scan`` once per member and writes one plain-text list per
-member *outside the repository* (default ``~/Workspace/Trosa-影子名单/<date>/``).
+member *outside the repository* (default ``~/Workspace/资料/影子名单/<date>/``).
 The lists contain customer names so the boss and the member can judge them;
 nothing about customers is printed to the terminal - only counts.
 
@@ -41,7 +41,7 @@ MEMBER_LABEL = {'hamid': 'Hamid', 'amy': 'Amy', 'kelley': 'Kelley', 'emma': 'Emm
 # What the 2026-10-27 hand count found (docs/research/notes/改造落地路线/follow_up_rhythm_data.md, 第三节).
 HAND_COUNT = {'hamid': 35, 'kelley': 23, 'amy': 21, 'emma': 0}
 BOUNCE_TYPES = {'outreach_bounced', '外联退信'}
-DEFAULT_OUT = Path.home() / 'Workspace' / 'Trosa-影子名单'
+DEFAULT_OUT = Path.home() / 'Workspace' / '资料' / '影子名单'
 EVENT_WINDOW_DAYS = 120
 ROW_LIMIT = 400                       # rows asked per query; the channel allows 500
 
