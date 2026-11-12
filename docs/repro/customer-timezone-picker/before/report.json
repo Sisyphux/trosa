@@ -1,0 +1,26 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18313",
+  "width": 1440,
+  "checks": [
+    {
+      "id": "no-select",
+      "expect": "资料里没有长下拉框",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "trigger",
+      "expect": "时区是一个按钮",
+      "pass": false,
+      "detail": ""
+    },
+    {
+      "id": "no-page-errors",
+      "expect": "页面没有脚本错误",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "pageErrors": []
+}

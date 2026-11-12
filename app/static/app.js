@@ -8898,8 +8898,7 @@ function customerClockHtml() {
   try {
     var now = Date.now();
     var theirs = tideDateParts(tz, now);
-    var option = CUSTOMER_TIMEZONE_OPTIONS.filter(function(item) { return item.value === tz; })[0];
-    var place = option ? option.label.split(' · ')[0] : tz;
+    var place = customerTimezonePlace(tz);
     var mine = new Date(now);
     var working = tideIsWorking(tz, now);
     var weekend = theirs.wd === 'Sat' || theirs.wd === 'Sun';
@@ -9091,94 +9090,243 @@ function renderCustomerFactsBrief(customer) {
   renderCustomerRoomCounts();
 }
 
+// name = 国家/地区（时钟上显示的就是它），city = 中文城市，en = 用来搜索的英文词。
+// 不显示 IANA 代号，只在搜索时也能用英文城市名找到。
 var CUSTOMER_TIMEZONE_OPTIONS = [
-  { value: 'Asia/Shanghai', label: '中国 · Asia/Shanghai' },
-  { value: 'Asia/Hong_Kong', label: '中国香港 · Asia/Hong_Kong' },
-  { value: 'Asia/Taipei', label: '中国台湾 · Asia/Taipei' },
-  { value: 'Asia/Tokyo', label: '日本 · Asia/Tokyo' },
-  { value: 'Asia/Seoul', label: '韩国 · Asia/Seoul' },
-  { value: 'Asia/Singapore', label: '新加坡 · Asia/Singapore' },
-  { value: 'Asia/Kuala_Lumpur', label: '马来西亚 · Asia/Kuala_Lumpur' },
-  { value: 'Asia/Jakarta', label: '印度尼西亚 · Asia/Jakarta' },
-  { value: 'Asia/Bangkok', label: '泰国 · Asia/Bangkok' },
-  { value: 'Asia/Ho_Chi_Minh', label: '越南 · Asia/Ho_Chi_Minh' },
-  { value: 'Asia/Manila', label: '菲律宾 · Asia/Manila' },
-  { value: 'Asia/Kolkata', label: '印度 · Asia/Kolkata' },
-  { value: 'Asia/Karachi', label: '巴基斯坦 · Asia/Karachi' },
-  { value: 'Asia/Dubai', label: '阿联酋 · Asia/Dubai' },
-  { value: 'Asia/Qatar', label: '卡塔尔 · Asia/Qatar' },
-  { value: 'Asia/Riyadh', label: '沙特阿拉伯 · Asia/Riyadh' },
-  { value: 'Asia/Kuwait', label: '科威特 · Asia/Kuwait' },
-  { value: 'Asia/Bahrain', label: '巴林 · Asia/Bahrain' },
-  { value: 'Asia/Muscat', label: '阿曼 · Asia/Muscat' },
-  { value: 'Asia/Tehran', label: '伊朗 · Asia/Tehran' },
-  { value: 'Asia/Jerusalem', label: '以色列 · Asia/Jerusalem' },
-  { value: 'Europe/Istanbul', label: '土耳其 · Europe/Istanbul' },
-  { value: 'Europe/Moscow', label: '俄罗斯 · Europe/Moscow' },
-  { value: 'Europe/London', label: '英国 · Europe/London' },
-  { value: 'Europe/Dublin', label: '爱尔兰 · Europe/Dublin' },
-  { value: 'Europe/Lisbon', label: '葡萄牙 · Europe/Lisbon' },
-  { value: 'Europe/Madrid', label: '西班牙 · Europe/Madrid' },
-  { value: 'Europe/Paris', label: '法国 · Europe/Paris' },
-  { value: 'Europe/Brussels', label: '比利时 · Europe/Brussels' },
-  { value: 'Europe/Amsterdam', label: '荷兰 · Europe/Amsterdam' },
-  { value: 'Europe/Berlin', label: '德国 · Europe/Berlin' },
-  { value: 'Europe/Zurich', label: '瑞士 · Europe/Zurich' },
-  { value: 'Europe/Rome', label: '意大利 · Europe/Rome' },
-  { value: 'Europe/Athens', label: '希腊 · Europe/Athens' },
-  { value: 'Europe/Bucharest', label: '罗马尼亚 · Europe/Bucharest' },
-  { value: 'Europe/Warsaw', label: '波兰 · Europe/Warsaw' },
-  { value: 'Europe/Prague', label: '捷克 · Europe/Prague' },
-  { value: 'Europe/Budapest', label: '匈牙利 · Europe/Budapest' },
-  { value: 'Europe/Copenhagen', label: '丹麦 · Europe/Copenhagen' },
-  { value: 'Europe/Stockholm', label: '瑞典 · Europe/Stockholm' },
-  { value: 'Europe/Helsinki', label: '芬兰 · Europe/Helsinki' },
-  { value: 'Europe/Vilnius', label: '立陶宛 · Europe/Vilnius' },
-  { value: 'Africa/Cairo', label: '埃及 · Africa/Cairo' },
-  { value: 'Africa/Lagos', label: '尼日利亚 · Africa/Lagos' },
-  { value: 'Africa/Johannesburg', label: '南非 · Africa/Johannesburg' },
-  { value: 'America/New_York', label: '美国东部 · America/New_York' },
-  { value: 'America/Chicago', label: '美国中部 · America/Chicago' },
-  { value: 'America/Denver', label: '美国山地 · America/Denver' },
-  { value: 'America/Los_Angeles', label: '美国太平洋 · America/Los_Angeles' },
-  { value: 'America/Toronto', label: '加拿大 · America/Toronto' },
-  { value: 'America/Mexico_City', label: '墨西哥 · America/Mexico_City' },
-  { value: 'America/Panama', label: '巴拿马 · America/Panama' },
-  { value: 'America/Costa_Rica', label: '哥斯达黎加 · America/Costa_Rica' },
-  { value: 'America/Guatemala', label: '危地马拉 · America/Guatemala' },
-  { value: 'America/Tegucigalpa', label: '洪都拉斯 · America/Tegucigalpa' },
-  { value: 'America/Santo_Domingo', label: '多米尼加共和国 · America/Santo_Domingo' },
-  { value: 'America/Puerto_Rico', label: '波多黎各 · America/Puerto_Rico' },
-  { value: 'America/Bogota', label: '哥伦比亚 · America/Bogota' },
-  { value: 'America/Lima', label: '秘鲁 · America/Lima' },
-  { value: 'America/Guayaquil', label: '厄瓜多尔 · America/Guayaquil' },
-  { value: 'America/Caracas', label: '委内瑞拉 · America/Caracas' },
-  { value: 'America/Santiago', label: '智利 · America/Santiago' },
-  { value: 'America/Argentina/Buenos_Aires', label: '阿根廷 · America/Argentina/Buenos_Aires' },
-  { value: 'America/Sao_Paulo', label: '巴西 · America/Sao_Paulo' },
-  { value: 'America/Paramaribo', label: '苏里南 · America/Paramaribo' },
-  { value: 'Australia/Sydney', label: '澳大利亚 · Australia/Sydney' },
-  { value: 'Pacific/Auckland', label: '新西兰 · Pacific/Auckland' }
-];
+  ['Asia/Shanghai', '中国', '上海', 'china beijing shanghai'],
+  ['Asia/Hong_Kong', '中国香港', '香港', 'hong kong hk'],
+  ['Asia/Taipei', '中国台湾', '台北', 'taiwan taipei'],
+  ['Asia/Tokyo', '日本', '东京', 'japan tokyo'],
+  ['Asia/Seoul', '韩国', '首尔', 'korea seoul'],
+  ['Asia/Singapore', '新加坡', '新加坡', 'singapore'],
+  ['Asia/Kuala_Lumpur', '马来西亚', '吉隆坡', 'malaysia kuala lumpur'],
+  ['Asia/Jakarta', '印度尼西亚', '雅加达', 'indonesia jakarta 印尼'],
+  ['Asia/Bangkok', '泰国', '曼谷', 'thailand bangkok'],
+  ['Asia/Ho_Chi_Minh', '越南', '胡志明市', 'vietnam ho chi minh hanoi 河内'],
+  ['Asia/Manila', '菲律宾', '马尼拉', 'philippines manila'],
+  ['Asia/Dhaka', '孟加拉国', '达卡', 'bangladesh dhaka'],
+  ['Asia/Colombo', '斯里兰卡', '科伦坡', 'sri lanka colombo'],
+  ['Asia/Kolkata', '印度', '孟买 · 新德里', 'india mumbai delhi kolkata'],
+  ['Asia/Karachi', '巴基斯坦', '卡拉奇', 'pakistan karachi'],
+  ['Asia/Dubai', '阿联酋', '迪拜', 'uae united arab emirates dubai abu dhabi'],
+  ['Asia/Muscat', '阿曼', '马斯喀特', 'oman muscat'],
+  ['Asia/Qatar', '卡塔尔', '多哈', 'qatar doha'],
+  ['Asia/Bahrain', '巴林', '麦纳麦', 'bahrain manama'],
+  ['Asia/Kuwait', '科威特', '科威特城', 'kuwait'],
+  ['Asia/Riyadh', '沙特阿拉伯', '利雅得', 'saudi arabia ksa riyadh jeddah 沙特'],
+  ['Asia/Tehran', '伊朗', '德黑兰', 'iran tehran'],
+  ['Asia/Jerusalem', '以色列', '耶路撒冷', 'israel tel aviv jerusalem'],
+  ['Europe/Istanbul', '土耳其', '伊斯坦布尔', 'turkey turkiye istanbul'],
+  ['Europe/Moscow', '俄罗斯', '莫斯科', 'russia moscow'],
+  ['Africa/Cairo', '埃及', '开罗', 'egypt cairo'],
+  ['Africa/Nairobi', '肯尼亚', '内罗毕', 'kenya nairobi'],
+  ['Africa/Johannesburg', '南非', '约翰内斯堡', 'south africa johannesburg'],
+  ['Africa/Lagos', '尼日利亚', '拉各斯', 'nigeria lagos'],
+  ['Africa/Accra', '加纳', '阿克拉', 'ghana accra'],
+  ['Europe/London', '英国', '伦敦', 'uk united kingdom britain england london'],
+  ['Europe/Dublin', '爱尔兰', '都柏林', 'ireland dublin'],
+  ['Europe/Lisbon', '葡萄牙', '里斯本', 'portugal lisbon'],
+  ['Europe/Madrid', '西班牙', '马德里', 'spain madrid'],
+  ['Europe/Paris', '法国', '巴黎', 'france paris'],
+  ['Europe/Brussels', '比利时', '布鲁塞尔', 'belgium brussels'],
+  ['Europe/Amsterdam', '荷兰', '阿姆斯特丹', 'netherlands holland amsterdam'],
+  ['Europe/Berlin', '德国', '柏林', 'germany deutschland berlin'],
+  ['Europe/Zurich', '瑞士', '苏黎世', 'switzerland zurich'],
+  ['Europe/Vienna', '奥地利', '维也纳', 'austria vienna'],
+  ['Europe/Rome', '意大利', '罗马', 'italy rome milan'],
+  ['Europe/Copenhagen', '丹麦', '哥本哈根', 'denmark copenhagen'],
+  ['Europe/Oslo', '挪威', '奥斯陆', 'norway oslo'],
+  ['Europe/Stockholm', '瑞典', '斯德哥尔摩', 'sweden stockholm'],
+  ['Europe/Warsaw', '波兰', '华沙', 'poland warsaw'],
+  ['Europe/Prague', '捷克', '布拉格', 'czech czechia prague'],
+  ['Europe/Budapest', '匈牙利', '布达佩斯', 'hungary budapest'],
+  ['Europe/Athens', '希腊', '雅典', 'greece athens'],
+  ['Europe/Bucharest', '罗马尼亚', '布加勒斯特', 'romania bucharest'],
+  ['Europe/Helsinki', '芬兰', '赫尔辛基', 'finland helsinki'],
+  ['Europe/Vilnius', '立陶宛', '维尔纽斯', 'lithuania vilnius'],
+  ['America/New_York', '美国东部', '纽约 · 迈阿密', 'usa us united states america east new york miami florida'],
+  ['America/Chicago', '美国中部', '芝加哥 · 休斯顿', 'usa us united states america central chicago houston texas dallas'],
+  ['America/Denver', '美国山地', '丹佛', 'usa us united states america mountain denver phoenix'],
+  ['America/Los_Angeles', '美国西部', '洛杉矶', 'usa us united states america pacific west los angeles san francisco california'],
+  ['America/Toronto', '加拿大东部', '多伦多', 'canada toronto montreal'],
+  ['America/Vancouver', '加拿大西部', '温哥华', 'canada vancouver'],
+  ['America/Mexico_City', '墨西哥', '墨西哥城', 'mexico'],
+  ['America/Guatemala', '危地马拉', '危地马拉城', 'guatemala'],
+  ['America/El_Salvador', '萨尔瓦多', '圣萨尔瓦多', 'el salvador'],
+  ['America/Tegucigalpa', '洪都拉斯', '特古西加尔巴', 'honduras tegucigalpa'],
+  ['America/Managua', '尼加拉瓜', '马那瓜', 'nicaragua managua'],
+  ['America/Costa_Rica', '哥斯达黎加', '圣何塞', 'costa rica san jose'],
+  ['America/Panama', '巴拿马', '巴拿马城', 'panama'],
+  ['America/Jamaica', '牙买加', '金斯敦', 'jamaica kingston'],
+  ['America/Santo_Domingo', '多米尼加', '圣多明各', 'dominican republic dominicana santo domingo'],
+  ['America/Puerto_Rico', '波多黎各', '圣胡安', 'puerto rico san juan'],
+  ['America/Port_of_Spain', '特立尼达和多巴哥', '西班牙港', 'trinidad tobago port of spain'],
+  ['America/Bogota', '哥伦比亚', '波哥大', 'colombia bogota'],
+  ['America/Guayaquil', '厄瓜多尔', '瓜亚基尔', 'ecuador guayaquil quito'],
+  ['America/Lima', '秘鲁', '利马', 'peru lima'],
+  ['America/Caracas', '委内瑞拉', '加拉加斯', 'venezuela caracas'],
+  ['America/La_Paz', '玻利维亚', '拉巴斯', 'bolivia la paz'],
+  ['America/Santiago', '智利', '圣地亚哥', 'chile santiago'],
+  ['America/Asuncion', '巴拉圭', '亚松森', 'paraguay asuncion'],
+  ['America/Argentina/Buenos_Aires', '阿根廷', '布宜诺斯艾利斯', 'argentina buenos aires'],
+  ['America/Montevideo', '乌拉圭', '蒙得维的亚', 'uruguay montevideo'],
+  ['America/Sao_Paulo', '巴西', '圣保罗', 'brazil sao paulo rio'],
+  ['America/Paramaribo', '苏里南', '帕拉马里博', 'suriname paramaribo'],
+  ['Australia/Perth', '澳大利亚西部', '珀斯', 'australia perth'],
+  ['Australia/Sydney', '澳大利亚东部', '悉尼 · 墨尔本', 'australia sydney melbourne'],
+  ['Pacific/Auckland', '新西兰', '奥克兰', 'new zealand auckland']
+].map(function(r) { return { value: r[0], name: r[1], city: r[2], en: r[3] }; });
+
+function customerTimezoneOption(tz) {
+  return CUSTOMER_TIMEZONE_OPTIONS.filter(function(item) { return item.value === tz; })[0] || null;
+}
+// 时钟和按钮上只说“哪里”：已知的说国家，不认识的退回城市名（Asia/Almaty → Almaty）。
+function customerTimezonePlace(tz) {
+  var o = customerTimezoneOption(tz);
+  return o ? o.name : String(tz || '').split('/').pop().replace(/_/g, ' ');
+}
+function customerTimezoneNow(tz, ms) {
+  try {
+    var p = tideDateParts(tz, ms);
+    var off = Math.round(tideOffsetMs(tz, ms) / 60000);
+    var sign = off < 0 ? '−' : '+';
+    var a = Math.abs(off);
+    return {
+      time: (p.hh < 10 ? '0' : '') + p.hh + ':' + (p.mm < 10 ? '0' : '') + p.mm,
+      utc: 'UTC' + sign + Math.floor(a / 60) + (a % 60 ? ':' + (a % 60 < 10 ? '0' : '') + (a % 60) : ''),
+      off: off
+    };
+  } catch (e) { return null; }
+}
 
 function customerTimezoneControl(customer) {
   var tz = customer.timezone || '';
   var source = customer.timezone_source || '';
-  var known = CUSTOMER_TIMEZONE_OPTIONS.some(function(item) { return item.value === tz; });
-  var options = ['<option value=""' + (tz ? '' : ' selected') + '>未设置</option>'];
-  CUSTOMER_TIMEZONE_OPTIONS.forEach(function(item) {
-    options.push('<option value="' + escapeHtml(item.value) + '"' + (item.value === tz ? ' selected' : '') + '>' + escapeHtml(item.label) + '</option>');
-  });
-  if (tz && !known) {
-    options.push('<option value="' + escapeHtml(tz) + '" selected>' + escapeHtml(tz) + '</option>');
-  }
-  var badge = tz ? '<span class="cw-tz-badge' + (source === 'manual' ? ' is-manual' : '') + '">' + (source === 'manual' ? '手动' : '推断') + '</span>' : '';
-  var reset = (source === 'manual' && tz) ? '<button type="button" class="cw-link cw-tz-reset" onclick="resetCustomerTimezone()">恢复推断</button>' : '';
+  var now = tz ? customerTimezoneNow(tz, Date.now()) : null;
+  var face = tz
+    ? '<span class="cw-tz-place">' + escapeHtml(customerTimezonePlace(tz)) + '</span>' +
+      (now ? '<span class="cw-tz-meta">' + now.time + ' · ' + now.utc + '</span>' : '')
+    : '<span class="cw-tz-place is-empty">选择时区</span>';
+  var badge = tz ? '<span class="cw-tz-badge' + (source === 'manual' ? ' is-manual' : '') + '">' + (source === 'manual' ? '手动' : '按国家') + '</span>' : '';
+  var reset = (source === 'manual' && tz) ? '<button type="button" class="cw-link cw-tz-reset" onclick="resetCustomerTimezone()">恢复按国家</button>' : '';
   return '<span class="cw-tz">' +
-    '<select class="cw-tz-select" aria-label="客户时区，可手动修改" onchange="quickUpdateCustomerTimezone(this)">' + options.join('') + '</select>' +
+    '<button type="button" class="cw-tz-trigger" aria-haspopup="listbox" aria-expanded="false" data-tz="' + escapeHtml(tz) + '" onclick="openCustomerTimezonePicker(this)">' + face + '</button>' +
     badge + reset +
     '<span class="cw-tz-feedback" aria-live="polite"></span></span>';
 }
+
+// 小弹层：上面一个搜索框，下面按东西顺序排好的地点，每行带对方此刻的时间。
+// 打字即筛选（中文、英文城市、UTC+4 都行），↑↓ 选，回车确定，Esc 关。
+var _cwTzPop = null;
+function closeCustomerTimezonePicker(focusTrigger) {
+  if (!_cwTzPop) return;
+  var pop = _cwTzPop;
+  _cwTzPop = null;
+  document.removeEventListener('mousedown', pop._outside, true);
+  if (pop._trigger) {
+    pop._trigger.setAttribute('aria-expanded', 'false');
+    if (focusTrigger) pop._trigger.focus();
+  }
+  pop.remove();
+}
+function openCustomerTimezonePicker(trigger) {
+  if (_cwTzPop) { var same = _cwTzPop._trigger === trigger; closeCustomerTimezonePicker(); if (same) return; }
+  var root = trigger.closest('.cw-tz');
+  var current = trigger.getAttribute('data-tz') || '';
+  var ms = Date.now();
+  var rows = CUSTOMER_TIMEZONE_OPTIONS.slice();
+  if (current && !customerTimezoneOption(current)) rows.push({ value: current, name: customerTimezonePlace(current), city: current, en: current });
+  rows = rows.map(function(o) { return { o: o, now: customerTimezoneNow(o.value, ms) }; })
+    .filter(function(r) { return r.now; })
+    .sort(function(a, b) { return a.now.off - b.now.off; });
+  var pop = document.createElement('div');
+  pop.className = 'cw-tz-pop';
+  pop.innerHTML = '<input type="search" class="cw-tz-search" placeholder="搜国家、城市或 UTC+4" aria-label="搜索时区" autocomplete="off" spellcheck="false">' +
+    '<ul class="cw-tz-list" role="listbox" aria-label="客户时区"></ul>';
+  var input = pop.querySelector('.cw-tz-search');
+  var list = pop.querySelector('.cw-tz-list');
+  var shown = [];
+  var active = 0;
+  function norm(s) { return String(s || '').toLowerCase().replace(/[\s·_\/]+/g, ' ').trim(); }
+  function mark(i) {
+    var items = list.querySelectorAll('.cw-tz-opt');
+    if (!items.length) return;
+    active = Math.max(0, Math.min(items.length - 1, i));
+    for (var k = 0; k < items.length; k++) items[k].classList.toggle('is-active', k === active);
+    items[active].scrollIntoView({ block: 'nearest' });
+  }
+  function render() {
+    var q = norm(input.value);
+    var qUtc = q.replace(/^(utc|gmt)\s*/, '').replace('−', '-');
+    shown = rows.filter(function(r) {
+      if (!q) return true;
+      var hay = norm(r.o.name + ' ' + r.o.city + ' ' + r.o.en + ' ' + r.o.value);
+      if (hay.indexOf(q) >= 0) return true;
+      return /^[+-]\d/.test(qUtc) && r.now.utc.replace('−', '-').slice(3).indexOf(qUtc) === 0;
+    });
+    var html = shown.map(function(r, i) {
+      var sel = r.o.value === current;
+      return '<li class="cw-tz-opt' + (sel ? ' is-selected' : '') + '" role="option" aria-selected="' + sel + '" data-i="' + i + '">' +
+        '<span class="cw-tz-opt-name">' + escapeHtml(r.o.name) + '<span class="cw-tz-opt-city">' + escapeHtml(r.o.city) + '</span></span>' +
+        '<span class="cw-tz-opt-time">' + r.now.time + '<span>' + r.now.utc + '</span></span></li>';
+    }).join('');
+    if (!shown.length) html = '<li class="cw-tz-none">没有找到</li>';
+    if (current && !q) html += '<li class="cw-tz-opt cw-tz-clear" role="option" aria-selected="false" data-i="clear">清除时区</li>';
+    list.innerHTML = html;
+    var start = 0;
+    if (!q && current) shown.forEach(function(r, i) { if (r.o.value === current) start = i; });
+    mark(start);
+  }
+  function choose(el) {
+    if (!el || !el.hasAttribute('data-i')) return;
+    var key = el.getAttribute('data-i');
+    var value = key === 'clear' ? '' : shown[Number(key)].o.value;
+    closeCustomerTimezonePicker(true);
+    quickUpdateCustomerTimezone(root, value);
+  }
+  list.addEventListener('mousedown', function(e) { e.preventDefault(); });
+  list.addEventListener('click', function(e) { choose(e.target.closest('.cw-tz-opt')); });
+  list.addEventListener('mousemove', function(e) {
+    var el = e.target.closest('.cw-tz-opt');
+    if (el && !el.classList.contains('is-active')) mark([].indexOf.call(list.querySelectorAll('.cw-tz-opt'), el));
+  });
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); mark(active + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); mark(active - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(list.querySelectorAll('.cw-tz-opt')[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeCustomerTimezonePicker(true); }
+    else if (e.key === 'Tab') { closeCustomerTimezonePicker(); }
+  });
+  pop._trigger = trigger;
+  pop._outside = function(e) { if (!pop.contains(e.target) && e.target !== trigger && !trigger.contains(e.target)) closeCustomerTimezonePicker(); };
+  document.addEventListener('mousedown', pop._outside, true);
+  // 资料栏会裁掉溢出的内容，所以弹层按屏幕定位：下面放不下就往上开。
+  (trigger.closest('#customerEditModal') || document.body).appendChild(pop);
+  _cwTzPop = pop;
+  trigger.setAttribute('aria-expanded', 'true');
+  render();
+  placeCustomerTimezonePicker();
+  input.focus();
+}
+function placeCustomerTimezonePicker() {
+  var pop = _cwTzPop;
+  if (!pop || !pop._trigger.isConnected) { closeCustomerTimezonePicker(); return; }
+  var r = pop._trigger.getBoundingClientRect();
+  var vw = window.innerWidth, vh = window.innerHeight, gap = 6, edge = 12;
+  var h = pop.offsetHeight, w = pop.offsetWidth;
+  var below = vh - r.bottom - gap - edge, above = r.top - gap - edge;
+  var up = h > below && above > below;
+  var room = up ? above : below;
+  pop.style.maxHeight = Math.max(160, room) + 'px';
+  h = Math.min(h, Math.max(160, room));
+  pop.style.left = Math.max(edge, Math.min(r.left, vw - w - edge)) + 'px';
+  pop.style.top = (up ? r.top - gap - h : r.bottom + gap) + 'px';
+}
+window.addEventListener('resize', placeCustomerTimezonePicker);
+document.addEventListener('scroll', function(e) {
+  if (_cwTzPop && !_cwTzPop.contains(e.target)) placeCustomerTimezonePicker();
+}, true);
 
 function customerProfileHtml(customer) {
   var site = customerWebsiteParts(customer);
@@ -9464,17 +9612,16 @@ function setCustomerTimezoneFeedback(root, message, type) {
 
 // One-click manual timezone change. The server records source=manual, so this
 // value is never replaced again by country inference until it is reset.
-async function quickUpdateCustomerTimezone(select) {
-  if (!select) return;
-  var root = select.closest('.cw-tz');
+async function quickUpdateCustomerTimezone(root, next) {
+  if (!root) return;
+  var trigger = root.querySelector('.cw-tz-trigger');
   var idField = document.getElementById('editCustomerId');
   var id = Number(idField && idField.value || 0);
   if (!id) return;
   var previous = String((_customerDetailCache && _customerDetailCache.timezone) || '');
-  var next = String(select.value || '').trim();
+  next = String(next || '').trim();
   if (next === previous) return;
-  select.disabled = true;
-  select.setAttribute('aria-busy', 'true');
+  if (trigger) { trigger.disabled = true; trigger.setAttribute('aria-busy', 'true'); }
   setCustomerTimezoneFeedback(root, '保存中…', 'saving');
   var scope = beginCustomerScope(id);
   try {
@@ -9486,14 +9633,11 @@ async function quickUpdateCustomerTimezone(select) {
       renderCustomerFactsBrief(cache);
       markModalClean('customerEditModal');
     }
-    showToast(next ? '客户时区已更新为 ' + next : '已清除客户时区', 'success');
+    showToast(next ? '时区已改为' + customerTimezonePlace(next) : '已清除客户时区', 'success');
   } catch (e) {
-    select.value = previous;
     setCustomerTimezoneFeedback(root, '未保存', 'error');
     showToast(e && e.message ? e.message : '时区更新失败', 'error');
-  } finally {
-    select.disabled = false;
-    select.removeAttribute('aria-busy');
+    if (trigger && trigger.isConnected) { trigger.disabled = false; trigger.removeAttribute('aria-busy'); }
   }
 }
 

@@ -1,0 +1,80 @@
+{
+  "label": "iphone",
+  "url": "http://127.0.0.1:18312",
+  "width": 390,
+  "checks": [
+    {
+      "id": "no-select",
+      "expect": "资料里没有长下拉框",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "trigger",
+      "expect": "时区是一个按钮",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "search-focus",
+      "expect": "点开后搜索框自动获得焦点",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "in-view",
+      "expect": "弹层完整在屏幕内",
+      "pass": true,
+      "detail": "{\"x\":78,\"y\":574.234375,\"width\":300,\"height\":300.59375}"
+    },
+    {
+      "id": "no-iana",
+      "expect": "列表里不显示 Asia/xxx 这类代号",
+      "pass": true,
+      "detail": "美国西部洛杉矶\n23:47UTC−8 | 加拿大西部温哥华\n23:47UTC−8 | 美国山地丹佛\n00:47UTC−7"
+    },
+    {
+      "id": "search-迪拜",
+      "expect": "搜「迪拜」能找到阿联酋",
+      "pass": true,
+      "detail": "阿联酋迪拜\n11:47UTC+4"
+    },
+    {
+      "id": "search-UTC+4",
+      "expect": "搜「UTC+4」能找到阿联酋",
+      "pass": true,
+      "detail": "阿联酋迪拜\n11:47UTC+4 | 阿曼马斯喀特\n11:47UTC+4"
+    },
+    {
+      "id": "search-new york",
+      "expect": "搜「new york」能找到美国东部",
+      "pass": true,
+      "detail": "美国东部纽约 · 迈阿密\n02:47UTC−5"
+    },
+    {
+      "id": "esc",
+      "expect": "Esc 关闭且不保存",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "saved",
+      "expect": "回车后保存为阿联酋（手动）",
+      "pass": true,
+      "detail": "[\"Asia/Dubai\",\"manual\"]"
+    },
+    {
+      "id": "reload",
+      "expect": "刷新后按钮显示「阿联酋」和对方此刻时间",
+      "pass": true,
+      "detail": "阿联酋\n11:47 · UTC+4"
+    },
+    {
+      "id": "no-page-errors",
+      "expect": "页面没有脚本错误",
+      "pass": true,
+      "detail": ""
+    }
+  ],
+  "pageErrors": []
+}
