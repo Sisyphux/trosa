@@ -189,6 +189,36 @@ class ArgumentMappingTest(unittest.TestCase):
             self.assertTrue(result['content'][0]['text'].startswith('错误'))
         self.assertEqual(gateway.actions, [])
 
+    def test_undo_result_has_no_second_undo_hint(self):
+        result = payload(call('undo', {'action_id': 'agact_' + 'y' * 24}, FakeGateway()))
+        self.assertNotIn('undo_hint', result)
+
+    def test_duplicate_customer_is_reported_as_not_written(self):
+        class Duplicate(FakeGateway):
+            def act(self, action, customer_id, payload, key=None):
+                return {'success': True, 'data': {'duplicate_candidate': {'customer_id': 42}}}
+        result = call('create_customer', {'name': 'ACME', 'email': 'a@b.test'}, Duplicate())
+        self.assertTrue(result['content'][0]['text'].startswith('未写入'))
+        body = json.loads(result['content'][0]['text'].split('\n', 1)[1])
+        self.assertNotIn('action_id', body)
+        self.assertFalse(body['written'])
+
+    def test_extra_cannot_override_target_or_owner(self):
+        gateway = FakeGateway()
+        for extra in ({'task_id': 9}, {'user_id': 2}, {'customer_id': 3}):
+            result = call('complete_task', {'task_id': 5, 'extra': extra}, gateway)
+            self.assertTrue(result['isError'], extra)
+        self.assertEqual(gateway.actions, [])
+
+    def test_unexpected_exception_does_not_kill_server(self):
+        class Broken(FakeGateway):
+            def get(self, path, **params):
+                raise KeyError('secret-ish detail')
+        result = call('today', gateway=Broken())
+        self.assertTrue(result['isError'])
+        self.assertIn('KeyError', result['content'][0]['text'])
+        self.assertNotIn('secret-ish', result['content'][0]['text'])
+
     def test_server_errors_surface_with_cli_code(self):
         class Failing(FakeGateway):
             def get(self, path, **params):

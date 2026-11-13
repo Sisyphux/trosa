@@ -132,6 +132,7 @@ TOOLS = {
              [_p('action_id', 'str', '写入结果里的 action_id（agact_ 开头）', required=True, positional=True)]),
 }
 
+PROTECTED_EXTRA_KEYS = frozenset({'customer_id', 'contact_id', 'task_id', 'log_id', 'user_id', 'owner_id', 'user'})
 FORBIDDEN_COMMANDS = frozenset({'issue-token', 'revoke-token'})
 assert not FORBIDDEN_COMMANDS & {spec[0] for spec in TOOLS.values()}
 
@@ -161,7 +162,7 @@ def tool_definitions():
     for name, (_command, read_only, desc, params) in TOOLS.items():
         tools.append({
             'name': name,
-            'description': desc + ('' if read_only else ' 结果里带 action_id 与 undo_hint。'),
+            'description': desc + ('' if read_only or name == 'undo' else ' 结果里带 action_id 与 undo_hint。'),
             'inputSchema': {
                 'type': 'object',
                 'properties': {p['name']: _schema(p) for p in params},
@@ -207,6 +208,9 @@ def build_argv(name, arguments):
         elif kind == 'object':
             if not isinstance(value, dict):
                 raise ToolError(f'{param["name"]} 必须是 JSON 对象')
+            clash = sorted(set(value) & PROTECTED_EXTRA_KEYS)
+            if clash:
+                raise ToolError('extra 里不能放 ' + ', '.join(clash) + '（请用对应的参数）')
             text = json.dumps(value, ensure_ascii=False)
         else:
             if not isinstance(value, str):
@@ -241,7 +245,10 @@ def with_action_id(result):
     data = result.get('data') if isinstance(result.get('data'), dict) else {}
     action = data.get('action') if isinstance(data.get('action'), dict) else {}
     enriched = dict(result)
-    if action.get('id') and not result.get('duplicate_candidate'):
+    if result.get('duplicate_candidate'):
+        enriched['written'] = False
+        return enriched
+    if action.get('id'):
         enriched['action_id'] = action['id']
         enriched['undo_hint'] = (f'撤销：调用 undo 工具，action_id={action["id"]}'
                                  f'（命令行等价：python3 tools/trosa_cli.py undo {action["id"]}）')
@@ -256,14 +263,23 @@ def call_tool(name, arguments, gateway=None):
         if args.command in FORBIDDEN_COMMANDS:  # defence in depth; build_argv already allow-lists
             raise ToolError('该命令只能由成员本人在终端运行')
         result = trosa_cli.run(args, gateway=gateway)
-        if not TOOLS[name][1]:
+        if not TOOLS[name][1] and name != 'undo':
             result = with_action_id(result)
     except (ToolError, trosa_cli.CliError) as error:
         code = getattr(error, 'code', None)
         prefix = f'错误（{code}）：' if code else '错误：'
-        return {'content': [{'type': 'text', 'text': prefix + str(error)}], 'isError': True}
+        return _text_result(prefix + str(error), True)
+    except Exception as error:  # keep the server alive; never echo details that could hold secrets
+        return _text_result(f'错误：内部异常 {type(error).__name__}。如果是写入，用同样参数重试会拿回同一个结果，不会重复写入。',
+                            True)
     text = json.dumps(result, ensure_ascii=False, indent=2)
-    return {'content': [{'type': 'text', 'text': text}], 'isError': False}
+    if isinstance(result, dict) and result.get('written') is False:
+        text = '未写入：已存在相同邮箱或电话的客户（见 duplicate_candidate），没有新建。\n' + text
+    return _text_result(text, False)
+
+
+def _text_result(text, is_error):
+    return {'content': [{'type': 'text', 'text': text}], 'isError': is_error}
 
 
 def _response(request_id, result=None, error=None):
