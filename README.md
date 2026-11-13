@@ -76,7 +76,7 @@ archive/               历史发布包
 | `DEPLOYMENT.md` | 家庭服务器上线与备份要求 |
 | `CHANGELOG.md` | 已落地变更与验证结果 |
 
-`Trade OS 重构审查报告.md` 和 `Trade OS AI 设计原则与功能边界.docx` 记录特定阶段的审查背景，供追溯决策使用；当前规则以上表中的现行文档为准。
+已过时的阶段性文档（重构审查报告、PostgreSQL 切换记录、GitHub 迁移说明等）已移到 `archive/docs/`，只供追溯；当前规则以上表中的现行文档为准。
 
 ## 启动与验证
 

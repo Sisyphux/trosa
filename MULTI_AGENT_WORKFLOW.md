@@ -13,14 +13,14 @@ cd ~/Workspace/trosa-worktrees/<id>
 # 3 验证：先同步最新 main，再跑完整门禁
 deploy/cloud/agent-worktree.sh sync --task <id>
 deploy/cloud/agent-worktree.sh test --task <id>
-# 4 上线（会推送 GitHub 并部署服务器，必须先得到用户明确同意）
+# 4 上线（推送 GitHub 并部署服务器；非红区测试过了 AI 直接发，红区先等用户点头）
 deploy/cloud/agent-worktree.sh publish --task <id>
 # 5 收尾
 deploy/cloud/agent-worktree.sh remove --task <id> --delete-branch
 ```
 
 - 只改文档、规则文件的小改动，可以直接在主工作区提交，不需要建任务。
-- 红区改动（迁移、权限、备份、发布脚本、Sela 接口）上线前给用户一段白话摘要：影响谁、怎么发现问题、怎么撤销。
+- 红区改动（迁移、权限、备份、发布脚本、Sela 接口）上线前给用户一段白话摘要：影响谁、怎么发现问题、怎么撤销，用户同意后再发布。非红区不用问。
 - 完成 = `status=landed`（已发布且健康）。门禁绿只是“开发完成”，以真实页面表现为准。
 - 已取消的旧规则：开发/发布角色拆分（`TRADE_OS_AGENT_ROLE` 不用设置）、`guard` 开工闸门、
   `[<id>]` 提交前缀强制、开发会话不得发布。会话租约默认关闭（设 `TRADE_OS_ENFORCE_LEASE=1` 才启用）。

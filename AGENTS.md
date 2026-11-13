@@ -1,10 +1,25 @@
-# Trosa：Codex 长期开发速读
+# Trosa：AI 开发与使用速读
+
+> 所有 AI（Claude、Codex 等）共用这一份规则；`CLAUDE.md` 只是指向本文件。
+> 原则：**可逆的事 AI 直接做，不可逆或红区的事先问人。** 默认放手，限制只留在真正会出事的地方。
+
+## AI 上手地图（先看这里）
+
+| 想做什么 | 用什么 | 要不要问人 |
+|---|---|---|
+| 读客户 / 沟通 / 待办 / Inbox | `python3 tools/trosa_cli.py …`（先 `whoami`），说明见 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) | 不用 |
+| 按成员指令改业务数据 | 同上的写命令，每次写都带 `undo` | 不用（永久删除除外，CLI 也做不到） |
+| 跨成员只读排查 | `python3 tools/trosa_maint_read.py` | 不用 |
+| 看线上是否健康 / 最近报错 | `deploy/cloud/status-workbench.sh`、`deploy/cloud/logs-workbench.sh` | 不用 |
+| 当前架构事实 | [`docs/SYSTEM_STATE.md`](docs/SYSTEM_STATE.md) | — |
+| 下一步做什么 | [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 里下一个未完成任务 | 不用 |
+| 改代码 → 测试 → 上线 | 下面「改代码到上线」 | 只有红区要问 |
 
 ## 产品与当前路线
 
 Trosa 是目前四人使用（设计上不限于四人，可按需增加使用者）的外贸 CRM，定位是“外贸业务员的客户记忆和成交线索本”：系统负责记住、算出、预填，人负责判断、确认、说话（详见 [`PRODUCT_DIRECTION.md`](PRODUCT_DIRECTION.md)，依据见 [`docs/research/`](docs/research/)）。核心闭环是：沟通进来 → 系统整理、人确认成记录 → 系统每天从事实算出跟进建议 → 人确认后才成为待办 → 到期再出现。沟通记录可以没有下一步，业务员不必在记录时就定下次跟进日期；跟进建议不是承诺，不形成逾期、不确认即过期；待办必须同时有明确动作和日期。
 
-当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务在独立 worktree 中完成逻辑完整的 commit；验证通过并得到用户同意后，用 `agent-worktree.sh publish --task <id>`（底层是 `deploy/cloud/auto-publish.sh`）构建干净候选并发布正式服务器，发布不读取主工作区的 dirty 改动。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（打地基阶段的规则引擎、数据护栏、影子名单已完成，从路线图里下一个未完成的任务接着做）；不要跳过路线图直接扩张其他页面。
+当前维护路线图是 [`TROSA_MAINTENANCE.md`](TROSA_MAINTENANCE.md)。Customer、Today、Inbox 的“沟通捕获 → 整理 → 人工确认”入口，以及 Customer 工作区的“现在 / 下一步”首屏收敛，已在本地完成并通过回归。普通代码任务在独立 worktree 中完成逻辑完整的 commit；验证通过后（红区还要用户同意），用 `agent-worktree.sh publish --task <id>`（底层是 `deploy/cloud/auto-publish.sh`）构建干净候选并发布正式服务器，发布不读取主工作区的 dirty 改动。下一阶段产品优先级是每日跟进建议，按 [`docs/research/2026-10-改造落地路线.md`](docs/research/2026-10-改造落地路线.md) 的任务清单依次推进（打地基阶段的规则引擎、数据护栏、影子名单已完成，从路线图里下一个未完成的任务接着做）；不要跳过路线图直接扩张其他页面。
 
 ## 改代码到上线（唯一流程）
 
@@ -13,8 +28,8 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 1. **开工**：`deploy/cloud/agent-worktree.sh start --task <id> --owner claude --goal ... --scope ...`，在 `trosa-worktrees/<id>`（分支 `agent/<id>`）里改；主工作区有无法归属的在途改动时用 `adopt --task <id>`，不要直接 commit、覆盖或删除。只改文档/规则文件的小改动可直接在主工作区提交。
 2. **提交**：写一句白话说明即可，不强制 `[<id>]` 前缀。每个任务只放自己的改动，不碰别的任务留下的未提交文件。
 3. **验证**：`sync --task <id>`（变基到最新 main）后 `test --task <id>`。门禁绿只是“开发完成”，界面问题以真实浏览器里的表现为准。
-4. **红区**（迁移、权限、备份、发布脚本、Sela 接口）上线前给用户一段白话摘要：影响谁、怎么发现问题、怎么撤销。
-5. **上线**：`publish --task <id>`（只接受 commit/branch，会推送 GitHub 并部署服务器）。推送远程、改线上必须先得到用户明确同意；同意后由我执行，不让用户手动跑。完成 = `status=landed`（已发布且健康），用 `evidence --task <id>` 核对，不得凭“测试通过”声称已修复。
+4. **红区**（迁移、权限、备份、发布脚本、Sela 接口，清单见 [`REVIEW.md`](REVIEW.md)）：独立 AI 审查后给用户一段白话摘要（影响谁、怎么发现问题、怎么撤销），**用户点头才上线**。
+5. **上线**：`publish --task <id>`（只接受 commit/branch，会推送 GitHub 并部署服务器，失败自动回滚）。**非红区改动测试通过后由 AI 直接发布，不再逐次问用户**；红区按第 4 步等用户同意。完成 = `status=landed`（已发布且健康），用 `evidence --task <id>` 核对，不得凭“测试通过”声称已修复。
 6. **收尾**：`remove --task <id> --delete-branch`（只会安全删除已发布或已等价合入的分支）。
 
 已取消：开发/发布角色拆分（不必设 `TRADE_OS_AGENT_ROLE`）、`guard` 开工闸门、开发会话不得发布、会话租约（默认关闭，设 `TRADE_OS_ENFORCE_LEASE=1` 才启用）。
@@ -24,7 +39,7 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 
 ## 运行与数据边界
 
-- **Agent 读业务数据的现成入口**：先运行 `python3 tools/trosa_cli.py whoami`；通过就用该 CLI（只读 + 提议，提议由成员在 Trosa 确认）。没有令牌时请成员本人按 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) 领取，Agent 不得索要访问码或绕过。
+- **Agent 读业务数据的现成入口**：先运行 `python3 tools/trosa_cli.py whoami`；通过就用该 CLI（读取、提议，以及成员指令下的可撤销写入）。没有令牌时请成员本人按 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) 领取，Agent 不得索要访问码或绕过。
 - **维护者全员只读通道**：需要跨成员读取真实数据（排查排除清单、重复客户、迁移核对等）时，用 `python3 tools/trosa_maint_read.py`（独立只读数据库角色，凭据在 `~/.config/trosa-maint/readonly.json`，与 `workbench.env` 分开；开通与边界见 [`docs/MAINTAINER_DATA_ACCESS.md`](docs/MAINTAINER_DATA_ACCESS.md)）。不要为了读数据去读 `workbench.env`。
 - **Trosa / Sela 业务数据访问优先顺序**：系统已为 Agent 提供后端接口和内部数据访问能力。处理业务数据必须优先遵循 `现有 API / service → database / internal tools → CLI → UI（仅作最后验收）`。除非任务明确要求 UI 验收，禁止使用浏览器、Computer Use 或模拟人工点击读取或修改业务数据。已有 API / service 能完成操作时，必须调用现有接口，不得绕过接口改用页面操作。
 - **正式服务器（腾讯云 Lighthouse，SSH 别名 `trosa-new`）是唯一正式运行环境与唯一写入主机**：Flask/Waitress 位于 `/opt/trade-os/current`，正式业务数据位于服务器本机 PostgreSQL，附件、导入来源和历史回滚材料位于 `/var/lib/trade-os`，通过 Cloudflare Tunnel 对外提供服务。
@@ -60,7 +75,7 @@ Trosa 是目前四人使用（设计上不限于四人，可按需增加使用�
 
 ## 修改原则
 
-- 不因 `app.py` 或 `app/static/app.js` 很大就进行拆文件或大规模重构。先完成一个完整、可验证的问题，复用现有端点和数据模型。
+- `app.py`（2 万多行）和 `app/static/app.js` 太大，AI 每次都要读很多无关代码。不做一次性大重构；但改到某一块时，可以把这一块（一组路由 + 它的辅助函数）原样搬到独立模块，行为不变、测试全绿、同一个提交里只做搬家不改逻辑。功能改动和搬家分开提交。
 - 不恢复冻结功能，除非用户明确要求。
 - 任何功能改动都不得破坏客户、联系人、沟通记录、Today、Inbox、Search、备份恢复或 Sela 的幂等同步契约。
 - 涉及 UI 时先读 `design/DESIGN_WORLD.md`（现行基准：瑞士式外观 + 今天潮汐 / Inbox 对话 / 客户账页 / 客户工作区的页面结构，事实来源 `app/static/swiss-d.css`）和 `design/UI_QUALITY_BASELINE.md`；旧 Daylight 规范、房间文档与原型已删除，不再作依据；真实浏览器验收宽屏、iPad、iPhone、旧 Win10、键盘、200% 缩放与性能模式。

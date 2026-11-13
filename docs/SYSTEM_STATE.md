@@ -158,7 +158,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | `docs/SYSTEM_STATE.md`（本文件） | **唯一架构事实入口** | 当前状态有争议时以此为准 |
 | `docs/CHANGELOG.md` | **唯一架构变更日志** | 架构/重要功能/删除/权限变化的解释性记录 |
 | `CHANGELOG.md`（根） | 产品变更日志 | 用户可感知变化 + 验证结果 |
-| `AGENTS.md` | 执行宪法 | 代理开工/验证/发布铁律 |
+| `AGENTS.md`（`CLAUDE.md` 指向它） | 执行宪法 | 所有 AI 的上手地图与开工/验证/发布规则 |
 | `TROSA_MAINTENANCE.md` | 维护路线图 | 五任务排序与可执行卡片 |
 | `README.md` | 对外总览 | 启动、结构、PG rehearsal |
 | `PRODUCT_DIRECTION.md` | 产品边界 | 能力优先级与数据口径 |
@@ -180,6 +180,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
   `report-source.md`（2026-09-07深度审计原文，结论已并入§8）、
   `Trade OS 重构审查报告.md`（自声明历史文档）、`Trade OS AI 设计原则与功能边界.docx`、
   `产品宣传册-Publimpresos-20260817.md`、`design-qa.md`（单次验收笔记）、`archive/*.tar.gz`。
+- 2026-11-13 已执行：上面 B、D 两类文件（含 `POSTGRESQL_PRODUCTION_CUTOVER.md`、`POSTGRESQL_REHEARSAL.md`）已移到 `archive/docs/`，根目录只留现行文档，AI 不会再把它们当现行规则读。
 - 已于 2026-09-28 本地清理（均为 git 忽略的非仓库文件；删除前留有可恢复快照）：
   `pi-agent/`（仅 node_modules 环境产物）、`.workbuddy/`（旧 WorkBuddy Agent 记忆）、
   `~/.config/trosa/pi-mcp.env`（旧 Gateway token，属机密，未备份）、
