@@ -48,6 +48,41 @@ python3 tools/trosa_cli.py revoke-token --user <你的账号> list     # 查看 
 python3 tools/trosa_cli.py revoke-token --user <你的账号> <id>
 ```
 
+## 在聊天 AI 里用（MCP，Claude Desktop / Claude Code）
+
+`tools/trosa_mcp.py` 是一个本机 MCP 服务（纯标准库，不用装依赖），把上面的读命令和可逆写命令原样变成聊天 AI 能直接调用的工具。它内部就是调用同一个 CLI，用同一个令牌文件 `~/.config/trosa/agent.token`，所以先按上一节领好令牌。
+
+- 提供的工具：读 `whoami` `today` `customers` `customer` `contacts` `activity` `tasks` `inbox` `snapshot` `brief` `workspace` `timeline` `search`；写 `create_customer` `update_customer` `create_contact` `update_contact` `record_communication` `create_task` `update_task` `complete_task` `reschedule` `archive_customer` `restore_customer` `undo`。
+- 每次写入的结果里都有 `action_id` 和 `undo_hint`；做错了就让 AI 调用 `undo` 工具撤销。
+- 不提供：领取 / 撤销令牌（只能成员本人在终端做）、批量、删除、对外发信。它也不读 `workbench.env`。
+
+**Claude Desktop**：打开 `~/Library/Application Support/Claude/claude_desktop_config.json`，在 `mcpServers` 里加一项（路径用绝对路径），保存后完全退出再打开 Claude：
+
+```json
+{
+  "mcpServers": {
+    "trosa": {
+      "command": "/usr/bin/python3",
+      "args": ["/Users/<你的用户名>/Workspace/Trosa/tools/trosa_mcp.py"]
+    }
+  }
+}
+```
+
+**Claude Code**（对所有项目生效）：
+
+```bash
+claude mcp add --scope user trosa -- /usr/bin/python3 ~/Workspace/Trosa/tools/trosa_mcp.py
+```
+
+装好后在对话里说“看看我今天的待办”，AI 会调用 `today`。要指向别的环境，在配置里加 `"env": {"TROSA_BASE_URL": "https://..."}`。令牌失效时工具会返回“token 无效（401）”，成员本人重新 `issue-token` 即可，不用改配置。
+
+自检（不经过聊天，直接握手并读 Today）：
+
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}' '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"today","arguments":{}}}' | python3 tools/trosa_mcp.py
+```
+
 ## 常用流程
 
 **整体跟进审查**（客户跟进是否太空、该排哪些日期）：
@@ -116,4 +151,4 @@ echo '[{"action":"create_task","customer_id":12,"payload":{"title":"寄样","due
 ## 给维护者
 
 - 网关写动作的唯一事实源是 `app.py` 的 `_GATEWAY_ACTION_POLICY`：表里没有的动作一律 409，`reversible=False` 的动作任何 scope 都不放行。新增动作必须同时登记处理器与撤销路径，否则 `tests/test_agent_data_freedom.py` 会失败。
-- 接口契约与幂等回执在 `app.py` 的 `gateway_*` 路由；测试在 `tests/test_agent_cli.py`（CLI，离线）、`tests/test_agent_data_freedom.py`（策略表、写入、读放开、CLI 端到端）与 `tests/test_risk_regressions.py`（`agent_gateway` 相关用例）。新增网关读接口时，同步在 CLI 里加命令并更新本页。
+- 接口契约与幂等回执在 `app.py` 的 `gateway_*` 路由；测试在 `tests/test_agent_cli.py`（CLI，离线）、`tests/test_trosa_mcp.py`（MCP 服务，离线）、`tests/test_agent_data_freedom.py`（策略表、写入、读放开、CLI 端到端）与 `tests/test_risk_regressions.py`（`agent_gateway` 相关用例）。新增网关读接口时，同步在 CLI 里加命令、在 `tools/trosa_mcp.py` 的 `TOOLS` 里加对应工具，并更新本页。

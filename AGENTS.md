@@ -9,6 +9,7 @@
 |---|---|---|
 | 读客户 / 沟通 / 待办 / Inbox | `python3 tools/trosa_cli.py …`（先 `whoami`），说明见 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) | 不用 |
 | 按成员指令改业务数据 | 同上的写命令，每次写都带 `undo` | 不用（永久删除除外，CLI 也做不到） |
+| 在聊天 AI（Claude Desktop / Claude Code）里读写 Trosa | MCP 服务 `tools/trosa_mcp.py`（同一个令牌、同样的命令），接入方法见 [`docs/AGENT_ACCESS.md`](docs/AGENT_ACCESS.md) | 不用（同上） |
 | 跨成员只读排查 | `python3 tools/trosa_maint_read.py` | 不用 |
 | 看线上是否健康 / 最近报错 | `deploy/cloud/status-workbench.sh`、`deploy/cloud/logs-workbench.sh` | 不用 |
 | 当前架构事实 | [`docs/SYSTEM_STATE.md`](docs/SYSTEM_STATE.md) | — |
