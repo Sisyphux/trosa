@@ -213,6 +213,15 @@ class SelaCompanyOwnershipSnapshotTests(unittest.TestCase):
         self.assertEqual(body["matches"][0]["matched_by"], ["name"])
         self.assertEqual(body["matches"][0]["accounts"][0]["owner_username"], "amy")
 
+    def test_guard_name_check_is_not_skipped_when_python_key_is_empty(self):
+        connection = FakeConnection()
+        with mock.patch.object(app, "postgres_mode", return_value=True):
+            app._sela_company_ownership_snapshot(connection, name="Company", domain="unrelated.test")
+        sql = next(statement for statement, _ in connection.statements
+                   if "FROM core.companies company" in statement)
+        where = sql.split("WHERE company.organization_id", 1)[1]
+        self.assertIn("input_name.name_key=trosa.sela_company_name_key(company.canonical_name)", where)
+
     def test_duplicate_domains_and_shared_company_accounts_are_all_returned(self):
         class DuplicateDomains(FakeConnection):
             def execute(self, sql, params=None):

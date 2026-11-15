@@ -9747,6 +9747,10 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
         params.extend(name_keys)
         params.extend(name_keys)
         params.extend(name_keys)
+    elif str(name or '').strip():
+        # A raw company name can normalize to an empty Python key while the
+        # database guard still considers it meaningful; never skip that check.
+        clauses.append(guard_name_match)
     rows = conn.execute(
         '''SELECT company.id AS company_id, company.canonical_name,
                   company.normalized_name, company.website, company.identity_status,
