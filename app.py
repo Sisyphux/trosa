@@ -9725,7 +9725,12 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
     ).fetchone()['count'])
 
     clauses = []
-    params = []
+    params = [str(name or '')]
+    guard_name_match = '''(input_name.name_key IS NOT NULL AND (
+        input_name.name_key=trosa.sela_company_name_key(company.canonical_name)
+        OR input_name.name_key=trosa.sela_company_name_key(company.normalized_name)
+        OR input_name.name_key=trosa.sela_company_name_key(company_alias.alias)
+        OR input_name.name_key=trosa.sela_company_name_key(company_alias.normalized_alias)))'''
     if domain_keys:
         marks = ','.join('?' for _ in domain_keys)
         clauses.append('(domain.normalized_domain IN (' + marks + ') OR EXISTS ('
@@ -9738,7 +9743,7 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
         marks = ','.join('?' for _ in name_keys)
         clauses.append('(company.normalized_name IN (' + marks + ') '
                        'OR trosa.sela_company_name_key(company.canonical_name) IN (' + marks + ') '
-                       'OR company_alias.normalized_alias IN (' + marks + '))')
+                       'OR company_alias.normalized_alias IN (' + marks + ') OR ' + guard_name_match + ')')
         params.extend(name_keys)
         params.extend(name_keys)
         params.extend(name_keys)
@@ -9746,6 +9751,7 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
         '''SELECT company.id AS company_id, company.canonical_name,
                   company.normalized_name, company.website, company.identity_status,
                   domain.normalized_domain, company_alias.normalized_alias,
+                  ''' + guard_name_match + ''' AS guard_name_match,
                   account.id AS account_id, owner.legacy_user_id AS owner_username,
                   owner.display_name AS owner_display_name, account.account_status,
                   account.last_contact_at::date::text AS last_contact_on
@@ -9756,6 +9762,7 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
                ON account.company_id=company.id AND account.organization_id=company.organization_id
              LEFT JOIN identity.users owner ON owner.id=account.owner_user_id
                                       AND owner.organization_id=account.organization_id
+             CROSS JOIN (SELECT nullif(trosa.sela_company_name_key(?), '') AS name_key) input_name
             WHERE company.organization_id=trosa.compat_org_id()
               AND (''' + ' OR '.join(clauses) + ''')
             ORDER BY company.id, owner.legacy_user_id, account.id''',
@@ -9776,7 +9783,8 @@ def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', em
         if (row.get('normalized_domain') in domain_keys
                 or set(_canonical_website_domains(row.get('website'))) & set(domain_keys)):
             item['matched_by'].add('domain')
-        if (row.get('normalized_name') in name_keys
+        if (row.get('guard_name_match')
+                or row.get('normalized_name') in name_keys
                 or row.get('normalized_alias') in name_keys
                 or (name and _sync_name_key(row.get('canonical_name')) in name_keys)):
             item['matched_by'].add('name')

@@ -181,6 +181,38 @@ class SelaCompanyOwnershipSnapshotTests(unittest.TestCase):
         self.assertIn("company_alias.normalized_alias IN", sql)
         self.assertIn("name", body["matches"][0]["matched_by"])
 
+    def test_guard_name_key_finds_foreign_owner_without_domain(self):
+        class GuardMatch(FakeConnection):
+            def execute(self, sql, params=None):
+                statement = " ".join(str(sql).split())
+                if "FROM core.companies company" in statement:
+                    self.statements.append((statement, tuple(params or ())))
+                    # The database guard reduces both names to "acme"; Python
+                    # instead produces "acme and" for the requested name.
+                    required = ("nullif(trosa.sela_company_name_key(?), '')",
+                                "input_name.name_key IS NOT NULL", "AS guard_name_match") + tuple(
+                        "input_name.name_key=trosa.sela_company_name_key(" + field + ")"
+                        for field in ("company.canonical_name", "company.normalized_name",
+                                      "company_alias.alias", "company_alias.normalized_alias"))
+                    if not all(part in statement for part in required) or "Acme & Co" not in params:
+                        return Result([])
+                    return Result([{
+                        "company_id": "foreign", "canonical_name": "Acme Co",
+                        "normalized_name": "acme co", "website": "",
+                        "identity_status": "confirmed", "normalized_domain": None,
+                        "normalized_alias": None, "guard_name_match": True,
+                        "account_id": "account-amy", "owner_username": "amy",
+                        "owner_display_name": "Amy", "account_status": "active",
+                        "last_contact_on": "",
+                    }])
+                return super().execute(sql, params)
+
+        with mock.patch.object(app, "postgres_mode", return_value=True):
+            body = app._sela_company_ownership_snapshot(GuardMatch(), name="Acme & Co")
+        self.assertTrue(body["matched"])
+        self.assertEqual(body["matches"][0]["matched_by"], ["name"])
+        self.assertEqual(body["matches"][0]["accounts"][0]["owner_username"], "amy")
+
     def test_duplicate_domains_and_shared_company_accounts_are_all_returned(self):
         class DuplicateDomains(FakeConnection):
             def execute(self, sql, params=None):

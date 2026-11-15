@@ -2046,6 +2046,30 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         finally:
             self.connection.rollback()
 
+    def test_sela_ownership_name_guard_matches_other_owner_without_domain(self):
+        module = self._app_module()
+        company_id, account_id = str(uuid.uuid4()), str(uuid.uuid4())
+        unique = uuid.uuid4().hex
+        try:
+            self.connection.execute(
+                "INSERT INTO core.companies (id, organization_id, canonical_name, normalized_name, website) "
+                "VALUES (?, trosa.compat_org_id(), ?, ?, '')",
+                (company_id, f'Acme {unique} Co', f'acme {unique} co'))
+            self.connection.execute(
+                "INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id) "
+                "SELECT ?, trosa.compat_org_id(), ?, id FROM identity.users "
+                "WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='amy'",
+                (account_id, company_id))
+            with module.app.app_context():
+                module.g.current_user = 'hamid'
+                body = module._sela_company_ownership_snapshot(
+                    self.connection, name=f'Acme {unique} & Co')
+            match = next(row for row in body['matches'] if row['company_id'] == company_id)
+            self.assertEqual(match['matched_by'], ['name'])
+            self.assertEqual(match['accounts'][0]['owner_username'], 'amy')
+        finally:
+            self.connection.rollback()
+
     def test_sela_company_ownership_lookup_is_org_wide_audited_and_minimal(self):
         import db
         import trosa_domain
