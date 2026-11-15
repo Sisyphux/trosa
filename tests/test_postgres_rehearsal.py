@@ -125,6 +125,141 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
             cls._loaded_app = module
         return module
 
+    def _insert_sela_account(self, connection, *, name, domains=(), aliases=()):
+        """Insert a Sela-owned account directly to exercise the database guard."""
+        company_id = str(uuid.uuid4())
+        account_id = str(uuid.uuid4())
+        organization_id = connection.execute(
+            'SELECT trosa.compat_org_id() AS organization_id').fetchone()['organization_id']
+        owner_id = connection.execute(
+            '''SELECT id FROM identity.users
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid' ''',
+        ).fetchone()['id']
+        normalized_name = connection.execute(
+            'SELECT trosa.sela_company_name_key(?) AS name_key', (name,)).fetchone()['name_key']
+        connection.execute(
+            '''INSERT INTO core.companies
+               (id, organization_id, canonical_name, normalized_name, website)
+               VALUES (?, ?, ?, ?, '')''',
+            (company_id, organization_id, name, normalized_name),
+        )
+        for domain in domains:
+            connection.execute(
+                '''INSERT INTO core.company_domains
+                   (id, company_id, normalized_domain, is_primary, verification_status)
+                   VALUES (?, ?, ?, false, 'verified')''',
+                (str(uuid.uuid4()), company_id, domain),
+            )
+        for alias in aliases:
+            alias_key = connection.execute(
+                'SELECT trosa.sela_company_name_key(?) AS name_key', (alias,)).fetchone()['name_key']
+            connection.execute(
+                '''INSERT INTO core.company_aliases
+                   (id, company_id, alias, normalized_alias, source, confidence)
+                   VALUES (?, ?, ?, ?, 'rehearsal', 'confirmed')''',
+                (str(uuid.uuid4()), company_id, alias, alias_key),
+            )
+        connection.execute(
+            '''INSERT INTO trosa.accounts
+               (id, organization_id, company_id, owner_user_id, legacy_payload)
+               VALUES (?, ?, ?, ?, '{"import_source":"sela-v2","external_source":"sela"}'::jsonb)''',
+            (account_id, organization_id, company_id, owner_id),
+        )
+        return account_id
+
+    def test_duplicate_merge_respects_owner_with_colliding_legacy_ids(self):
+        """Exercise the real merge against colliding owner IDs; roll back every write."""
+        import db
+        from tools import merge_customer_duplicate as merge
+
+        self.connection.close()
+        db.set_db_user('amy')
+        self.connection = db.get_db()
+        conn = self.connection
+        accounts = {}
+        try:
+            for owner, customer_id in (('amy', 157), ('amy', 158), ('hamid', 157), ('hamid', 158)):
+                company_id, account_id = str(uuid.uuid4()), str(uuid.uuid4())
+                name = f'merge-owner-test-{owner}-{customer_id}'
+                conn.execute(
+                    '''INSERT INTO core.companies (id, organization_id, canonical_name, normalized_name)
+                       VALUES (?, trosa.compat_org_id(), ?, ?)''', (company_id, name, name))
+                conn.execute(
+                    '''INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id, display_name)
+                       SELECT ?, trosa.compat_org_id(), ?, id, ? FROM identity.users
+                        WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=?''',
+                    (account_id, company_id, name, owner))
+                conn.execute(
+                    '''INSERT INTO trosa.account_legacy_refs
+                       (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db, legacy_payload)
+                       VALUES (trosa.compat_org_id(), ?, ?, ?, ?, '{}'::jsonb)''',
+                    (owner, customer_id, account_id, name))
+                conn.execute(
+                    '''INSERT INTO trosa.agent_prospect_profiles
+                       (legacy_user_id, source_id, customer_id, contact_permission, suppression_reason, suppression_at)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (owner, name, customer_id, 'do_not_contact' if owner == 'hamid' else 'allowed',
+                     'Hamid original suppression' if owner == 'hamid' else '',
+                     '2026-01-01' if owner == 'hamid' else ''))
+                accounts[(owner, customer_id)] = account_id
+
+            source, target = merge._customer(conn, 157), merge._customer(conn, 158)
+            self.assertEqual(str(source['account_id']), accounts[('amy', 157)])
+            self.assertEqual(str(target['account_id']), accounts[('amy', 158)])
+            merge._validate_owner(conn, source, 'amy')
+            with self.assertRaises(ValueError):
+                merge._validate_owner(conn, source, 'hamid')
+            with self.assertRaises(ValueError):
+                merge._validate_owner(conn, {**source, 'account_id': accounts[('hamid', 157)]}, 'amy')
+
+            # Simulate historical bad data that the current DB trigger prevents.
+            conn.execute('SAVEPOINT shared_ref')
+            conn.execute('ALTER TABLE trosa.account_legacy_refs DISABLE TRIGGER trosa_account_legacy_refs_owner_guard')
+            conn.execute(
+                '''INSERT INTO trosa.account_legacy_refs
+                   (organization_id, legacy_user_id, legacy_customer_id, account_id, source_db)
+                   VALUES (trosa.compat_org_id(), 'hamid', 159, ?, 'merge-shared-ref')''',
+                (source['account_id'],))
+            with self.assertRaises(ValueError):
+                merge._validate_owner(conn, source, 'amy')
+            conn.execute('ROLLBACK TO SAVEPOINT shared_ref')
+
+            conn.execute('SAVEPOINT shared_company')
+            conn.execute(
+                '''INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id)
+                   SELECT ?, trosa.compat_org_id(), ?, id FROM identity.users
+                    WHERE organization_id=trosa.compat_org_id() AND legacy_user_id='hamid' ''',
+                (str(uuid.uuid4()), source['company_uuid']))
+            with self.assertRaises(ValueError):
+                merge._validate_owner(conn, source, 'amy')
+            conn.execute('ROLLBACK TO SAVEPOINT shared_company')
+
+            def profiles(owner):
+                return [dict(row) for row in conn.execute(
+                    '''SELECT * FROM trosa.agent_prospect_profiles
+                        WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=?
+                          AND customer_id IN (157, 158) ORDER BY customer_id''', (owner,)).fetchall()]
+
+            before = profiles('hamid')
+            self.assertEqual(len(before), 2)
+            # Both branches: target profile exists, and only the other owner has one.
+            for target_exists in (True, False):
+                with self.subTest(target_profile_exists=target_exists):
+                    conn.execute('SAVEPOINT merge_profiles')
+                    if not target_exists:
+                        conn.execute('''DELETE FROM trosa.agent_prospect_profiles
+                                         WHERE organization_id=trosa.compat_org_id()
+                                           AND legacy_user_id='amy' AND customer_id=158''')
+                    merge._merge(conn, source, target, 'Amy merge suppression', 'amy')
+                    amy = profiles('amy')
+                    self.assertEqual(len(amy), 1)
+                    self.assertEqual((amy[0]['customer_id'], amy[0]['contact_permission'], amy[0]['suppression_reason']),
+                                     (158, 'do_not_contact', 'Amy merge suppression'))
+                    self.assertEqual(profiles('hamid'), before)
+                    conn.execute('ROLLBACK TO SAVEPOINT merge_profiles')
+        finally:
+            conn.rollback()
+
     def test_batch_customer_reads_preserve_results_with_constant_query_count(self):
         from trosa_domain import active_customers, customer_facts, customer_contacts, customer_tasks, customer_interactions
 
@@ -1877,6 +2012,501 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(exclusions.status_code, 200, exclusions.get_json())
         self.assertTrue(any(item['source_id'] == 'pg-sela-exclusion-1'
                             for item in exclusions.get_json()['records']))
+
+    def test_sela_ownership_coverage_includes_inactive_and_rejects_unresolved_accounts(self):
+        module = self._app_module()
+        user_id, company_id, account_id, other_org, other_user = (str(uuid.uuid4()) for _ in range(5))
+        try:
+            self.connection.execute(
+                "INSERT INTO identity.users (id, organization_id, legacy_user_id, display_name, status) "
+                "VALUES (?, trosa.compat_org_id(), ?, ?, 'inactive')",
+                (user_id, 'rehearsal-inactive-owner', 'Inactive Owner'))
+            self.connection.execute(
+                "INSERT INTO core.companies (id, organization_id, canonical_name, normalized_name, website) "
+                "VALUES (?, trosa.compat_org_id(), ?, ?, ?)",
+                (company_id, 'Coverage Company', 'coverage company', 'https://coverage-owner.test'))
+            self.connection.execute(
+                "INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id) "
+                "VALUES (?, trosa.compat_org_id(), ?, ?)", (account_id, company_id, user_id))
+            body = module._sela_company_ownership_snapshot(self.connection, domain='coverage-owner.test')
+            self.assertIn('rehearsal-inactive-owner', body['checked_owners'])
+            self.assertEqual(body['matches'][0]['accounts'][0]['owner_username'], 'rehearsal-inactive-owner')
+            self.connection.execute('INSERT INTO identity.organizations (id, name) VALUES (?, ?)',
+                                    (other_org, 'Other organization'))
+            self.connection.execute(
+                'INSERT INTO identity.users (id, organization_id, legacy_user_id, display_name) VALUES (?, ?, ?, ?)',
+                (other_user, other_org, 'foreign-owner', 'Foreign Owner'))
+            self.connection.execute('UPDATE trosa.accounts SET owner_user_id=? WHERE id=?', (other_user, account_id))
+            with self.assertRaisesRegex(RuntimeError, '负责人'):
+                module._sela_company_ownership_snapshot(self.connection, domain='unrelated.test')
+            self.connection.execute('UPDATE trosa.accounts SET owner_user_id=? WHERE id=?', (user_id, account_id))
+            self.connection.execute('UPDATE identity.users SET legacy_user_id=NULL WHERE id=?', (user_id,))
+            with self.assertRaisesRegex(RuntimeError, '负责人'):
+                module._sela_company_ownership_snapshot(self.connection, domain='unrelated.test')
+        finally:
+            self.connection.rollback()
+
+    def test_sela_company_ownership_lookup_is_org_wide_audited_and_minimal(self):
+        import db
+        import trosa_domain
+
+        module = self._app_module()
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_id = trosa_domain.create_customer(amy_connection, values={
+                'name': 'CRISTACRYL SAS', 'company': 'CRISTACRYL SAS',
+                'website': 'https://www.cristacryl.com',
+            })
+            amy_connection.commit()
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+        client = module.app.test_client()
+        with mock.patch.object(module, '_integration_token_matches', return_value=True):
+            found = client.get('/api/integrations/sela/company-ownership?domain=cristacryl.com&name=Cristacryl',
+                               headers={'Authorization': 'Bearer rehearsal-only'})
+            missing = client.get('/api/integrations/sela/company-ownership?domain=never-held.rehearsal')
+        self.assertEqual(found.status_code, 200, found.get_json())
+        body = found.get_json()
+        self.assertEqual(body['scope'], 'org')
+        self.assertIn('amy', body['checked_owners'])
+        self.assertEqual(body['total_owners'], len(body['checked_owners']))
+        self.assertTrue(body['matched'])
+        account = next(account for company in body['matches'] for account in company['accounts']
+                       if account['owner_username'] == 'amy')
+        self.assertTrue(account['account_id'])
+        self.assertNotIn('email', json.dumps(body).lower())
+        self.assertNotIn('notes', json.dumps(body).lower())
+        self.assertNotIn('amount', json.dumps(body).lower())
+        self.assertEqual(missing.status_code, 200, missing.get_json())
+        self.assertEqual(missing.get_json()['scope'], 'org')
+        self.assertEqual(missing.get_json()['matches'], [])
+        audit = self.connection.execute(
+            "SELECT key_hash FROM audit.sela_company_ownership_lookups WHERE requested_by='hamid' "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        self.assertTrue(audit)
+        self.assertNotIn('cristacryl.com', audit['key_hash'])
+        self.assertNotEqual(int(amy_id), 0)
+
+    def test_sela_prospect_create_cannot_make_second_owner_account(self):
+        import db
+        import trosa_domain
+
+        module = self._app_module()
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_id = trosa_domain.create_customer(amy_connection, values={
+                'name': 'Cross Owner CRISTACRYL', 'company': 'CRISTACRYL SAS',
+                'website': 'https://www.cristacryl.com',
+            })
+            amy_connection.execute(
+                '''INSERT INTO core.company_domains
+                   (id, company_id, normalized_domain, is_primary, verification_status)
+                   SELECT ?, account.company_id, 'cristacryl.com', true, 'verified'
+                     FROM trosa.account_legacy_refs ref
+                     JOIN trosa.accounts account ON account.id=ref.account_id
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id='amy' AND ref.legacy_customer_id=?''',
+                (str(uuid.uuid4()), amy_id),
+            )
+            amy_connection.commit()
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+        with module.app.app_context():
+            module.g.current_user = 'hamid'
+            result = module._sela_upsert_prospect(self.connection, {
+                'source_id': 'cross-owner-create-rehearsal',
+                'company': 'Cristacryl', 'website': 'https://cristacryl.com/',
+                'contact': {'email': 'buyer@cristacryl.com'},
+            })
+        self.assertEqual(result.get('status'), 'REVIEW', result)
+        self.assertEqual(result.get('reason'), 'CROSS_OWNER_COMPANY', result)
+        self.connection.rollback()
+        company_count = self.connection.execute(
+            "SELECT count(*) FROM core.company_domains WHERE normalized_domain='cristacryl.com'"
+        ).fetchone()[0]
+        self.assertEqual(company_count, 1)
+
+    def test_sela_customer_creation_marks_account_before_database_guard(self):
+        import trosa_domain
+
+        customer_id = trosa_domain.create_customer(self.connection, values={
+            'name': 'Sela Marker Regression', 'company': 'Sela Marker Regression',
+            'website': 'https://marker-regression.example',
+            'import_source': 'sela-v2', 'external_source': 'sela',
+        })
+        account = self.connection.execute(
+            '''SELECT account.legacy_payload FROM trosa.account_legacy_refs ref
+               JOIN trosa.accounts account ON account.id=ref.account_id
+               WHERE ref.organization_id=trosa.compat_org_id()
+                 AND ref.legacy_user_id='hamid' AND ref.legacy_customer_id=?''',
+            (customer_id,),
+        ).fetchone()
+        self.assertEqual(account['legacy_payload'].get('import_source'), 'sela-v2')
+        self.assertEqual(account['legacy_payload'].get('external_source'), 'sela')
+        self.connection.rollback()
+
+    def test_ownership_lookup_finds_website_without_domain_registry_and_alias(self):
+        import db
+        import trosa_domain
+
+        module = self._app_module()
+        db.set_db_user('amy')
+        connection = db.get_db()
+        try:
+            customer_id = trosa_domain.create_customer(connection, values={
+                'name': 'Website Only Legal', 'company': 'Website Only Legal',
+                'website': 'https://www.website-only.example/path',
+            })
+            company_id = connection.execute(
+                '''SELECT account.company_id FROM trosa.account_legacy_refs ref
+                   JOIN trosa.accounts account ON account.id=ref.account_id
+                   WHERE ref.organization_id=trosa.compat_org_id()
+                     AND ref.legacy_user_id='amy' AND ref.legacy_customer_id=?''',
+                (customer_id,),
+            ).fetchone()['company_id']
+            connection.execute('DELETE FROM core.company_domains WHERE company_id=?', (company_id,))
+            connection.execute(
+                '''INSERT INTO core.company_aliases
+                   (id, company_id, alias, normalized_alias, source, confidence)
+                   VALUES (?, ?, 'Website Alias', 'website alias', 'rehearsal', 'confirmed')''',
+                (str(uuid.uuid4()), company_id),
+            )
+            with module.app.app_context():
+                module.g.current_user = 'amy'
+                by_domain = module._sela_company_ownership_snapshot(
+                    connection, domain='unrelated.example', domains=['website-only.example'])
+                by_alias = module._sela_company_ownership_snapshot(connection, name='Website Alias')
+            for result in (by_domain, by_alias):
+                match = next(row for row in result['matches'] if row['company_id'] == str(company_id))
+                self.assertEqual(match['accounts'][0]['owner_username'], 'amy')
+            self.assertIn('domain', next(row for row in by_domain['matches']
+                                        if row['company_id'] == str(company_id))['matched_by'])
+        finally:
+            connection.rollback()
+            connection.close()
+            db.set_db_user('hamid')
+
+    def test_sela_prospect_create_is_serialized_against_concurrent_owner_claim(self):
+        import db
+        import trosa_domain
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        module = self._app_module()
+        amy_ready = Event()
+        allow_amy_commit = Event()
+        hamid_checked = Event()
+
+        def amy_claim():
+            db.set_db_user('amy')
+            connection = db.get_db()
+            try:
+                customer_id = trosa_domain.create_customer(connection, values={
+                    'name': 'Race Plastics', 'company': 'Race Plastics',
+                    'website': 'https://raceplastics.example',
+                })
+                amy_ready.set()
+                if not allow_amy_commit.wait(10):
+                    raise RuntimeError('test did not release Amy transaction')
+                connection.commit()
+                return customer_id
+            finally:
+                connection.close()
+                db.set_db_user('hamid')
+
+        def hamid_sela_create():
+            db.set_db_user('hamid')
+            connection = db.get_db()
+            try:
+                with module.app.app_context():
+                    module.g.current_user = 'hamid'
+                    result = module._sela_upsert_prospect(connection, {
+                        'source_id': 'cross-owner-race-rehearsal',
+                        'company': 'Race Plastics', 'website': 'https://raceplastics.example',
+                        'contact': {'email': 'buyer@raceplastics.example'},
+                    })
+                    connection.commit()
+                    return result
+            finally:
+                connection.close()
+                db.set_db_user('hamid')
+
+        real_snapshot = module._sela_company_ownership_snapshot
+
+        def snapshot_then_signal(*args, **kwargs):
+            result = real_snapshot(*args, **kwargs)
+            hamid_checked.set()
+            return result
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            amy_future = pool.submit(amy_claim)
+            try:
+                self.assertTrue(amy_ready.wait(10), 'Amy account was not staged in the rehearsal DB')
+                with mock.patch.object(module, '_sela_company_ownership_snapshot', side_effect=snapshot_then_signal):
+                    hamid_future = pool.submit(hamid_sela_create)
+                    self.assertTrue(hamid_checked.wait(10), 'Sela did not complete its initial owner read')
+                    allow_amy_commit.set()
+                    amy_future.result(timeout=20)
+                    result = hamid_future.result(timeout=20)
+            finally:
+                # Always release the staged owner transaction before the pool
+                # waits for worker shutdown, including on assertion failure.
+                allow_amy_commit.set()
+        self.assertEqual(result.get('status'), 'REVIEW', result)
+        self.assertEqual(result.get('reason'), 'CROSS_OWNER_COMPANY', result)
+        self.connection.rollback()
+        # Canonical customer creation stores the website on the company; a
+        # corresponding company_domains row is not required.
+        ownership = self.connection.execute(
+            "SELECT count(*) FILTER (WHERE owner.legacy_user_id='amy') AS amy_count, "
+            "count(*) FILTER (WHERE owner.legacy_user_id='hamid' "
+            "AND account.legacy_payload->>'import_source'='sela-v2' "
+            "AND account.legacy_payload->>'external_source'='sela') AS hamid_sela_count "
+            "FROM trosa.accounts account "
+            "JOIN core.companies company ON company.id=account.company_id "
+            "JOIN identity.users owner ON owner.id=account.owner_user_id "
+            "WHERE account.organization_id=trosa.compat_org_id() AND ("
+            "trosa.sela_company_domain_key(company.website)='raceplastics.example' OR "
+            "trosa.sela_company_name_key(company.canonical_name)="
+            "trosa.sela_company_name_key('Race Plastics'))"
+        ).fetchone()
+        self.assertEqual(ownership['amy_count'], 1)
+        self.assertEqual(ownership['hamid_sela_count'], 0)
+
+    def test_sela_account_guard_matches_second_host_in_foreign_company_website(self):
+        """A second website host must prevent a direct cross-owner Sela insert."""
+        connection = self.connection
+        suffix = uuid.uuid4().hex
+        primary_host = f'primary-{suffix}.cross-owner.test'
+        shared_host = f'shared-{suffix}.cross-owner.test'
+        amy_company_id, candidate_company_id = str(uuid.uuid4()), str(uuid.uuid4())
+        try:
+            organization_id = connection.execute(
+                'SELECT trosa.compat_org_id() AS organization_id',
+            ).fetchone()['organization_id']
+            owners = {
+                row['legacy_user_id']: row['id']
+                for row in connection.execute(
+                    """SELECT legacy_user_id, id FROM identity.users
+                       WHERE organization_id=trosa.compat_org_id()
+                         AND legacy_user_id IN ('amy', 'hamid')"""
+                ).fetchall()
+            }
+            self.assertEqual(set(owners), {'amy', 'hamid'})
+            for company_id, name, website in (
+                (amy_company_id, f'Amy Website Owner {suffix}',
+                 f'https://{primary_host}; https://{shared_host}'),
+                (candidate_company_id, f'Different Sela Candidate {suffix}',
+                 f'https://{shared_host}'),
+            ):
+                connection.execute(
+                    '''INSERT INTO core.companies
+                       (id, organization_id, canonical_name, normalized_name, website)
+                       VALUES (?, ?, ?, trosa.sela_company_name_key(?), ?)''',
+                    (company_id, organization_id, name, name, website),
+                )
+            connection.execute(
+                '''INSERT INTO trosa.accounts (id, organization_id, company_id, owner_user_id)
+                   VALUES (?, ?, ?, ?)''',
+                (str(uuid.uuid4()), organization_id, amy_company_id, owners['amy']),
+            )
+            with self.assertRaisesRegex(Exception, 'CROSS_OWNER_COMPANY'):
+                connection.execute(
+                    '''INSERT INTO trosa.accounts
+                       (id, organization_id, company_id, owner_user_id, legacy_payload)
+                       VALUES (?, ?, ?, ?, '{"import_source":"sela-v2","external_source":"sela"}'::jsonb)''',
+                    (str(uuid.uuid4()), organization_id, candidate_company_id, owners['hamid']),
+                )
+        finally:
+            connection.rollback()
+
+    def test_sela_account_guard_matches_candidate_aliases_to_foreign_canonical_and_alias(self):
+        import db
+        import trosa_domain
+
+        db.set_db_user('amy')
+        amy_connection = db.get_db()
+        try:
+            amy_id = trosa_domain.create_customer(amy_connection, values={
+                'name': 'Alias Legal Name', 'company': 'Alias Legal Name', 'website': '',
+            })
+            company_id = amy_connection.execute(
+                '''SELECT account.company_id FROM trosa.account_legacy_refs ref
+                     JOIN trosa.accounts account ON account.id=ref.account_id
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id='amy' AND ref.legacy_customer_id=?''',
+                (amy_id,),
+            ).fetchone()['company_id']
+            alias_key = amy_connection.execute(
+                'SELECT trosa.sela_company_name_key(?) AS name_key', ('Existing Friendly Brand',),
+            ).fetchone()['name_key']
+            amy_connection.execute(
+                '''INSERT INTO core.company_aliases
+                   (id, company_id, alias, normalized_alias, source, confidence)
+                   VALUES (?, ?, ?, ?, 'rehearsal', 'confirmed')''',
+                (str(uuid.uuid4()), company_id, 'Existing Friendly Brand', alias_key),
+            )
+            amy_connection.commit()
+        finally:
+            amy_connection.close()
+            db.set_db_user('hamid')
+
+        for alias in ('Alias Legal Name', 'Existing Friendly Brand'):
+            with self.subTest(alias=alias), self.assertRaisesRegex(Exception, 'CROSS_OWNER_COMPANY'):
+                self._insert_sela_account(self.connection, name='Different Sela Display Name', aliases=[alias])
+            self.connection.rollback()
+
+    def test_secondary_domain_claim_is_serialized_before_sela_account_insert(self):
+        import db
+        import trosa_domain
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        amy_ready = Event()
+        release_amy = Event()
+        hamid_attempting = Event()
+        hamid_done = Event()
+        shared_domain = 'secondary-race.cross-owner.test'
+
+        def amy_claim():
+            db.set_db_user('amy')
+            connection = db.get_db()
+            try:
+                customer_id = trosa_domain.create_customer(connection, values={
+                    'name': 'Multi Host Owner', 'company': 'Multi Host Owner', 'website': '',
+                })
+                company_id = connection.execute(
+                    '''SELECT account.company_id FROM trosa.account_legacy_refs ref
+                         JOIN trosa.accounts account ON account.id=ref.account_id
+                        WHERE ref.organization_id=trosa.compat_org_id()
+                          AND ref.legacy_user_id='amy' AND ref.legacy_customer_id=?''',
+                    (customer_id,),
+                ).fetchone()['company_id']
+                connection.execute(
+                    '''INSERT INTO core.company_domains
+                       (id, company_id, normalized_domain, is_primary, verification_status)
+                       VALUES (?, ?, ?, false, 'verified')''',
+                    (str(uuid.uuid4()), company_id, shared_domain),
+                )
+                amy_ready.set()
+                if not release_amy.wait(10):
+                    raise RuntimeError('test did not release Amy identity transaction')
+                connection.commit()
+                return 'committed'
+            finally:
+                connection.close()
+                db.set_db_user('hamid')
+
+        def sela_claim():
+            db.set_db_user('hamid')
+            connection = db.get_db()
+            try:
+                hamid_attempting.set()
+                self._insert_sela_account(connection, name='Unrelated Sela Brand', domains=[shared_domain])
+                connection.commit()
+                return 'created'
+            except Exception as exc:
+                connection.rollback()
+                return str(exc)
+            finally:
+                hamid_done.set()
+                connection.close()
+                db.set_db_user('hamid')
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            amy_future = pool.submit(amy_claim)
+            try:
+                self.assertTrue(amy_ready.wait(10), 'Amy secondary domain was not staged')
+                sela_future = pool.submit(sela_claim)
+                self.assertTrue(hamid_attempting.wait(10), 'Sela did not attempt the secondary-domain claim')
+                self.assertFalse(hamid_done.wait(0.25), 'Sela passed the uncommitted secondary-domain lock')
+                release_amy.set()
+                self.assertEqual(amy_future.result(timeout=20), 'committed')
+                result = sela_future.result(timeout=20)
+            finally:
+                release_amy.set()
+        self.assertIn('CROSS_OWNER_COMPANY', result)
+
+    def test_alias_claim_is_serialized_before_sela_account_insert(self):
+        import db
+        import trosa_domain
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        amy_ready = Event()
+        release_amy = Event()
+        hamid_attempting = Event()
+        hamid_done = Event()
+        shared_alias = 'Shared Cross Owner Alias'
+
+        def amy_claim():
+            db.set_db_user('amy')
+            connection = db.get_db()
+            try:
+                customer_id = trosa_domain.create_customer(connection, values={
+                    'name': 'Alias Race Owner', 'company': 'Alias Race Owner', 'website': '',
+                })
+                company_id = connection.execute(
+                    '''SELECT account.company_id FROM trosa.account_legacy_refs ref
+                         JOIN trosa.accounts account ON account.id=ref.account_id
+                        WHERE ref.organization_id=trosa.compat_org_id()
+                          AND ref.legacy_user_id='amy' AND ref.legacy_customer_id=?''',
+                    (customer_id,),
+                ).fetchone()['company_id']
+                alias_key = connection.execute(
+                    'SELECT trosa.sela_company_name_key(?) AS name_key', (shared_alias,),
+                ).fetchone()['name_key']
+                connection.execute(
+                    '''INSERT INTO core.company_aliases
+                       (id, company_id, alias, normalized_alias, source, confidence)
+                       VALUES (?, ?, ?, ?, 'rehearsal', 'confirmed')''',
+                    (str(uuid.uuid4()), company_id, shared_alias, alias_key),
+                )
+                amy_ready.set()
+                if not release_amy.wait(10):
+                    raise RuntimeError('test did not release Amy alias transaction')
+                connection.commit()
+                return 'committed'
+            finally:
+                connection.close()
+                db.set_db_user('hamid')
+
+        def sela_claim():
+            db.set_db_user('hamid')
+            connection = db.get_db()
+            try:
+                hamid_attempting.set()
+                self._insert_sela_account(connection, name='Unrelated Alias Candidate', aliases=[shared_alias])
+                connection.commit()
+                return 'created'
+            except Exception as exc:
+                connection.rollback()
+                return str(exc)
+            finally:
+                hamid_done.set()
+                connection.close()
+                db.set_db_user('hamid')
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            amy_future = pool.submit(amy_claim)
+            try:
+                self.assertTrue(amy_ready.wait(10), 'Amy alias was not staged')
+                sela_future = pool.submit(sela_claim)
+                self.assertTrue(hamid_attempting.wait(10), 'Sela did not attempt the alias claim')
+                self.assertFalse(hamid_done.wait(0.25), 'Sela passed the uncommitted alias lock')
+                release_amy.set()
+                self.assertEqual(amy_future.result(timeout=20), 'committed')
+                result = sela_future.result(timeout=20)
+            finally:
+                release_amy.set()
+        self.assertIn('CROSS_OWNER_COMPANY', result)
 
     def test_sela_exclusion_snapshot_issues_the_same_reads_for_any_customer_count(self):
         """The snapshot build is a fixed set of batch reads, not one per contacted Customer."""

@@ -5,6 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -88,6 +89,51 @@ class SelaServiceAuthTest(unittest.TestCase):
             service.post('/api/integrations/sela/token', headers=service_headers).status_code,
             401,
         )
+
+    def test_company_ownership_lookup_is_a_narrow_service_read(self):
+        service = self.module.app.test_client()
+        service_headers = {'Authorization': f'Bearer {SERVICE_TOKEN}'}
+        # The lookup is deliberately unavailable in the SQLite auth fixture;
+        # the formal PostgreSQL-only behavior is exercised in rehearsal tests.
+        # It must still be routed through the fixed Sela service credential.
+        self.assertEqual(
+            service.get('/api/integrations/sela/company-ownership?domain=example.test',
+                        headers=service_headers).status_code,
+            503,
+        )
+        self.assertEqual(
+            service.get('/api/integrations/sela/company-ownership?domain=example.test').status_code,
+            401,
+        )
+        self.assertEqual(
+            service.post('/api/integrations/sela/company-ownership',
+                         json={'domain': 'example.test'}, headers=service_headers).status_code,
+            405,
+        )
+
+    def test_human_session_cannot_read_organization_wide_ownership(self):
+        client = self.module.app.test_client()
+        self.module.app.secret_key = 'test-only'
+        with client.session_transaction() as session:
+            session['user'] = 'amy'
+        with mock.patch.object(self.module, '_production_mode', False), \
+             mock.patch.object(self.module, 'postgres_mode', return_value=True), \
+             mock.patch.object(self.module, 'get_db', side_effect=AssertionError('human session reached organization data')):
+            response = client.get('/api/integrations/sela/company-ownership?domain=example.test')
+        self.assertEqual(response.status_code, 403, response.get_json())
+
+    def test_service_token_cannot_borrow_a_human_session_for_ownership_read(self):
+        client = self.module.app.test_client()
+        self.module.app.secret_key = 'test-only'
+        with client.session_transaction() as session:
+            session['user'] = 'amy'
+        with mock.patch.object(self.module, '_production_mode', False), \
+             mock.patch.object(self.module, 'postgres_mode', return_value=True), \
+             mock.patch.object(self.module, 'get_db', side_effect=AssertionError('mixed credentials reached organization data')):
+            response = client.get(
+                '/api/integrations/sela/company-ownership?domain=example.test',
+                headers={'Authorization': f'Bearer {SERVICE_TOKEN}'})
+        self.assertEqual(response.status_code, 403, response.get_json())
 
     def test_service_token_can_complete_only_the_sela_inbox_resume_handoff(self):
         service = self.module.app.test_client()

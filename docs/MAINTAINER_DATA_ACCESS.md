@@ -33,8 +33,11 @@ python3 tools/trosa_maint_read.py whoami                                 # 角�
 python3 tools/trosa_maint_read.py check                                  # 严格自检，过期返回 3
 python3 tools/trosa_maint_read.py users
 python3 tools/trosa_maint_read.py customers --query bold.net.co          # 遍历全部成员
+python3 tools/trosa_maint_read.py company-ownership --domain cristacryl.com --name Cristacryl
 python3 tools/trosa_maint_read.py sql "SELECT ..." --as-user kelley
 ```
+
+`company-ownership` 是跨负责人排查的专用只读查询：只读规范公司/域名/别名、账户负责人、账户状态和最后联系日期，并返回 `scope=org`；不读取联系人邮箱、备注或沟通内容。每次查询写入维护端本地 `audit.log`，不能通过本命令写入业务库。
 
 ## 数据新鲜度与旧快照
 - `whoami` / `check` 会输出 `data_watermark`（业务表最后更新时间）和 `data_lag_hours`；

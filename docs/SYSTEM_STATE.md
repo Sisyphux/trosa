@@ -73,7 +73,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 | Web编排 | `app.py` / `serve.py` | 全部路由、权限、业务编排、undo；`serve.py` 启动前强制 PG | 在用，唯一正式入口 |
 | 业务域 | `trosa_domain.py` | Interaction/Task 唯一业务读写语义；Today/Customer共用排序；外联投递历史永不转为待办（SQL强制） | 在用，唯一写入通道 |
 | 数据层 | `db.py` / `postgres_compat.py` / `postgres_schema_contract.py` | PG启动迁移、兼容层、来源审计、schema契约 | 在用，关键接缝 |
-| 迁移 | `migrations/0001–0029` | 6 schema沉淀；0019退役旧AI/监控兼容视图；0020建customer_states事实；0023–0029收敛兼容写边界与审计 | 在用，ledger在`audit.schema_migrations`（SHA-256） |
+| 迁移 | `migrations/0001–0135` | 6 schema沉淀；0019退役旧AI/监控兼容视图；0020建customer_states事实；后续迁移持续收敛兼容写边界、审计与身份安全 | 在用；0135 为本地待部署变更，ledger在`audit.schema_migrations`（SHA-256） |
 | 前端 | `app/static/` | 单页应用；Customer/Today/Inbox共同确认入口已发布并通过公网健康门 | 在用 |
 | 采集扩展 | `browser-extension/` | MV3侧边栏，从网页邮箱/WhatsApp采集回POST `/api/extension/*` | 在用 |
 | Sela同步 | `/api/integrations/sela/*` 16条 | prospect 开发（发开信、读邮箱检测回信，交接给 Trosa）；精确身份匹配+幂等键+REVIEW；不直连DB | 在用 |
@@ -108,6 +108,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
   不完整电话只进候选/待审阅。
 - Sela 用独立 Bearer token（prospect/exclusion `sela-v2`，并复用同一受限身份只读客户/沟通/Today/Inbox）；
   多重命中或身份冲突必须返回 `REVIEW`，不得猜测归属。
+- **跨负责人只读核验（迁移 0135，本地待部署）**：Sela 专用 `GET /api/integrations/sela/company-ownership` 只返回全组织负责人覆盖、公司身份、负责人、账户状态与最后联系日期；不返回联系人、邮件、备注或沟通正文。每次查询写入 `audit.sela_company_ownership_lookups`（查询键只存哈希），服务身份限每分钟 120 次、禁止缓存。Sela 新建或更新 prospect 前核验所有账户归属；`trosa.accounts` 触发器在写入时再次阻止并发跨负责人创建，只有标记为 Sela 外联数据的路径受限，人工 CRM 共享公司账户仍可按负责人分别存在。维护者可用只读 `trosa_maint_read.py company-ownership` 独立核对。
 - 个人 Agent Gateway token（`/api/gateway/*`）保留为登录用户绑定的外部动作入口，用 scope + `Idempotency-Key`；高风险删除/批量/恢复/token管理不开放。Sela 服务身份不扩权、不共享。
 - **已知短板（见§8）**：运行角色疑似 superuser 且无 RLS；隔离主要依赖应用层而非数据库强制。
 
@@ -144,6 +145,7 @@ gateway 11、reminders 9、inbox 8、agent 8）+ 4 非API（`/`、favicon、invi
 5. **ECS 正式契约与迁移账本已完成本轮验收**：当前 release 为
    `auto-20260912085022-9d7d87b`，公网四字段健康门通过，受控 `verify_schema` 确认
    0001–0029、完整 schema contract 与零 orphan reference。后续修改仍须重复该验收。
+6. **跨负责人安全变更已完成本地演练，待上线验收**：新增迁移 0136、0137、全组织归属核查和发送屏障。重编号后的隔离 PostgreSQL 演练运行 87 项并通过；线上实际状态须另行核验。
 
 ## 9. 下一阶段方向（不跳过路线图）
 

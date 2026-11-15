@@ -12,6 +12,20 @@
 > `report-source.md`（归档）与切库清单中，本文件自审计基线日起收敛，
 > 此前事项只收录仍有效的架构结论，不复刻全部产品流水。
 
+## 日期：2026-11-14（本地待部署）
+
+修改内容：新增只对 Sela 服务身份开放的组织级公司归属只读查询；查询写入脱敏的审计记录并限制频率、不缓存。新增迁移 0136、0137：Sela prospect 新建和更新前返回全组织身份/负责人核验，账户写入触发器兜住并发跨负责人创建，并增加发送屏障；新增维护者只读 `company-ownership` 查询与审计说明。
+
+为什么修改：单负责人视角无法确认其他负责人是否已持有同一家公司；仅在创建前检查仍会留下并发窗口，且已有 Sela prospect 可能在转移负责人后继续被更新。
+
+影响范围：Sela 专用 GET 集成路由、PostgreSQL 审计表、Sela prospect 写入和账户创建竞态边界、维护者只读通道。普通人工 CRM 仍允许同一规范公司由不同负责人分别持有账户；返回不含联系人邮箱、备注、沟通正文或金额。
+
+是否需要迁移：是。迁移文件已加入本地工作树，尚未应用；生产数据、服务、定时器和安全暂停均未触碰。
+
+当前状态：迁移重编号后的隔离 PostgreSQL 演练 87 项通过，包含真实数据库写入和并发相关测试；上线验收待执行。
+
+补充覆盖范围：负责人清单包含组织内全部身份（包括停用身份），并独立核对身份总数及全组织账户的负责人和公司引用；无法证明完整时拒绝查询。响应新增 `coverage`：`basis=all_org_identities_and_accounts_v1`、`organization_identity_count` 和 `unresolved_account_count=0`。本次 Sela 整改已校验该完整性证明。
+
 ## 日期：2026-09-28（清理旧 Agent/Gateway 认知残留）
 
 修改内容：删除 `AGENT_API_CAPABILITY_AUDIT.md`；把 `README.md`、`PRODUCT_DIRECTION.md`、`POSTGRESQL_PRODUCTION_CUTOVER.md`、`Trade OS 系统设计说明.md`、`docs/SYSTEM_STATE.md`、`TROSA_MAINTENANCE.md` 中“Sela 经 Trosa Gateway 写回”“上层 Agent 经 `/api/gateway/*`”等过时表述，改为当前正式面：Sela 受限集成 `/api/integrations/sela/*` + 普通业务只读 API（`/api/customers`、`/api/customers/<id>/timeline|tasks|follow_history|contacts`、`/api/inbox`、`/api/reminders/today`、`/api/reminders/upcoming`、`/api/follow-history`，其中 `flow=customer` 表示客户侧真实沟通）。

@@ -15,8 +15,8 @@ the recycle bin.
 
 Usage (production, on the server)::
 
-    python3 tools/merge_customer_duplicate.py --source 1262 --target 3
-    python3 tools/merge_customer_duplicate.py --source 1262 --target 3 --apply --yes
+    python3 tools/merge_customer_duplicate.py --user hamid --source 1262 --target 3
+    python3 tools/merge_customer_duplicate.py --user hamid --source 1262 --target 3 --apply --yes
 
 The default is a dry run that prints exactly what would move.  ``--apply``
 writes one transaction; re-running after a successful merge exits without
@@ -57,15 +57,46 @@ def _customer(conn, customer_id):
         conn,
         '''SELECT r.*, a.company_id AS company_uuid, a.deleted_at AS account_deleted_at
              FROM trosa.customer_records r
-             JOIN trosa.accounts a ON a.id=r.account_id
+             JOIN trosa.account_legacy_refs ref
+               ON ref.organization_id=trosa.compat_org_id()
+              AND ref.legacy_user_id=trosa.compat_current_user()
+              AND ref.legacy_customer_id=r.id AND ref.account_id=r.account_id
+             JOIN trosa.accounts a ON a.id=ref.account_id AND a.organization_id=ref.organization_id
             WHERE r.id=? AND r.deleted_at IS NULL''',
         (customer_id,),
     )
     return rows[0] if rows else None
 
 
-def _snapshot(conn, source, target):
+def _validate_owner(conn, customer, user):
+    """Reject ambiguous or shared identities before reading or changing facts."""
+    if not user or not user.strip():
+        raise ValueError('必须明确指定客户所属成员')
+    row = conn.execute(
+        '''SELECT 1 FROM trosa.account_legacy_refs ref
+             JOIN trosa.accounts a ON a.id=ref.account_id AND a.organization_id=ref.organization_id
+             JOIN identity.users u ON u.id=a.owner_user_id AND u.organization_id=ref.organization_id
+            WHERE nullif(current_setting('trade_os.user', true), '')=?
+              AND ref.organization_id=trosa.compat_org_id() AND ref.legacy_user_id=?
+              AND u.legacy_user_id=? AND ref.legacy_customer_id=?
+              AND ref.account_id=? AND a.company_id=?
+              AND NOT EXISTS (SELECT 1 FROM trosa.account_legacy_refs other
+                               WHERE other.account_id=a.id
+                                 AND (other.organization_id<>ref.organization_id
+                                   OR other.legacy_user_id<>ref.legacy_user_id
+                                   OR other.legacy_customer_id<>ref.legacy_customer_id))
+              AND NOT EXISTS (SELECT 1 FROM trosa.accounts other
+                               WHERE other.company_id=a.company_id AND other.id<>a.id)''',
+        (user, user, user, customer['id'], customer['account_id'], customer['company_uuid']),
+    ).fetchone()
+    if not row:
+        raise ValueError('客户归属不明确或账户、公司由其他成员共享，已停止合并')
+
+
+def _snapshot(conn, source, target, user):
     """Every fact the merge reads or moves, so the change is reversible by hand."""
+    _validate_owner(conn, source, user)
+    _validate_owner(conn, target, user)
     source_account = source['account_id']
     target_account = target['account_id']
     statement = {}
@@ -75,7 +106,9 @@ def _snapshot(conn, source, target):
     statement['legacy_refs'] = _rows(
         conn,
         '''SELECT * FROM trosa.account_legacy_refs
-            WHERE legacy_customer_id IN (?, ?)''',
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user()
+              AND legacy_customer_id IN (?, ?)''',
         (source['id'], target['id']),
     )
     statement['details'] = _rows(
@@ -85,7 +118,8 @@ def _snapshot(conn, source, target):
     )
     statement['states'] = _rows(
         conn,
-        'SELECT * FROM trosa.customer_states WHERE legacy_customer_id IN (?, ?)',
+        '''SELECT * FROM trosa.customer_states WHERE organization_id=trosa.compat_org_id()
+             AND legacy_user_id=trosa.compat_current_user() AND legacy_customer_id IN (?, ?)''',
         (source['id'], target['id']),
     )
     # ``trosa.customer_contacts`` is a read view; contacts live per user in
@@ -117,7 +151,8 @@ def _snapshot(conn, source, target):
     statement['prospect_profiles'] = _rows(
         conn,
         '''SELECT * FROM trosa.agent_prospect_profiles
-            WHERE customer_id IN (?, ?)''',
+            WHERE organization_id=trosa.compat_org_id()
+              AND legacy_user_id=trosa.compat_current_user() AND customer_id IN (?, ?)''',
         (source['id'], target['id']),
     )
     company_ids = [source['company_uuid'], target['company_uuid']]
@@ -164,18 +199,22 @@ def _rebind_payload(conn, tables, target_account, source_id, target_id):
     """
     rebound = {}
     for table, column in tables:
+        owner_filter = (' AND organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()'
+                        if table == 'trosa.contact_legacy_refs' else '')
         rebound[f'{table}.{column}'] = _exec(
             conn,
             f'''UPDATE {table}
                    SET {column} = coalesce({column}, '{{}}'::jsonb)
                        || jsonb_build_object('customer_id', ?::text)
-                 WHERE account_id=? AND {column}->>'customer_id'=?''',
+                 WHERE account_id=? AND {column}->>'customer_id'=?{owner_filter}''',
             (str(target_id), target_account, str(source_id)),
         )
     return rebound
 
 
-def _merge(conn, source, target, note):
+def _merge(conn, source, target, note, user):
+    _validate_owner(conn, source, user)
+    _validate_owner(conn, target, user)
     source_id, target_id = int(source['id']), int(target['id'])
     source_account, target_account = source['account_id'], target['account_id']
     source_company, target_company = source['company_uuid'], target['company_uuid']
@@ -249,7 +288,8 @@ def _merge(conn, source, target, note):
     # Customer (unique key).  When the survivor already has one, keep it (and
     # block it); the duplicate's profile is dropped with its research.
     target_profile = conn.execute(
-        'SELECT id FROM trosa.agent_prospect_profiles WHERE customer_id=?', (target_id,)
+        '''SELECT id FROM trosa.agent_prospect_profiles WHERE organization_id=trosa.compat_org_id()
+             AND legacy_user_id=trosa.compat_current_user() AND customer_id=?''', (target_id,)
     ).fetchone()
     if target_profile:
         moved['prospect_profiles'] = _exec(
@@ -257,18 +297,21 @@ def _merge(conn, source, target, note):
             """UPDATE trosa.agent_prospect_profiles
                   SET contact_permission='do_not_contact', suppression_reason=?,
                       suppression_at=?, updated_at=?
-                WHERE customer_id=?""",
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user() AND customer_id=?""",
             (note, now, now, target_id),
         )
         moved['prospect_profiles_removed'] = _exec(
-            conn, 'DELETE FROM trosa.agent_prospect_profiles WHERE customer_id=?', (source_id,))
+            conn, '''DELETE FROM trosa.agent_prospect_profiles WHERE organization_id=trosa.compat_org_id()
+                     AND legacy_user_id=trosa.compat_current_user() AND customer_id=?''', (source_id,))
     else:
         moved['prospect_profiles'] = _exec(
             conn,
             """UPDATE trosa.agent_prospect_profiles
                   SET customer_id=?, contact_permission='do_not_contact',
                       suppression_reason=?, suppression_at=?, updated_at=?
-                WHERE customer_id=?""",
+                WHERE organization_id=trosa.compat_org_id()
+                  AND legacy_user_id=trosa.compat_current_user() AND customer_id=?""",
             (target_id, note, now, now, source_id),
         )
 
@@ -325,8 +368,8 @@ def _merge(conn, source, target, note):
                    || jsonb_build_object('is_deleted', '1'::text, 'deleted_at', ?::text)
             WHERE organization_id=trosa.compat_org_id()
               AND legacy_user_id=trosa.compat_current_user()
-              AND legacy_customer_id=?""",
-        (now, source_id),
+              AND legacy_customer_id=? AND account_id=?""",
+        (now, source_id, source_account),
     )
     return moved
 
@@ -376,9 +419,14 @@ def main(argv=None):
     parser.add_argument('--repair', action='store_true',
                         help='合并已完成但历史绑定仍指向旧客户时，补齐 legacy_payload 的 customer_id')
     parser.add_argument('--yes', action='store_true', help='与 --apply 一起确认写入')
-    parser.add_argument('--user', default=os.environ.get('TRADE_OS_AGENT_USER') or 'hamid')
+    parser.add_argument('--user', default=os.environ.get('TRADE_OS_AGENT_USER', ''),
+                        help='客户所属成员（或设置 TRADE_OS_AGENT_USER）')
     args = parser.parse_args(argv)
 
+    args.user = args.user.strip()
+    if not args.user:
+        print('必须通过 --user 或 TRADE_OS_AGENT_USER 明确指定客户所属成员。', file=sys.stderr)
+        return 2
     if not db.postgres_mode():
         print('只支持正式 PostgreSQL 运行环境；SQLite 仅供开发，不做客户合并。', file=sys.stderr)
         return 2
@@ -394,7 +442,24 @@ def main(argv=None):
     try:
         source = _customer(conn, args.source)
         target = _customer(conn, args.target)
+        if source:
+            _validate_owner(conn, source, args.user)
+        if target:
+            _validate_owner(conn, target, args.user)
         if source is None and target is not None and args.repair:
+            # Repair is only safe when the archived source still maps to this owner.
+            archived = conn.execute(
+                '''SELECT ref.legacy_customer_id AS id, ref.account_id, a.company_id AS company_uuid
+                     FROM trosa.account_legacy_refs ref JOIN trosa.accounts a ON a.id=ref.account_id
+                    WHERE ref.organization_id=trosa.compat_org_id()
+                      AND ref.legacy_user_id=trosa.compat_current_user() AND ref.legacy_customer_id=?
+                      AND lower(coalesce(ref.legacy_payload->>'is_deleted', '0')) IN ('1', 'true')''',
+                (args.source,),
+            ).fetchone()
+            if not archived:
+                print('找不到该成员已归档的来源客户，无法安全补绑定。', file=sys.stderr)
+                return 2
+            _validate_owner(conn, archived, args.user)
             if not args.apply or not args.yes:
                 print(json.dumps({'repair': 'dry-run', 'source': args.source,
                                   'target': args.target}, ensure_ascii=False))
@@ -425,7 +490,7 @@ def main(argv=None):
             f'（{source.get("website") or "无官网"}）并入 #{args.target}，'
             '保留其开发邮件与联系人，并停止 sela 对该公司的自动联系。')
 
-        statement = _snapshot(conn, source, target)
+        statement = _snapshot(conn, source, target, args.user)
         print(json.dumps({
             'source': {key: source.get(key) for key in
                        ('id', 'name', 'company', 'website', 'import_source', 'external_source', 'external_id')},
@@ -441,7 +506,7 @@ def main(argv=None):
 
         backup_path = _write_backup(statement, args.backup_dir, args.source, args.target)
         print(f'备份已写入 {backup_path}')
-        moved = _merge(conn, source, target, note)
+        moved = _merge(conn, source, target, note, args.user)
         _write_audit(
             conn, args.user, args.target,
             f'合并重复客户 #{args.source}（{source.get("company") or source.get("name")}）到 '

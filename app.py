@@ -382,6 +382,7 @@ def _sela_integration_path_allowed():
         (request.method == 'GET' and request.path in {
             '/api/integrations/sela/health',
             '/api/integrations/sela/exclusions',
+            '/api/integrations/sela/company-ownership',
             '/api/integrations/sela/prospects',
             '/api/integrations/sela/needs',
             '/api/integrations/sela/continuations',
@@ -390,6 +391,9 @@ def _sela_integration_path_allowed():
             '/api/integrations/sela/outreach-history',
         })
         or (request.method == 'POST' and request.path in {
+            '/api/integrations/sela/send-barrier/prepare',
+            '/api/integrations/sela/send-barrier/arm',
+            '/api/integrations/sela/send-barrier/finalize',
             '/api/integrations/sela/reply',
             '/api/integrations/sela/prospects',
             '/api/integrations/sela/exclusions',
@@ -900,6 +904,23 @@ def login_required(f):
         ):
             return jsonify({'error': '未登录', 'login_required': True}), 401
         return f(*args, **kwargs)
+    return decorated
+
+
+def sela_service_required(f):
+    """Require the dedicated non-interactive Sela credential for org-wide reads."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get('user') or getattr(g, 'gateway_principal', None):
+            return jsonify({'error': '全组织所有权查询仅供 Sela 服务凭据使用'}), 403
+        if not _sela_service_integration_user():
+            return jsonify({'error': '需要有效的 Sela 服务凭据'}), 401
+        if str(getattr(g, 'current_user', '') or '') != 'hamid':
+            return jsonify({'error': 'Sela 服务身份未正确建立'}), 403
+        return f(*args, **kwargs)
+
     return decorated
 
 
@@ -4550,6 +4571,8 @@ def _sela_business_exclusion_view(row):
         'match_policy': str(row.get('match_policy') or 'hard'),
         'source': str(row.get('source') or 'business_exclusion'),
         'source_id': str(row.get('source_id') or ''),
+        # Missing ownership must stay unresolved so Sela treats crm_contacted as hard.
+        'owner_username': str(row.get('legacy_user_id') or ''),
         'reason': str(row.get('reason') or ''),
         'is_active': bool(row.get('is_active')),
         'updated_at': str(row.get('updated_at') or ''),
@@ -4909,9 +4932,9 @@ def _sela_other_member_contact_records(own_records):
                              FROM customers WHERE is_deleted=0 OR is_deleted IS NULL''').fetchall()
             finally:
                 member_conn.close()
-        except Exception:
+        except Exception as exc:
             logger.exception('sela exclusion: 读取成员 %s 的联系事实失败', member)
-            continue
+            raise RuntimeError(f'全组织排除快照不完整：无法读取成员 {member}') from exc
         finally:
             set_db_user(current)
         for row in rows:
@@ -4937,6 +4960,7 @@ def _sela_other_member_contact_records(own_records):
                 'normalized_name': name_key,
                 'aliases': aliases,
                 'domains': domains,
+                'owner_username': member,
                 'country': str(item.get('country') or ''),
                 'status': 'member_contacted', 'match_policy': 'hard',
                 'source': 'trosa_member_contact', 'source_id': f'{member}:{customer_id}',
@@ -4993,6 +5017,7 @@ def _sela_exclusion_snapshot_records(conn):
             'normalized_name': _sync_name_key(canonical_name),
             'aliases': aliases,
             'domains': domains,
+            'owner_username': get_current_user(),
             'country': str(item.get('country') or ''),
             'status': _sela_customer_exclusion_status(evidence), 'match_policy': 'hard',
             'source': 'trosa_customer', 'source_id': str(customer_id),
@@ -5069,6 +5094,7 @@ def _sela_exclusion_snapshot_records(conn):
                 'normalized_name': _sync_name_key(canonical_name),
                 'aliases': suppression_aliases,
                 'domains': suppression_domains,
+                'owner_username': get_current_user(),
                 'country': str(item.get('country') or ''),
                 'status': 'do_not_contact', 'match_policy': 'hard',
                 'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),
@@ -5125,6 +5151,7 @@ def _sela_exclusion_snapshot_records(conn):
             'normalized_name': _sync_name_key(canonical_name),
             'aliases': suppression_aliases,
             'domains': suppression_domains,
+            'owner_username': get_current_user(),
             'country': str(item.get('country') or ''),
             'status': 'do_not_contact', 'match_policy': 'hard',
             'source': 'trosa_contact_suppression', 'source_id': str(item.get('source_id') or ''),
@@ -6123,6 +6150,66 @@ def _sela_upsert_prospect(conn, prospect):
     created = False
     warnings = []
 
+    if postgres_mode():
+        try:
+            # Apply the organization-wide ownership gate to both a new
+            # prospect and every Sela update.  An existing Sela source id may
+            # have been transferred to another owner since its last write.
+            ownership = _sela_company_ownership_snapshot(
+                conn,
+                domain=prospect.get('website') or prospect.get('domain') or '',
+                name=company,
+                email_domain=_canonical_website_domain(
+                    (prospect.get('contact') or {}).get('email')
+                    if isinstance(prospect.get('contact'), dict) else prospect.get('email')),
+            )
+            ownership_key_hash = _sela_hash({
+                'domain': _canonical_website_domain(prospect.get('website') or prospect.get('domain')),
+                'name': company,
+                'email_domain': _canonical_website_domain(
+                    (prospect.get('contact') or {}).get('email')
+                    if isinstance(prospect.get('contact'), dict) else prospect.get('email')),
+            })
+            conn.execute(
+                '''INSERT INTO audit.sela_company_ownership_lookups
+                       (id, organization_id, requested_by, key_hash, match_count, checked_owner_count)
+                   VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?)''',
+                (str(uuid4()), _sela_prospect_user(), ownership_key_hash,
+                 len(ownership['matches']), ownership['total_owners']),
+            )
+        except Exception as exc:
+            raise CrmWriteError('全组织所有权核验失败，已停止 Prospect 创建', 503) from exc
+        current_owner = str(_sela_prospect_user() or '')
+        ownership_conflicts = []
+        for matched_company in ownership['matches']:
+            accounts = matched_company.get('accounts') or []
+            unknown_company_identity = str(matched_company.get('identity_status') or '').lower() not in {'confirmed', 'verified'}
+            if not accounts:
+                ownership_conflicts.append({
+                    'company_id': matched_company.get('company_id'),
+                    'company': matched_company.get('canonical_name'),
+                    'owner_username': '', 'owner_display_name': '', 'account_id': '',
+                    'account_status': '', 'matched_by': matched_company.get('matched_by') or [],
+                })
+                continue
+            for account in accounts:
+                owner = str(account.get('owner_username') or '')
+                if unknown_company_identity or not owner or owner != current_owner:
+                    ownership_conflicts.append({
+                        'company_id': matched_company.get('company_id'),
+                        'company': matched_company.get('canonical_name'),
+                        'owner_username': owner,
+                        'owner_display_name': account.get('owner_display_name') or '',
+                        'account_id': account.get('account_id') or '',
+                        'account_status': account.get('account_status') or '',
+                        'matched_by': matched_company.get('matched_by') or [],
+                    })
+        if ownership_conflicts:
+            return {
+                'success': True, 'status': 'REVIEW', 'reason': 'CROSS_OWNER_COMPANY',
+                'source_id': source_id, 'candidates': ownership_conflicts[:20],
+            }
+
     if profile and not customer:
         raise CrmWriteError('Prospect 关联的客户已不存在', 409)
     if customer:
@@ -6237,7 +6324,47 @@ def _sela_upsert_prospect(conn, prospect):
                 ),
             }
             if postgres_mode():
-                customer_id = _create_customer_record(conn, values=creation_values)
+                conn.execute('SAVEPOINT sela_cross_owner_prospect_create')
+                try:
+                    customer_id = _create_customer_record(conn, values=creation_values)
+                except Exception as exc:
+                    if 'CROSS_OWNER_COMPANY' not in str(exc):
+                        conn.execute('ROLLBACK TO SAVEPOINT sela_cross_owner_prospect_create')
+                        conn.execute('RELEASE SAVEPOINT sela_cross_owner_prospect_create')
+                        raise
+                    conn.execute('ROLLBACK TO SAVEPOINT sela_cross_owner_prospect_create')
+                    conn.execute('RELEASE SAVEPOINT sela_cross_owner_prospect_create')
+                    try:
+                        current = _sela_company_ownership_snapshot(
+                            conn,
+                            domain=prospect.get('website') or prospect.get('domain') or '',
+                            name=company,
+                        )
+                    except Exception:
+                        current = {'matches': []}
+                    conflict_candidates = []
+                    for matched_company in current.get('matches') or []:
+                        for account in matched_company.get('accounts') or [{}]:
+                            conflict_candidates.append({
+                                'company_id': matched_company.get('company_id'),
+                                'company': matched_company.get('canonical_name') or company,
+                                'owner_username': account.get('owner_username') or '',
+                                'owner_display_name': account.get('owner_display_name') or '',
+                                'account_id': account.get('account_id') or '',
+                                'account_status': account.get('account_status') or '',
+                                'matched_by': matched_company.get('matched_by') or ['database_guard'],
+                            })
+                    if not conflict_candidates:
+                        conflict_candidates = [{
+                            'company': company, 'owner_username': '',
+                            'matched_by': ['database_guard'],
+                        }]
+                    return {
+                        'success': True, 'status': 'REVIEW', 'reason': 'CROSS_OWNER_COMPANY',
+                        'source_id': source_id, 'candidates': conflict_candidates[:20],
+                    }
+                else:
+                    conn.execute('RELEASE SAVEPOINT sela_cross_owner_prospect_create')
             else:
                 cursor = conn.execute(
                     '''INSERT INTO customers
@@ -9542,6 +9669,346 @@ def sela_integration_exclusions():
     for key, value in response_headers.items():
         response.headers[key] = value
     return response
+
+
+def _sela_company_ownership_snapshot(conn, *, domain='', domains=(), name='', email_domain=''):
+    """Build a minimal, complete ownership projection for one organization."""
+    if not postgres_mode():
+        raise RuntimeError('全组织所有权查询只支持正式 PostgreSQL 数据内核')
+    if not isinstance(domains, (list, tuple)):
+        raise ValueError('公司域名列表格式无效')
+    if any(not isinstance(raw, str) for raw in domains):
+        raise ValueError('公司域名列表格式无效')
+    raw_domains = [raw for raw in (domain, *domains, email_domain) if str(raw or '').strip()]
+    if any(not _canonical_website_domain(raw) for raw in raw_domains):
+        raise ValueError('公司域名格式无效，无法完成所有权查询')
+    domain_keys = sorted({key for raw in (domain, *domains, email_domain)
+                          if (key := _canonical_website_domain(raw))})
+    name_keys = list(dict.fromkeys(_sela_name_variants(name)))
+    if not domain_keys and not name_keys:
+        raise ValueError('需要公司名称或官网域名')
+
+    org_row = conn.execute('SELECT trosa.compat_org_id() AS organization_id').fetchone()
+    organization_id = str(org_row['organization_id'] or '') if org_row else ''
+    if not organization_id:
+        raise RuntimeError('Trosa 组织身份不可用')
+    users = conn.execute(
+        '''SELECT legacy_user_id, display_name
+             FROM identity.users
+            WHERE organization_id=trosa.compat_org_id()
+            ORDER BY legacy_user_id''',
+    ).fetchall()
+    if not users or any(not str(row['legacy_user_id'] or '').strip()
+                        or str(row['legacy_user_id']) != str(row['legacy_user_id']).strip()
+                        for row in users):
+        raise RuntimeError('Trosa 负责人清单不完整')
+    owner_rows = {str(row['legacy_user_id']): str(row['display_name'] or '') for row in users}
+    checked_owners = sorted(owner_rows)
+    coverage = conn.execute(
+        '''SELECT
+             (SELECT count(*) FROM identity.users
+               WHERE organization_id=trosa.compat_org_id()) AS total_owners,
+             (SELECT count(*) FROM trosa.accounts account
+               LEFT JOIN identity.users owner
+                 ON owner.id=account.owner_user_id AND owner.organization_id=account.organization_id
+               LEFT JOIN core.companies company
+                 ON company.id=account.company_id AND company.organization_id=account.organization_id
+              WHERE account.organization_id=trosa.compat_org_id()
+                AND (owner.id IS NULL OR owner.legacy_user_id IS NULL
+                     OR btrim(owner.legacy_user_id)='' OR company.id IS NULL)) AS unresolved_accounts'''
+    ).fetchone()
+    if (not coverage or int(coverage['total_owners']) != len(checked_owners)
+            or int(coverage['unresolved_accounts']) != 0):
+        raise RuntimeError('Trosa 负责人或账户归属覆盖不完整')
+    total_companies = int(conn.execute(
+        'SELECT count(*) AS count FROM core.companies WHERE organization_id=trosa.compat_org_id()'
+    ).fetchone()['count'])
+
+    clauses = []
+    params = []
+    if domain_keys:
+        marks = ','.join('?' for _ in domain_keys)
+        clauses.append('(domain.normalized_domain IN (' + marks + ') OR EXISTS ('
+                       "SELECT 1 FROM regexp_split_to_table(coalesce(company.website, ''), "
+                       "'[[:space:],;，；]+') AS website_part(value) "
+                       'WHERE trosa.sela_company_domain_key(website_part.value) IN (' + marks + ')))')
+        params.extend(domain_keys)
+        params.extend(domain_keys)
+    if name_keys:
+        marks = ','.join('?' for _ in name_keys)
+        clauses.append('(company.normalized_name IN (' + marks + ') '
+                       'OR trosa.sela_company_name_key(company.canonical_name) IN (' + marks + ') '
+                       'OR company_alias.normalized_alias IN (' + marks + '))')
+        params.extend(name_keys)
+        params.extend(name_keys)
+        params.extend(name_keys)
+    rows = conn.execute(
+        '''SELECT company.id AS company_id, company.canonical_name,
+                  company.normalized_name, company.website, company.identity_status,
+                  domain.normalized_domain, company_alias.normalized_alias,
+                  account.id AS account_id, owner.legacy_user_id AS owner_username,
+                  owner.display_name AS owner_display_name, account.account_status,
+                  account.last_contact_at::date::text AS last_contact_on
+             FROM core.companies company
+             LEFT JOIN core.company_domains domain ON domain.company_id=company.id
+             LEFT JOIN core.company_aliases company_alias ON company_alias.company_id=company.id
+             LEFT JOIN trosa.accounts account
+               ON account.company_id=company.id AND account.organization_id=company.organization_id
+             LEFT JOIN identity.users owner ON owner.id=account.owner_user_id
+                                      AND owner.organization_id=account.organization_id
+            WHERE company.organization_id=trosa.compat_org_id()
+              AND (''' + ' OR '.join(clauses) + ''')
+            ORDER BY company.id, owner.legacy_user_id, account.id''',
+        params,
+    ).fetchall()
+    grouped = {}
+    for raw in rows:
+        row = dict(raw)
+        company_id = str(row['company_id'])
+        item = grouped.setdefault(company_id, {
+            'company_id': company_id,
+            'canonical_name': str(row.get('canonical_name') or ''),
+            'website': str(row.get('website') or ''),
+            'identity_status': str(row.get('identity_status') or ''),
+            'matched_by': set(),
+            'accounts_by_id': {},
+        })
+        if (row.get('normalized_domain') in domain_keys
+                or set(_canonical_website_domains(row.get('website'))) & set(domain_keys)):
+            item['matched_by'].add('domain')
+        if (row.get('normalized_name') in name_keys
+                or row.get('normalized_alias') in name_keys
+                or (name and _sync_name_key(row.get('canonical_name')) in name_keys)):
+            item['matched_by'].add('name')
+        if row.get('account_id') is not None:
+            account_id = str(row['account_id'])
+            item['accounts_by_id'][account_id] = {
+                'account_id': account_id,
+                'owner_username': str(row.get('owner_username') or ''),
+                'owner_display_name': str(row.get('owner_display_name') or ''),
+                'account_status': str(row.get('account_status') or ''),
+                'last_contact_on': str(row.get('last_contact_on') or ''),
+            }
+    matches = []
+    for item in grouped.values():
+        matches.append({
+            'company_id': item['company_id'],
+            'canonical_name': item['canonical_name'],
+            'website': item['website'],
+            'identity_status': item['identity_status'],
+            'matched_by': sorted(item['matched_by']),
+            'accounts': sorted(item['accounts_by_id'].values(), key=lambda row: row['owner_username']),
+        })
+    return {
+        'success': True,
+        'schema_version': 1,
+        'scope': 'org',
+        'organization_id': organization_id,
+        'as_of': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'checked_owners': checked_owners,
+        'total_owners': int(coverage['total_owners']),
+        'coverage': {
+            'basis': 'all_org_identities_and_accounts_v1',
+            'organization_identity_count': int(coverage['total_owners']),
+            'unresolved_account_count': int(coverage['unresolved_accounts']),
+        },
+        'total_companies': total_companies,
+        'matched': bool(matches),
+        'matches': matches,
+    }
+
+
+@app.route('/api/integrations/sela/send-barrier/<action>', methods=['POST'])
+@login_required
+@sela_service_required
+def sela_send_barrier(action):
+    """Fail closed around the provider send; UNKNOWN never releases a lock."""
+    if action not in {'prepare', 'arm', 'finalize'} or not postgres_mode():
+        return jsonify({'success': False, 'error': '发送屏障不可用'}), 503
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': '请求无效'}), 400
+    allowed = {'send_id', 'token', 'name', 'domain', 'domains', 'email_domain', 'recipient_hash', 'outcome', 'send_not_started'}
+    if set(data) - allowed:
+        return jsonify({'success': False, 'error': '请求包含不支持的字段'}), 400
+    send_not_started = data.get('send_not_started', False)
+    if type(send_not_started) is not bool:
+        return jsonify({'success': False, 'error': 'send_not_started 必须为布尔值'}), 400
+    if send_not_started and (action != 'finalize' or data.get('outcome') != 'CONFIRMED_NOT_SENT'):
+        return jsonify({'success': False, 'error': 'send_not_started 仅适用于 CONFIRMED_NOT_SENT'}), 400
+    try:
+        send_id = str(UUID(str(data.get('send_id') or '')))
+    except ValueError:
+        return jsonify({'success': False, 'error': 'send_id 无效'}), 400
+    name = str(data.get('name') or '').strip()
+    domain = str(data.get('domain') or '').strip()
+    email_domain = str(data.get('email_domain') or '').strip()
+    domains = data.get('domains', [])
+    if (not isinstance(domains, list) or len(domains) > 12
+            or any(not isinstance(item, str) or len(item) > 320
+                   or not item.strip() or re.search(r'[\s@/,;，；]', item)
+                   or not _canonical_website_domain(item) for item in domains)):
+        return jsonify({'success': False, 'error': '公司域名列表无效'}), 400
+    if len(name) > 500 or len(domain) > 320 or len(email_domain) > 320:
+        return jsonify({'success': False, 'error': '公司身份过长'}), 400
+    recipient_hash = data.get('recipient_hash')
+    if action in {'prepare', 'arm'} and (not isinstance(recipient_hash, str) or not re.fullmatch(r'[a-f0-9]{64}', recipient_hash)):
+        return jsonify({'success': False, 'error': '收件人摘要无效'}), 400
+    if action == 'prepare' and not (name or domain or email_domain or domains):
+        return jsonify({'success': False, 'error': '公司身份或收件人摘要无效'}), 400
+    identity_hash = _sela_hash({'name': name, 'domain': domain, 'domains': domains, 'email_domain': email_domain})
+    conn = get_db()
+    try:
+        conn.execute('SELECT trosa.sela_send_barrier_lock(trosa.compat_org_id())')
+        conn.execute("SELECT set_config('trosa.sela_send_barrier_operation', ?, true)", (action,))
+        row = conn.execute('SELECT *, expires_at > now() AS fresh FROM audit.sela_send_barriers WHERE organization_id=trosa.compat_org_id() AND send_id=? FOR UPDATE', (send_id,)).fetchone()
+        user = str(get_current_user() or '')
+        if action == 'prepare':
+            # Validate the identity and coverage even before issuing a token.
+            _sela_company_ownership_snapshot(conn, name=name, domain=domain, domains=domains, email_domain=email_domain)
+            if row:
+                if row['requested_by'] != user or row['identity_hash'] != identity_hash or row['recipient_hash'] != recipient_hash:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': 'send_id 已用于不同请求'}), 409
+                if row['state'] == 'PREPARED' and not row['fresh']:
+                    token = secrets.token_urlsafe(32)
+                    conn.execute("""UPDATE audit.sela_send_barriers
+                        SET token=?, expires_at=now() + interval '5 minutes', updated_at=now()
+                        WHERE organization_id=trosa.compat_org_id() AND send_id=?""", (token, send_id))
+                    result = {'success': True, 'state': 'PREPARED', 'token': token, 'fresh': True}
+                else:
+                    result = {'success': True, 'state': row['state'], 'token': row['token'], 'fresh': row['fresh']}
+            else:
+                token = secrets.token_urlsafe(32)
+                conn.execute("""INSERT INTO audit.sela_send_barriers
+                    (organization_id, send_id, requested_by, identity_hash, recipient_hash, token, state, expires_at)
+                    VALUES (trosa.compat_org_id(), ?, ?, ?, ?, ?, 'PREPARED', now() + interval '5 minutes')""",
+                    (send_id, user, identity_hash, recipient_hash, token))
+                result = {'success': True, 'state': 'PREPARED', 'token': token, 'fresh': True}
+        else:
+            token = str(data.get('token') or '')
+            if not row or row['requested_by'] != user or not secrets.compare_digest(str(row['token']), token):
+                conn.rollback()
+                return jsonify({'success': False, 'error': '屏障凭证无效'}), 403
+            state = row['state']
+            if action == 'arm':
+                if not secrets.compare_digest(row['recipient_hash'], recipient_hash):
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '收件人摘要已改变'}), 409
+                if row['identity_hash'] != identity_hash:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '公司身份已改变'}), 409
+                if state == 'ARMED':
+                    result = {'success': True, 'state': state, 'acquired': False}
+                elif state != 'PREPARED' or not row['fresh']:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '准备凭证已过期或已结束'}), 409
+                else:
+                    ownership = _sela_company_ownership_snapshot(conn, name=name, domain=domain, domains=domains, email_domain=email_domain)
+                    if any((match['accounts'] and str(match.get('identity_status') or '').lower() not in {'confirmed', 'verified'})
+                           or any(not a.get('owner_username') or a['owner_username'] != user
+                                  for a in match['accounts'])
+                           for match in ownership['matches']):
+                        conn.rollback()
+                        return jsonify({'success': False, 'error': '公司属于其他负责人'}), 409
+                    conn.execute("UPDATE audit.sela_send_barriers SET state='ARMED', updated_at=now() WHERE organization_id=trosa.compat_org_id() AND send_id=?", (send_id,))
+                    result = {'success': True, 'state': 'ARMED', 'acquired': True}
+            else:
+                outcome = str(data.get('outcome') or '')
+                if outcome not in {'UNKNOWN', 'SENT', 'CONFIRMED_NOT_SENT'}:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '结果无效'}), 400
+                prepared_closed_before_send = (
+                    state == 'PREPARED'
+                    and outcome == 'CONFIRMED_NOT_SENT'
+                    and send_not_started is True
+                )
+                if state != 'ARMED' and state != outcome and not prepared_closed_before_send:
+                    conn.rollback()
+                    return jsonify({'success': False, 'error': '屏障状态不允许该结果'}), 409
+                if state in {'PREPARED', 'ARMED'} and outcome != 'UNKNOWN':
+                    conn.execute('UPDATE audit.sela_send_barriers SET state=?, updated_at=now() WHERE organization_id=trosa.compat_org_id() AND send_id=?', (outcome, send_id))
+                    state = outcome
+                result = {'success': True, 'state': state}
+        conn.commit()
+        response = jsonify(result)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+    except ValueError as exc:
+        conn.rollback()
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception:
+        conn.rollback()
+        logger.exception('Sela send barrier failed')
+        return jsonify({'success': False, 'error': '发送屏障校验失败'}), 503
+    finally:
+        conn.close()
+
+
+@app.route('/api/integrations/sela/company-ownership', methods=['GET'])
+@login_required
+@sela_service_required
+def sela_integration_company_ownership():
+    """Authorized, audited, minimal organization-wide ownership read for Sela."""
+    if not postgres_mode():
+        response = jsonify({'success': False, 'error': '全组织所有权查询只支持 PostgreSQL 正式数据内核'})
+        response.headers['Cache-Control'] = 'no-store'
+        return response, 503
+    allowed = {'domain', 'name', 'email_domain'}
+    if set(request.args.keys()) - allowed:
+        return jsonify({'success': False, 'error': '所有权查询参数无效'}), 400
+    if len(request.args.getlist('name')) > 1 or len(request.args.getlist('email_domain')) > 1:
+        return jsonify({'success': False, 'error': '所有权查询参数重复'}), 400
+    domain_values = [str(value or '').strip()[:320] for value in request.args.getlist('domain')]
+    if len(domain_values) > 12:
+        return jsonify({'success': False, 'error': '域名数量过多'}), 400
+    domain = domain_values[0] if domain_values else ''
+    domains = domain_values[1:]
+    name = str(request.args.get('name') or '').strip()[:500]
+    email_domain = str(request.args.get('email_domain') or '').strip()[:320]
+    if not any((domain, name, email_domain)):
+        return jsonify({'success': False, 'error': '需要公司名称或官网域名'}), 400
+    conn = get_db()
+    try:
+        # Pin the complete owner/company view to one fresh transaction snapshot;
+        # the audit row is the only business-independent write in this route.
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+        org_id = str(conn.execute('SELECT trosa.compat_org_id() AS organization_id').fetchone()['organization_id'])
+        requested_by = str(get_current_user() or '')
+        recent = int(conn.execute(
+            '''SELECT count(*) AS count
+                 FROM audit.sela_company_ownership_lookups
+                WHERE organization_id=? AND requested_by=?
+                  AND created_at > now() - interval '1 minute' ''',
+            (org_id, requested_by),
+        ).fetchone()['count'])
+        if recent >= 120:
+            conn.rollback()
+            response = jsonify({'success': False, 'error': '所有权查询频率过高，请稍后重试'})
+            response.headers['Cache-Control'] = 'no-store'
+            return response, 429
+        body = _sela_company_ownership_snapshot(
+            conn, domain=domain, domains=domains, name=name, email_domain=email_domain)
+        key_hash = _sela_hash({'domain': domain, 'name': name, 'email_domain': email_domain})
+        conn.execute(
+            '''INSERT INTO audit.sela_company_ownership_lookups
+                   (id, organization_id, requested_by, key_hash, match_count, checked_owner_count)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (str(uuid4()), org_id, requested_by, key_hash, len(body['matches']), body['total_owners']),
+        )
+        conn.commit()
+        response = jsonify(body)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return response
+    except ValueError as exc:
+        conn.rollback()
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception:
+        conn.rollback()
+        logger.exception('Sela organization-wide ownership lookup failed')
+        return jsonify({'success': False, 'error': '全组织所有权查询失败，已停止'}), 503
+    finally:
+        conn.close()
 
 
 @app.route('/api/integrations/sela/exclusions', methods=['POST'])

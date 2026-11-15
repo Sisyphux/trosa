@@ -365,6 +365,48 @@ def _cmd_customers(args) -> int:
     return 0
 
 
+def _cmd_company_ownership(args) -> int:
+    """Read owner-scoped accounts across the organization without contact data."""
+    domain = str(getattr(args, 'domain', '') or '').strip().lower()
+    name = str(getattr(args, 'name', '') or '').strip()
+    if not domain and not name:
+        raise MaintError('需要 --domain 或 --name')
+    predicates, params = [], []
+    if domain:
+        predicates.append('domain.normalized_domain=%s')
+        params.append(domain.removeprefix('https://').removeprefix('http://').removeprefix('www.').strip('/'))
+    if name:
+        predicates.append(
+            '(trosa.sela_company_name_key(company.canonical_name)='
+            'trosa.sela_company_name_key(%s) OR EXISTS '
+            '(SELECT 1 FROM core.company_aliases alias '
+            ' WHERE alias.company_id=company.id '
+            ' AND trosa.sela_company_name_key(alias.alias)=trosa.sela_company_name_key(%s)))'
+        )
+        params.extend([name, name])
+    columns, rows, truncated = run_query(
+        '''SELECT company.id AS company_id, company.canonical_name, company.website,
+                  company.identity_status, account.id AS account_id,
+                  owner.legacy_user_id AS owner_username, owner.display_name AS owner_display_name,
+                  account.account_status, account.last_contact_at::date AS last_contact_on
+             FROM core.companies company
+             LEFT JOIN core.company_domains domain ON domain.company_id=company.id
+             LEFT JOIN trosa.accounts account
+               ON account.company_id=company.id AND account.organization_id=company.organization_id
+             LEFT JOIN identity.users owner
+               ON owner.id=account.owner_user_id AND owner.organization_id=account.organization_id
+            WHERE company.organization_id=trosa.compat_org_id()
+              AND (''' + ' OR '.join(predicates) + ''')
+            ORDER BY company.canonical_name, owner.legacy_user_id, account.id''',
+        tuple(params), limit=MAX_ROWS,
+    )
+    if truncated:
+        raise MaintError(f'匹配超过 {MAX_ROWS} 行；请缩小公司名称或域名后重试')
+    _audit('company-ownership', 'organization-wide owner lookup')
+    _emit(columns, rows, False, extra={'scope': 'org', 'read_only': True})
+    return 0
+
+
 def _cmd_sql(args) -> int:
     columns, rows, truncated = run_query(args.sql, as_user=args.as_user, limit=args.limit)
     _audit('sql', args.sql, args.as_user)
@@ -388,6 +430,10 @@ def main(argv=None) -> int:
     p.add_argument('--query', required=True)
     p.add_argument('--as-user', default='', help='只看某位成员；缺省遍历全部启用成员')
     p.set_defaults(func=_cmd_customers)
+    p = sub.add_parser('company-ownership', help='只读核查公司在全组织的负责人和账户状态，不读取联系人/沟通内容')
+    p.add_argument('--domain', default='', help='官网域名')
+    p.add_argument('--name', default='', help='公司名')
+    p.set_defaults(func=_cmd_company_ownership)
     p = sub.add_parser('sql', help='执行一条只读 SELECT')
     p.add_argument('sql')
     p.add_argument('--as-user', default='', help='把 trade_os.user 设为该成员，视图按其视角投影')

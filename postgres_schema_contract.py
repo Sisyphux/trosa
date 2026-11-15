@@ -16,7 +16,7 @@ REQUIRED_SCHEMAS = (
 )
 
 REQUIRED_TABLES = (
-    "audit.schema_migrations",
+    "audit.schema_migrations", "audit.sela_send_barriers",
     "identity.organizations", "identity.users", "identity.memberships", "identity.settings",
     "identity.team_invitations",
     "core.companies", "core.company_domains", "core.company_aliases", "core.people",
@@ -141,11 +141,18 @@ REQUIRED_INDEXES = (
 )
 
 REQUIRED_COLUMNS += (
+    ("audit.sela_send_barriers", "state"),
+    ("audit.sela_send_barriers", "expires_at"),
+    ("audit.sela_send_barriers", "identity_hash"),
+    ("audit.sela_send_barriers", "recipient_hash"),
     ("audit.operation_log_events", "target_reference"),
     ("trosa.accounts", "owner_user_id"),
 )
 
 REQUIRED_FUNCTIONS = (
+    "trosa.sela_send_barrier_lock(uuid)",
+    "trosa.sela_send_barrier_mutation_guard()",
+    "trosa.sela_send_barrier_truncate_guard()",
     "trosa.compat_current_user()",
     "trosa.compat_normalized_name(text)",
     "trosa.compat_domain(text)",
@@ -190,6 +197,16 @@ REQUIRED_FUNCTIONS = (
 )
 
 REQUIRED_TRIGGERS = (
+    "identity.users.aa_sela_send_barrier_users",
+    "identity.users.aa_sela_send_barrier_truncate_users",
+    "trosa.accounts.aa_sela_send_barrier_accounts",
+    "trosa.accounts.aa_sela_send_barrier_truncate_accounts",
+    "core.companies.aa_sela_send_barrier_truncate_companies",
+    "core.company_aliases.aa_sela_send_barrier_truncate_aliases",
+    "core.company_domains.aa_sela_send_barrier_truncate_domains",
+    "core.companies.aa_sela_send_barrier_companies",
+    "core.company_aliases.aa_sela_send_barrier_aliases",
+    "core.company_domains.aa_sela_send_barrier_domains",
     "trosa.customers.compat_customers_write",
     "trosa.contacts.compat_contacts_write",
     "trosa.reminders.compat_reminders_write",

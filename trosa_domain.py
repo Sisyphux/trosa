@@ -1522,15 +1522,19 @@ def create_customer(conn: Any, *, values: dict[str, Any]) -> int:
            VALUES (?, trosa.compat_org_id(), ?, lower(?), ?, ?)''',
         (company_id, values.get('company', ''), values.get('company', ''), values.get('website', ''), values.get('country', '')),
     )
+    account_provenance = {}
+    if values.get('import_source') == 'sela-v2' and values.get('external_source') == 'sela':
+        account_provenance = {'import_source': 'sela-v2', 'external_source': 'sela'}
     conn.execute(
         '''INSERT INTO trosa.accounts
            (id, organization_id, company_id, owner_user_id, display_name, priority_level, profile, field, industry,
             company_size, annual_revenue, tags, last_contact_at, next_follow_up_at, legacy_payload)
            VALUES (?, trosa.compat_org_id(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, trosa.compat_time(?),
-                   trosa.compat_time(?), '{}'::jsonb)''',
+                   trosa.compat_time(?), ?::jsonb)''',
         (account_id, company_id, owner_user_id, values.get('name', ''), values.get('level', ''), values.get('profile', ''),
          values.get('field', ''), values.get('industry', ''), values.get('company_size', ''),
-         values.get('annual_revenue', ''), values.get('tags', ''), values.get('last_contact', ''), values.get('next_follow_up', '')),
+         values.get('annual_revenue', ''), values.get('tags', ''), values.get('last_contact', ''), values.get('next_follow_up', ''),
+         json.dumps(account_provenance)),
     )
     conn.execute(
         '''INSERT INTO trosa.account_legacy_refs

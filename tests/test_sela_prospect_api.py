@@ -1115,6 +1115,14 @@ class SelaProspectApiTest(unittest.TestCase):
         })
         self.assertEqual(view['domains'], ['bold.net'])
 
+    def test_business_exclusion_without_owner_stays_unresolved_outside_request_context(self):
+        view = self.module._sela_business_exclusion_view({
+            'id': 168, 'canonical_name': 'Unknown Owner Plastics',
+            'domains_json': json.dumps(['unknown-owner.example']), 'is_active': 1,
+            'status': 'crm_contacted',
+        })
+        self.assertEqual(view['owner_username'], '')
+
     def test_imported_outreach_date_alone_does_not_establish_contact(self):
         customer_id = self.add_customer('Legacy Import Co', website='https://legacy-import.example/')
         conn = self.hamid_db()

@@ -4,6 +4,7 @@ import os
 import stat
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,24 @@ class ReadOnlySqlGuardTest(unittest.TestCase):
             with self.subTest(sql=sql):
                 with self.assertRaises(maint.MaintError):
                     maint.check_read_only_sql(sql)
+
+    def test_company_ownership_audit_is_a_parameterized_org_wide_select(self):
+        from types import SimpleNamespace
+        args = SimpleNamespace(domain='cristacryl.com', name="Cristacryl'; DROP TABLE x; --")
+        with mock.patch.object(maint, 'run_query', return_value=(['owner'], [['amy']], False)) as query, \
+             mock.patch.object(maint, '_audit') as audit, \
+             mock.patch.object(maint, '_emit') as emit:
+            self.assertEqual(maint._cmd_company_ownership(args), 0)
+        sql, params = query.call_args.args[:2]
+        self.assertIn('core.company_domains', sql)
+        self.assertIn('identity.users', sql)
+        self.assertIn('owner_user_id', sql)
+        self.assertNotIn('customer_contacts', sql)
+        self.assertNotIn('notes', sql.lower())
+        self.assertNotIn("DROP TABLE", sql)
+        self.assertTrue(any("DROP TABLE" in str(item) for item in params))
+        audit.assert_called_once()
+        emit.assert_called_once()
 
 
 class ConfigBoundaryTest(unittest.TestCase):
