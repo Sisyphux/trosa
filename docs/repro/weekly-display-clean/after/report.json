@@ -1,0 +1,130 @@
+{
+  "label": "after",
+  "checks": [
+    {
+      "id": "weekly-1440-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "weekly-1440-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "weekly-1440-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "weekly-1280-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "weekly-1280-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "weekly-1280-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "weekly-960-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "weekly-960-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "weekly-960-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "weekly-768-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "weekly-768-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "weekly-768-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "weekly-390-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "weekly-390-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "weekly-390-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "detail-1440-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "detail-1440-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "detail-1440-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "earlier-1440-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "detail-768-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "detail-768-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "detail-768-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "earlier-768-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "detail-390-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "detail-390-keeps-content-dates-numbers",
+      "pass": true
+    },
+    {
+      "id": "detail-390-keeps-highlight",
+      "pass": true
+    },
+    {
+      "id": "earlier-390-hides-markers",
+      "pass": true
+    },
+    {
+      "id": "raw-cache-and-global-renderer-unchanged",
+      "pass": true
+    },
+    {
+      "id": "no-page-errors",
+      "pass": true
+    }
+  ],
+  "pageErrors": [],
+  "syntheticOnly": true,
+  "screenshots": [
+    "weekly-1440.png",
+    "weekly-390.png",
+    "detail-1440.png",
+    "detail-390.png"
+  ],
+  "browser": "153.0.8010.12"
+}

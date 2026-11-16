@@ -14661,8 +14661,22 @@ function weeklyEmphasizeFacts(html) {
   }).join('');
 }
 
+// Hide internal delimiters only in weekly displays. Keep the
+// enclosed text and leave API data, caches and ordinary communication views raw.
+function weeklyDisplayText(source) {
+  return String(source || '')
+    .replace(/【客户背调(?:[ \t]+\d{4}-\d{2}-\d{2})?】|【\/客户背调】/g, '')
+    .replace(/\[ticket:\d+\]/g, '');
+}
+
+// Profiles are plain reading text (including native title tooltips), unlike
+// communication bodies which retain highlights. Reuse the safe rich-text parser.
+function weeklyProfileText(source) {
+  return richPlainText(weeklyDisplayText(source).replace(/<br\s*\/?\s*>|&lt;br\s*\/?\s*&gt;/gi, '\n'));
+}
+
 function weeklyTextLines(source) {
-  return String(source || '').split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
+  return weeklyDisplayText(source).split(/\n+/).map(function(line) { return line.trim(); }).filter(Boolean).map(function(line) {
     var m = line.match(/^客户回复了邮件[:：]\s*/);
     var body = m ? line.slice(m[0].length) : line;
     return '<p>' + (m ? '<span class="wk-from">客户来信</span>' : '') + weeklyEmphasizeFacts(renderRichText(body)) + '</p>';
@@ -14697,11 +14711,11 @@ function weeklyRecordHtml(r, uid) {
     : '<span class="wk-record-name">' + escapeHtml(nm) + '</span>';
   return '<article class="wk-record"><header><h3>' + title + '</h3><time datetime="' + escapeHtml(r.date || '') + '">' + escapeHtml(weeklyDateLabel(r.date)) + '</time></header>' +
     (meta ? '<p class="wk-record-meta">' + escapeHtml(meta) + '</p>' : '') +
-    (r.customer_profile ? '<p class="wk-record-profile"' + (r.customer_profile_zh ? ' title="原文：' + escapeHtml(r.customer_profile) + '"' : '') + '>' + escapeHtml(r.customer_profile_zh || r.customer_profile) + '</p>' : '') +
+    (r.customer_profile ? '<p class="wk-record-profile"' + (r.customer_profile_zh ? ' title="原文：' + escapeHtml(weeklyProfileText(r.customer_profile)) + '"' : '') + '>' + escapeHtml(weeklyProfileText(r.customer_profile_zh || r.customer_profile)) + '</p>' : '') +
     weeklyCustomerFacts(r) +
     '<div class="wk-record-text">' + weeklyTextLines(weeklyCustomerText(r, 'actual_work')) + '</div>' +
     '<button type="button" class="wk-record-more" hidden onclick="toggleWeeklyRecord(this)">展开</button>' +
-    (r.next_step ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(r.next_step) + '</p>' : '') + '</article>';
+    (r.next_step ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(weeklyDisplayText(r.next_step)) + '</p>' : '') + '</article>';
 }
 
 function toggleWeeklyRecord(button) {
@@ -14964,10 +14978,10 @@ function weeklyDossierHeadHtml(customer) {
   add('角色', escapeHtml(customer.business_role || ''));
   add('阶段', escapeHtml(customer.business_stage || ''));
   add('最近联系', escapeHtml(customer.last_actual_contact ? formatDate(customer.last_actual_contact) : ''));
-  var profile = customer.profile_zh || customer.profile || '';
+  var profile = weeklyProfileText(customer.profile_zh || customer.profile);
   return '<header class="wk-dossier-head"><p class="wk-dossier-kicker">客户详情 · 只读</p><h3 id="ovDetailTitle">' + escapeHtml(customer.company || customer.name || '客户详情') + '</h3>' +
     '<p class="wk-record-meta" data-dossier-meta>' + escapeHtml(weeklyDossierMeta(customer)) + '</p>' +
-    (profile ? '<p class="wk-record-profile wk-dossier-profile" data-dossier-profile' + (customer.profile_zh ? ' title="原文：' + escapeHtml(customer.profile) + '"' : '') + '>' + escapeHtml(profile) + '</p>' : '') +
+    (profile ? '<p class="wk-record-profile wk-dossier-profile" data-dossier-profile' + (customer.profile_zh ? ' title="原文：' + escapeHtml(weeklyProfileText(customer.profile)) + '"' : '') + '>' + escapeHtml(profile) + '</p>' : '') +
     (specs.length ? '<dl class="wk-spec">' + specs.join('') + '</dl>' : '') + '</header>';
 }
 
@@ -14990,7 +15004,7 @@ function weeklyDossierItemHtml(item) {
   return '<article class="wk-dossier-item"><time datetime="' + escapeHtml(item.date || '') + '">' + escapeHtml(weeklyDateLabel(item.date)) + '</time><div>' +
     (!fromReply && kind ? '<p class="wk-dossier-kind">' + escapeHtml(kind) + '</p>' : '') +
     '<div class="wk-record-text is-open">' + weeklyTextLines(raw) + '</div>' +
-    (item.next_plan ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(item.next_plan) + '</p>' : '') + '</div></article>';
+    (item.next_plan ? '<p class="wk-record-next"><span>下一步</span>' + renderRichText(weeklyDisplayText(item.next_plan)) + '</p>' : '') + '</div></article>';
 }
 
 // One timeline. This week's records are the first group; they are no longer
@@ -15067,7 +15081,7 @@ function refreshDossierTranslation(custId, owner, timelinePage, detailToken, tri
       if (!modal) return;
       var meta = modal.querySelector('[data-dossier-meta]'), prof = modal.querySelector('[data-dossier-profile]');
       if (meta) meta.textContent = weeklyDossierMeta(cu);
-      if (prof && cu.profile_zh) { prof.textContent = cu.profile_zh; prof.title = '原文：' + (cu.profile || ''); }
+      if (prof && cu.profile_zh) { prof.textContent = weeklyProfileText(cu.profile_zh); prof.title = '原文：' + weeklyProfileText(cu.profile); }
       if (!cu.translation_pending) return;
     } catch (e) { return; }
     refreshDossierTranslation(custId, owner, timelinePage, detailToken, tries + 1);
