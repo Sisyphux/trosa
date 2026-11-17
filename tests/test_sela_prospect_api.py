@@ -1039,6 +1039,49 @@ class SelaProspectApiTest(unittest.TestCase):
         self.add_follow_log(customer_id, '外联邮件退信', activity_type='外联退信', follow_date='2026-11-10')
         self.assertIsNone(self._record_for(customer_id))
 
+    def test_a_company_we_mailed_without_a_bounce_keeps_its_duplicate_send_block(self):
+        # 发过一封、没退信、也没人回过：这是“别再重复冷开发”的护栏，不能一起软化。
+        customer_id = self.add_customer('Mailed Once Co', website='https://mailed-once.example/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO outreach_emails (customer_id, subject, sent_date, reply_status, recipient_email)
+                   VALUES (?, 'Acrílico cast', '2026-11-10', 'pending', 'buyer@mailed-once.example')""",
+                (customer_id,))
+            outreach_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                """INSERT INTO email_delivery_events
+                   (email, outreach_email_id, event_type, message_id, source, occurred_at)
+                   VALUES ('buyer@mailed-once.example', ?, 'sent', 'sent-2', 'test', '2026-11-10 22:08:53')""",
+                (outreach_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        record = self._record_for(customer_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertFalse(record['contacted'])
+        self.assertEqual(record['contact_evidence'], 'delivery_event')
+
+    def test_a_legacy_row_whose_text_says_bounce_is_not_a_human_contact(self):
+        # 历史导入行只在正文写“外联邮件退信…”，activity_type 是 follow_up；
+        # 口径要和 communication_text 一致，不能因为字段没标就当成真人接触。
+        customer_id = self.add_customer('Legacy Bounce Co', website='https://legacy-bounce.example/')
+        self.add_follow_log(customer_id, '外联邮件退信\n主题：Hi', activity_type='follow_up',
+                            follow_date='2026-11-10')
+        self.assertIsNone(self._record_for(customer_id))
+
+    def test_bounced_email_gives_one_address_or_nothing(self):
+        # recipient_email 是自由文本：带显示名要取出地址，写两个地址就宁可不说，
+        # 免得 sela 拿错地址去抑制一个还能收信的信箱。
+        self.assertEqual(self.module._sela_bounced_address('Juan Perez <Ventas@32-one.com>'),
+                         'ventas@32-one.com')
+        self.assertEqual(self.module._sela_bounced_address('ventas@32-one.com'), 'ventas@32-one.com')
+        self.assertEqual(self.module._sela_bounced_address(
+            'Juan Perez <ventas@32-one.com>, otro@32-one.com'), '')
+        self.assertEqual(self.module._sela_bounced_address(''), '')
+
     def test_a_real_reply_next_to_a_bounce_still_blocks_cold_outreach(self):
         customer_id = self.add_customer('Real Reply Co', website='https://real-reply.example/')
         self.add_follow_log(customer_id, '邮件被退信：sales@real-reply.example',
@@ -1089,6 +1132,39 @@ class SelaProspectApiTest(unittest.TestCase):
         # Only the contact fact crosses members: no notes, profile, contacts or content.
         self.assertFalse({'notes', 'profile', 'contacts', 'content', 'email', 'name', 'company'} & set(record))
         self.assertFalse(any('Quiet Member' in str(r.get('canonical_name')) for r in records))
+
+    def test_another_members_bounced_customer_is_not_a_hard_exclusion(self):
+        # 别的成员那边也只是退信：没人看过信，不该按“该成员接触过”硬拦所有人。
+        db.set_db_user('kelley')
+        conn = db.get_db()
+        try:
+            conn.execute(
+                "INSERT INTO customers (name, company, website, country) "
+                "VALUES ('Bounced Member Co', 'Bounced Member Co', 'https://bounced-member.example/', 'Colombia')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                """INSERT INTO outreach_emails (customer_id, subject, sent_date, reply_status, recipient_email)
+                   VALUES (?, 'Hi', '2026-11-10', 'bounced', 'ventas@bounced-member.example')""",
+                (customer_id,))
+            outreach_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                """INSERT INTO email_delivery_events
+                   (email, outreach_email_id, event_type, message_id, source, occurred_at)
+                   VALUES ('ventas@bounced-member.example', ?, 'sent', 'member-sent', 'test',
+                           '2026-11-10 10:00:00')""",
+                (outreach_id,))
+            conn.execute(
+                """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction, activity_type, created_at)
+                   VALUES (?, '邮件被退信：ventas@bounced-member.example', '2026-11-10', 'outbound',
+                           'outreach_bounced', '2026-11-10 10:00:00')""",
+                (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+            db.set_db_user('hamid')
+        records = self.exclusion_records()
+        self.assertFalse(any(r.get('record_id') == f'trosa-member-contact:kelley:{customer_id}'
+                             for r in records))
 
     def test_member_contact_is_not_duplicated_when_hamid_already_covers_the_company(self):
         own = self.add_customer('Shared Plastics', website='https://shared-plastics.example/')

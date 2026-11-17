@@ -4690,8 +4690,12 @@ def _sela_customer_contact_evidence(conn):
     Counting it as contact marked the company ``trosa_customer_contacted`` and
     made sela refuse it forever, even after a person supplied a new address
     (32ONE / customer 2806).  Bounce rows therefore fall through to the weaker
-    ``delivery_event`` fact, which still blocks a duplicate send to the dead
-    mailbox but leaves the company developable.
+    ``delivery_event`` fact.
+
+    Weakening the record itself is not enough: the exclusion snapshot still
+    treats "we mailed it once" as a reason not to develop the company again
+    (that is the duplicate-send guard, and it stays).  Only a customer whose
+    own mail *bounced* becomes a soft record — see ``_sela_bounced_customers``.
     """
     evidence: dict[int, str] = {}
 
@@ -4707,7 +4711,8 @@ def _sela_customer_contact_evidence(conn):
         for row in conn.execute(
             """SELECT DISTINCT customer_id FROM trosa.customer_interactions
                 WHERE kind='communication'
-                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')""",
+                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')
+                  AND COALESCE(content,'') NOT LIKE '外联邮件退信%'""",
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
@@ -4731,7 +4736,8 @@ def _sela_customer_contact_evidence(conn):
         for row in conn.execute(
             """SELECT DISTINCT customer_id FROM follow_up_logs
                 WHERE (is_deleted=0 OR is_deleted IS NULL)
-                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')""",
+                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')
+                  AND COALESCE(content,'') NOT LIKE '外联邮件退信%'""",
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
@@ -4931,6 +4937,7 @@ def _sela_other_member_contact_records(own_records):
             member_conn = get_db()
             try:
                 evidence = _sela_customer_contact_evidence(member_conn)
+                member_bounced = _sela_bounced_customers(member_conn)
                 if not evidence:
                     continue
                 member_contact_domains = _sela_contact_domains_by_customer(member_conn)
@@ -4955,6 +4962,13 @@ def _sela_other_member_contact_records(own_records):
             customer_id = int(item['id'])
             if customer_id not in evidence:
                 continue
+            human_contact = evidence[customer_id] in _SELA_HUMAN_CONTACT_EVIDENCE
+            if not human_contact and customer_id in member_bounced:
+                # The member's own mail bounced there: nobody at the company read
+                # it, so this is not a relationship to protect.  Keeping it hard
+                # here blocked the company for every other member and for sela
+                # itself, which is the 32ONE failure one owner further out.
+                continue
             canonical_name = str(item.get('company') or item.get('name') or '').strip()
             name_key = _sync_name_key(canonical_name)
             aliases, domains = _sela_record_identity(
@@ -4978,7 +4992,7 @@ def _sela_other_member_contact_records(own_records):
                 'status': 'member_contacted', 'match_policy': 'hard',
                 'source': 'trosa_member_contact', 'source_id': f'{member}:{customer_id}',
                 'updated_at': str(item.get('updated_at') or ''),
-                'contacted': True,
+                'contacted': human_contact,
                 'contact_evidence': evidence[customer_id],
             })
     return extra
@@ -5004,6 +5018,67 @@ def _sela_customer_exclusion_status(evidence):
     return 'trosa_customer'
 
 
+def _sela_bounced_customers(conn):
+    """Customer ids whose own mail came back as a delivery failure.
+
+    The exclusion snapshot needs this separately from the contact evidence: a
+    customer we mailed once and never heard from keeps its duplicate-send
+    block, but one whose mailbox refused the letter was never reached at all,
+    so a new address must be allowed to continue.
+    """
+    bounced: set[int] = set()
+
+    def mark(customer_id):
+        try:
+            customer_id = int(customer_id)
+        except (TypeError, ValueError):
+            return
+        if customer_id:
+            bounced.add(customer_id)
+
+    if postgres_mode():
+        for row in conn.execute(
+            """SELECT DISTINCT customer_id FROM trosa.customer_interactions
+                WHERE (kind='email' AND lower(COALESCE(delivery_status,''))='bounced')
+                   OR (kind='communication'
+                       AND (COALESCE(activity_type,'') IN ('outreach_bounced','外联退信')
+                            OR COALESCE(content,'') LIKE '外联邮件退信%'))""",
+        ).fetchall():
+            mark(row['customer_id'])
+        for row in conn.execute(
+            """SELECT DISTINCT account_ref.legacy_customer_id AS customer_id
+                 FROM trosa.email_delivery_events event
+                 JOIN trosa.outreach_messages message ON message.id=event.outreach_message_id
+                 JOIN trosa.account_legacy_refs account_ref
+                   ON account_ref.account_id=message.account_id
+                  AND account_ref.organization_id=trosa.compat_org_id()
+                  AND account_ref.legacy_user_id=trosa.compat_current_user()
+                WHERE lower(COALESCE(event.event_type,''))='bounced'""",
+        ).fetchall():
+            mark(row['customer_id'])
+    else:
+        for row in conn.execute(
+            "SELECT DISTINCT customer_id FROM outreach_emails "
+            "WHERE lower(COALESCE(reply_status,''))='bounced'",
+        ).fetchall():
+            mark(row['customer_id'])
+        for row in conn.execute(
+            """SELECT DISTINCT customer_id FROM follow_up_logs
+                WHERE (is_deleted=0 OR is_deleted IS NULL)
+                  AND (COALESCE(activity_type,'') IN ('outreach_bounced','外联退信')
+                       OR COALESCE(content,'') LIKE '外联邮件退信%')""",
+        ).fetchall():
+            mark(row['customer_id'])
+        for row in conn.execute(
+            """SELECT DISTINCT outreach.customer_id FROM email_delivery_events event
+                 JOIN outreach_emails outreach ON outreach.id=event.outreach_email_id
+                WHERE outreach.customer_id IS NOT NULL
+                  AND lower(COALESCE(event.event_type,''))='bounced'""",
+        ).fetchall():
+            mark(row['customer_id'])
+    return bounced
+
+
 def _sela_exclusion_snapshot_records(conn):
     """Return the one authoritative exclusion projection owned by Trosa.
 
@@ -5014,6 +5089,7 @@ def _sela_exclusion_snapshot_records(conn):
     can develop them while still reusing the existing record.
     """
     contact_evidence = _sela_customer_contact_evidence(conn)
+    bounced_customers = _sela_bounced_customers(conn)
     contact_domains = _sela_contact_domains_by_customer(conn)
     registry = _sela_company_registry(conn)
 
@@ -5035,20 +5111,22 @@ def _sela_exclusion_snapshot_records(conn):
             'country': str(item.get('country') or ''),
             'status': status,
             # Only a fact that a person really dealt with this company blocks a
-            # cold letter.  A weaker record (sela's own delivery, including a
-            # bounce it recorded itself) stays in the snapshot for inspection
-            # but must not hard-exclude the company: sela's own contract treats
-            # a soft ``trosa_customer`` as "already emailed, keep the follow-up
-            # cadence" — a hard policy here overrode that and made every bounced
-            # customer permanently undevelopable.
-            'match_policy': 'hard' if status == 'trosa_customer_contacted' else 'soft',
+            # cold letter — plus the duplicate-send guard for a company we
+            # already mailed, which stays hard.  The one exception is a company
+            # whose own mail bounced: nobody there ever read the letter, and a
+            # hard policy here made it permanently undevelopable even after a
+            # person supplied a new address (32ONE / customer 2806).  sela's own
+            # contract treats a soft ``trosa_customer`` as "already emailed,
+            # keep the follow-up cadence", which is exactly right for it.
+            'match_policy': ('hard' if status == 'trosa_customer_contacted'
+                             or customer_id not in bounced_customers else 'soft'),
             'source': 'trosa_customer', 'source_id': str(customer_id),
             'updated_at': str(item.get('updated_at') or ''),
             'id': customer_id, 'name': str(item.get('name') or ''),
             'company': canonical_name, 'website': str(item.get('website') or ''),
             'business_stage': str(item.get('business_stage') or ''),
             'latest_outreach_date': latest_outreach_date,
-            'contacted': True,
+            'contacted': status == 'trosa_customer_contacted',
             'contact_evidence': evidence,
         }
 
@@ -6948,6 +7026,26 @@ class _SelaProspectPage(_SelaProspectContext):
         return dict(self._customer_outreach.get(int(customer_id), _SELA_EMPTY_OUTREACH_HISTORY))
 
 
+_BOUNCED_ADDRESS_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _sela_bounced_address(value):
+    """The single address Trosa names for a bounce, or ``""`` when it names none.
+
+    ``recipient_email`` is free text from older import paths and can carry a
+    display name or several addresses.  sela compares this value with the
+    addresses on the record, so half an answer is worse than none: no match
+    keeps the company blocked, while a wrong match would mail a live mailbox.
+    """
+    text = str(value or '').strip()[:500]
+    if not text:
+        return ''
+    found = _BOUNCED_ADDRESS_RE.findall(text)
+    if len(found) != 1:
+        return ''
+    return found[0].casefold()
+
+
 def _sela_prospect_view(conn, profile, context=None):
     """Build the compact candidate projection from Trosa's canonical facts."""
     profile = dict(profile)
@@ -7096,8 +7194,7 @@ def _sela_prospect_view(conn, profile, context=None):
         # address on the record died" from "a different address died" without
         # this fact; a replacement supplied in Trosa then looks exactly like a
         # bounce nobody can explain.
-        'bounced_email': (str(outreach.get('recipient_email') or '').strip().lower()
-                          if reply_status == 'bounced' else ''),
+        'bounced_email': _sela_bounced_address(outreach.get('recipient_email')) if reply_status == 'bounced' else '',
         'replied': real_interaction or outreach_history['last_status'] == 'replied',
         'sent_at': str(outreach.get('sent_date') or ''),
         'first_touch_at': str(outreach.get('first_touch_at') or ''),
