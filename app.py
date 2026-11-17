@@ -67,6 +67,7 @@ from app.engine import (
 )
 from config import EMAIL_VERIFICATION_CONFIG
 from communication_text import (
+    BOUNCE_ACTIVITY_TYPES, BOUNCE_CONTENT_MARKER, is_bounce_record,
     fallback_message_fact, looks_like_quoted_email, looks_like_raw_message,
     message_body_for_summary, plain_outreach_subject, plain_reply_result, strip_quoted_email_text, strip_system_notes,
 )
@@ -4676,6 +4677,11 @@ def _sela_contact_email_index(conn):
     return index
 
 
+_SELA_BOUNCE_ACTIVITY_SQL = ', '.join(
+    "'" + value.replace("'", "''") + "'" for value in sorted(BOUNCE_ACTIVITY_TYPES))
+_SELA_BOUNCE_LIKE = f'%{BOUNCE_CONTENT_MARKER}%'
+
+
 def _sela_customer_contact_evidence(conn):
     """Map Customer id -> the durable fact that proves real external contact.
 
@@ -4709,12 +4715,24 @@ def _sela_customer_contact_evidence(conn):
 
     if postgres_mode():
         for row in conn.execute(
-            """SELECT DISTINCT customer_id FROM trosa.customer_interactions
+            f"""SELECT DISTINCT customer_id FROM trosa.customer_interactions
                 WHERE kind='communication'
-                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')
-                  AND COALESCE(content,'') NOT LIKE '外联邮件退信%'""",
+                  AND COALESCE(activity_type,'') NOT IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                  AND COALESCE(content,'') NOT LIKE ?""", (_SELA_BOUNCE_LIKE,),
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
+        # Rows whose text mentions a bounce: whether the company was reached is
+        # decided by ``is_bounce_record`` alone (a plain bounce reached nobody; a
+        # bounce followed by "called the buyer, used the new address" did).
+        for row in conn.execute(
+            f"""SELECT customer_id, COALESCE(content,'') AS content
+                  FROM trosa.customer_interactions
+                 WHERE kind='communication'
+                   AND COALESCE(activity_type,'') NOT IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                   AND COALESCE(content,'') LIKE ?""", (_SELA_BOUNCE_LIKE,),
+        ).fetchall():
+            if not is_bounce_record(row['content']):
+                mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
             """SELECT DISTINCT customer_id FROM trosa.customer_interactions
                 WHERE kind='email' AND lower(COALESCE(delivery_status,''))='replied'""",
@@ -4734,12 +4752,21 @@ def _sela_customer_contact_evidence(conn):
             mark(row.get('customer_id'), 'customer_reply')
     else:
         for row in conn.execute(
-            """SELECT DISTINCT customer_id FROM follow_up_logs
+            f"""SELECT DISTINCT customer_id FROM follow_up_logs
                 WHERE (is_deleted=0 OR is_deleted IS NULL)
-                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')
-                  AND COALESCE(content,'') NOT LIKE '外联邮件退信%'""",
+                  AND COALESCE(activity_type,'') NOT IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                  AND COALESCE(content,'') NOT LIKE ?""", (_SELA_BOUNCE_LIKE,),
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
+        for row in conn.execute(
+            f"""SELECT customer_id, COALESCE(content,'') AS content
+                  FROM follow_up_logs
+                 WHERE (is_deleted=0 OR is_deleted IS NULL)
+                   AND COALESCE(activity_type,'') NOT IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                   AND COALESCE(content,'') LIKE ?""", (_SELA_BOUNCE_LIKE,),
+        ).fetchall():
+            if not is_bounce_record(row['content']):
+                mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
             "SELECT DISTINCT customer_id FROM outreach_emails "
             "WHERE lower(COALESCE(reply_status,''))='replied'",
@@ -4940,7 +4967,7 @@ def _sela_other_member_contact_records(own_records):
             try:
                 evidence = _sela_customer_contact_evidence(member_conn)
                 member_bounced = _sela_bounced_customers(member_conn)
-                if not evidence:
+                if not evidence and not member_bounced:
                     continue
                 member_contact_domains = _sela_contact_domains_by_customer(member_conn)
                 member_registry = _sela_company_registry(member_conn)
@@ -4962,14 +4989,20 @@ def _sela_other_member_contact_records(own_records):
         for row in rows:
             item = dict(row)
             customer_id = int(item['id'])
-            if customer_id not in evidence:
-                continue
-            human_contact = evidence[customer_id] in _SELA_HUMAN_CONTACT_EVIDENCE
-            if not human_contact and customer_id in member_bounced:
+            if customer_id in evidence:
+                human_contact = evidence[customer_id] in _SELA_HUMAN_CONTACT_EVIDENCE
                 # The member's own mail bounced there: nobody at the company read
                 # it, so this is not a relationship to protect.  Keeping it hard
                 # here blocked the company for every other member and for sela
                 # itself, which is the 32ONE failure one owner further out.
+                bounce_only = (not human_contact) and customer_id in member_bounced
+            elif customer_id in member_bounced:
+                # No outreach row or delivery event on the member's side, only a
+                # hand-recorded bounce: it still must show up (soft) instead of
+                # disappearing, which made sela mail the dead mailbox again.
+                human_contact = False
+                bounce_only = True
+            else:
                 continue
             canonical_name = str(item.get('company') or item.get('name') or '').strip()
             name_key = _sync_name_key(canonical_name)
@@ -4991,11 +5024,13 @@ def _sela_other_member_contact_records(own_records):
                 'domains': domains,
                 'owner_username': member,
                 'country': str(item.get('country') or ''),
-                'status': 'member_contacted', 'match_policy': 'hard',
+                'status': 'trosa_customer' if bounce_only else
+                          ('member_contacted' if human_contact else 'trosa_customer'),
+                'match_policy': 'soft' if bounce_only else 'hard',
                 'source': 'trosa_member_contact', 'source_id': f'{member}:{customer_id}',
                 'updated_at': str(item.get('updated_at') or ''),
                 'contacted': human_contact,
-                'contact_evidence': evidence[customer_id],
+                'contact_evidence': evidence.get(customer_id) or ('bounce_only' if bounce_only else ''),
             })
     return extra
 
@@ -5041,12 +5076,19 @@ def _sela_bounced_customers(conn):
     if postgres_mode():
         for row in conn.execute(
             """SELECT DISTINCT customer_id FROM trosa.customer_interactions
-                WHERE (kind='email' AND lower(COALESCE(delivery_status,''))='bounced')
-                   OR (kind='communication'
-                       AND (COALESCE(activity_type,'') IN ('outreach_bounced','外联退信')
-                            OR COALESCE(content,'') LIKE '外联邮件退信%'))""",
+                WHERE kind='email' AND lower(COALESCE(delivery_status,''))='bounced'""",
         ).fetchall():
             mark(row['customer_id'])
+        for row in conn.execute(
+            f"""SELECT customer_id, COALESCE(activity_type,'') AS activity_type,
+                       COALESCE(content,'') AS content
+                  FROM trosa.customer_interactions
+                 WHERE kind='communication'
+                   AND (COALESCE(activity_type,'') IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                        OR COALESCE(content,'') LIKE ?)""", (_SELA_BOUNCE_LIKE,),
+        ).fetchall():
+            if is_bounce_record(row['content'], row['activity_type']):
+                mark(row['customer_id'])
         for row in conn.execute(
             """SELECT DISTINCT account_ref.legacy_customer_id AS customer_id
                  FROM trosa.email_delivery_events event
@@ -5065,12 +5107,15 @@ def _sela_bounced_customers(conn):
         ).fetchall():
             mark(row['customer_id'])
         for row in conn.execute(
-            """SELECT DISTINCT customer_id FROM follow_up_logs
-                WHERE (is_deleted=0 OR is_deleted IS NULL)
-                  AND (COALESCE(activity_type,'') IN ('outreach_bounced','外联退信')
-                       OR COALESCE(content,'') LIKE '外联邮件退信%')""",
+            f"""SELECT customer_id, COALESCE(activity_type,'') AS activity_type,
+                       COALESCE(content,'') AS content
+                  FROM follow_up_logs
+                 WHERE (is_deleted=0 OR is_deleted IS NULL)
+                   AND (COALESCE(activity_type,'') IN ({_SELA_BOUNCE_ACTIVITY_SQL})
+                        OR COALESCE(content,'') LIKE ?)""", (_SELA_BOUNCE_LIKE,),
         ).fetchall():
-            mark(row['customer_id'])
+            if is_bounce_record(row['content'], row['activity_type']):
+                mark(row['customer_id'])
         for row in conn.execute(
             """SELECT DISTINCT outreach.customer_id FROM email_delivery_events event
                  JOIN outreach_emails outreach ON outreach.id=event.outreach_email_id
@@ -5102,13 +5147,14 @@ def _sela_exclusion_snapshot_records(conn):
     contact_domains = _sela_contact_domains_by_customer(conn)
     registry = _sela_company_registry(conn)
 
-    def customer_record(item, customer_id, latest_outreach_date):
+    def customer_record(item, customer_id, latest_outreach_date, evidence=None):
         canonical_name = str(item.get('company') or item.get('name') or '')
         if not canonical_name:
             return None
         aliases, domains = _sela_record_identity(
             item, contact_domains.get(customer_id, []), registry.get(customer_id))
-        evidence = contact_evidence.get(customer_id, '')
+        if evidence is None:
+            evidence = contact_evidence.get(customer_id, '')
         status = _sela_customer_exclusion_status(evidence)
         return {
             'record_id': f'trosa-customer:{customer_id}',
@@ -5210,6 +5256,14 @@ def _sela_exclusion_snapshot_records(conn):
                 record = archived_record(item, customer_id)
             elif contact_evidence.get(customer_id):
                 record = customer_record(item, customer_id, latest_outreach_by_customer.get(customer_id, ''))
+            elif customer_id in bounced_customers:
+                # A bounce recorded by hand (pasted log only, no outreach row and
+                # no delivery event) used to drop the Customer from the feed
+                # entirely: sela then saw "never contacted" and mailed the dead
+                # mailbox again.  It belongs on the feed as a soft record.
+                record = customer_record(item, customer_id,
+                                         latest_outreach_by_customer.get(customer_id, ''),
+                                         evidence='bounce_only')
             else:
                 record = None
             if record:
@@ -5272,6 +5326,11 @@ def _sela_exclusion_snapshot_records(conn):
             record = archived_record(item, customer_id)
         elif contact_evidence.get(customer_id):
             record = customer_record(item, customer_id, str(item.get('latest_outreach_date') or ''))
+        elif customer_id in bounced_customers:
+            # Same as the PostgreSQL branch: a hand-recorded bounce keeps the
+            # Customer on the feed as a soft record instead of vanishing.
+            record = customer_record(item, customer_id, str(item.get('latest_outreach_date') or ''),
+                                     evidence='bounce_only')
         else:
             record = None
         if record:
@@ -7083,7 +7142,13 @@ def _sela_bounced_address(value):
     addresses on the record, so half an answer is worse than none: no match
     keeps the company blocked, while a wrong match would mail a live mailbox.
     """
-    text = str(value or '').strip()[:500]
+    text = str(value or '').strip()
+    if len(text) > 500:
+        # Bound the scan at a separator, never mid-address: cutting inside an
+        # address produced a plausible-looking but wrong one, which is worse
+        # than saying nothing (sela would then mail a live mailbox).
+        cut = max(text.rfind(separator, 0, 500) for separator in ' \t\n,;<>')
+        text = text[:cut] if cut > 0 else ''
     if not text:
         return ''
     found = _BOUNCED_ADDRESS_RE.findall(text)

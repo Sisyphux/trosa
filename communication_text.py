@@ -360,6 +360,42 @@ def looks_like_raw_message(value):
     return len(text) > 160 and cjk < len(text) * 0.1 and bool(_EMAIL_ADDRESS.search(text))
 
 
+# --- Bounce classification ---------------------------------------------------
+# Whether one communication row *is* a bounce is answered here and nowhere else.
+# SQL callers may only do the coarse ``content LIKE '%外联邮件退信%'`` screen and
+# hand the row to ``is_bounce_record``; anything finer in SQL drifts: a body that
+# opens with a newline was a bounce to one query and a human contact to the
+# other, and the customer ended up permanently excluded (32ONE) or vanished from
+# the snapshot as if nobody had ever written to it.
+BOUNCE_CONTENT_MARKER = '外联邮件退信'
+BOUNCE_ACTIVITY_TYPES = frozenset({'outreach_bounced', '外联退信'})
+
+# A bounce marker followed by a real human step records a follow-up, not a
+# bounce: "the mail bounced, then I reached the buyer by phone and used his new
+# address" means the company *was* reached.  Words that appear in a pure bounce
+# notice (无人接听, 投递失败) deliberately do not appear here.
+_BOUNCE_THEN_HUMAN = re.compile(
+    r'联系上|联系到|已联系|联络上|接通|改用|改发|转给|介绍给|面谈|拜访|上门|'
+    r'微信|whatsapp|客户(?:已)?回复|回复了我方',
+    re.IGNORECASE,
+)
+
+
+def is_bounce_record(value, activity_type=''):
+    """Whether this communication row records the bounce itself.
+
+    ``activity_type`` written by the system wins; otherwise the body decides,
+    after dropping leading whitespace (pasted/imported rows start with a
+    newline) and unless the body goes on to describe a human step.
+    """
+    if str(activity_type or '').strip() in BOUNCE_ACTIVITY_TYPES:
+        return True
+    text = str(value or '').lstrip()
+    if not text.startswith(BOUNCE_CONTENT_MARKER):
+        return False
+    return not _BOUNCE_THEN_HUMAN.search(text[len(BOUNCE_CONTENT_MARKER):])
+
+
 def raw_message_subject(value):
     match = _SUBJECT_LINE.search(str(value or ''))
     if not match:

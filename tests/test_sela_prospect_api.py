@@ -1033,11 +1033,18 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(record['match_policy'], 'soft')
         self.assertEqual(record['contact_evidence'], 'delivery_event')
 
-    def test_a_bounce_alone_does_not_put_the_company_on_the_exclusion_feed(self):
-        # 只有退信、连送达事件都没有的客户，和“没接触过”的客户一样不该进硬排除名单。
+    def test_a_bounce_alone_is_a_soft_record_not_a_missing_one(self):
+        # 只有退信、连送达事件都没有的客户也要出现在名单里：以前它整条消失，
+        # sela 当它从没接触过，又往同一个死信箱发一次。软记录 = 别再发这个地址，
+        # 但不算“真人接触”，换了新地址还能继续。
         customer_id = self.add_customer('Bounced Import Co', website='https://bounced-import.example/')
         self.add_follow_log(customer_id, '外联邮件退信', activity_type='外联退信', follow_date='2026-11-10')
-        self.assertIsNone(self._record_for(customer_id))
+        record = self._record_for(customer_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer')
+        self.assertEqual(record['match_policy'], 'soft')
+        self.assertFalse(record['contacted'])
+        self.assertEqual(record['contact_evidence'], 'bounce_only')
 
     def test_a_company_we_mailed_without_a_bounce_keeps_its_duplicate_send_block(self):
         # 发过一封、没退信、也没人回过：这是“别再重复冷开发”的护栏，不能一起软化。
@@ -1070,7 +1077,46 @@ class SelaProspectApiTest(unittest.TestCase):
         customer_id = self.add_customer('Legacy Bounce Co', website='https://legacy-bounce.example/')
         self.add_follow_log(customer_id, '外联邮件退信\n主题：Hi', activity_type='follow_up',
                             follow_date='2026-11-10')
-        self.assertIsNone(self._record_for(customer_id))
+        record = self._record_for(customer_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer')
+        self.assertEqual(record['match_policy'], 'soft')
+        self.assertFalse(record['contacted'])
+
+    def test_a_pasted_bounce_that_starts_with_whitespace_is_still_a_bounce(self):
+        # 粘贴/导入的退信正文常带前导换行和空格：SQL 的 LIKE '外联邮件退信%' 匹配
+        # 不到，于是同一行在“是不是真人沟通”和“是不是退信”两处得到相反答案，
+        # 客户被判成 trosa_customer_contacted 永久硬排除（32ONE 的另一条路径）。
+        for index, content in enumerate((
+            '\n外联邮件退信：ventas@pad.example',
+            '   \n\n  外联邮件退信\n主题：Acrílico cast',
+            '\t外联邮件退信（5.1.1）',
+        )):
+            customer_id = self.add_customer(f'Padded Bounce Co {index}',
+                                            website=f'https://padded-bounce-{index}.example/')
+            self.add_follow_log(customer_id, content, activity_type='follow_up',
+                                follow_date='2026-11-10')
+            record = self._record_for(customer_id)
+            self.assertIsNotNone(record, content)
+            self.assertEqual(record['status'], 'trosa_customer', content)
+            self.assertEqual(record['match_policy'], 'soft', content)
+            self.assertFalse(record['contacted'], content)
+
+    def test_a_bounce_that_was_followed_by_a_real_conversation_is_human_contact(self):
+        # 「先退信、又写了怎么绕过去」的行记的是真人跟进：电话联系上采购、改用新
+        # 地址。把它当退信剔除，客户会整条从名单消失，sela 重新冷发同一家。
+        customer_id = self.add_customer('Bounced Then Called Co',
+                                        website='https://bounced-then-called.example/')
+        self.add_follow_log(
+            customer_id,
+            '外联邮件退信：ventas@bounced-then-called.example\n'
+            '电话联系上采购 Ana，改用 ana@bounced-then-called.example',
+            activity_type='follow_up', follow_date='2026-11-10')
+        record = self._record_for(customer_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer_contacted')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertTrue(record['contacted'])
 
     def test_bounced_email_gives_one_address_or_nothing(self):
         # recipient_email 是自由文本：带显示名要取出地址，写两个地址就宁可不说，
@@ -1135,6 +1181,7 @@ class SelaProspectApiTest(unittest.TestCase):
 
     def test_another_members_bounced_customer_is_not_a_hard_exclusion(self):
         # 别的成员那边也只是退信：没人看过信，不该按“该成员接触过”硬拦所有人。
+        # 但它仍要以软记录出现——整条消失等于让 sela 再往死信箱发一次。
         db.set_db_user('kelley')
         conn = db.get_db()
         try:
@@ -1163,8 +1210,43 @@ class SelaProspectApiTest(unittest.TestCase):
             conn.close()
             db.set_db_user('hamid')
         records = self.exclusion_records()
-        self.assertFalse(any(r.get('record_id') == f'trosa-member-contact:kelley:{customer_id}'
-                             for r in records))
+        record = next((r for r in records
+                       if r.get('record_id') == f'trosa-member-contact:kelley:{customer_id}'), None)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer')
+        self.assertEqual(record['match_policy'], 'soft')
+        self.assertFalse(record['contacted'])
+        self.assertEqual(record['contact_evidence'], 'delivery_event')
+
+    def test_another_members_bounce_only_customer_is_a_soft_record(self):
+        # kelley 那边只有一条人工写的退信日志、没有外联行也没有送达事件：
+        # 以前这条客户两边都不出现；现在必须以软记录出现，且不重复占位。
+        db.set_db_user('kelley')
+        conn = db.get_db()
+        try:
+            conn.execute(
+                "INSERT INTO customers (name, company, website, country) "
+                "VALUES ('Member Paste Bounce Co', 'Member Paste Bounce Co', "
+                "'https://member-paste-bounce.example/', 'Colombia')")
+            customer_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                """INSERT INTO follow_up_logs (customer_id, content, follow_date, direction,
+                                               activity_type, created_at)
+                   VALUES (?, '\n外联邮件退信：ventas@member-paste-bounce.example',
+                           '2026-11-10', 'outbound', 'follow_up', '2026-11-10 10:00:00')""",
+                (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+            db.set_db_user('hamid')
+        records = self.exclusion_records()
+        matches = [r for r in records
+                   if r.get('record_id') == f'trosa-member-contact:kelley:{customer_id}']
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]['status'], 'trosa_customer')
+        self.assertEqual(matches[0]['match_policy'], 'soft')
+        self.assertFalse(matches[0]['contacted'])
+        self.assertEqual(matches[0]['contact_evidence'], 'bounce_only')
 
     def test_member_contact_is_not_duplicated_when_hamid_already_covers_the_company(self):
         own = self.add_customer('Shared Plastics', website='https://shared-plastics.example/')

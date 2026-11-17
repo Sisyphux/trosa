@@ -2657,6 +2657,56 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         # Leave nothing live behind for the acceptance that shares this database.
         self.assertEqual(client.delete(f'/api/customers/{customer_id}').status_code, 200)
 
+    def test_z_paste_only_bounce_is_a_soft_record_and_a_follow_up_is_hard(self):
+        """A hand-recorded bounce must not vanish from the exclusion feed.
+
+        Same reason as ``test_z_archived...`` for the ``_z_`` name: it creates
+        real Customers, and the legacy ids that allocates would otherwise shift
+        the ids the customer-binding tests assert on.
+        """
+        import trosa_domain
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        def make(name):
+            customer_id = self._create_pg_customer(name)
+            self.addCleanup(lambda: client.delete(f'/api/customers/{customer_id}'))
+            return customer_id
+
+        def record(customer_id, content):
+            trosa_domain.record_external_interaction(
+                self.connection, customer_id=customer_id, content=content,
+                occurred_on='2026-11-10', direction='outbound', source='manual',
+                activity_type='follow_up')
+            self.connection.commit()
+
+        def record_for(customer_id):
+            with module.app.test_request_context():
+                records = module._sela_exclusion_snapshot_records(self.connection)
+            return next((item for item in records
+                         if item.get('source') == 'trosa_customer'
+                         and str(item.get('source_id')) == str(customer_id)), None)
+
+        paste_only = make('PG Paste Bounce')
+        record(paste_only, '\n外联邮件退信：ventas@pg-paste.example')
+        bounce = record_for(paste_only)
+        self.assertIsNotNone(bounce)
+        self.assertEqual((bounce['status'], bounce['match_policy']), ('trosa_customer', 'soft'))
+        self.assertFalse(bounce['contacted'])
+        self.assertEqual(bounce['contact_evidence'], 'bounce_only')
+
+        followed_up = make('PG Bounced Then Called')
+        record(followed_up,
+               '外联邮件退信：ventas@pg-called.example\n'
+               '电话联系上采购 Ana，改用 ana@pg-called.example')
+        human = record_for(followed_up)
+        self.assertIsNotNone(human)
+        self.assertEqual((human['status'], human['match_policy']),
+                         ('trosa_customer_contacted', 'hard'))
+        self.assertTrue(human['contacted'])
+
     def test_human_restore_lifts_own_sela_exclusion_and_blocks_sela_reblock(self):
         """Restore deactivates only this prospect's source='sela' row; Sela may not re-block alone."""
         module = self._app_module()

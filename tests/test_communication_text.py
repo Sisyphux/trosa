@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 from communication_text import (
     clean_legacy_sela_content,
     fallback_message_fact,
+    is_bounce_record,
     looks_like_raw_message,
     looks_like_legacy_sela_content,
     looks_like_quoted_email,
@@ -235,6 +236,36 @@ class RawMessageGateTest(unittest.TestCase):
         text = '客户通过 Gmail 回复\n主题：Re: Quote\n发件人：a@b.com\n正文：\nsecret body'
         self.assertEqual(fallback_message_fact(text, 'inbound'), '客户回复了邮件：Quote')
         self.assertEqual(fallback_message_fact('外联邮件退信\n主题：Hi', 'outbound', 'outreach_bounced'), '外联邮件退信：Hi')
+
+
+class BounceRecordTest(unittest.TestCase):
+    """``is_bounce_record`` is the only place that answers «这一行是不是退信»."""
+
+    def test_a_system_marked_bounce_is_a_bounce(self):
+        self.assertTrue(is_bounce_record('邮件被退信：ventas@x.example', 'outreach_bounced'))
+        self.assertTrue(is_bounce_record('外联邮件退信', '外联退信'))
+
+    def test_leading_whitespace_does_not_hide_a_bounce(self):
+        for text in ('外联邮件退信：a@x.example',
+                     '\n外联邮件退信：a@x.example',
+                     '   \n\n 外联邮件退信\n主题：Hi',
+                     '\t外联邮件退信（5.1.1）'):
+            self.assertTrue(is_bounce_record(text, 'follow_up'), text)
+
+    def test_a_bounce_followed_by_a_human_step_is_not_a_bounce(self):
+        for text in ('外联邮件退信：ventas@x.example\n电话联系上采购 Ana，改用 ana@x.example',
+                     '外联邮件退信后联系到老板，面谈了规格',
+                     '外联邮件退信，客户回复让我加微信'):
+            self.assertFalse(is_bounce_record(text, 'follow_up'), text)
+
+    def test_a_bounce_notice_that_merely_mentions_a_phone_is_still_a_bounce(self):
+        # 「电话无人接听」是退信通知里常见的补充说明，不是真人接触。
+        self.assertTrue(is_bounce_record('外联邮件退信：a@x.example，电话无人接听', 'follow_up'))
+
+    def test_plain_human_text_is_not_a_bounce(self):
+        self.assertFalse(is_bounce_record('电话沟通，对方下周回复', 'follow_up'))
+        self.assertFalse(is_bounce_record('客户回复：请报 FOB 价', 'customer_reply'))
+        self.assertFalse(is_bounce_record('', ''))
 
 
 if __name__ == '__main__':
