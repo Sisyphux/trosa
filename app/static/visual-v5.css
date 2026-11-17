@@ -3442,8 +3442,12 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-thread.has-dossier { display: flex; flex-direction: column; row-gap: 8px; }
   #trosa .dialogue-thread.has-dossier .dialogue-main { order: 1; }
   #trosa .dialogue-thread.has-dossier .dialogue-dossier { order: 0; flex: none; max-height: 45%; }
+  /* 这一行是两段：点名、地点、联系人…排一行，基本介绍另起一行占满整行。
+     用 grid 固定这两段的位置——早先用 flex 换行时，介绍那句带着 max-width
+     参与第一行排布，宽桌面上它挤在同一行里，资料就被压成一字一列的竖条。 */
   #trosa .dialogue-dossier-summary {
-    display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; min-height: 40px; padding: 12px 20px 12px 44px; box-sizing: border-box;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 6px 22px;
+    min-height: 40px; padding: 12px 20px 12px 44px; box-sizing: border-box;
     cursor: pointer; list-style: none; position: relative;
   }
   #trosa .dialogue-dossier-summary::-webkit-details-marker { display: none; }
@@ -3453,10 +3457,10 @@ html.motion-lite #trosa .ld-lens, html.motion-reduced #trosa .ld-lens { transiti
   #trosa .dialogue-glance-cell i { font-style: normal; font-size: var(--dl-fs-caption); color: var(--dl-ink-3); }
   #trosa .dialogue-glance-cell b { font-weight: 500; color: var(--dl-ink); overflow-wrap: anywhere; }
   #trosa .dialogue-glance-cell.is-flag b { font-weight: 600; color: var(--dl-gold-ink); }
-  #trosa .dialogue-glance-toggle { flex: none; margin-left: auto; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-2); }
+  #trosa .dialogue-glance-toggle { flex: none; margin-left: 0; justify-self: end; font-size: var(--dl-fs-caption); font-weight: 600; color: var(--dl-ink-2); }
   #trosa .dialogue-glance-toggle::after { content: "全部资料 ↓"; }
   #trosa .dialogue-dossier-fold[open] .dialogue-glance-toggle::after { content: "收起 ↑"; }
-  #trosa .dialogue-glance-intro { flex: 1 1 100%; max-width: 78ch; font-size: var(--dl-fs-body-s); line-height: 1.6; color: var(--dl-ink-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  #trosa .dialogue-glance-intro { grid-column: 1 / -1; max-width: min(100%, 78ch); font-size: var(--dl-fs-body-s); line-height: 1.6; color: var(--dl-ink-2); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   #trosa .dialogue-dossier-fold[open] .dialogue-glance-cells,
   #trosa .dialogue-dossier-fold[open] .dialogue-glance-intro { display: none; }
   #trosa .dialogue-dossier-head { padding-left: 40px; }
