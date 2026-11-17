@@ -212,6 +212,73 @@ class SelaExclusionsCostTest(unittest.TestCase):
         self.assertEqual(after.status_code, 200)
         self.assertIn('dnc-1', self.source_ids(after))
 
+    # -- archive means "stop contacting", not "forget the company" -----------
+    def archive(self, customer_id):
+        response = self.client.delete(f'/api/customers/{customer_id}')
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def restore(self, customer_id):
+        response = self.client.post(f'/api/customers/{customer_id}/restore')
+        self.assertEqual(response.status_code, 200, response.get_json())
+
+    def records_by_source(self):
+        return {r.get('source'): r for r in self.get().get_json()['records']}
+
+    def test_archived_customer_becomes_a_hard_block(self):
+        """An archived Customer still owns its company identity on the sela side."""
+        cid = self.add_customer(1, email='buyer@excl1.example')
+        self.assertNotIn('trosa_archived_customer', self.records_by_source())
+        self.archive(cid)
+        record = self.records_by_source()['trosa_archived_customer']
+        self.assertEqual(record['source_id'], str(cid))
+        self.assertEqual(record['status'], 'do_not_contact')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertEqual(record['normalized_name'], 'excl 1')
+        self.assertIn('excl1.example', record['domains'])
+
+    def test_archive_replaces_the_contacted_record_with_the_block(self):
+        cid = self.add_customer(1, contacted=True, email='a@excl1.example')
+        self.assertEqual(self.records_by_source()['trosa_customer']['status'],
+                         'trosa_customer_contacted')
+        self.archive(cid)
+        records = self.records_by_source()
+        self.assertNotIn('trosa_customer', records)
+        self.assertEqual(records['trosa_archived_customer']['status'], 'do_not_contact')
+
+    def test_restore_lifts_the_archive_block(self):
+        cid = self.add_customer(1, contacted=True, email='a@excl1.example')
+        self.archive(cid)
+        self.restore(cid)
+        records = self.records_by_source()
+        self.assertNotIn('trosa_archived_customer', records)
+        self.assertEqual(records['trosa_customer']['status'], 'trosa_customer_contacted')
+
+    def test_archive_invalidates_the_snapshot(self):
+        cid = self.add_customer(1, contacted=True)
+        self.add_customer(2, contacted=True)
+        self.assert_invalidates(lambda: self.archive(cid), str(cid))
+
+    def test_archived_customer_without_any_contact_still_blocks(self):
+        """A block must not need an earlier conversation to be written."""
+        cid = self.add_customer(7)
+        self.archive(cid)
+        self.assertEqual(self.records_by_source()['trosa_archived_customer']['source_id'], str(cid))
+
+    def test_archived_customer_without_a_matchable_name_is_skipped(self):
+        """A hard record with no name and no host would abort sela's whole index."""
+        conn = self.db()
+        try:
+            cursor = conn.execute(
+                "INSERT INTO customers (name, company, country, updated_at, is_deleted) "
+                "VALUES ('', '', '', datetime('now', 'localtime'), 1)")
+            customer_id = cursor.lastrowid
+            conn.execute("UPDATE customers SET name='***', company='***' WHERE id=?", (customer_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.assertNotIn('trosa_archived_customer',
+                         {r.get('source') for r in self.get().get_json()['records']})
+
 
 if __name__ == '__main__':
     unittest.main()

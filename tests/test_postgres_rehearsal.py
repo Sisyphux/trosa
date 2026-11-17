@@ -2603,6 +2603,60 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(changed.status_code, 200)
         self.assertIn(extra, {item.get('id') for item in changed.get_json()['records']})
 
+    def test_z_archived_customer_blocks_sela_as_a_do_not_contact_record(self):
+        """Archiving means "stop contacting": the block is derived, restore lifts it.
+
+        Runs last (``_z_``) on purpose: it publishes a real prospect, and the
+        legacy ids that allocates would otherwise shift the ids the
+        customer-binding tests assert on.
+        """
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        run = uuid.uuid4().hex[:8]
+        source_id = f'pg-arch-{run}'
+        published = client.post(
+            '/api/integrations/sela/prospects',
+            headers={'X-Idempotency-Key': f'pg-arch:{source_id}'},
+            json={'prospect': {
+                'source_id': source_id, 'company': f'{source_id} Co',
+                'website': f'https://{source_id}.example/', 'country': 'US',
+                'business_type': 'acrylic fabricator', 'status': 'READY TO CONTACT',
+                'contact': {'name': 'Buyer', 'email': f'buyer@{source_id}.example'},
+                'subject': 'Intro', 'email_draft': 'Hello.',
+                'outreach_status': 'SENT', 'sent_at': '2026-10-03T10:00:00+08:00',
+            }},
+        )
+        self.assertEqual(published.status_code, 200, published.get_json())
+        customer_id = published.get_json()['trosa_id']
+
+        def records():
+            response = client.get('/api/integrations/sela/exclusions')
+            self.assertEqual(response.status_code, 200)
+            return response.get_json()['records']
+
+        def archived_mine(items):
+            return [record for record in items
+                    if record.get('source') == 'trosa_archived_customer'
+                    and record.get('source_id') == str(customer_id)]
+
+        def live_mine(items):
+            return [record for record in items
+                    if record.get('source') == 'trosa_customer' and record.get('id') == customer_id]
+
+        self.assertEqual(len(live_mine(records())), 1)
+        self.assertEqual(client.delete(f'/api/customers/{customer_id}').status_code, 200)
+        archived = archived_mine(records())
+        self.assertEqual(len(archived), 1)
+        self.assertEqual((archived[0]['status'], archived[0]['match_policy']), ('do_not_contact', 'hard'))
+        self.assertIn(f'{source_id}.example', archived[0]['domains'])
+        self.assertEqual(client.post(f'/api/customers/{customer_id}/restore').status_code, 200)
+        back = records()
+        self.assertEqual(archived_mine(back), [])
+        self.assertEqual(len(live_mine(back)), 1)
+        # Leave nothing live behind for the acceptance that shares this database.
+        self.assertEqual(client.delete(f'/api/customers/{customer_id}').status_code, 200)
+
     def test_human_restore_lifts_own_sela_exclusion_and_blocks_sela_reblock(self):
         """Restore deactivates only this prospect's source='sela' row; Sela may not re-block alone."""
         module = self._app_module()

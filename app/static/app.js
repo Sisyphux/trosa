@@ -8170,7 +8170,7 @@ async function submitBatchSet() {
 }
 
 async function batchDeleteCustomers() {
-  if (!await showAppConfirm({ title: '归档客户', message: '将 ' + selectedCustomers.size + ' 个客户归档？之后仍可恢复。', submitLabel: '归档' })) return;
+  if (!await showAppConfirm({ title: '归档客户', message: '将 ' + selectedCustomers.size + ' 个客户归档？归档后 Sela 不再联系这些公司，之后仍可恢复。', submitLabel: '归档' })) return;
   try {
     await api('/api/customers/batch/delete', { method: 'POST', body: JSON.stringify({ ids: Array.from(selectedCustomers) }) });
     showToast('客户已归档', 'success');
@@ -8178,7 +8178,7 @@ async function batchDeleteCustomers() {
   } catch(e) {}
 }
 async function batchDeleteNew() {
-  if (!await showAppConfirm({ title: '归档选中客户', message: '确认归档 ' + selectedNewPool.size + ' 个选中客户？之后仍可恢复。', submitLabel: '归档' })) return;
+  if (!await showAppConfirm({ title: '归档选中客户', message: '确认归档 ' + selectedNewPool.size + ' 个选中客户？归档后 Sela 不再联系这些公司，之后仍可恢复。', submitLabel: '归档' })) return;
   try {
     await api('/api/customers/batch/delete', { method: 'POST', body: JSON.stringify({ ids: Array.from(selectedNewPool) }) });
     showToast('批量删除成功', 'success');
@@ -10011,7 +10011,7 @@ async function saveCustomer() {
 }
 
 async function deleteCustomer(id) {
-  if (!await showAppConfirm({ title: '归档客户', message: '将这个客户归档？之后仍可恢复。', submitLabel: '归档' })) return false;
+  if (!await showAppConfirm({ title: '归档客户', message: '将这个客户归档？归档后 Sela 不再联系它，之后仍可恢复。', submitLabel: '归档' })) return false;
   // 确认之后立刻划掉这一行的公司名（账页里）；保存失败撤回。
   var archiveButton = document.querySelector('[data-ld-archive="' + id + '"]');
   var archiveRow = archiveButton && archiveButton.closest('.ld-ent');

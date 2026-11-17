@@ -125,7 +125,7 @@ TOOLS = {
     'reschedule': ('reschedule', False, '调整待办日期（可撤销）。',
                    [_p('task_id', 'int', '待办 ID', required=True, positional=True),
                     _p('date', 'str', '新' + DATE_HINT, required=True)]),
-    'archive_customer': ('archive-customer', False, '把客户归档到回收站（可撤销，可用 restore_customer 恢复）。',
+    'archive_customer': ('archive-customer', False, '把客户归档到回收站：之后不再联系，sela 也停止开发这家公司（可撤销，可用 restore_customer 恢复）。',
                          [CUSTOMER_ID]),
     'restore_customer': ('restore-customer', False, '从回收站恢复客户（可撤销）。', [CUSTOMER_ID]),
     'undo': ('undo', False, '撤销之前的一次写入；action_id 来自写入结果。',

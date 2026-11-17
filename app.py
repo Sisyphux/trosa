@@ -4771,20 +4771,22 @@ def _sela_contact_domains_by_customer(conn):
     A Customer whose website field is empty or holds free text is still the
     same company as a prospect writing from ``@thatcompany.com``.  Free-mail
     domains identify nobody and are skipped.
+
+    Archived Customers are included: the company is still the same company, and
+    a block that cannot be matched by host is worse than one that can.  The map
+    is keyed by Customer id, so this only widens the identity of archived rows.
     """
     if postgres_mode():
         rows = conn.execute(
             '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
                  FROM trosa.customer_contacts contact
-                 JOIN trosa.customer_records record ON record.id=contact.customer_id
-                WHERE record.deleted_at IS NULL AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+                WHERE LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
         ).fetchall()
     else:
         rows = conn.execute(
             '''SELECT contact.customer_id, lower(trim(contact.email)) AS email
-                 FROM contacts contact JOIN customers customer ON customer.id=contact.customer_id
-                WHERE (customer.is_deleted=0 OR customer.is_deleted IS NULL)
-                  AND LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
+                 FROM contacts contact
+                WHERE LENGTH(TRIM(COALESCE(contact.email, '')))>0''',
         ).fetchall()
     result: dict[int, list[str]] = {}
     for row in rows:
@@ -5082,11 +5084,18 @@ def _sela_bounced_customers(conn):
 def _sela_exclusion_snapshot_records(conn):
     """Return the one authoritative exclusion projection owned by Trosa.
 
-    A Customer record only blocks new outreach when a durable external-contact
-    fact exists.  Mere existence in the CRM — profile, contacts, research,
-    tasks, follow-up suggestions or imported date fields — must not turn a
-    prospect into a hard exclusion.  Uncontacted Customers are omitted so sela
-    can develop them while still reusing the existing record.
+    A live Customer record only blocks new outreach when a durable
+    external-contact fact exists.  Mere existence in the CRM — profile,
+    contacts, research, tasks, follow-up suggestions or imported date fields —
+    must not turn a prospect into a hard exclusion.  Uncontacted live Customers
+    are omitted so sela can develop them while still reusing the existing
+    record.
+
+    An *archived* Customer is the one exception, and it blocks precisely because
+    archiving is a human statement that this company is no longer to be
+    contacted: it becomes a derived ``do_not_contact`` record (see
+    ``archived_record``) that disappears again the moment the Customer is
+    restored.
     """
     contact_evidence = _sela_customer_contact_evidence(conn)
     bounced_customers = _sela_bounced_customers(conn)
@@ -5130,6 +5139,38 @@ def _sela_exclusion_snapshot_records(conn):
             'contact_evidence': evidence,
         }
 
+    def archived_record(item, customer_id):
+        """An archived Customer is itself a hard do-not-contact fact.
+
+        Archiving means "we stop working this company", so sela must stop too.
+        The record carries the company's identity (names, hosts) so a later cold
+        prospect for the same company is refused instead of being re-created as
+        a duplicate.  It is *derived* from ``deleted_at`` rather than stored, so
+        restoring the Customer cancels it exactly and nothing has to be cleaned
+        up.  An identity-less archived row is skipped: a hard record that cannot
+        match would abort the whole exclusion index on the sela side.
+        """
+        canonical_name = str(item.get('company') or item.get('name') or '').strip()
+        if not canonical_name:
+            return None
+        aliases, domains = _sela_record_identity(
+            item, contact_domains.get(customer_id, []), registry.get(customer_id))
+        if not domains and not _sync_name_key(canonical_name):
+            return None
+        return {
+            'record_id': f'trosa-archived-customer:{customer_id}',
+            'canonical_name': canonical_name,
+            'normalized_name': _sync_name_key(canonical_name),
+            'aliases': aliases,
+            'domains': domains,
+            'owner_username': get_current_user(),
+            'country': str(item.get('country') or ''),
+            'status': 'do_not_contact', 'match_policy': 'hard',
+            'source': 'trosa_archived_customer', 'source_id': str(customer_id),
+            'reason': '客户已归档，不再联系',
+            'updated_at': str(item.get('updated_at') or ''),
+        }
+
     if postgres_mode():
         records = []
         # One narrow Customer read and one latest-outreach read for the whole
@@ -5137,8 +5178,8 @@ def _sela_exclusion_snapshot_records(conn):
         # ``DISTINCT ON`` keeps exactly the row ``_modern_outreach_rows`` would
         # return first per Customer (same ordering, same date projection).
         customers = conn.execute(
-            '''SELECT id, name, company, website, country, business_stage, updated_at
-                 FROM trosa.customer_records WHERE deleted_at IS NULL
+            '''SELECT id, name, company, website, country, business_stage, updated_at, deleted_at
+                 FROM trosa.customer_records
                 ORDER BY updated_at DESC, id DESC''',
         ).fetchall()
         latest_outreach_by_customer = {
@@ -5165,9 +5206,12 @@ def _sela_exclusion_snapshot_records(conn):
         for row in customers:
             item = dict(row)
             customer_id = int(item['id'])
-            if not contact_evidence.get(customer_id):
-                continue
-            record = customer_record(item, customer_id, latest_outreach_by_customer.get(customer_id, ''))
+            if item.get('deleted_at'):
+                record = archived_record(item, customer_id)
+            elif contact_evidence.get(customer_id):
+                record = customer_record(item, customer_id, latest_outreach_by_customer.get(customer_id, ''))
+            else:
+                record = None
             if record:
                 records.append(record)
         suppressed = conn.execute(
@@ -5213,21 +5257,23 @@ def _sela_exclusion_snapshot_records(conn):
     records = []
     rows = conn.execute(
         '''SELECT c.id, c.name, c.company, c.country, c.website, c.business_stage,
-                  c.external_source, c.last_contact, c.updated_at,
+                  c.external_source, c.last_contact, c.updated_at, c.is_deleted,
                   COALESCE(MAX(o.sent_date), '') AS latest_outreach_date
            FROM customers c
            LEFT JOIN outreach_emails o ON o.customer_id=c.id
-           WHERE (c.is_deleted=0 OR c.is_deleted IS NULL)
            GROUP BY c.id, c.name, c.company, c.country, c.website, c.business_stage,
-                    c.external_source, c.last_contact, c.updated_at
+                    c.external_source, c.last_contact, c.updated_at, c.is_deleted
            ORDER BY c.id'''
     ).fetchall()
     for row in rows:
         item = dict(row)
         customer_id = int(item['id'])
-        if not contact_evidence.get(customer_id):
-            continue
-        record = customer_record(item, customer_id, str(item.get('latest_outreach_date') or ''))
+        if item.get('is_deleted'):
+            record = archived_record(item, customer_id)
+        elif contact_evidence.get(customer_id):
+            record = customer_record(item, customer_id, str(item.get('latest_outreach_date') or ''))
+        else:
+            record = None
         if record:
             records.append(record)
     suppressed = conn.execute(

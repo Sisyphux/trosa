@@ -474,7 +474,7 @@ def build_parser():
     p.add_argument('task', type=int)
     p.add_argument('--date', required=True, help='新日期 YYYY-MM-DD')
     p.add_argument('--json', default='')
-    p = sub.add_parser('archive-customer', help='归档客户到回收站（可逆；需 crm:write）')
+    p = sub.add_parser('archive-customer', help='归档客户到回收站：之后不再联系，sela 也停止开发（可逆；需 crm:write）')
     p.add_argument('customer', type=int)
     p = sub.add_parser('restore-customer', help='从回收站恢复客户（可逆；需 crm:write）')
     p.add_argument('customer', type=int)
