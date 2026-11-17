@@ -1001,6 +1001,63 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertTrue(record['contacted'])
         self.assertEqual(record['contact_evidence'], 'recorded_communication')
 
+    def _record_for(self, customer_id):
+        records = self.exclusion_records()
+        return next((r for r in records if r.get('record_id') == f'trosa-customer:{customer_id}'), None)
+
+    def test_a_bounce_is_not_a_human_contact(self):
+        # 32ONE: 一封退信被记成沟通，客户就被当成“真人接触过”，sela 再也开发不了；
+        # 补了联系人邮箱也白搭。退信只说明这个信箱发不到，不等于有人跟我们说过话。
+        # 送达事件仍在（我们确实发过一封），所以记录还得留在名单里，但只能是软的。
+        customer_id = self.add_customer('32ONE', website='https://www.32-one.com/')
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """INSERT INTO outreach_emails (customer_id, subject, sent_date, reply_status, recipient_email)
+                   VALUES (?, 'Acrílico cast', '2026-11-10', 'bounced', 'ventas@32-one.com')""",
+                (customer_id,))
+            outreach_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.execute(
+                """INSERT INTO email_delivery_events
+                   (email, outreach_email_id, event_type, message_id, source, occurred_at)
+                   VALUES ('ventas@32-one.com', ?, 'sent', 'sent-1', 'test', '2026-11-10 22:08:53')""",
+                (outreach_id,))
+            conn.commit()
+        finally:
+            conn.close()
+        self.add_follow_log(customer_id, '邮件被退信：ventas@32-one.com', activity_type='outreach_bounced',
+                            source='sela_reply_engine', follow_date='2026-11-10')
+        record = self._record_for(customer_id)
+        self.assertIsNotNone(record)
+        self.assertEqual(record['status'], 'trosa_customer')
+        self.assertEqual(record['match_policy'], 'soft')
+        self.assertEqual(record['contact_evidence'], 'delivery_event')
+
+    def test_a_bounce_alone_does_not_put_the_company_on_the_exclusion_feed(self):
+        # 只有退信、连送达事件都没有的客户，和“没接触过”的客户一样不该进硬排除名单。
+        customer_id = self.add_customer('Bounced Import Co', website='https://bounced-import.example/')
+        self.add_follow_log(customer_id, '外联邮件退信', activity_type='外联退信', follow_date='2026-11-10')
+        self.assertIsNone(self._record_for(customer_id))
+
+    def test_a_real_reply_next_to_a_bounce_still_blocks_cold_outreach(self):
+        customer_id = self.add_customer('Real Reply Co', website='https://real-reply.example/')
+        self.add_follow_log(customer_id, '邮件被退信：sales@real-reply.example',
+                            activity_type='outreach_bounced', follow_date='2026-11-10')
+        self.add_follow_log(customer_id, '客户回复：请报 FOB 价', direction='inbound',
+                            activity_type='customer_reply', follow_date='2026-11-11')
+        record = self._record_for(customer_id)
+        self.assertEqual(record['status'], 'trosa_customer_contacted')
+        self.assertEqual(record['match_policy'], 'hard')
+        self.assertEqual(record['contact_evidence'], 'recorded_communication')
+
+    def test_a_manual_outbound_log_is_still_a_real_contact(self):
+        # 人工记的一条“已电话沟通”是真人接触，必须继续硬排除。
+        customer_id = self.add_customer('Phoned Co', website='https://phoned.example/')
+        self.add_follow_log(customer_id, '已电话沟通，等报价', activity_type='follow_up')
+        record = self._record_for(customer_id)
+        self.assertEqual(record['status'], 'trosa_customer_contacted')
+        self.assertEqual(record['match_policy'], 'hard')
+
     def _add_member_customer(self, member, name, *, website='', contacted=True):
         db.set_db_user(member)
         conn = db.get_db()
@@ -1646,6 +1703,31 @@ class SelaProspectApiTest(unittest.TestCase):
         body['contact'] = {'name': 'Buyer', 'email': f'buyer@{source_id}.example'}
         body.update(fields)
         return self.post_prospect(body, f'sela-v2:{source_id}:one')
+
+    def test_prospect_view_names_the_mailbox_that_bounced(self):
+        # 公司的 BOUNCED 是整家公司的状态，退信却是某一个信箱的事。sela 必须看得见
+        # 到底是哪个地址退的，否则人换过新地址后它只能一直当成“还有退信没解释”。
+        source_id = 'bounced-mailbox'
+        self._publish(source_id)
+        conn = self.hamid_db()
+        try:
+            conn.execute(
+                """UPDATE outreach_emails
+                      SET reply_status='bounced', sent_date='2026-11-10',
+                          recipient_email='ventas@32-one.com'
+                    WHERE external_source='sela' AND external_id=?""",
+                (source_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        rows = self.client.get(
+            '/api/integrations/sela/prospects?limit=100', headers=self.headers(),
+        ).get_json()['prospects']
+        row = next(item for item in rows if item['id'] == source_id)
+        self.assertEqual(row['outreach_status'], 'BOUNCED')
+        self.assertEqual(row['bounced_email'], 'ventas@32-one.com')
+        self.assertEqual(row['email'], f'buyer@{source_id}.example')
 
     def test_prospect_projection_uses_earliest_sent_event_as_stable_first_touch(self):
         source_id = 'first-touch-time'

@@ -4680,10 +4680,18 @@ def _sela_customer_contact_evidence(conn):
     """Map Customer id -> the durable fact that proves real external contact.
 
     Contact is decided only by real communication evidence: a recorded
-    communication, an inbound reply or bounce, a real delivery event, or an
+    communication, an inbound reply, a real delivery event, or an
     open inbound capture matched to a known Contact email.  A Customer row,
     its contacts, research, tasks, follow-up suggestions or imported date
     fields never establish contact on their own.
+
+    A bounce is a delivery failure, never a conversation: the recipient's
+    server refused the mailbox, so nobody at the company read the letter.
+    Counting it as contact marked the company ``trosa_customer_contacted`` and
+    made sela refuse it forever, even after a person supplied a new address
+    (32ONE / customer 2806).  Bounce rows therefore fall through to the weaker
+    ``delivery_event`` fact, which still blocks a duplicate send to the dead
+    mailbox but leaves the company developable.
     """
     evidence: dict[int, str] = {}
 
@@ -4697,12 +4705,14 @@ def _sela_customer_contact_evidence(conn):
 
     if postgres_mode():
         for row in conn.execute(
-            "SELECT DISTINCT customer_id FROM trosa.customer_interactions WHERE kind='communication'",
+            """SELECT DISTINCT customer_id FROM trosa.customer_interactions
+                WHERE kind='communication'
+                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')""",
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
             """SELECT DISTINCT customer_id FROM trosa.customer_interactions
-                WHERE kind='email' AND lower(COALESCE(delivery_status,'')) IN ('replied','bounced')""",
+                WHERE kind='email' AND lower(COALESCE(delivery_status,''))='replied'""",
         ).fetchall():
             mark(row['customer_id'], 'customer_reply')
         for row in conn.execute(
@@ -4719,11 +4729,14 @@ def _sela_customer_contact_evidence(conn):
             mark(row.get('customer_id'), 'customer_reply')
     else:
         for row in conn.execute(
-            "SELECT DISTINCT customer_id FROM follow_up_logs WHERE is_deleted=0 OR is_deleted IS NULL",
+            """SELECT DISTINCT customer_id FROM follow_up_logs
+                WHERE (is_deleted=0 OR is_deleted IS NULL)
+                  AND COALESCE(activity_type,'') NOT IN ('outreach_bounced','外联退信')""",
         ).fetchall():
             mark(row['customer_id'], 'recorded_communication')
         for row in conn.execute(
-            "SELECT DISTINCT customer_id FROM outreach_emails WHERE lower(COALESCE(reply_status,'')) IN ('replied','bounced')",
+            "SELECT DISTINCT customer_id FROM outreach_emails "
+            "WHERE lower(COALESCE(reply_status,''))='replied'",
         ).fetchall():
             mark(row['customer_id'], 'customer_reply')
         for row in conn.execute(
@@ -5011,6 +5024,7 @@ def _sela_exclusion_snapshot_records(conn):
         aliases, domains = _sela_record_identity(
             item, contact_domains.get(customer_id, []), registry.get(customer_id))
         evidence = contact_evidence.get(customer_id, '')
+        status = _sela_customer_exclusion_status(evidence)
         return {
             'record_id': f'trosa-customer:{customer_id}',
             'canonical_name': canonical_name,
@@ -5019,7 +5033,15 @@ def _sela_exclusion_snapshot_records(conn):
             'domains': domains,
             'owner_username': get_current_user(),
             'country': str(item.get('country') or ''),
-            'status': _sela_customer_exclusion_status(evidence), 'match_policy': 'hard',
+            'status': status,
+            # Only a fact that a person really dealt with this company blocks a
+            # cold letter.  A weaker record (sela's own delivery, including a
+            # bounce it recorded itself) stays in the snapshot for inspection
+            # but must not hard-exclude the company: sela's own contract treats
+            # a soft ``trosa_customer`` as "already emailed, keep the follow-up
+            # cadence" — a hard policy here overrode that and made every bounced
+            # customer permanently undevelopable.
+            'match_policy': 'hard' if status == 'trosa_customer_contacted' else 'soft',
             'source': 'trosa_customer', 'source_id': str(customer_id),
             'updated_at': str(item.get('updated_at') or ''),
             'id': customer_id, 'name': str(item.get('name') or ''),
@@ -7069,6 +7091,13 @@ def _sela_prospect_view(conn, profile, context=None):
         # Empty-date imported drafts never count as a send (sent_count=0).
         'outreach': outreach_history,
         'bounced': outreach_history['last_status'] == 'bounced',
+        # The mailbox the bounce actually came from.  Trosa's own BOUNCED is
+        # company-wide and outlives the dead address, so sela cannot tell "the
+        # address on the record died" from "a different address died" without
+        # this fact; a replacement supplied in Trosa then looks exactly like a
+        # bounce nobody can explain.
+        'bounced_email': (str(outreach.get('recipient_email') or '').strip().lower()
+                          if reply_status == 'bounced' else ''),
         'replied': real_interaction or outreach_history['last_status'] == 'replied',
         'sent_at': str(outreach.get('sent_date') or ''),
         'first_touch_at': str(outreach.get('first_touch_at') or ''),
@@ -7166,7 +7195,7 @@ _SELA_PROSPECT_VIEW_FIELDS = frozenset({
     'qualification_reason', 'angle', 'supplier_pivot', 'site_hygiene',
     'evidence', 'source_urls', 'campaign', 'source_run', 'do_not_contact',
     'do_not_contact_reason', 'subject', 'email_draft', 'outreach_status',
-    'outcome', 'outreach', 'bounced', 'replied', 'sent_at', 'first_touch_at',
+    'outcome', 'outreach', 'bounced', 'bounced_email', 'replied', 'sent_at', 'first_touch_at',
     'last_outreach_at', 'last_inbound_at', 'last_reply_received_at',
     'last_reply_body', 'gmail_message_id', 'gmail_thread_id', 'gmail_draft_id',
     'gmail_draft_url', 'imported_at', 'updated_at', 'trosa_revision',
