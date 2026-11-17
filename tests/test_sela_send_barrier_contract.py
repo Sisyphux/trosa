@@ -114,6 +114,21 @@ class SendBarrierContractTest(unittest.TestCase):
         self.assertEqual(self.snapshot.call_args.kwargs['domains'], self.payload['domains'])
         self.assertEqual(self.conn.row['state'], 'PREPARED')
 
+    def test_unconfirmed_identity_or_unclaimed_company_can_still_arm(self):
+        arm = self.prepare()
+        for snapshot in (
+            {'matches': [{'identity_status': 'review',
+                          'accounts': [{'owner_username': 'hamid', 'account_id': 'a1'}]}]},
+            {'matches': [{'identity_status': 'confirmed', 'accounts': []}]},
+        ):
+            with self.subTest(snapshot=snapshot):
+                self.snapshot.return_value = snapshot
+                self.conn.row['state'] = 'PREPARED'
+                response = self.post('arm', arm)
+                self.assertEqual(response.status_code, 200, response.get_json())
+                self.assertTrue(response.get_json()['acquired'])
+                self.conn.row['state'] = 'PREPARED'
+
     def test_domains_validation_and_domain_only_identity(self):
         for domains in ('first.example', [123], ['first.example'] * 13, ['bad domain'], ['person@example.com'], ['x' * 321]):
             with self.subTest(domains=domains):

@@ -401,5 +401,49 @@ class SelaCompanyOwnershipSnapshotTests(unittest.TestCase):
         self.assertEqual(malformed.status_code, 400)
 
 
+class SelaCrossOwnerConflictTests(unittest.TestCase):
+    """Only another owner's account makes a match a cross-owner conflict."""
+
+    @staticmethod
+    def _ownership(status, accounts):
+        return {'matches': [{
+            'company_id': 'company-1', 'canonical_name': 'Acriplast',
+            'identity_status': status, 'matched_by': ['name'], 'accounts': accounts,
+        }]}
+
+    def test_review_identity_with_self_account_is_not_a_conflict(self):
+        ownership = self._ownership('review', [{'account_id': 'a1', 'owner_username': 'hamid'}])
+        self.assertEqual(app._sela_cross_owner_conflicts(ownership, 'hamid'), [])
+
+    def test_review_identity_with_another_owner_is_a_conflict(self):
+        ownership = self._ownership('review', [{'account_id': 'a1', 'owner_username': 'amy'}])
+        conflicts = app._sela_cross_owner_conflicts(ownership, 'hamid')
+        self.assertEqual([row['owner_username'] for row in conflicts], ['amy'])
+
+    def test_unclaimed_company_is_not_a_conflict(self):
+        ownership = self._ownership('confirmed', [])
+        self.assertEqual(app._sela_cross_owner_conflicts(ownership, 'hamid'), [])
+
+    def test_missing_owner_still_blocks(self):
+        ownership = self._ownership('confirmed', [{'account_id': 'a1', 'owner_username': ''}])
+        conflicts = app._sela_cross_owner_conflicts(ownership, 'hamid')
+        self.assertEqual(len(conflicts), 1)
+        self.assertEqual(conflicts[0]['account_id'], 'a1')
+
+    def test_incomplete_snapshot_fails_closed(self):
+        cases = [
+            None,
+            {},
+            {'matches': None},
+            {'matches': [{'company_id': 'c1', 'canonical_name': 'X'}]},
+            {'matches': [{'company_id': 'c1', 'canonical_name': 'X', 'accounts': None}]},
+            {'matches': [{'company_id': 'c1', 'canonical_name': 'X', 'accounts': ['nope']}]},
+        ]
+        for ownership in cases:
+            with self.subTest(ownership=ownership):
+                with self.assertRaises(ValueError):
+                    app._sela_cross_owner_conflicts(ownership, 'hamid')
+
+
 if __name__ == "__main__":
     unittest.main()

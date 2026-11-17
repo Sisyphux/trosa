@@ -6136,6 +6136,42 @@ def _sela_upsert_additional_emails(conn, customer_id, values, now):
     return []
 
 
+def _sela_cross_owner_conflicts(ownership, current_owner):
+    """Accounts in a Sela ownership snapshot that belong to somebody else.
+
+    ``identity_status`` (review vs confirmed) only says how sure Trosa is that
+    two company rows are the same firm; it never says who owns the customer.
+    A match with an empty account list is unclaimed by everyone in the
+    organization, so it is not a conflict either.
+
+    An incomplete snapshot (no ``matches``, a match without an account list) is
+    never read as "no conflict": it raises, so the caller fails closed instead
+    of creating a prospect on unverifiable ownership facts.
+    """
+    if not isinstance(ownership, dict) or not isinstance(ownership.get('matches'), list):
+        raise ValueError('所有权快照缺少匹配清单，已停止')
+    current_owner = str(current_owner or '')
+    conflicts = []
+    for matched_company in ownership['matches']:
+        if not isinstance(matched_company, dict) or not isinstance(matched_company.get('accounts'), list):
+            raise ValueError('所有权快照缺少账户清单，已停止')
+        for account in matched_company['accounts']:
+            if not isinstance(account, dict):
+                raise ValueError('所有权快照账户格式无效，已停止')
+            owner = str(account.get('owner_username') or '')
+            if not owner or owner != current_owner:
+                conflicts.append({
+                    'company_id': matched_company.get('company_id'),
+                    'company': matched_company.get('canonical_name'),
+                    'owner_username': owner,
+                    'owner_display_name': account.get('owner_display_name') or '',
+                    'account_id': account.get('account_id') or '',
+                    'account_status': account.get('account_status') or '',
+                    'matched_by': matched_company.get('matched_by') or [],
+                })
+    return conflicts
+
+
 def _sela_upsert_prospect(conn, prospect):
     """Create or update a Trosa-owned Prospect before outreach happens."""
     if not isinstance(prospect, dict):
@@ -6179,31 +6215,17 @@ def _sela_upsert_prospect(conn, prospect):
             )
         except Exception as exc:
             raise CrmWriteError('全组织所有权核验失败，已停止 Prospect 创建', 503) from exc
+        # Only another owner's account (or an account whose owner cannot be
+        # resolved) makes this a cross-owner company.  `identity_status` is
+        # dedupe confidence, not ownership: a Sela prospect whose identity is
+        # still under review but whose only account belongs to the caller is
+        # the caller's own record.  A company record with no account anywhere in
+        # the organization is unclaimed, not somebody else's customer.
         current_owner = str(_sela_prospect_user() or '')
-        ownership_conflicts = []
-        for matched_company in ownership['matches']:
-            accounts = matched_company.get('accounts') or []
-            unknown_company_identity = str(matched_company.get('identity_status') or '').lower() not in {'confirmed', 'verified'}
-            if not accounts:
-                ownership_conflicts.append({
-                    'company_id': matched_company.get('company_id'),
-                    'company': matched_company.get('canonical_name'),
-                    'owner_username': '', 'owner_display_name': '', 'account_id': '',
-                    'account_status': '', 'matched_by': matched_company.get('matched_by') or [],
-                })
-                continue
-            for account in accounts:
-                owner = str(account.get('owner_username') or '')
-                if unknown_company_identity or not owner or owner != current_owner:
-                    ownership_conflicts.append({
-                        'company_id': matched_company.get('company_id'),
-                        'company': matched_company.get('canonical_name'),
-                        'owner_username': owner,
-                        'owner_display_name': account.get('owner_display_name') or '',
-                        'account_id': account.get('account_id') or '',
-                        'account_status': account.get('account_status') or '',
-                        'matched_by': matched_company.get('matched_by') or [],
-                    })
+        try:
+            ownership_conflicts = _sela_cross_owner_conflicts(ownership, current_owner)
+        except ValueError as exc:
+            raise CrmWriteError(str(exc), 503) from exc
         if ownership_conflicts:
             return {
                 'success': True, 'status': 'REVIEW', 'reason': 'CROSS_OWNER_COMPANY',
@@ -9917,9 +9939,12 @@ def sela_send_barrier(action):
                     return jsonify({'success': False, 'error': '准备凭证已过期或已结束'}), 409
                 else:
                     ownership = _sela_company_ownership_snapshot(conn, name=name, domain=domain, domains=domains, email_domain=email_domain)
-                    if any((match['accounts'] and str(match.get('identity_status') or '').lower() not in {'confirmed', 'verified'})
-                           or any(not a.get('owner_username') or a['owner_username'] != user
-                                  for a in match['accounts'])
+                    # Ownership alone decides.  An unconfirmed company identity
+                    # or a company record with no account is not another
+                    # owner's customer; only an account the caller does not own
+                    # (or one whose owner cannot be resolved) refuses the arm.
+                    if any(any(not a.get('owner_username') or a['owner_username'] != user
+                               for a in match['accounts'])
                            for match in ownership['matches']):
                         conn.rollback()
                         return jsonify({'success': False, 'error': '公司属于其他负责人'}), 409
