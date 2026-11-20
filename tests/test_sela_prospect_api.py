@@ -2135,6 +2135,42 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(returned['missing_facts'][0]['field'], 'contact_email')
         self.assertEqual(returned['resume'], '补充邮箱后继续首次开发')
 
+    def test_a_file_name_in_the_email_field_is_never_stored_as_a_contact(self):
+        body = prospect('prospect-junk')
+        body['contact']['email'] = 'banner-1@3x-100.jpg'
+        response = self.post_prospect(body, 'sela-v2:prospect-junk:one')
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        result = response.get_json()
+        self.assertEqual(result['status'], 'SYNCED')
+        self.assertTrue(any('banner-1@3x-100.jpg' in warning for warning in result['warnings']))
+        conn = self.hamid_db()
+        try:
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE lower(trim(email))=?',
+                ('banner-1@3x-100.jpg',)).fetchone()[0], 0)
+            self.assertEqual(conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE customer_id=?', (result['trosa_id'],)).fetchone()[0], 1)
+        finally:
+            conn.close()
+
+    def test_a_later_save_with_a_file_name_does_not_erase_the_stored_address(self):
+        body = prospect('prospect-keep')
+        first = self.post_prospect(body, 'sela-v2:prospect-keep:one')
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        customer_id = first.get_json()['trosa_id']
+        later = copy.deepcopy(body)
+        later['contact']['email'] = 'banner-1@3x-100.jpg'
+        second = self.post_prospect(later, 'sela-v2:prospect-keep:two')
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            emails = [row['email'] for row in conn.execute(
+                'SELECT email FROM contacts WHERE customer_id=? ORDER BY id', (customer_id,))]
+        finally:
+            conn.close()
+        self.assertIn('ana@acrilicos.example', emails)
+        self.assertFalse([email for email in emails if 'banner' in email.lower()])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -2163,6 +2163,33 @@ def _canonical_email(value):
     return (value or '').strip().casefold()
 
 
+# Asset file names ("banner-1@3x-100.jpg") satisfy the address syntax check, so
+# the suffix is what tells them apart.  Same list as sela's email_finder.
+_SELA_ASSET_SUFFIXES = {
+    'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'css', 'js', 'ico',
+    'woff', 'woff2', 'ttf', 'pdf', 'map', 'avif',
+}
+
+
+def _sela_contact_email(value):
+    """The address to store for a Sela-written contact, or '' when it is not one.
+
+    Sela's research and website scraping can hand over something that only looks
+    like an address; storing it makes the company permanently unreachable and
+    makes every later verification of it fail.
+    """
+    raw = _sela_prospect_text(value, 320)
+    if not raw:
+        return ''
+    try:
+        normalized = validate_email_address(raw, check_deliverability=False).normalized
+    except EmailNotValidError:
+        return ''
+    if normalized.rsplit('.', 1)[-1].lower() in _SELA_ASSET_SUFFIXES:
+        return ''
+    return _canonical_email(normalized)
+
+
 def _sela_phone_key(value):
     raw = str(value or '').strip()
     if not raw:
@@ -4170,14 +4197,17 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
         return []
     fields = ('name', 'title', 'email', 'phone', 'whatsapp', 'linkedin',
               'preferred_channel', 'contact_type', 'notes')
-    contact = {
-        key: (str(raw_contact.get(key) or '').strip() if key != 'email'
-              else _canonical_email(raw_contact.get(key)))
-        for key in fields
-    }
+    raw_email = str(raw_contact.get('email') or '').strip()
+    contact = {key: str(raw_contact.get(key) or '').strip() for key in fields}
+    contact['email'] = _sela_contact_email(raw_email)
+    warnings = []
+    if raw_email and not contact['email']:
+        # A file name or other non-address is dropped, never stored: it would
+        # make the company look reachable and fail every verification instead.
+        warnings.append('邮箱字段不是有效邮箱，已忽略：%s' % raw_email[:120])
     contact['is_primary'] = 1 if raw_contact.get('is_primary', 1) else 0
     if not any(contact.get(key) for key in fields):
-        return []
+        return warnings
 
     phone_keys = {
         phone for phone in (
@@ -4225,8 +4255,8 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
                 or phone_keys.intersection(row_phones)):
             duplicates.append(row)
     if any(row['customer_id'] != customer_id for row in duplicates):
-        return ['CONTACT_EMAIL_ALREADY_ASSIGNED' if contact['email']
-                else 'CONTACT_PHONE_ALREADY_ASSIGNED']
+        return warnings + ['CONTACT_EMAIL_ALREADY_ASSIGNED' if contact['email']
+                           else 'CONTACT_PHONE_ALREADY_ASSIGNED']
     duplicate = next((row for row in duplicates if row['customer_id'] == customer_id), None)
     if duplicate:
         merged = dict(duplicate)
@@ -4236,23 +4266,25 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
             if contact.get(key) and not merged.get(key):
                 merged[key] = contact[key]
         merged['is_primary'] = max(int(merged.get('is_primary') or 0), contact['is_primary'])
+        # A dropped value never erases the address this contact already has.
+        merged['email'] = contact['email'] or _canonical_email(duplicate.get('email'))
         if postgres_mode():
-            _update_contact(conn, contact_id=duplicate['id'], values={**merged, 'email': contact['email']})
+            _update_contact(conn, contact_id=duplicate['id'], values=merged)
         else:
             conn.execute(
                 '''UPDATE contacts SET name=?, title=?, email=?, phone=?, whatsapp=?, linkedin=?,
                    preferred_channel=?, contact_type=?, is_primary=?, notes=? WHERE id=?''',
-                (merged.get('name') or '', merged.get('title') or '', contact['email'],
+                (merged.get('name') or '', merged.get('title') or '', merged['email'],
                  merged.get('phone') or '', merged.get('whatsapp') or '', merged.get('linkedin') or '',
                  merged.get('preferred_channel') or '', merged.get('contact_type') or 'person',
                  merged['is_primary'], merged.get('notes') or '', duplicate['id']),
             )
-        return []
+        return warnings
 
     # Research often starts with only a name, a LinkedIn URL, or an email.
     # Keep that confirmed fact in Trosa now; subsequent research can enrich it.
     _create_contact(conn, customer_id=customer_id, values=contact, created_at=now)
-    return []
+    return warnings
 
 
 
@@ -6326,11 +6358,7 @@ def _sela_upsert_additional_emails(conn, customer_id, values, now):
     for raw in values:
         if len(seen) >= _SELA_ADDITIONAL_EMAILS_MAX:
             break
-        try:
-            email = _canonical_email(validate_email_address(
-                _sela_prospect_text(raw, 320), check_deliverability=False).normalized)
-        except EmailNotValidError:
-            continue
+        email = _sela_contact_email(raw)
         if not email or email in seen:
             continue
         seen.add(email)
