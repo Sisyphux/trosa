@@ -2166,10 +2166,56 @@ class SelaProspectApiTest(unittest.TestCase):
         try:
             emails = [row['email'] for row in conn.execute(
                 'SELECT email FROM contacts WHERE customer_id=? ORDER BY id', (customer_id,))]
+            count = conn.execute(
+                'SELECT COUNT(*) FROM contacts WHERE customer_id=?', (customer_id,)).fetchone()[0]
         finally:
             conn.close()
         self.assertIn('ana@acrilicos.example', emails)
         self.assertFalse([email for email in emails if 'banner' in email.lower()])
+        # The dropped value leaves no identity key; the name still finds the
+        # contact that is already there instead of adding a blank copy.
+        self.assertEqual(count, 1)
+
+    def test_a_rejected_address_with_a_known_phone_merges_without_an_error(self):
+        body = prospect('prospect-phone')
+        body['contact']['email'] = ''
+        body['contact']['phone'] = '+62 812 3456 7890'
+        first = self.post_prospect(body, 'sela-v2:prospect-phone:one')
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        customer_id = first.get_json()['trosa_id']
+        later = copy.deepcopy(body)
+        later['contact']['email'] = 'banner-1@3x-100.jpg'
+        second = self.post_prospect(later, 'sela-v2:prospect-phone:two')
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            rows = [dict(row) for row in conn.execute(
+                'SELECT email, phone FROM contacts WHERE customer_id=?', (customer_id,))]
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['email'], '')
+        self.assertEqual(rows[0]['phone'], '+62 812 3456 7890')
+
+    def test_a_stored_file_name_does_not_merge_two_companies(self):
+        first = self.post_prospect(prospect('prospect-junk-a'), 'sela-v2:prospect-junk-a:one')
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        customer_a = first.get_json()['trosa_id']
+        conn = self.hamid_db()
+        try:
+            # An address stored before this validation existed.
+            conn.execute('UPDATE contacts SET email=? WHERE customer_id=?',
+                         ('banner-1@3x-100.jpg', customer_a))
+            conn.commit()
+        finally:
+            conn.close()
+        other = prospect('prospect-junk-b')
+        other['company'] = 'Vidrios del Sur S.A.'
+        other['website'] = 'https://vidrios-sur.example/'
+        other['contact']['email'] = 'banner-1@3x-100.jpg'
+        second = self.post_prospect(other, 'sela-v2:prospect-junk-b:one')
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        self.assertNotEqual(second.get_json()['trosa_id'], first.get_json()['trosa_id'])
 
 
 if __name__ == '__main__':

@@ -2166,8 +2166,9 @@ def _canonical_email(value):
 # Asset file names ("banner-1@3x-100.jpg") satisfy the address syntax check, so
 # the suffix is what tells them apart.  Same list as sela's email_finder.
 _SELA_ASSET_SUFFIXES = {
-    'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'css', 'js', 'ico',
-    'woff', 'woff2', 'ttf', 'pdf', 'map', 'avif',
+    'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'tif', 'tiff', 'heic',
+    'avif', 'ico', 'css', 'js', 'json', 'xml', 'html', 'htm', 'map', 'pdf',
+    'zip', 'webm', 'mp4', 'mov', 'woff', 'woff2', 'ttf',
 }
 
 
@@ -2179,6 +2180,14 @@ def _sela_contact_email(value):
     makes every later verification of it fail.
     """
     raw = _sela_prospect_text(value, 320)
+    if not raw:
+        return ''
+    # "Ana <ana@acrilicos.example>" and a trailing dot are address forms the
+    # validator rejects but the address inside them is real.
+    bracketed = re.search(r'<([^<>]+)>', raw)
+    if bracketed:
+        raw = bracketed.group(1).strip()
+    raw = raw.rstrip('. ').strip()
     if not raw:
         return ''
     try:
@@ -4038,7 +4047,9 @@ def _sela_match_customers(conn, payload):
     """
     candidate_id = str(payload.get('candidate_id') or '').strip()
     contact = payload.get('contact') if isinstance(payload.get('contact'), dict) else {}
-    wanted_email = _canonical_email(contact.get('email'))
+    # Same validation as the contact write: a file name stored by an older sync
+    # must not make two unrelated companies look like one identity.
+    wanted_email = _sela_contact_email(contact.get('email'))
     wanted_phones = {
         phone for phone in (
             _sela_phone_key(contact.get('phone')),
@@ -4215,6 +4226,10 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
             _sela_phone_key(contact.get('whatsapp')),
         ) if phone
     }
+    # Nothing survived validation that can identify the contact, so the name is
+    # the only thing that can recognise the record this customer already has;
+    # without it every repeated sync would add another blank contact.
+    name_only = not contact['email'] and not phone_keys
     if postgres_mode():
         # Only the contacts that can duplicate this one, with their Customer's
         # names, in one statement (the whole contact table used to be read per
@@ -4237,6 +4252,18 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
                 row = dict(contact_row)
                 row['is_deleted'] = 0
                 existing_contacts.append(row)
+        elif name_only:
+            for contact_row in conn.execute(
+                '''SELECT ct.*, c.company AS company, c.name AS customer_name
+                     FROM trosa.customer_contacts ct
+                     JOIN trosa.customer_records c ON c.id=ct.customer_id
+                    WHERE c.deleted_at IS NULL AND ct.customer_id=%s
+                    ORDER BY ct.is_primary DESC, ct.created_at DESC, ct.id DESC''',
+                (customer_id,),
+            ).fetchall():
+                row = dict(contact_row)
+                row['is_deleted'] = 0
+                existing_contacts.append(row)
     else:
         existing_contacts = conn.execute(
             '''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted
@@ -4244,16 +4271,23 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
                WHERE COALESCE(c.is_deleted,0)=0'''
         ).fetchall()
     duplicates = []
-    for row in existing_contacts:
-        row_phones = {
-            phone for phone in (
-                _sela_phone_key(row['phone']),
-                _sela_phone_key(row['whatsapp']),
-            ) if phone
-        }
-        if ((contact['email'] and _canonical_email(row['email']) == contact['email'])
-                or phone_keys.intersection(row_phones)):
-            duplicates.append(row)
+    if name_only:
+        wanted_name = _sync_name_key(contact.get('name'))
+        if wanted_name:
+            duplicates = [row for row in existing_contacts
+                          if int(row['customer_id']) == int(customer_id)
+                          and _sync_name_key(row['name']) == wanted_name]
+    else:
+        for row in existing_contacts:
+            row_phones = {
+                phone for phone in (
+                    _sela_phone_key(row['phone']),
+                    _sela_phone_key(row['whatsapp']),
+                ) if phone
+            }
+            if ((contact['email'] and _canonical_email(row['email']) == contact['email'])
+                    or phone_keys.intersection(row_phones)):
+                duplicates.append(row)
     if any(row['customer_id'] != customer_id for row in duplicates):
         return warnings + ['CONTACT_EMAIL_ALREADY_ASSIGNED' if contact['email']
                            else 'CONTACT_PHONE_ALREADY_ASSIGNED']
@@ -4267,7 +4301,7 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
                 merged[key] = contact[key]
         merged['is_primary'] = max(int(merged.get('is_primary') or 0), contact['is_primary'])
         # A dropped value never erases the address this contact already has.
-        merged['email'] = contact['email'] or _canonical_email(duplicate.get('email'))
+        merged['email'] = contact['email'] or _canonical_email(merged.get('email'))
         if postgres_mode():
             _update_contact(conn, contact_id=duplicate['id'], values=merged)
         else:
