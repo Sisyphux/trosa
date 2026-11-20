@@ -2163,6 +2163,28 @@ def _canonical_email(value):
     return (value or '').strip().casefold()
 
 
+def _sela_email_forms(email):
+    """The address plus its IDN counterpart, so a stored punycode address and a
+    Unicode one still recognise each other as the same identity."""
+    forms = {email}
+    local, _, domain = email.rpartition('@')
+    if not domain:
+        return forms
+    try:
+        ascii_domain = domain.encode('idna').decode('ascii')
+    except UnicodeError:
+        ascii_domain = ''
+    if ascii_domain and ascii_domain != domain:
+        forms.add(f'{local}@{ascii_domain}')
+    try:
+        unicode_domain = domain.encode('ascii').decode('idna')
+    except (UnicodeError, UnicodeDecodeError):
+        unicode_domain = ''
+    if unicode_domain and unicode_domain != domain:
+        forms.add(f'{local}@{unicode_domain}')
+    return forms
+
+
 # Asset file names ("banner-1@3x-100.jpg") satisfy the address syntax check, so
 # the suffix is what tells them apart.  Same list as sela's email_finder.
 _SELA_ASSET_SUFFIXES = {
@@ -2187,7 +2209,7 @@ def _sela_contact_email(value):
     bracketed = re.search(r'<([^<>]+)>', raw)
     if bracketed:
         raw = bracketed.group(1).strip()
-    raw = raw.rstrip('. ').strip()
+    raw = raw.rstrip('.,; ').strip()
     if not raw:
         return ''
     try:
@@ -3816,9 +3838,11 @@ def _sela_contact_identity_condition(column_prefix, wanted_email, wanted_phones)
     """
     conditions, params = [], []
     prefix = column_prefix
-    if wanted_email:
-        conditions.append(f'strpos(lower({prefix}email), ?) > 0')
-        params.append(wanted_email)
+    emails = [wanted_email] if isinstance(wanted_email, str) else list(wanted_email or ())
+    if emails:
+        for address in emails:
+            conditions.append(f'strpos(lower({prefix}email), ?) > 0')
+            params.append(address)
         conditions.append(f'octet_length({prefix}email) <> char_length({prefix}email)')
     if wanted_phones:
         for key in sorted(wanted_phones):
@@ -4050,6 +4074,7 @@ def _sela_match_customers(conn, payload):
     # Same validation as the contact write: a file name stored by an older sync
     # must not make two unrelated companies look like one identity.
     wanted_email = _sela_contact_email(contact.get('email'))
+    wanted_email_forms = _sela_email_forms(wanted_email) if wanted_email else set()
     wanted_phones = {
         phone for phone in (
             _sela_phone_key(contact.get('phone')),
@@ -4061,7 +4086,7 @@ def _sela_match_customers(conn, payload):
 
     if postgres_mode():
         rows, contact_rows = _sela_match_candidate_rows(
-            conn, candidate_id, payload, wanted_email, wanted_phones, wanted_domain, registry)
+            conn, candidate_id, payload, wanted_email_forms, wanted_phones, wanted_domain, registry)
         if rows is None:
             item = contact_rows
             return [item], ''
@@ -4096,7 +4121,7 @@ def _sela_match_customers(conn, payload):
         ).fetchall()
     identity_matches = {}
     for row in contact_rows:
-        if wanted_email and row['email'] == wanted_email:
+        if wanted_email and _sela_email_forms(_canonical_email(row['email'])) & wanted_email_forms:
             identity_matches.setdefault(row['customer_id'], set()).add('email')
         row_phones = {
             phone for phone in (
@@ -4230,6 +4255,10 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
     # the only thing that can recognise the record this customer already has;
     # without it every repeated sync would add another blank contact.
     name_only = not contact['email'] and not phone_keys
+    if name_only and not _sync_name_key(contact.get('name')):
+        # No address, no phone, no name: the row would identify nobody, and every
+        # repeated sync of a rejected address would add another blank contact.
+        return warnings
     if postgres_mode():
         # Only the contacts that can duplicate this one, with their Customer's
         # names, in one statement (the whole contact table used to be read per
@@ -4268,7 +4297,8 @@ def _sela_upsert_contact(conn, customer_id, raw_contact, now):
         existing_contacts = conn.execute(
             '''SELECT ct.*, c.company, c.name AS customer_name, c.is_deleted
                FROM contacts ct JOIN customers c ON c.id=ct.customer_id
-               WHERE COALESCE(c.is_deleted,0)=0'''
+               WHERE COALESCE(c.is_deleted,0)=0
+               ORDER BY ct.is_primary DESC, ct.created_at DESC, ct.id DESC'''
         ).fetchall()
     duplicates = []
     if name_only:

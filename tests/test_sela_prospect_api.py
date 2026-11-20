@@ -2218,5 +2218,43 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertNotEqual(second.get_json()['trosa_id'], first.get_json()['trosa_id'])
 
 
+    def test_a_contact_without_a_name_or_address_is_not_stored(self):
+        body = prospect('prospect-nameless')
+        body['contact'] = {'email': 'banner-1@3x-100.jpg', 'title': 'Sales'}
+        first = self.post_prospect(body, 'sela-v2:prospect-nameless:one')
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        customer = first.get_json()['trosa_id']
+        again = prospect('prospect-nameless')
+        again['contact'] = {'email': 'photo@2x.png', 'title': 'Sales'}
+        second = self.post_prospect(again, 'sela-v2:prospect-nameless:two')
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        conn = self.hamid_db()
+        try:
+            rows = conn.execute('SELECT * FROM contacts WHERE customer_id=?', (customer,)).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 0)
+
+    def test_a_punycode_address_still_identifies_the_same_customer(self):
+        first = self.post_prospect(prospect('prospect-idn'), 'sela-v2:prospect-idn:one')
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        customer = first.get_json()['trosa_id']
+        conn = self.hamid_db()
+        try:
+            # A record written before the sync normalised the address.
+            conn.execute('UPDATE contacts SET email=? WHERE customer_id=?',
+                         ('ana@xn--e1afmkfd.xn--p1ai', customer))
+            conn.commit()
+        finally:
+            conn.close()
+        other = prospect('prospect-idn-b')
+        other['company'] = 'Acrílicos do Brasil Ltda'
+        other['website'] = 'https://acrilicos-brasil.example/'
+        other['contact']['email'] = 'ana@пример.рф'
+        second = self.post_prospect(other, 'sela-v2:prospect-idn:two')
+        self.assertEqual(second.status_code, 200, second.get_data(as_text=True))
+        self.assertEqual(second.get_json()['trosa_id'], customer)
+
+
 if __name__ == '__main__':
     unittest.main()
