@@ -46,7 +46,7 @@ from db import (
     postgres_mode,
     formal_runtime,
     runtime_contract_status,
-    init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, get_registered_users,
+    init_all_dbs, USERS, USERS_LIST, CUSTOMER_LEVEL_VALUES, BUSINESS_STAGE_VALUES, get_registered_users,
     init_user_tables, refresh_users_registry,
     backup_database, cancel_safety_backup, list_backups, schedule_safety_backup,
     DB_DIR, run_startup_maintenance, entry_field_color,
@@ -161,6 +161,9 @@ def _normalize_customer_level(value, fallback='C'):
     """Keep customer grades within the shared A-D +/- vocabulary."""
     normalized = str(value or '').strip().upper()
     return normalized if normalized in CUSTOMER_LEVEL_VALUES else fallback
+
+
+BUSINESS_STAGE_ERROR = '业务阶段只能是留空、回复过、寄过样品、报过价、成交或流失'
 
 # Flask 应用
 if getattr(sys, 'frozen', False):
@@ -4447,7 +4450,10 @@ _SELA_OPPORTUNITY_TOKENS = {
     'PURCHASE', 'PURCHASE_INTENT', 'PURCHASE INTENT', 'NEGOTIATION', 'PROPOSAL',
     'OPPORTUNITY', 'OPPORTUNITY_IDENTIFIED', 'INTERESTED', 'QUALIFIED', 'MEETING',
     'MEETING_BOOKED',
+    # Trosa 六档业务阶段用中文原值，按整个字段值精确匹配，不做子串推断。
+    '寄过样品', '报过价',
 }
+_SELA_REPLY_TOKENS = {'回复过'}
 _SELA_REJECTED_TOKENS = {
     'NOT_INTERESTED', 'NOT INTERESTED', 'REJECTED', 'DECLINED', 'UNSUBSCRIBED',
     'UNSUBSCRIBE', 'OPT_OUT', 'DO_NOT_CONTACT', 'DNC',
@@ -4483,6 +4489,9 @@ def _sela_prospect_lifecycle_facts(value):
     if tokens & _SELA_OPPORTUNITY_TOKENS:
         signals.append('opportunity')
         return {'stage': 'qualified_opportunity', 'rejected': rejected, 'signals': signals}
+    if tokens & _SELA_REPLY_TOKENS:
+        signals.append('inbound')
+        return {'stage': 'engaged_lead', 'rejected': rejected, 'signals': signals}
     inbound = bool(
         _sela_prospect_text(record.get('last_inbound_at'), 120)
         or _sela_prospect_text(record.get('last_reply_received_at'), 120)
@@ -14472,9 +14481,9 @@ def update_customer(customer_id):
             return jsonify({'error': error.message}), error.status
         reply_habit = ' '.join(str(data.get('reply_habit', existing.get('reply_habit', '')) or '').split())[:200]
         business_stage = data.get('business_stage', existing.get('business_stage', ''))
-        if business_stage not in ('', '成交', '流失'):
+        if business_stage not in BUSINESS_STAGE_VALUES:
             conn.close()
-            return jsonify({'error': '业务阶段只能是成交、流失或留空'}), 400
+            return jsonify({'error': BUSINESS_STAGE_ERROR}), 400
         business_role = data.get('business_role', data.get('type', existing.get('business_role', existing.get('type', ''))))
         if business_role not in ('', '中间商', '终端'):
             conn.close()
@@ -14623,8 +14632,8 @@ def batch_update_business_stage():
         data = {}
     ids = data.get('ids', [])
     value = data.get('value', '')
-    if value not in ('', '成交', '流失'):
-        return jsonify({'error': '业务阶段只能是成交、流失或留空'}), 400
+    if value not in BUSINESS_STAGE_VALUES:
+        return jsonify({'error': BUSINESS_STAGE_ERROR}), 400
     try:
         ids = _normalize_id_list(ids, '客户列表')
     except CrmWriteError:
@@ -20607,8 +20616,8 @@ def create_customer_profile(data, before_commit=None, *, duplicate_check='reject
     customer_level = _normalize_customer_level(data.get('level', 'C'))
     business_stage = str(data.get('business_stage') or '').strip()
     business_role = str(data.get('business_role', data.get('type', '')) or '').strip()
-    if business_stage not in ('', '成交', '流失'):
-        raise CrmWriteError('业务阶段只能是成交、流失或留空')
+    if business_stage not in BUSINESS_STAGE_VALUES:
+        raise CrmWriteError(BUSINESS_STAGE_ERROR)
     if business_role not in ('', '中间商', '终端'):
         raise CrmWriteError('客户角色只能是中间商、终端或留空')
     contacts = _merge_contact_candidates(data.get('contacts') or [])

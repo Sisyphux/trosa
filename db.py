@@ -1114,6 +1114,9 @@ CUSTOMER_LEVEL_VALUES = (
     'D', 'D+', 'D-',
 )
 
+# 业务阶段的六档口径：空值表示未联系或还没标，不能批量写成「未联系」。
+BUSINESS_STAGE_VALUES = ('', '回复过', '寄过样品', '报过价', '成交', '流失')
+
 USER_TABLE_SQL = [
     # 客户表
     '''
@@ -1154,7 +1157,7 @@ USER_TABLE_SQL = [
         -- Contact and next-action state are derived from communications and
         -- open dated reminders; the old status/customer_type/attention
         -- columns below remain solely for on-disk migration compatibility.
-        business_stage TEXT DEFAULT '' CHECK(business_stage IN ('', '成交', '流失')),
+        business_stage TEXT DEFAULT '' CHECK(business_stage IN ('', '回复过', '寄过样品', '报过价', '成交', '流失')),
         business_role TEXT DEFAULT '' CHECK(business_role IN ('', '中间商', '终端')),
         customer_judgment TEXT DEFAULT '',
         is_pinned INTEGER DEFAULT 0,

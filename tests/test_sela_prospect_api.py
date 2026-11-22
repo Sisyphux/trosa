@@ -1990,6 +1990,16 @@ class SelaProspectApiTest(unittest.TestCase):
         self.assertEqual(by_id['won-1']['lifecycle_stage'], 'customer')
         self.assertTrue(by_id['won-1']['customer_linked'])
 
+    def test_chinese_business_stages_map_by_exact_value_not_substring(self):
+        facts = self.module._sela_prospect_lifecycle_facts
+        self.assertEqual(facts({'business_stage': '回复过'})['stage'], 'engaged_lead')
+        self.assertEqual(facts({'business_stage': '寄过样品'})['stage'], 'qualified_opportunity')
+        self.assertEqual(facts({'business_stage': '报过价'})['stage'], 'qualified_opportunity')
+        self.assertEqual(facts({'business_stage': '成交'})['stage'], 'customer')
+        self.assertEqual(facts({'business_stage': ''})['stage'], 'cold_prospect')
+        self.assertEqual(facts({'business_stage': '客户回复过并问价'})['stage'], 'cold_prospect')
+        self.assertEqual(facts({'customer_status': '已报过价，等确认'})['stage'], 'cold_prospect')
+
     def test_manual_inbound_interaction_agrees_across_today_and_sela_projection(self):
         source_id = 'manual-inbound-boundary'
         created = self.post_prospect(prospect(source_id), 'sela-v2:manual-inbound:create')

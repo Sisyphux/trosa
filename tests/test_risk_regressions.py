@@ -2637,6 +2637,58 @@ class InputBoundaryRegressionTest(unittest.TestCase):
         fallback = sela_evidence_entries({'website': 'https://fallback.test'})
         self.assertEqual(fallback[0]['source_url'], 'https://fallback.test')
 
+    def test_business_stage_six_values_are_saved_and_unknown_values_rejected(self):
+        module = self._load_module('crm_app_stage_six_values_test')
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+
+        created = {}
+        for index, stage in enumerate(db.BUSINESS_STAGE_VALUES):
+            response = client.post('/api/customers', json={
+                'name': f'阶段测试{index}', 'company': f'Stage Test {index}', 'business_stage': stage,
+            })
+            self.assertEqual(response.status_code, 201, (stage, response.get_json()))
+            created[stage] = response.get_json()['id']
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            saved = dict(conn.execute('SELECT id, business_stage FROM customers').fetchall())
+        finally:
+            conn.close()
+        for stage, customer_id in created.items():
+            self.assertEqual(saved[customer_id], stage)
+
+        edited = client.put(f"/api/customers/{created['']}", json={'business_stage': '报过价'})
+        self.assertEqual(edited.status_code, 200, edited.get_json())
+        batched = client.post('/api/customers/batch/business-stage', json={
+            'ids': [created['回复过'], created['寄过样品']], 'value': '成交',
+        })
+        self.assertEqual(batched.status_code, 200, batched.get_json())
+
+        invalid = '已报价'
+        for response in (
+            client.post('/api/customers', json={'name': '乱阶段', 'business_stage': invalid}),
+            client.put(f"/api/customers/{created['']}", json={'business_stage': invalid}),
+            client.post('/api/customers/batch/business-stage', json={
+                'ids': [created['']], 'value': invalid,
+            }),
+        ):
+            self.assertEqual(response.status_code, 400, response.get_json())
+            self.assertIn('业务阶段只能是', response.get_json()['error'])
+
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            rows = dict(conn.execute('SELECT id, business_stage FROM customers').fetchall())
+            self.assertEqual(rows[created['']], '报过价')
+            self.assertEqual(rows[created['回复过']], '成交')
+            self.assertEqual(rows[created['寄过样品']], '成交')
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM customers WHERE name='乱阶段'").fetchone()[0], 0)
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO customers(name, business_stage) VALUES ('直写乱阶段', ?)", (invalid,))
+        finally:
+            conn.close()
+
 
 class PostgresCompatibilityRegressionTest(unittest.TestCase):
     """SQLite-shaped writes must remain valid against PostgreSQL views."""
