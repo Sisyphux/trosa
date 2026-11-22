@@ -2184,7 +2184,7 @@ function statusBadge(status) {
   var map = {
     '未建联': 'badge-status-pending', '已建联': 'badge-status-active',
     '跟进中': 'badge-status-following', '成交': 'badge-status-done', '流失': 'badge-status-lost',
-    '回复过': 'badge-status-active', '寄过样品': 'badge-status-sampled', '报过价': 'badge-status-quoted',
+    '回复过': 'badge-status-replied', '寄过样品': 'badge-status-sampled', '报过价': 'badge-status-quoted',
     'Following': 'badge-status-following', 'Closed': 'badge-status-done', 'Lost': 'badge-status-lost',
     'pending': 'badge-status-pending', 'replied': 'badge-status-active',
     'bounced': 'badge-status-lost', 'no_reply': 'badge-status-following'

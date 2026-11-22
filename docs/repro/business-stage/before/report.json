@@ -1,0 +1,206 @@
+{
+  "label": "before",
+  "url": "http://127.0.0.1:18192",
+  "generatedAt": "2026-11-22T15:40:12.258Z",
+  "checks": [
+    {
+      "id": "dropdown-filter",
+      "title": "filter 下拉按同一顺序提供六个业务阶段，首项文案保持不变",
+      "pass": false,
+      "detail": "值=|成交|流失，首项=全部业务阶段"
+    },
+    {
+      "id": "dropdown-edit",
+      "title": "edit 下拉按同一顺序提供六个业务阶段，首项文案保持不变",
+      "pass": false,
+      "detail": "值=|成交|流失，首项=未标记"
+    },
+    {
+      "id": "dropdown-add",
+      "title": "add 下拉按同一顺序提供六个业务阶段，首项文案保持不变",
+      "pass": false,
+      "detail": "值=|成交|流失，首项=未标记"
+    },
+    {
+      "id": "dropdown-today",
+      "title": "today 下拉按同一顺序提供六个业务阶段，首项文案保持不变",
+      "pass": false,
+      "detail": "值=|成交|流失，首项=不修改"
+    },
+    {
+      "id": "create-accepts-six-stages",
+      "title": "新建客户逐档保存六个业务阶段",
+      "pass": false,
+      "detail": "空:201 回复过:400 寄过样品:400 报过价:400 成交:201 流失:201"
+    },
+    {
+      "id": "create-rejects-unknown-stage",
+      "title": "新建客户拒绝未定义的业务阶段",
+      "pass": true,
+      "detail": "乱值返回 400"
+    },
+    {
+      "id": "editor-loads-new-stage",
+      "title": "真实客户编辑弹窗能读到并选中“报过价”",
+      "pass": false,
+      "detail": "没有可用的测试客户"
+    },
+    {
+      "id": "batch-dropdown-six-stages",
+      "title": "批量改业务阶段的弹窗提供六个值",
+      "pass": false,
+      "detail": "选项=|成交|流失"
+    },
+    {
+      "id": "list-filter-by-new-stage",
+      "title": "列表按“报过价”筛选后只剩这条测试客户",
+      "pass": false,
+      "detail": "结果=[\"阶段验证1795362016518-空\",\"阶段验证1795362016518-成交\",\"阶段验证1795362016518-流失\"]"
+    },
+    {
+      "id": "badge-colours-distinct",
+      "title": "三个新阶段颜色两两可分且不同于默认样式，成交和流失保持原样",
+      "pass": false,
+      "detail": "[{\"stage\":\"回复过\",\"className\":\"badge badge-status-pending\",\"background\":\"rgb(245, 245, 245)\",\"color\":\"rgb(68, 68, 68)\"},{\"stage\":\"寄过样品\",\"className\":\"badge badge-status-pending\",\"background\":\"rgb(245, 245, 245)\",\"color\":\"rgb(68, 68, 68)\"},{\"stage\":\"报过价\",\"className\":\"badge badge-status-pending\",\"background\":\"rgb(245, 245, 245)\",\"color\":\"rgb(68, 68, 68)\"},{\"stage\":\"成交\",\"className\":\"badge badge-status-done\",\"background\":\"rgb(245, 245, 245)\",\"color\":\"rgb(68, 68, 68)\"},{\"stage\":\"流失\",\"className\":\"badge badge-status-lost\",\"background\":\"rgb(245, 245, 245)\",\"color\":\"rgb(68, 68, 68)\"}]"
+    },
+    {
+      "id": "no-page-errors",
+      "title": "页面运行期间没有 JavaScript 报错",
+      "pass": true,
+      "detail": "无"
+    }
+  ],
+  "measurements": {
+    "dropdowns": {
+      "filter": {
+        "values": [
+          "",
+          "成交",
+          "流失"
+        ],
+        "labels": [
+          "全部业务阶段",
+          "成交",
+          "流失"
+        ],
+        "labelKey": "全部业务阶段"
+      },
+      "edit": {
+        "values": [
+          "",
+          "成交",
+          "流失"
+        ],
+        "labels": [
+          "未标记",
+          "成交",
+          "流失"
+        ],
+        "labelKey": "未标记"
+      },
+      "add": {
+        "values": [
+          "",
+          "成交",
+          "流失"
+        ],
+        "labels": [
+          "未标记",
+          "成交",
+          "流失"
+        ],
+        "labelKey": "未标记"
+      },
+      "today": {
+        "values": [
+          "",
+          "成交",
+          "流失"
+        ],
+        "labels": [
+          "不修改",
+          "成交",
+          "流失"
+        ],
+        "labelKey": "不修改"
+      }
+    },
+    "created": {
+      "空": {
+        "status": 201,
+        "id": 4,
+        "saved": ""
+      },
+      "回复过": {
+        "status": 400
+      },
+      "寄过样品": {
+        "status": 400
+      },
+      "报过价": {
+        "status": 400
+      },
+      "成交": {
+        "status": 201,
+        "id": 5,
+        "saved": "成交"
+      },
+      "流失": {
+        "status": 201,
+        "id": 6,
+        "saved": "流失"
+      },
+      "乱值": {
+        "status": 400
+      }
+    },
+    "batchOptions": [
+      "",
+      "成交",
+      "流失"
+    ],
+    "filtered": [
+      "阶段验证1795362016518-空",
+      "阶段验证1795362016518-成交",
+      "阶段验证1795362016518-流失"
+    ],
+    "badges": [
+      {
+        "stage": "回复过",
+        "className": "badge badge-status-pending",
+        "background": "rgb(245, 245, 245)",
+        "color": "rgb(68, 68, 68)"
+      },
+      {
+        "stage": "寄过样品",
+        "className": "badge badge-status-pending",
+        "background": "rgb(245, 245, 245)",
+        "color": "rgb(68, 68, 68)"
+      },
+      {
+        "stage": "报过价",
+        "className": "badge badge-status-pending",
+        "background": "rgb(245, 245, 245)",
+        "color": "rgb(68, 68, 68)"
+      },
+      {
+        "stage": "成交",
+        "className": "badge badge-status-done",
+        "background": "rgb(245, 245, 245)",
+        "color": "rgb(68, 68, 68)"
+      },
+      {
+        "stage": "流失",
+        "className": "badge badge-status-lost",
+        "background": "rgb(245, 245, 245)",
+        "color": "rgb(68, 68, 68)"
+      }
+    ]
+  },
+  "screenshots": [
+    "01-signed-in.png",
+    "03-badge-colours.png"
+  ],
+  "pageErrors": [],
+  "browser": "chromium 153.0.8010.12"
+}
