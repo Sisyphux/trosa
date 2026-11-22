@@ -716,6 +716,46 @@ class AgentDataFreedomTest(unittest.TestCase):
             finally:
                 conn.close()
 
+            # The two business fields travel through --json, not dedicated flags.
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                conn.execute("UPDATE customers SET business_role='中间商', business_stage='成交' WHERE id=?",
+                             (customer_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            business_update = run('update-customer', str(customer_id), '--json', json.dumps({
+                'business_role': '终端', 'business_stage': '报过价',
+            }, ensure_ascii=False))
+            business_action = business_update['data']['action']['id']
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                self.assertEqual(conn.execute(
+                    'SELECT business_role, business_stage, notes FROM customers WHERE id=?',
+                    (customer_id,)).fetchone(), ('终端', '报过价', ''))
+            finally:
+                conn.close()
+            run('undo', business_action)
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                self.assertEqual(conn.execute(
+                    'SELECT business_role, business_stage, notes FROM customers WHERE id=?',
+                    (customer_id,)).fetchone(), ('中间商', '成交', ''))
+            finally:
+                conn.close()
+            with self.assertRaises(trosa_cli.CliError) as invalid:
+                run('update-customer', str(customer_id), '--json', json.dumps({
+                    'business_role': '经销商', 'business_stage': '报过价',
+                }, ensure_ascii=False))
+            self.assertIn('客户角色', str(invalid.exception))
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                self.assertEqual(conn.execute(
+                    'SELECT business_role, business_stage FROM customers WHERE id=?',
+                    (customer_id,)).fetchone(), ('中间商', '成交'))
+            finally:
+                conn.close()
+
             task = run('create-task', str(customer_id), '--title', 'CLI 跟进', '--due', '2026-10-20')
             task_id = task['data']['action']['related_id']
             self.assertTrue(task_id)

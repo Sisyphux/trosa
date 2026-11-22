@@ -2,8 +2,9 @@
  * Real-browser verification for the six business stages.
  *
  * It signs in on an isolated local Trosa, opens the real customer editor and
- * batch editor, filters the customer pool by the new stages, and measures the
- * badge colours in the real page.  Run it against the pre-change source and it
+ * the Today quick-edit dialog, filters the customer pool by the new stages,
+ * and measures the badge colours in the real page.  Run it against the
+ * pre-change source and it
  * reports the defect (exit 20); run it against the change and it exits 0.
  *
  * Usage:
@@ -46,6 +47,22 @@ function loadPlaywright() {
 
 async function settle(page) {
   await page.waitForTimeout(450);
+}
+
+async function goToPage(page, name) {
+  if (await page.evaluate(() => document.getElementById('roomIndex').hidden)) {
+    await page.click('#roomBrand');
+    await page.waitForFunction(() => !document.getElementById('roomIndex').hidden, null, { timeout: 8000 });
+  }
+  await page.click(`#roomIndex [data-nav-page="${name}"]`);
+  await page.waitForFunction(
+    (pageName) => {
+      const el = document.getElementById(`page-${pageName}`);
+      return el && !el.hidden && getComputedStyle(el).display !== 'none';
+    },
+    name, { timeout: 12000 },
+  );
+  await settle(page);
 }
 
 async function runScenario(browser, options, outDir, report) {
@@ -174,10 +191,31 @@ async function runScenario(browser, options, outDir, report) {
         editState.value === '报过价' && JSON.stringify(editState.options) === JSON.stringify(STAGES),
         `选中=${editState.value || '(空)'}，选项=${editState.options.join('|') || '(空)'}`);
       await shot('02-customer-editor.png');
+
+      // Open the real profile form, change the stage and actually press 保存修改;
+      // reading the detail API afterwards proves the click persisted it.
+      await page.click('#customerEditModal [data-customer-tab="editTabBasic"]');
+      await page.click('#cwPanelAction button');
+      await page.evaluate(() => { document.getElementById('editBusinessStage').value = '寄过样品'; });
+      const editorSaved = page.waitForResponse(
+        (response) => response.request().method() === 'PUT'
+          && response.url().endsWith(`/api/customers/${targetId}`), { timeout: 12000 },
+      );
+      await page.click('#saveCustomerFooterBtn');
+      await editorSaved;
+      const editorStage = await page.evaluate(async (id) => {
+        const response = await fetch(`/api/customers/${id}`, { credentials: 'same-origin' });
+        return response.ok ? (await response.json()).business_stage : null;
+      }, targetId);
+      check('editor-save-persists-new-stage',
+        '真实客户编辑弹窗点“保存修改”后写入新阶段',
+        editorStage === '寄过样品', `详情接口读回=${editorStage || '(空)'}`);
+      await shot('03-customer-editor-saved.png');
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
     } else {
       check('editor-loads-new-stage', '真实客户编辑弹窗能读到并选中“报过价”', false, '没有可用的测试客户');
+      check('editor-save-persists-new-stage', '真实客户编辑弹窗点“保存修改”后写入新阶段', false, '没有可用的测试客户');
     }
 
     // 4. The batch stage picker must offer the same values.
@@ -193,7 +231,25 @@ async function runScenario(browser, options, outDir, report) {
       `选项=${batchOptions.join('|') || '(空)'}`);
     await page.keyboard.press('Escape');
 
-    // 5. The list filter really narrows the pool by a new stage.
+    // 5. The list filter really narrows the pool by a new stage.  The editor
+    // check above changed the first 报过价 customer to 寄过样品, so use a
+    // separate customer for the batch path.
+    const batchName = `${prefix}-批量`;
+    const batchCustomer = await page.evaluate(async ({ name }) => {
+      try {
+        const response = await fetch('/api/customers', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, company: name, business_stage: '报过价' }),
+        });
+        const body = await response.json();
+        return { status: response.status, id: body.id };
+      } catch (error) {
+        return { status: 0, error: String(error) };
+      }
+    }, { name: batchName });
+    report.measurements.batchCustomer = batchCustomer;
+    await goToPage(page, 'customers');
     await page.evaluate((value) => {
       document.getElementById('newPoolSearch').value = value;
       const select = document.getElementById('newPoolStageFilter');
@@ -207,10 +263,80 @@ async function runScenario(browser, options, outDir, report) {
     report.measurements.filtered = filtered;
     check('list-filter-by-new-stage',
       '列表按“报过价”筛选后只剩这条测试客户',
-      filtered.length === 1 && filtered[0] === `${prefix}-报过价`,
+      filtered.length === 1 && filtered[0] === batchName,
       `结果=${JSON.stringify(filtered)}`);
 
-    // 6. Badge colours are visually distinct in a real browser.
+    // 6. Give that customer a dated task, then use the reachable Today batch
+    // bar: select the row, press 快速编辑, choose a new stage and really press
+    // 保存到所选客户.  The detail API read-back proves the click persisted it.
+    const batchId = batchCustomer.id;
+    if (batchId) {
+      // Today only shows human-owned customers.  A real inbound note makes
+      // this isolated test customer visible there, after the pool filter has
+      // already been checked (a contacted customer leaves the uncontacted pool).
+      const note = await page.evaluate(async (id) => {
+        const response = await fetch(`/api/customers/${id}/follow_history`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            activity_content: '客户确认收到产品报价', direction: 'inbound',
+            activity_type: 'email', resolution_source: 'human',
+          }),
+        });
+        return { status: response.status };
+      }, batchId);
+      report.measurements.batchCustomerNote = note;
+      const today = await page.evaluate(() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      });
+      const task = await page.evaluate(async ({ id, today }) => {
+        const response = await fetch(`/api/customers/${id}/tasks`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: '业务阶段真实批量验证', due_date: today }),
+        });
+        return { status: response.status };
+      }, { id: batchId, today });
+      report.measurements.batchTask = task;
+      await goToPage(page, 'dashboard');
+      await page.waitForSelector(`.today-task-row[data-customer-id="${batchId}"]`, { state: 'visible', timeout: 12000 });
+      await page.evaluate((id) => {
+        const row = document.querySelector(`.today-task-row[data-customer-id="${id}"]`);
+        if (row && typeof window.enterTodaySelectionMode === 'function') window.enterTodaySelectionMode(row);
+        const checkbox = document.querySelector(`.today-task-checkbox[data-id="${id}"]`);
+        if (checkbox) { checkbox.checked = true; window.updateTodaySelection(); }
+      }, batchId);
+      await page.waitForFunction(
+        () => document.getElementById('todayBatchBar').classList.contains('show'),
+        null, { timeout: 8000 },
+      );
+      await page.click('#todayBatchBar button[onclick="openTodayQuickEdit()"]');
+      await page.waitForFunction(() => {
+        const el = document.getElementById('todayQuickEditModal');
+        return el && getComputedStyle(el).display !== 'none';
+      }, null, { timeout: 8000 });
+      await page.evaluate(() => { document.getElementById('todayQuickEditBusinessStage').value = '寄过样品'; });
+      const batchSaved = page.waitForResponse(
+        (response) => response.request().method() === 'POST'
+          && response.url().includes('/api/customers/batch/business-stage'), { timeout: 12000 },
+      );
+      await page.click('#todayQuickEditSubmit');
+      await batchSaved;
+      const batchStage = await page.evaluate(async (id) => {
+        const response = await fetch(`/api/customers/${id}`, { credentials: 'same-origin' });
+        return response.ok ? (await response.json()).business_stage : null;
+      }, batchId);
+      check('batch-save-persists-new-stage',
+        '真实批量弹窗点“保存到所选客户”后写入新阶段',
+        batchStage === '寄过样品', `详情接口读回=${batchStage || '(空)'}`);
+      await shot('04-batch-saved.png');
+      await page.keyboard.press('Escape');
+    } else {
+      check('batch-save-persists-new-stage', '真实批量弹窗点“保存到所选客户”后写入新阶段', false, '没有可用的测试客户');
+    }
+
+    // 7. Badge colours are visually distinct in a real browser.
     const badges = await page.evaluate((stages) => {
       const host = document.createElement('div');
       host.id = 'stageBadgeEvidence';
@@ -245,7 +371,7 @@ async function runScenario(browser, options, outDir, report) {
     check('badge-colours-distinct',
       '三个新阶段颜色两两可分且不同于默认样式，成交和流失保持原样',
       passed, JSON.stringify(badges));
-    await shot('03-badge-colours.png');
+    await shot('05-badge-colours.png');
 
     check('no-page-errors', '页面运行期间没有 JavaScript 报错', report.pageErrors.length === 0,
       report.pageErrors.join(' / ') || '无');

@@ -12,6 +12,7 @@ import platform
 import logging
 import shutil
 import json
+import re
 import hashlib
 import time
 import uuid
@@ -2051,18 +2052,31 @@ def _quarantine_duplicate_unmatched_hashes(cursor):
     return quarantined
 
 
+def _sqlite_check_values(table_sql, column):
+    """Read the literal values of a simple ``CHECK(column IN (...))`` clause."""
+    match = re.search(
+        r'CHECK\s*\(\s*["`\[]?' + re.escape(column) + r'["`\]]?\s+IN\s*\(([^)]*)\)',
+        table_sql, re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return {value.replace("''", "'") for value in re.findall(r"'((?:[^']|'')*)'", match.group(1))}
+
+
 def _migrate_customer_level_constraint(cursor):
-    """Allow +/- customer grades while preserving the existing customer rows.
+    """Keep the SQLite grade and business-stage CHECKs in step with the code.
 
     SQLite cannot alter a CHECK constraint in place. Rebuild only the
     customers table, keep all existing columns and indexes, and normalize any
-    legacy unexpected value to C while copying.
+    legacy unexpected value while copying.
     """
     table_row = cursor.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'"
     ).fetchone()
     table_sql = (table_row[0] or '') if table_row else ''
-    if "'A-'" in table_sql:
+    level_values = _sqlite_check_values(table_sql, 'level')
+    stage_values = _sqlite_check_values(table_sql, 'business_stage')
+    if level_values == set(CUSTOMER_LEVEL_VALUES) and stage_values == set(BUSINESS_STAGE_VALUES):
         return
 
     connection = cursor.connection
@@ -2087,9 +2101,12 @@ def _migrate_customer_level_constraint(cursor):
         columns = [name for name in old_columns if name in new_columns]
         quoted_columns = ', '.join('"' + name.replace('"', '""') + '"' for name in columns)
         allowed_sql = ', '.join("'" + value.replace("'", "''") + "'" for value in CUSTOMER_LEVEL_VALUES)
+        allowed_stage_sql = ', '.join("'" + value.replace("'", "''") + "'" for value in BUSINESS_STAGE_VALUES)
         select_columns = [
             "CASE WHEN \"level\" IN (" + allowed_sql + ") THEN \"level\" ELSE 'C' END"
-            if name == 'level' else '"' + name.replace('"', '""') + '"'
+            if name == 'level' else
+            "CASE WHEN \"business_stage\" IN (" + allowed_stage_sql + ") THEN \"business_stage\" ELSE '' END"
+            if name == 'business_stage' else '"' + name.replace('"', '""') + '"'
             for name in columns
         ]
         cursor.execute(

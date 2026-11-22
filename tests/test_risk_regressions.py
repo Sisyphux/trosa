@@ -64,6 +64,34 @@ class IsolatedDatabaseTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_old_sqlite_stage_check_is_rebuilt_without_losing_rows(self):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("""CREATE TABLE customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                level TEXT DEFAULT 'C' CHECK(level IN ('A', 'A+', 'A-', 'B', 'B+', 'B-', 'C', 'C+', 'C-', 'D', 'D+', 'D-')),
+                business_stage TEXT DEFAULT '' CHECK(business_stage IN ('', '成交', '流失')),
+                notes TEXT DEFAULT '保持不动'
+            )""")
+            conn.execute("INSERT INTO customers(name, level, business_stage) VALUES ('老客户', 'A-', '成交')")
+            conn.commit()
+            cursor = conn.cursor()
+            db._migrate_customer_level_constraint(cursor)
+            row = conn.execute(
+                'SELECT name, level, business_stage, notes FROM customers').fetchone()
+            self.assertEqual(tuple(row), ('老客户', 'A-', '成交', '保持不动'))
+            table_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'").fetchone()[0]
+            self.assertEqual(db._sqlite_check_values(table_sql, 'business_stage'),
+                             set(db.BUSINESS_STAGE_VALUES))
+            conn.execute("INSERT INTO customers(name, business_stage) VALUES ('新阶段', '报过价')")
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO customers(name, business_stage) VALUES ('乱阶段', '已报价')")
+            conn.commit()
+        finally:
+            conn.close()
+
     def test_demo_data_requires_explicit_switch(self):
         db.init_all_dbs()
         os.environ['CRM_SEED_DEMO_DATA'] = 'true'

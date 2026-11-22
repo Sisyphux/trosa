@@ -20768,10 +20768,14 @@ def update_customer_profile(customer_id, data, before_commit=None):
     """Update only ordinary customer profile fields with the standard undo transaction."""
     data = data or {}
     allowed = ('name', 'company', 'country', 'website', 'field', 'industry', 'company_size', 'annual_revenue',
-               'profile', 'notes', 'tags')
+               'profile', 'notes', 'tags', 'business_role', 'business_stage')
     supplied = {key: data[key] for key in allowed if key in data}
     if not supplied:
         raise CrmWriteError('请提供至少一个可更新的客户资料字段')
+    if 'business_role' in supplied and supplied['business_role'] not in ('', '中间商', '终端'):
+        raise CrmWriteError('客户角色只能是中间商、终端或留空')
+    if 'business_stage' in supplied and supplied['business_stage'] not in BUSINESS_STAGE_VALUES:
+        raise CrmWriteError(BUSINESS_STAGE_ERROR)
 
     def operation(conn, c):
         modern_before = _customer_record(conn, customer_id) if postgres_mode() else None
@@ -20793,11 +20797,12 @@ def update_customer_profile(customer_id, data, before_commit=None):
         if postgres_mode():
             _update_customer_record(conn, customer_id=customer_id, values=values)
         else:
-            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, company_size=?, annual_revenue=?, profile=?, notes=?, tags=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?''',
+            c.execute('''UPDATE customers SET name=?, company=?, country=?, website=?, field=?, industry=?, company_size=?, annual_revenue=?, profile=?, notes=?, tags=?, business_role=?, business_stage=?, timezone=?, timezone_source=?, updated_at=? WHERE id=?''',
                       (values.get('name', ''), values.get('company', ''), values.get('country', ''), values.get('website', ''),
                        values.get('field', ''), values.get('industry', ''), values.get('company_size', ''),
                        values.get('annual_revenue', ''), values.get('profile', ''), values.get('notes', ''),
-                       values.get('tags', ''), values.get('timezone', ''), values.get('timezone_source', ''), now, customer_id))
+                       values.get('tags', ''), values.get('business_role', ''), values.get('business_stage', ''),
+                       values.get('timezone', ''), values.get('timezone_source', ''), now, customer_id))
         after = _snapshot_entity(conn, 'customers', customer_id)
         undo_token = _create_undo_action(conn, 'UPDATE_CUSTOMER_PROFILE', 'customer', customer_id,
                                          [_undo_entity('customers', customer_id, before, after)], '撤销 Agent 修改客户资料')

@@ -1,7 +1,7 @@
 {
   "label": "before",
   "url": "http://127.0.0.1:18192",
-  "generatedAt": "2026-11-22T15:40:12.258Z",
+  "generatedAt": "2026-11-22T17:45:12.550Z",
   "checks": [
     {
       "id": "dropdown-filter",
@@ -46,6 +46,12 @@
       "detail": "没有可用的测试客户"
     },
     {
+      "id": "editor-save-persists-new-stage",
+      "title": "真实客户编辑弹窗点“保存修改”后写入新阶段",
+      "pass": false,
+      "detail": "没有可用的测试客户"
+    },
+    {
       "id": "batch-dropdown-six-stages",
       "title": "批量改业务阶段的弹窗提供六个值",
       "pass": false,
@@ -55,7 +61,13 @@
       "id": "list-filter-by-new-stage",
       "title": "列表按“报过价”筛选后只剩这条测试客户",
       "pass": false,
-      "detail": "结果=[\"阶段验证1795362016518-空\",\"阶段验证1795362016518-成交\",\"阶段验证1795362016518-流失\"]"
+      "detail": "结果=[\"阶段验证1795369516851-空\",\"阶段验证1795369516851-成交\",\"阶段验证1795369516851-流失\"]"
+    },
+    {
+      "id": "batch-save-persists-new-stage",
+      "title": "真实批量弹窗点“保存到所选客户”后写入新阶段",
+      "pass": false,
+      "detail": "没有可用的测试客户"
     },
     {
       "id": "badge-colours-distinct",
@@ -159,10 +171,13 @@
       "成交",
       "流失"
     ],
+    "batchCustomer": {
+      "status": 400
+    },
     "filtered": [
-      "阶段验证1795362016518-空",
-      "阶段验证1795362016518-成交",
-      "阶段验证1795362016518-流失"
+      "阶段验证1795369516851-空",
+      "阶段验证1795369516851-成交",
+      "阶段验证1795369516851-流失"
     ],
     "badges": [
       {
@@ -199,7 +214,7 @@
   },
   "screenshots": [
     "01-signed-in.png",
-    "03-badge-colours.png"
+    "05-badge-colours.png"
   ],
   "pageErrors": [],
   "browser": "chromium 153.0.8010.12"

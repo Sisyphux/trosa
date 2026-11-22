@@ -1,7 +1,7 @@
 {
   "label": "after",
   "url": "http://127.0.0.1:18191",
-  "generatedAt": "2026-11-22T15:39:24.108Z",
+  "generatedAt": "2026-11-22T17:44:28.283Z",
   "checks": [
     {
       "id": "dropdown-filter",
@@ -46,6 +46,12 @@
       "detail": "选中=报过价，选项=|回复过|寄过样品|报过价|成交|流失"
     },
     {
+      "id": "editor-save-persists-new-stage",
+      "title": "真实客户编辑弹窗点“保存修改”后写入新阶段",
+      "pass": true,
+      "detail": "详情接口读回=寄过样品"
+    },
+    {
       "id": "batch-dropdown-six-stages",
       "title": "批量改业务阶段的弹窗提供六个值",
       "pass": true,
@@ -55,7 +61,13 @@
       "id": "list-filter-by-new-stage",
       "title": "列表按“报过价”筛选后只剩这条测试客户",
       "pass": true,
-      "detail": "结果=[\"阶段验证1795361967846-报过价\"]"
+      "detail": "结果=[\"阶段验证1795369471220-批量\"]"
+    },
+    {
+      "id": "batch-save-persists-new-stage",
+      "title": "真实批量弹窗点“保存到所选客户”后写入新阶段",
+      "pass": true,
+      "detail": "详情接口读回=寄过样品"
     },
     {
       "id": "badge-colours-distinct",
@@ -152,32 +164,32 @@
     "created": {
       "空": {
         "status": 201,
-        "id": 13,
+        "id": 69,
         "saved": ""
       },
       "回复过": {
         "status": 201,
-        "id": 14,
+        "id": 70,
         "saved": "回复过"
       },
       "寄过样品": {
         "status": 201,
-        "id": 15,
+        "id": 71,
         "saved": "寄过样品"
       },
       "报过价": {
         "status": 201,
-        "id": 16,
+        "id": 72,
         "saved": "报过价"
       },
       "成交": {
         "status": 201,
-        "id": 17,
+        "id": 73,
         "saved": "成交"
       },
       "流失": {
         "status": 201,
-        "id": 18,
+        "id": 74,
         "saved": "流失"
       },
       "乱值": {
@@ -203,9 +215,19 @@
       "成交",
       "流失"
     ],
+    "batchCustomer": {
+      "status": 201,
+      "id": 75
+    },
     "filtered": [
-      "阶段验证1795361967846-报过价"
+      "阶段验证1795369471220-批量"
     ],
+    "batchCustomerNote": {
+      "status": 200
+    },
+    "batchTask": {
+      "status": 201
+    },
     "badges": [
       {
         "stage": "回复过",
@@ -242,7 +264,9 @@
   "screenshots": [
     "01-signed-in.png",
     "02-customer-editor.png",
-    "03-badge-colours.png"
+    "03-customer-editor-saved.png",
+    "04-batch-saved.png",
+    "05-badge-colours.png"
   ],
   "pageErrors": [],
   "browser": "chromium 153.0.8010.12"
