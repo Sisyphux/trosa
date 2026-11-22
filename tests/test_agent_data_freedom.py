@@ -755,6 +755,18 @@ class AgentDataFreedomTest(unittest.TestCase):
                     (customer_id,)).fetchone(), ('中间商', '成交'))
             finally:
                 conn.close()
+            with self.assertRaises(trosa_cli.CliError) as invalid_stage:
+                run('update-customer', str(customer_id), '--json', json.dumps({
+                    'business_stage': '已报价',
+                }, ensure_ascii=False))
+            self.assertIn('业务阶段只能是', str(invalid_stage.exception))
+            conn = sqlite3.connect(db.get_user_db_path('hamid'))
+            try:
+                self.assertEqual(conn.execute(
+                    'SELECT business_role, business_stage FROM customers WHERE id=?',
+                    (customer_id,)).fetchone(), ('中间商', '成交'))
+            finally:
+                conn.close()
 
             task = run('create-task', str(customer_id), '--title', 'CLI 跟进', '--due', '2026-10-20')
             task_id = task['data']['action']['related_id']

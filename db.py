@@ -2089,6 +2089,7 @@ def _migrate_customer_level_constraint(cursor):
     old_columns = [row[1] for row in cursor.execute('PRAGMA table_info(customers)').fetchall()]
 
     cursor.execute('PRAGMA foreign_keys=OFF')
+    connection.execute('BEGIN IMMEDIATE')
     try:
         cursor.execute('DROP TABLE IF EXISTS customers_new')
         create_sql = USER_TABLE_SQL[0].replace(
@@ -2119,6 +2120,10 @@ def _migrate_customer_level_constraint(cursor):
         cursor.execute('ALTER TABLE customers_new RENAME TO customers')
         for _index_name, index_sql in index_rows:
             cursor.execute(index_sql)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         cursor.execute('PRAGMA foreign_keys=' + ('1' if foreign_keys_enabled else '0'))
 

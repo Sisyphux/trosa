@@ -92,6 +92,45 @@ class IsolatedDatabaseTest(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_stage_check_migration_rolls_back_when_interrupted(self):
+        conn = sqlite3.connect(db.get_user_db_path('hamid'))
+        try:
+            conn.execute("""CREATE TABLE customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                level TEXT DEFAULT 'C' CHECK(level IN ('A', 'A+', 'A-', 'B', 'B+', 'B-', 'C', 'C+', 'C-', 'D', 'D+', 'D-')),
+                business_stage TEXT DEFAULT '' CHECK(business_stage IN ('', '成交', '流失')),
+                notes TEXT DEFAULT '保持不动'
+            )""")
+            conn.execute("INSERT INTO customers(name, level, business_stage) VALUES ('老客户', 'A-', '成交')")
+            conn.commit()
+
+            class InterruptedCursor:
+                def __init__(self, real):
+                    self.connection = real.connection
+                    self.real = real
+
+                def execute(self, sql, *args):
+                    if str(sql).strip() == 'ALTER TABLE customers_new RENAME TO customers':
+                        raise RuntimeError('模拟迁移中断')
+                    return self.real.execute(sql, *args)
+
+            with self.assertRaisesRegex(RuntimeError, '模拟迁移中断'):
+                db._migrate_customer_level_constraint(InterruptedCursor(conn.cursor()))
+
+            row = conn.execute(
+                'SELECT name, level, business_stage, notes FROM customers').fetchone()
+            self.assertEqual(tuple(row), ('老客户', 'A-', '成交', '保持不动'))
+            table_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'").fetchone()[0]
+            self.assertEqual(db._sqlite_check_values(table_sql, 'business_stage'),
+                             {'', '成交', '流失'})
+            self.assertEqual(conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='customers_new'"
+            ).fetchone()[0], 0)
+        finally:
+            conn.close()
+
     def test_demo_data_requires_explicit_switch(self):
         db.init_all_dbs()
         os.environ['CRM_SEED_DEMO_DATA'] = 'true'
