@@ -13384,8 +13384,19 @@ def _customer_aliases(conn, customer_id, customer=None):
     return names
 
 
-def _customer_context_markdown(customer, contacts, follow_history, outreach_emails, reminders, mode='compact', agent_prospect=None):
-    """Create a copy-ready factual context for an external model without adding inferred conclusions."""
+_CUSTOMER_CONTEXT_DIRECTION_LABELS = {
+    'inbound': '客户发来', 'outbound': '我方发出', 'two_way': '双方沟通', 'unknown': '方向不明确',
+}
+_CUSTOMER_CONTEXT_ACTIVITY_LABELS = {
+    'whatsapp': 'WhatsApp', 'email': '邮件', 'phone': '电话', 'meeting': '会议',
+    'quote': '报价', 'sample': '寄样', 'follow_up': '其他跟进',
+    'customer_reply': '客户回复', 'task_completed': '完成任务',
+    'outreach_email': '开发邮件', 'outreach_bounced': '外联退信',
+}
+
+
+def _customer_context_company_lines(customer, contacts):
+    """Company and contact facts, identical across every export mode."""
     customer_name = customer.get('company') or customer.get('name') or '客户'
     lines = [f'# {customer_name}', '', '## 公司资料',
              f'- 国家：{customer.get("country") or "待确认"}',
@@ -13403,40 +13414,225 @@ def _customer_context_markdown(customer, contacts, follow_history, outreach_emai
                 lines.append(f'  - {detail}')
     else:
         lines.append('- 联系人：待确认')
+    return lines
+
+
+def _customer_context_research_lines(agent_prospect):
+    """Machine research body only; the caller supplies the unverified heading."""
+    if not agent_prospect:
+        return []
+    lines = []
+    research_labels = (
+        ('资格状态', 'qualification_status'), ('研究状态', 'research_status'),
+        ('置信度', 'confidence'), ('沟通角度', 'angle'),
+    )
+    for label, key in research_labels:
+        value = str(agent_prospect.get(key) or '').strip()
+        if value:
+            lines.append(f'- {label}：{value[:2000]}')
+    for label, key in (('研究结论', 'reason'), ('补充研究结论', 'research_reason')):
+        value = str(agent_prospect.get(key) or '').strip()
+        if value:
+            lines.append(f'- {label}：{value[:8000]}')
+    permission = str(agent_prospect.get('contact_permission') or '').strip()
+    if permission:
+        permission_text = '已停止联系' if permission == 'do_not_contact' else '允许联系'
+        suppression_reason = str(agent_prospect.get('suppression_reason') or '').strip()
+        lines.append(f'- 联系权限：{permission_text}' + (f'（{suppression_reason[:2000]}）' if suppression_reason else ''))
+    source_urls = [str(url).strip() for url in (agent_prospect.get('source_urls') or []) if str(url).strip()]
+    if source_urls:
+        lines.append('- 公开来源：' + '；'.join(source_urls[:20])[:8000])
+    evidence = agent_prospect.get('evidence') or []
+    if evidence:
+        lines.append('- 证据：')
+        for item in evidence[:20]:
+            if isinstance(item, dict):
+                text = str(item.get('text') or item.get('excerpt') or item.get('summary') or '').strip()
+                url = str(item.get('source_url') or item.get('url') or '').strip()
+                value = ' · '.join(part for part in (text, url) if part)
+            else:
+                value = str(item).strip()
+            if value:
+                lines.append(f'  - {value[:3500]}')
+    return lines
+
+
+def _customer_context_text_lines(prefix, value):
+    """Keep stored text verbatim; continuation lines stay inside the bullet."""
+    text = str(value or '').strip()
+    if not text:
+        return []
+    rows = text.split('\n')
+    lines = [prefix + rows[0]]
+    for extra in rows[1:]:
+        lines.append('  ' + extra if extra.strip() else '')
+    return lines
+
+
+def _customer_context_sort_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _customer_context_timeline_events(follow_history, outreach_emails, email_details):
+    """Every stored communication as one chronologically ordered block.
+
+    Email rows contribute their outbound body and, when a customer reply was
+    stored, a separate inbound event dated by that reply.  The text is the
+    stored text: nothing is paraphrased and no mailbox or attachment is read.
+    """
+    events = []
+    for item in follow_history:
+        date_text = str(item.get('occurred_on') or item.get('follow_date') or '').strip()
+        activity = str(item.get('activity_type') or '').strip()
+        channel = _CUSTOMER_CONTEXT_ACTIVITY_LABELS.get(activity, '沟通')
+        direction = _CUSTOMER_CONTEXT_DIRECTION_LABELS.get(
+            str(item.get('direction') or '').strip().lower(), '方向不明确')
+        content = str(item.get('content') or '').strip()
+        result = str(item.get('result') or '').strip()
+        next_plan = str(item.get('next_plan') or '').strip()
+        block = [f'- {date_text or "日期待确认"} · {channel} · {direction}']
+        block.extend(_customer_context_text_lines('  内容：', content))
+        block.extend(_customer_context_text_lines('  结果：', result))
+        if not content and not result:
+            block.append('  内容：Trosa 未保存正文')
+        if next_plan:
+            block.extend(_customer_context_text_lines('  记录时写的下一步：', next_plan))
+        events.append(((date_text, str(item.get('created_at') or ''),
+                        _customer_context_sort_id(item.get('id')), 0), block))
+
+    for item in outreach_emails:
+        legacy_id = _customer_context_sort_id(item.get('id'))
+        details = email_details.get(legacy_id) or {}
+        sent_date = str(item.get('occurred_on') or item.get('sent_date')
+                        or details.get('sent_date') or '').strip()
+        reply_date = str(details.get('reply_date') or item.get('reply_date') or '').strip()
+        subject = str(details.get('subject') or item.get('subject') or '').strip()
+        if not subject:
+            subject = str(item.get('content') or '').strip()
+        subject = plain_outreach_subject(subject) if subject else '未保存主题'
+        body = str(details.get('body') or '').strip()
+        reply = str(details.get('reply_content') or '').strip()
+        reply_status = str(details.get('reply_status') or item.get('delivery_status')
+                           or item.get('reply_status') or '').strip()
+        block = [f'- {sent_date or "日期待确认"} · 开发邮件 · 我方发出', f'  主题：{subject}']
+        if body:
+            block.extend(_customer_context_text_lines('  正文：', body))
+        elif reply:
+            block.append('  正文：Trosa 未保存这封外发邮件的正文，只保存了客户回信。')
+        else:
+            block.append('  正文：Trosa 未保存正文，只保存了主题。')
+        if reply_status == 'bounced':
+            block.append('  送达：退信')
+        elif reply_status == 'pending':
+            block.append('  送达：待回复')
+        elif reply_status == 'no_reply':
+            block.append('  送达：无回复')
+        events.append(((sent_date, str(item.get('created_at') or ''), legacy_id, 1), block))
+        if reply and reply_status != 'bounced':
+            inbound = [f'- {reply_date or sent_date or "日期待确认"} · 客户回信 · 客户发来']
+            inbound.extend(_customer_context_text_lines('  正文：', reply))
+            events.append(((reply_date or sent_date, '', legacy_id, 0), inbound))
+    events.sort(key=lambda event: event[0], reverse=True)
+    return events
+
+
+def _customer_context_email_details(conn, customer_id, email_ids):
+    """Stored subject, body and reply for the emails already bound to this Customer.
+
+    The ids come from the binding-correct timeline view, so a merged sibling
+    account's mail cannot be pulled into this export by accident.
+    """
+    ids = []
+    for value in email_ids or []:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return {}
+    marks = ','.join('?' for _ in ids)
+    if postgres_mode():
+        rows = conn.execute(
+            '''SELECT ref.legacy_id AS id, message.subject, message.body AS body,
+                      message.reply_content, message.reply_status,
+                      COALESCE(trosa.compat_local_date(message.reply_at), '') AS reply_date
+                 FROM trosa.outreach_messages message
+                 JOIN trosa.legacy_row_refs ref ON ref.target_id=message.id
+                WHERE ref.table_name='outreach_emails'
+                  AND ref.organization_id=trosa.compat_org_id()
+                  AND ref.legacy_user_id=trosa.compat_current_user()
+                  AND ref.legacy_id IN (''' + marks + ')',
+            ids,
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            '''SELECT id, subject, content AS body, reply_content, reply_status, reply_date
+                 FROM outreach_emails
+                WHERE customer_id=? AND id IN (''' + marks + ')',
+            [customer_id] + ids,
+        ).fetchall()
+    return {_customer_context_sort_id(row['id']): dict(row) for row in rows}
+
+
+def _customer_timeline_markdown(customer, contacts, follow_history, outreach_emails, reminders,
+                                agent_prospect, email_details):
+    """Copy-ready complete record of one Customer, without inferring anything.
+
+    It holds what Trosa stored: the whole timeline, the open tasks, manual
+    notes and machine research kept apart.  It adds no stage, score or
+    follow-up recommendation.
+    """
+    lines = _customer_context_company_lines(customer, contacts)
+
+    notes = str(customer.get('notes') or '').strip()
+    waiting = str(customer.get('customer_judgment') or '').strip()
+    lines.extend(['', '## 人工备注'])
+    lines.extend(_customer_context_text_lines('- 备注：', notes))
+    lines.extend(_customer_context_text_lines('- 当前等待：', waiting))
+    if not notes and not waiting:
+        lines.append('- 暂无人工备注')
+
+    lines.extend(['', '## 当前未完成待办'])
+    if reminders:
+        for task in reminders:
+            action = str(task.get('title') or task.get('content') or '').strip() or '未写明的待办'
+            due = str(task.get('remind_date') or task.get('due_date') or '').strip() or '日期未定'
+            detail = str(task.get('content') or '').strip()
+            suffix = f'（{detail}）' if detail and detail != action else ''
+            lines.append(f'- {due} · {action}{suffix}')
+    else:
+        lines.append('- 暂无未完成待办')
+
+    lines.extend(['', '## 自动背调（机器抓取或生成，未经人工核实；不是客户当前阶段，也不是已确认事实）'])
+    lines.extend(_customer_context_research_lines(agent_prospect) or ['- 暂无自动背调资料'])
+
+    events = _customer_context_timeline_events(follow_history, outreach_emails, email_details)
+    lines.extend(['', f'## 沟通时间线（共 {len(events)} 条，从新到旧）'])
+    if events:
+        for _, block in events:
+            lines.extend(block)
+    else:
+        lines.append('- 暂无沟通记录')
+
+    lines.extend([
+        '',
+        '## 使用说明',
+        '- 以上是 Trosa 已保存的记录，没有新增阶段、评分或跟进建议。',
+        '- 记录里的「下一步」只是当时写下的计划；当前的待办只看上面的「当前未完成待办」。',
+        '- 信息不足或前后对不上的地方，请明确列为待确认，不要替客户补全。',
+    ])
+    return '\n'.join(lines)
+
+
+def _customer_context_markdown(customer, contacts, follow_history, outreach_emails, reminders, mode='compact', agent_prospect=None):
+    """Create a copy-ready factual context for an external model without adding inferred conclusions."""
+    lines = _customer_context_company_lines(customer, contacts)
     if agent_prospect:
         lines.extend(['', '## 自动研究资料（仅作研究依据，未自动视为已确认客户事实）'])
-        research_labels = (
-            ('资格状态', 'qualification_status'), ('研究状态', 'research_status'),
-            ('置信度', 'confidence'), ('沟通角度', 'angle'),
-        )
-        for label, key in research_labels:
-            value = str(agent_prospect.get(key) or '').strip()
-            if value:
-                lines.append(f'- {label}：{value[:2000]}')
-        for label, key in (('研究结论', 'reason'), ('补充研究结论', 'research_reason')):
-            value = str(agent_prospect.get(key) or '').strip()
-            if value:
-                lines.append(f'- {label}：{value[:8000]}')
-        permission = str(agent_prospect.get('contact_permission') or '').strip()
-        if permission:
-            permission_text = '已停止联系' if permission == 'do_not_contact' else '允许联系'
-            suppression_reason = str(agent_prospect.get('suppression_reason') or '').strip()
-            lines.append(f'- 联系权限：{permission_text}' + (f'（{suppression_reason[:2000]}）' if suppression_reason else ''))
-        source_urls = [str(url).strip() for url in (agent_prospect.get('source_urls') or []) if str(url).strip()]
-        if source_urls:
-            lines.append('- 公开来源：' + '；'.join(source_urls[:20])[:8000])
-        evidence = agent_prospect.get('evidence') or []
-        if evidence:
-            lines.append('- 证据：')
-            for item in evidence[:20]:
-                if isinstance(item, dict):
-                    text = str(item.get('text') or item.get('excerpt') or item.get('summary') or '').strip()
-                    url = str(item.get('source_url') or item.get('url') or '').strip()
-                    value = ' · '.join(part for part in (text, url) if part)
-                else:
-                    value = str(item).strip()
-                if value:
-                    lines.append(f'  - {value[:3500]}')
+        lines.extend(_customer_context_research_lines(agent_prospect))
     if mode != 'timeline':
         lines.extend(['', '## 最近状态'])
         latest = follow_history[0] if follow_history else None
@@ -13515,8 +13711,17 @@ def export_customer_context(customer_id):
                                                           AND COALESCE(reminder_type, 'follow_up') NOT LIKE 'outreach_%'
                                                         ORDER BY remind_date ASC''', (customer_id,)).fetchall()]
     agent_prospect = _sela_customer_agent_context(_sela_profile_for_customer(c, customer_id))
+    email_details = {}
+    if mode == 'timeline':
+        email_details = _customer_context_email_details(
+            conn, customer_id, [item.get('id') for item in outreach_emails])
     conn.close()
-    return jsonify({'mode': mode, 'content': _customer_context_markdown(customer, contacts, follow_history, outreach_emails, reminders, mode, agent_prospect)})
+    content = (_customer_timeline_markdown(customer, contacts, follow_history, outreach_emails,
+                                           reminders, agent_prospect, email_details)
+               if mode == 'timeline' else
+               _customer_context_markdown(customer, contacts, follow_history, outreach_emails,
+                                          reminders, mode, agent_prospect))
+    return jsonify({'mode': mode, 'content': content})
 
 
 # ========== 客户文件附件 ==========

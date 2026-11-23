@@ -9481,7 +9481,7 @@ async function copyCustomerContext(mode) {
   try {
     var result = await api('/api/customers/' + customerId + '/context?mode=' + encodeURIComponent(mode || 'compact'));
     await navigator.clipboard.writeText(result.content || '');
-    showToast('全部沟通已导出，可直接粘贴到外部模型', 'success');
+    showToast('已复制全部沟通与待办，可自行粘贴', 'success');
   } catch (e) {
     showToast('复制上下文失败：' + (e.message || '请稍后重试'), 'error');
   }
