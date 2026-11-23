@@ -13509,29 +13509,39 @@ def _customer_context_timeline_events(follow_history, outreach_emails, email_det
         sent_date = str(item.get('occurred_on') or item.get('sent_date')
                         or details.get('sent_date') or '').strip()
         reply_date = str(details.get('reply_date') or item.get('reply_date') or '').strip()
-        subject = str(details.get('subject') or item.get('subject') or '').strip()
-        if not subject:
-            subject = str(item.get('content') or '').strip()
-        subject = plain_outreach_subject(subject) if subject else '未保存主题'
+        # ``details`` always speaks for the email.  Falling back to the
+        # interaction's ``content`` would turn SQLite's body column into a
+        # subject (PostgreSQL stores the subject there instead).
+        subject_text = str(details.get('subject') or item.get('subject') or '').strip()
+        subject = plain_outreach_subject(subject_text) if subject_text else '未保存主题'
         body = str(details.get('body') or '').strip()
         reply = str(details.get('reply_content') or '').strip()
         reply_status = str(details.get('reply_status') or item.get('delivery_status')
                            or item.get('reply_status') or '').strip()
+        bounced = reply_status == 'bounced'
         block = [f'- {sent_date or "日期待确认"} · 开发邮件 · 我方发出', f'  主题：{subject}']
         if body:
             block.extend(_customer_context_text_lines('  正文：', body))
+        elif bounced:
+            block.append('  正文：Trosa 未保存这封外发邮件的正文。')
         elif reply:
             block.append('  正文：Trosa 未保存这封外发邮件的正文，只保存了客户回信。')
-        else:
+        elif subject_text:
             block.append('  正文：Trosa 未保存正文，只保存了主题。')
-        if reply_status == 'bounced':
+        else:
+            block.append('  正文：Trosa 未保存正文。')
+        if bounced:
             block.append('  送达：退信')
+            # A bounce body belongs to delivery, never to a customer reply.
+            block.extend(_customer_context_text_lines('  退信信息：', reply))
         elif reply_status == 'pending':
             block.append('  送达：待回复')
         elif reply_status == 'no_reply':
             block.append('  送达：无回复')
+        elif reply_status == 'replied' and not reply:
+            block.append('  客户已回复，Trosa 未保存回信正文。')
         events.append(((sent_date, str(item.get('created_at') or ''), legacy_id, 1), block))
-        if reply and reply_status != 'bounced':
+        if reply and not bounced:
             inbound = [f'- {reply_date or sent_date or "日期待确认"} · 客户回信 · 客户发来']
             inbound.extend(_customer_context_text_lines('  正文：', reply))
             events.append(((reply_date or sent_date, '', legacy_id, 0), inbound))

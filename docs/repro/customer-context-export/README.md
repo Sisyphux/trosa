@@ -36,7 +36,7 @@ node tools/repro_customer_context_export.cjs --url http://127.0.0.1:18190 \
 | 运行 | 结果 |
 | --- | --- |
 | `before/`（修复前） | 退出码 20；8 项失败：第 50 条以后丢失、邮件无正文、回信没单列、只有主题的邮件没有说明、待办 / 备注 / 自动背调没有独立成块 |
-| `after/`（修复后） | 退出码 0；12 项全部通过，剪贴板文本与接口返回一致（4422 字符） |
+| `after/`（修复后） | 退出码 0；12 项全部通过，剪贴板文本与接口返回一致（4452 字符） |
 
 证据：各目录下的 `report.json`（每项检查、页面错误、字符数）和截图 `workspace-open.png`、`after-copy.png`。
 
@@ -44,5 +44,6 @@ node tools/repro_customer_context_export.cjs --url http://127.0.0.1:18190 \
 
 - `app.py`：`export_customer_context` 在 timeline 模式下按已绑定的沟通 id 读取邮件的主题、正文、回信和退信状态；`_customer_timeline_markdown` 输出完整时间线、当前待办、人工备注和自动背调四块，不生成阶段、评分或建议。
 - 排序按日期、保存时间、记录 id 稳定从新到旧；同一天多条不会因排序丢失或乱序。
+- 退信只记为送达事实和「退信信息」，不会变成客户回信；已回复但没保存回信正文时明确说明，不让人误以为没回复。
 - 其他导出模式（`compact` / `full` / `requirements`）保持原样。
 - `app/static/app.js`：一键复制仍走同一个入口，成功提示改为「已复制全部沟通与待办，可自行粘贴」。

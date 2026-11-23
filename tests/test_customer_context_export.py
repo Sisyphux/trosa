@@ -172,7 +172,40 @@ class CustomerContextExportTest(unittest.TestCase):
         self.assertIn('正文：Trosa 未保存正文，只保存了主题。', content)
         # A bounce is a delivery fact, never a customer reply.
         self.assertIn('送达：退信', content)
+        self.assertIn('退信信息：550 5.1.1 user unknown', content)
         self.assertNotIn('正文：550 5.1.1 user unknown', content)
+        self.assertNotIn('只保存了客户回信', content)
+
+    def test_email_edge_states_never_claim_a_reply_that_is_not_there(self):
+        email = {'id': 9, 'occurred_on': '2026-11-01', 'created_at': '', 'delivery_status': 'bounced'}
+
+        def lines(details):
+            events = self.module._customer_context_timeline_events([], [email], {9: details})
+            return '\n'.join(line for _, block in events for line in block), len(events)
+
+        bounce, count = lines({'subject': 'Only subject', 'body': '',
+                               'reply_content': '550 5.1.1 user unknown', 'reply_status': 'bounced'})
+        self.assertEqual(count, 1, 'a bounce must not become a second inbound event')
+        self.assertIn('退信信息：550 5.1.1 user unknown', bounce)
+        self.assertNotIn('客户回信', bounce)
+        self.assertNotIn('只保存了客户回信', bounce)
+
+        replied, count = lines({'subject': 'Quotation', 'body': 'Body',
+                                'reply_content': '', 'reply_status': 'replied'})
+        self.assertEqual(count, 1)
+        self.assertIn('客户已回复，Trosa 未保存回信正文', replied)
+
+        # SQLite's ``content`` is the body, so it must never be shown as the subject.
+        sqlite_row, _ = lines({'subject': '', 'body': 'Hello body',
+                               'reply_content': '', 'reply_status': 'pending'})
+        self.assertIn('主题：未保存主题', sqlite_row)
+        self.assertIn('正文：Hello body', sqlite_row)
+        self.assertNotIn('主题：Hello body', sqlite_row)
+
+        empty, _ = lines({'subject': '', 'body': '', 'reply_content': '', 'reply_status': 'pending'})
+        self.assertIn('主题：未保存主题', empty)
+        self.assertIn('正文：Trosa 未保存正文。', empty)
+        self.assertNotIn('只保存了主题', empty)
 
     def test_current_tasks_do_not_borrow_a_historical_next_step(self):
         customer_id = self._seed_customer()
