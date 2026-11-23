@@ -1,7 +1,7 @@
 {
   "label": "after",
   "url": "http://127.0.0.1:18191",
-  "generatedAt": "2026-11-22T17:44:28.283Z",
+  "generatedAt": "2026-11-22T18:42:45.638Z",
   "checks": [
     {
       "id": "dropdown-filter",
@@ -61,7 +61,7 @@
       "id": "list-filter-by-new-stage",
       "title": "列表按“报过价”筛选后只剩这条测试客户",
       "pass": true,
-      "detail": "结果=[\"阶段验证1795369471220-批量\"]"
+      "detail": "结果=[\"阶段验证1795372969466-批量\"]"
     },
     {
       "id": "batch-save-persists-new-stage",
@@ -164,32 +164,32 @@
     "created": {
       "空": {
         "status": 201,
-        "id": 69,
+        "id": 76,
         "saved": ""
       },
       "回复过": {
         "status": 201,
-        "id": 70,
+        "id": 77,
         "saved": "回复过"
       },
       "寄过样品": {
         "status": 201,
-        "id": 71,
+        "id": 78,
         "saved": "寄过样品"
       },
       "报过价": {
         "status": 201,
-        "id": 72,
+        "id": 79,
         "saved": "报过价"
       },
       "成交": {
         "status": 201,
-        "id": 73,
+        "id": 80,
         "saved": "成交"
       },
       "流失": {
         "status": 201,
-        "id": 74,
+        "id": 81,
         "saved": "流失"
       },
       "乱值": {
@@ -217,10 +217,10 @@
     ],
     "batchCustomer": {
       "status": 201,
-      "id": 75
+      "id": 82
     },
     "filtered": [
-      "阶段验证1795369471220-批量"
+      "阶段验证1795372969466-批量"
     ],
     "batchCustomerNote": {
       "status": 200
