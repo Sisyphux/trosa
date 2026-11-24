@@ -1229,6 +1229,95 @@ class PostgreSQLRehearsalAcceptanceTest(unittest.TestCase):
         self.assertEqual(match['email'], 'undo-target@example.test')
         self.assertEqual(match['name'], 'Undo Target Buyer')
 
+    def test_contact_with_history_can_be_removed_without_losing_the_record(self):
+        """A dead mailbox could not be deleted once it had history (2026-11-24 PLEXIPOL).
+
+        Deleting a contact on the canonical backend removes only this member's
+        projection; the contact method and its timeline/outreach/delivery rows
+        stay.  A bounced address must therefore be removable from the contact
+        list, or every later letter is mailed to it again.
+        """
+        import trosa_domain
+        from tools.postgres_rehearsal import load_fixture
+
+        module = self._app_module()
+        client = module.app.test_client()
+        self.assertEqual(client.post('/api/auth/login', json={'user': 'hamid'}).status_code, 200)
+        customer_id = load_fixture()['customer_id']
+        marker = 'dead-mailbox-' + uuid.uuid4().hex[:8]
+        email = marker + '@example.test'
+        contact_id = trosa_domain.create_contact(self.connection, customer_id=customer_id, values={
+            'name': 'UNKNOWN', 'email': email, 'contact_type': 'person',
+            'is_primary': False, 'notes': '',
+        })
+        self.connection.commit()
+        ref = self.connection.execute(
+            '''SELECT contact_method_id FROM trosa.contact_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_contact_id=?''', (contact_id,),
+        ).fetchone()
+        method_id = ref['contact_method_id']
+        account_id = self.connection.execute(
+            '''SELECT account_id FROM trosa.account_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_customer_id=?''', (customer_id,),
+        ).fetchone()['account_id']
+
+        def uid(name):
+            return self.connection.execute("SELECT trosa.compat_uuid(?)", (name,)).fetchone()[0]
+
+        timeline_id, outreach_id = uid(marker + ':timeline'), uid(marker + ':outreach')
+        self.connection.execute(
+            '''INSERT INTO trosa.timeline_events
+                   (id, account_id, contact_method_id, event_type, direction, content, occurred_at)
+               VALUES (?, ?, ?, 'communication', 'outbound', 'bounced letter', now())''',
+            (timeline_id, account_id, method_id),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.outreach_messages
+                   (id, account_id, contact_method_id, subject, body, provider_message_id, sent_at)
+               VALUES (?, ?, ?, 'First letter', 'body', ?, now())''',
+            (outreach_id, account_id, method_id, marker + '-msg'),
+        )
+        self.connection.execute(
+            '''INSERT INTO trosa.email_delivery_events
+                   (id, organization_id, contact_method_id, outreach_message_id, event_type, occurred_at)
+               VALUES (?, trosa.compat_org_id(), ?, ?, 'bounced', now())''',
+            (uid(marker + ':delivery'), method_id, outreach_id),
+        )
+        self.connection.commit()
+
+        deleted = client.delete(f'/api/contacts/{contact_id}')
+        self.assertEqual(deleted.status_code, 200, deleted.get_data(as_text=True))
+
+        self.assertEqual([item for item in trosa_domain.customer_contacts(self.connection, customer_id)
+                          if int(item['id']) == int(contact_id)], [])
+        # The address and the history that names it survive the projection removal.
+        self.assertEqual(self.connection.execute(
+            'SELECT value FROM core.contact_methods WHERE id=?', (method_id,),
+        ).fetchone()['value'], email)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.timeline_events WHERE contact_method_id=?', (method_id,),
+        ).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.outreach_messages WHERE contact_method_id=?', (method_id,),
+        ).fetchone()[0], 1)
+        self.assertEqual(self.connection.execute(
+            'SELECT count(*) FROM trosa.email_delivery_events WHERE contact_method_id=?', (method_id,),
+        ).fetchone()[0], 1)
+
+        restored = client.post('/api/undo/' + deleted.get_json()['undo_token'])
+        self.assertEqual(restored.status_code, 200, restored.get_data(as_text=True))
+        restored_contacts = [item for item in trosa_domain.customer_contacts(self.connection, customer_id)
+                             if int(item['id']) == int(contact_id)]
+        self.assertEqual(len(restored_contacts), 1, restored_contacts)
+        self.assertEqual(restored_contacts[0]['email'], email)
+        self.assertEqual(self.connection.execute(
+            '''SELECT contact_method_id FROM trosa.contact_legacy_refs
+                WHERE organization_id=trosa.compat_org_id() AND legacy_user_id=trosa.compat_current_user()
+                  AND legacy_contact_id=?''', (contact_id,),
+        ).fetchone()['contact_method_id'], method_id)
+
     def test_contact_email_already_held_by_the_company_moves_to_the_person(self):
         """An address that was a company-level method must not violate the one-owner CHECK.
 

@@ -22412,50 +22412,29 @@ def delete_contact(contact_id):
         conn.close()
         return jsonify({'error': '联系人不存在'}), 404
 
-    reference_sources = (
-        ('follow_up_logs', '沟通记录'),
-        ('outreach_emails', '开发信'),
-        ('email_delivery_events', '邮件投递记录'),
-    )
-    references = []
-    if postgres_mode():
-        contact_ref = conn.execute(
-            '''SELECT contact_method_id FROM trosa.contact_legacy_refs
-                WHERE organization_id=trosa.compat_org_id()
-                  AND legacy_user_id=trosa.compat_current_user()
-                  AND legacy_contact_id=?''', (contact_id,)
-        ).fetchone()
-        method_id = contact_ref['contact_method_id'] if contact_ref else None
-        canonical_reference_counts = {
-            'follow_up_logs': (conn.execute(
-                '''SELECT COUNT(*) FROM trosa.timeline_events event
-                    JOIN trosa.account_legacy_refs ar ON ar.account_id=event.account_id
-                   WHERE event.contact_method_id=? AND ar.organization_id=trosa.compat_org_id()
-                     AND ar.legacy_user_id=trosa.compat_current_user()''', (method_id,)
-            ).fetchone()[0] if method_id else 0),
-            'outreach_emails': (conn.execute(
-                '''SELECT COUNT(*) FROM trosa.outreach_messages message
-                    JOIN trosa.account_legacy_refs ar ON ar.account_id=message.account_id
-                   WHERE message.contact_method_id=? AND ar.organization_id=trosa.compat_org_id()
-                     AND ar.legacy_user_id=trosa.compat_current_user()''', (method_id,)
-            ).fetchone()[0] if method_id else 0),
-            'email_delivery_events': (conn.execute(
-                '''SELECT COUNT(*) FROM trosa.email_delivery_events
-                   WHERE organization_id=trosa.compat_org_id() AND contact_method_id=?''', (method_id,)
-            ).fetchone()[0] if method_id else 0),
-        }
-    else:
-        canonical_reference_counts = {
-            table_name: c.execute(f'SELECT COUNT(*) FROM {table_name} WHERE contact_id=?', (contact_id,)).fetchone()[0]
-            for table_name, _ in reference_sources
-        }
-    for table_name, label in reference_sources:
-        count = canonical_reference_counts.get(table_name, 0)
-        if count:
-            references.append({'type': table_name, 'label': label, 'count': count})
-    if references:
-        conn.close()
-        return jsonify({'error': '联系人仍被历史记录引用，暂不能删除', 'references': references}), 409
+    # On the canonical backend a Contact is only this member's projection over
+    # shared identity facts: ``_delete_contact`` removes the legacy ref, while
+    # the contact method keeps the address and timeline/outreach/delivery rows
+    # keep pointing at it.  A dead address therefore has to be removable once
+    # history exists -- 2026-11-24 PLEXIPOL: sklep@ bounced twice, but the
+    # reference guard refused deletion, and every later letter went to it
+    # again.  The legacy SQLite schema has no such separation (the contact row
+    # is what history points at), so the guard stays in force there.
+    if not postgres_mode():
+        reference_sources = (
+            ('follow_up_logs', '沟通记录'),
+            ('outreach_emails', '开发信'),
+            ('email_delivery_events', '邮件投递记录'),
+        )
+        references = []
+        for table_name, label in reference_sources:
+            count = c.execute(f'SELECT COUNT(*) FROM {table_name} WHERE contact_id=?',
+                              (contact_id,)).fetchone()[0]
+            if count:
+                references.append({'type': table_name, 'label': label, 'count': count})
+        if references:
+            conn.close()
+            return jsonify({'error': '联系人仍被历史记录引用，暂不能删除', 'references': references}), 409
 
     _delete_contact(conn, contact_id=contact_id)
     undo_token = _create_undo_action(
