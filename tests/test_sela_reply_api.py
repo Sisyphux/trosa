@@ -647,5 +647,141 @@ class SelaReplyApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
 
+    # -- sela's two separate answers ---------------------------------------
+    def _post_meaning_reply(self, candidate_id, meaning, delivery='human', message_id='gmail-meaning-1'):
+        outbound = outbound_payload(candidate_id)
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        reply = {
+            'candidate_id': outbound['candidate_id'],
+            'trosa_id': trosa_id,
+            'reply': {
+                'message_id': message_id,
+                'from': 'Ana Silva <ana@acrilicos.com>',
+                'subject': 'Re: Acrylic sheet supply',
+                'received_at': '2026-10-26T09:00:00+08:00',
+                'body': 'Los colores los manejamos personalizados. ¿en qué están interesados?',
+            },
+            'action': {'event': 'REPLIED', 'delivery': delivery, 'meaning': meaning},
+            'idempotency_key': f'sela:gmail-reply:{message_id}',
+        }
+        response = self.client.post(
+            '/api/integrations/sela/reply', json=reply,
+            headers=self.headers(reply['idempotency_key']))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        return trosa_id, response.get_json()
+
+    def _last_log(self, trosa_id):
+        conn = self.hamid_db()
+        try:
+            return conn.execute(
+                '''SELECT content, result, direction, activity_type, related_task_id
+                   FROM follow_up_logs WHERE customer_id=? ORDER BY id DESC LIMIT 1''',
+                (trosa_id,)).fetchone()
+        finally:
+            conn.close()
+
+    def test_buyer_misread_is_a_reply_but_not_purchase_intent(self):
+        trosa_id, body = self._post_meaning_reply('candidate-buyer-misread', 'buyer_misread')
+        self.assertEqual(body['status'], 'SYNCED')
+        self.assertEqual(body['meaning'], 'buyer_misread')
+        self.assertIsNone(body['task_id'])
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '对方似乎把我们当买家')
+        self.assertEqual(row['direction'], 'inbound')
+        self.assertEqual(row['activity_type'], 'customer_reply')
+        self.assertIsNone(row['related_task_id'])
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'REPLIED')
+        self.assertEqual(self._outreach_status('candidate-buyer-misread'), 'REPLIED')
+
+    def test_processing_inquiry_has_its_own_plain_result(self):
+        trosa_id, body = self._post_meaning_reply('candidate-processing', 'processing')
+        self.assertEqual(body['status'], 'SYNCED')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '客户询问定制加工')
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'REPLIED')
+
+    def test_referral_has_its_own_plain_result(self):
+        trosa_id, body = self._post_meaning_reply('candidate-referral', 'referral')
+        self.assertEqual(body['status'], 'SYNCED')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '客户转交负责人')
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'REPLIED')
+
+    def test_decline_meaning_is_not_interested(self):
+        trosa_id, body = self._post_meaning_reply('candidate-decline', 'decline')
+        self.assertEqual(body['status'], 'SYNCED')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '客户暂无意向')
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'NOT_INTERESTED')
+        self.assertEqual(self._outreach_status('candidate-decline'), 'NOT_INTERESTED')
+
+    def test_uncertain_delivery_is_marked_in_the_plain_result(self):
+        trosa_id, body = self._post_meaning_reply('candidate-uncertain', 'unclear', delivery='uncertain')
+        self.assertEqual(body['status'], 'SYNCED')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '已收到客户回复（不确定）')
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'REPLIED')
+
+    def test_uncertain_interested_is_downgraded_to_replied(self):
+        outbound = outbound_payload('candidate-uncertain-interested')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        payload = {
+            'candidate_id': outbound['candidate_id'],
+            'trosa_id': trosa_id,
+            'reply': {'message_id': 'gmail-uncertain-1', 'from': 'Ana <ana@acrilicos.com>',
+                      'subject': 'Re: Acrylic sheet supply', 'received_at': '2026-10-26T09:00:00+08:00',
+                      'body': 'Maybe. I will check.'},
+            'action': {'event': 'INTERESTED', 'delivery': 'uncertain', 'meaning': 'unclear'},
+            'idempotency_key': 'sela:gmail-reply:gmail-uncertain-1',
+        }
+        response = self.client.post('/api/integrations/sela/reply', json=payload,
+                                    headers=self.headers(payload['idempotency_key']))
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.get_json()['status'], 'SYNCED')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '已收到客户回复（不确定）')
+        self.assertEqual(self.module._sela_reply_event_from_rows([row]), 'REPLIED')
+        self.assertEqual(self._outreach_status('candidate-uncertain-interested'), 'REPLIED')
+
+    def test_auto_delivery_is_acknowledged_without_a_customer_reply(self):
+        outbound = outbound_payload('candidate-auto-delivery')
+        trosa_id = self.post_outbound(outbound).get_json()['trosa_id']
+        payload = {
+            'candidate_id': outbound['candidate_id'],
+            'trosa_id': trosa_id,
+            'reply': {'message_id': 'gmail-auto-1', 'from': 'Ana <ana@acrilicos.com>',
+                      'subject': 'Re: Acrylic sheet supply', 'received_at': '2026-10-26T09:00:00+08:00',
+                      'body': 'Thank you, your request has been received.'},
+            'action': {'event': 'REPLIED', 'delivery': 'auto', 'meaning': 'purchase'},
+            'idempotency_key': 'sela:gmail-reply:gmail-auto-1',
+        }
+        first = self.client.post('/api/integrations/sela/reply', json=payload,
+                                 headers=self.headers(payload['idempotency_key']))
+        self.assertEqual(first.status_code, 200, first.get_data(as_text=True))
+        body = first.get_json()
+        self.assertEqual(body['status'], 'SYNCED')
+        self.assertIsNone(body['activity_id'])
+        self.assertEqual(body['reason'], 'AUTO_RECEIPT_NOT_A_REPLY')
+        conn = self.hamid_db()
+        try:
+            count = conn.execute(
+                "SELECT count(*) FROM follow_up_logs WHERE customer_id=? AND direction='inbound'",
+                (trosa_id,)).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(count, 0)
+        # A replay returns the same receipt and still writes nothing.
+        again = self.client.post('/api/integrations/sela/reply', json=payload,
+                                 headers=self.headers(payload['idempotency_key']))
+        self.assertEqual(again.get_json(), body)
+
+    def test_unknown_meaning_from_an_older_sela_is_ignored(self):
+        trosa_id, body = self._post_meaning_reply('candidate-unknown-meaning', 'a_new_word')
+        self.assertEqual(body['status'], 'SYNCED')
+        self.assertEqual(body['meaning'], '')
+        row = self._last_log(trosa_id)
+        self.assertEqual(row['result'], '已收到客户回复')
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -212,6 +212,8 @@ class AutoReplyTest(unittest.TestCase):
         'Respuesta automática: estoy fuera de la oficina.',
         'Your request has been received and a ticket was created.',
         'This is an automated message, please do not reply to this email.',
+        'Encerrados Ferias/ Closed Holidays',
+        'This email account is not monitored regularly, for a faster response use the website.',
     ]
     REAL_MAILS = [
         'Our factory is closed for the holiday from Dec 25 to Jan 2, please send the quotation before then.',

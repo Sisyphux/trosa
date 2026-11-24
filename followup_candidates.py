@@ -86,6 +86,12 @@ DEFAULT_PARAMS: dict[str, Any] = {
         'after_holiday_days': 14,      # "节后 / after the holiday" -> event date + this
         'standalone': True,            # False: R4 may only support another rule's candidate
     },
+    # R5: the letter treated us as the buyer.  Keep the reply, but do not run
+    # the ordinary "customer spoke, nobody answered" cadence on it.
+    'r5': {
+        'min_days': 1,
+        'max_days': 60,
+    },
     # Limits on what a member sees per day.
     'limits': {
         'daily_cap': 2,                # few and sure: a member sees at most this many a day, most days none
@@ -96,7 +102,7 @@ DEFAULT_PARAMS: dict[str, Any] = {
         'ignore_window_days': 14,      # ... within this many days silences the customer
     },
     # Display / ordering.
-    'priority': ['R1:certain', 'R4', 'R1:hint', 'R2', 'R3'],
+    'priority': ['R1:certain', 'R4', 'R5', 'R1:hint', 'R2', 'R3'],
     # Which timeline sources can be trusted to know the direction.
     'reliable_sources': ['sela', 'inbox'],
     # Event types that are not a conversation at all.
@@ -133,6 +139,7 @@ RULE_NAMES = {
     'R2': 'quote-sample-silent',
     'R3': 'dormant-deal-client',
     'R4': 'customer-said-date',
+    'R5': 'buyer-misread',
 }
 
 
@@ -203,7 +210,10 @@ _RE_NEG_ORDER = re.compile(r'(没有|没|无|暂无|未|尚未|还没|不)[^，�
 _RE_DECLINED = re.compile(
     r"(婉拒|拒绝|谢绝|不感兴趣|没有兴趣|无兴趣|不考虑|不需要|没有需求|暂无需求|无需求|退订|取消订阅|别再发|不要再发"
     r"|not interested|no interest|no need|unsubscribe|remove me|stop (?:e-?mailing|sending|contacting)|do not contact"
-    r"|(?:we|i) (?:do not|don't) (?:need|require|import|buy)|not (?:looking|in the market)|no longer (?:need|interested))", re.I)
+    r"|(?:we|i) (?:do not|don't) (?:need|require|import|buy)|not (?:looking|in the market)|no longer (?:need|interested)"
+    r"|pricing is no different|no different to what (?:i'm|im|we're) already paying"
+    r"|happy with (?:our|my) (?:current )?supplier|already have (?:a )?supplier"
+    r"|no point getting samples)", re.I)
 _RE_LEAD_LABEL = re.compile(r'^\s*客户(?:回复|来信|回信)了?(?:邮件)?[：:]\s*')
 _BOUNCE_NUMERIC = re.compile(r'^\d+$')
 # Typical automatic-reply sentences only.  A bare "holiday", "vacation" or "ticket" is an ordinary
@@ -217,7 +227,41 @@ _RE_AUTO_REPLY = re.compile(
     r"|\b(?:your|the) (?:support )?(?:ticket|request) (?:has been|was|is) (?:received|created|logged|opened)\b"
     r"|abwesenheitsnotiz|abwesenheitsmeldung|automatische antwort|fuera de (?:la )?oficina"
     r"|respuesta autom[aá]tica|r[ée]ponse automatique|absent du bureau|risposta automatica"
-    r"|resposta autom[aá]tica|fora do escrit[óo]rio)", re.I)
+    r"|resposta autom[aá]tica|fora do escrit[óo]rio"
+    # receipt / ticket templates (the automatic acknowledgement, not a person)
+    r"|has been received by our|a member of the team will respond|we will get back to you"
+    r"|ticket created|ticket id|case (?:id|number)"
+    r"|su correo ha sido recibido|ser[aá] tramitado|en breve recibir[aá]"
+    r"|informaci[oó]n recibida|hemos recibido su|n[uú]mero de solicitud|acuse de recibo"
+    r"|merci pour votre demande|nous la traitons dans les meilleurs d[eé]lais"
+    r"|votre demande a bien [eé]t[eé] enregistr[eé]e|nous accusons r[eé]ception"
+    r"|uw aanvraag is ontvangen|wij nemen zo spoedig mogelijk contact op"
+    r"|dit is een automatisch bericht"
+    r"|closed holidays|encerrad[oa]s? (?:para )?f[eé]rias"
+    r"|not monitored regularly|account is not monitored)", re.I)
+# sela's plain result for a letter that treats us as the buyer.  The reply stays
+# on the timeline, but the ordinary "customer spoke, nobody answered" cadence
+# must not run on it; R5 gives the specific prompt instead.
+_RE_BUYER_MISREAD = re.compile(r'对方似乎把我们当买家')
+# A real answer that happens to contain an automatic-reply phrase
+# ("I'm out of office next week, but please quote 3 mm") is still the customer
+# speaking.  Only an auto phrase with no business request is dropped.
+_RE_REPLY_SUBSTANTIVE = re.compile(
+    r'(?:please\s+(?:quote|send|share|provide|confirm|advise|let\s+us\s+know)'
+    r'|\b(?:can|could|would)\s+you\b'
+    r'|(?:send|share|provide)\s+us\b'
+    r'|\bwe\s+(?:still\s+)?(?:need|require|want|would\s+like|are\s+looking\s+for)\b'
+    r'|\b(?:pueden|podr[ií]an|agradeceremos|por\s+favor)\b.{0,40}(?:enviar|compartir|mandar|indicar|cotizar)'
+    r'|\b(?:enviarnos|compartirnos|mandarnos|cotizarnos)\b'
+    r'|\b(?:nos\s+interesa|necesitamos|buscamos)\b'
+    r'|\bcopio\b.{0,80}(?:compañer|encargad|responsable)'
+    r'|\b(?:remitido|trasladado|derivado)\b.{0,80}(?:compañer|encargad|responsable)'
+    r'|\b(?:forwarded|copied)\b.{0,60}(?:colleague|team|manager)'
+    r'|\bperson\s+in\s+charge\b'
+    r'|(?:报价|价格|交期|样品|起订量|厚度|颜色|规格))', re.I)
+_RE_QUOTE_LINE = re.compile(
+    r'^\s*(?:>|-{2,}|On\s.{0,200}?wrote\s*:|El\s.{0,200}?escribió\s*:'
+    r'|(?:From|De|Von|Van|Da)\s*:\s+\S|-----Original\s+Message)', re.I)
 
 _MONTHS = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
            'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
@@ -269,6 +313,20 @@ def _to_date(value: Any, tz: ZoneInfo) -> date | None:
         return date.fromisoformat(text[:10])
     except ValueError:
         return None
+
+
+def _reply_body(text: Any) -> str:
+    """The new words inside sela's timeline envelope, without the quoted letter."""
+    body = str(text or '')
+    marker = '正文：'
+    if marker in body:
+        body = body.split(marker, 1)[1]
+    kept: list[str] = []
+    for line in body.replace('\r\n', '\n').replace('\r', '\n').split('\n'):
+        if _RE_QUOTE_LINE.match(line):
+            break
+        kept.append(line)
+    return '\n'.join(kept).strip()[:4000]
 
 
 def _text(event: Mapping, *fields: str) -> str:
@@ -379,8 +437,12 @@ def _normalise_events(events: Iterable[Any], params: Mapping, today: date) -> di
         customer_typed = direction == 'inbound' or event_type.lower() in ('customer_reply', '客户回复')
         if params['guards']['bounce_text'] and customer_typed and _bounce_text(text):
             continue
-        if params['guards']['auto_reply'] and customer_typed and _RE_AUTO_REPLY.search(text):
-            continue
+        if params['guards']['auto_reply'] and customer_typed:
+            # Only the new words, never the quoted letter below them, decide
+            # whether this is a machine receipt.
+            reply_text = _reply_body(text)
+            if _RE_AUTO_REPLY.search(reply_text) and not _RE_REPLY_SUBSTANTIVE.search(reply_text):
+                continue
         by_account.setdefault(account_id, []).append({
             **event,
             '_id': event.get('event_id', event.get('id', f'{account_id}:{day.isoformat()}:{index}')),
@@ -389,6 +451,7 @@ def _normalise_events(events: Iterable[Any], params: Mapping, today: date) -> di
             '_direction': direction,
             '_payload': payload,
             '_order': index,
+            '_buyer_misread': bool(customer_typed and _RE_BUYER_MISREAD.search(text)),
         })
     batch_cfg = params['batch_day']
     per_day: dict[tuple, int] = {}
@@ -559,7 +622,7 @@ def _rule_r1(account_id: Any, rows: list[dict], today: date, params: Mapping) ->
     speakers = [e for e, s in zip(day_rows, sides) if s in ('customer', 'customer_text')]
     if not speakers:
         return None
-    if any(_RE_DECLINED.search(_text(e, 'content', 'result')) for e in speakers):
+    if any(_RE_DECLINED.search(_reply_body(_text(e, 'content', 'result'))) for e in speakers):
         return None                                   # the customer said no: not worth chasing
     reliable_speakers = [e for e, s in zip(day_rows, sides) if s == 'customer' and _is_reliable(e, params)]
     certain = bool(reliable_speakers) and all(s == 'customer' for s in sides)
@@ -654,6 +717,30 @@ def _rule_r4(account_id: Any, rows: list[dict], today: date, params: Mapping) ->
         facts={'said_on': last.isoformat(), 'quote': snippet, 'stated_date': due.isoformat(),
                'days_since_date': overdue},
         reason=f'客户 {_md(last)}提到「{snippet}」（约 {_md(due)}），之后没有记录')
+
+
+def _rule_r5(account_id: Any, rows: list[dict], today: date, params: Mapping) -> Candidate | None:
+    """The letter treated us as the buyer: keep it, but do not run the no-reply cadence.
+
+    It is not a purchase reply, so the prompt must not read like one.  It must
+    also not disappear: the person may still choose to develop the company after
+    first saying we are the sheet supplier and finding the real buyer.
+    """
+    cfg = params['r5']
+    last, day_rows = _last_day_events(rows)
+    evidence = day_rows[-1] if day_rows and day_rows[-1].get('_buyer_misread') else None
+    if evidence is None:
+        return None                                   # a later record is the real last word
+    if any(_side(e) in ('ours', 'both') for e in day_rows):
+        return None                                   # we already answered that day
+    age = (today - last).days
+    if age < cfg['min_days'] or age > cfg['max_days']:
+        return None
+    return Candidate(
+        account_id=account_id, rule='R5', certainty='certain',
+        evidence_event_id=evidence['_id'], evidence_event_ids=(evidence['_id'],),
+        facts={'buyer_misread_on': last.isoformat(), 'days_ago': age},
+        reason='对方似乎把我们当买家，若继续开发，先说明我们是板材供应商并确认采购联系人')
 
 
 # ---------------------------------------------------------------------------
@@ -857,13 +944,23 @@ def scan(accounts: Iterable[Any], events: Iterable[Any], open_task_account_ids: 
             continue
 
         fired: list[Candidate] = []
-        for rule_fn in (_rule_r1, _rule_r2, _rule_r4):
-            candidate = rule_fn(account_id, rows, today, cfg)
-            if candidate is not None:
-                fired.append(candidate)
-        r3 = _rule_r3(account_id, rows, today, cfg)
-        if r3 is not None:
-            fired.append(r3[0])
+        last_day = rows[-1]['_day']
+        last_is_misread = bool(rows[-1].get('_buyer_misread'))
+        if last_is_misread:
+            # The letter treated us as the buyer.  R5 is the only prompt it gets;
+            # the ordinary no-reply cadence would say the wrong thing.
+            r5 = _rule_r5(account_id, rows, today, cfg)
+            if r5 is not None:
+                fired.append(r5)
+            r3 = None
+        else:
+            for rule_fn in (_rule_r1, _rule_r2, _rule_r4):
+                candidate = rule_fn(account_id, rows, today, cfg)
+                if candidate is not None:
+                    fired.append(candidate)
+            r3 = _rule_r3(account_id, rows, today, cfg)
+            if r3 is not None:
+                fired.append(r3[0])
         fired = [c for c in fired
                  if (account_id, c.evidence_event_id) not in muted_keys
                  and (account_id, c.rule, c.evidence_event_id) not in muted_keys]

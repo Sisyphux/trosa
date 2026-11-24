@@ -6767,12 +6767,30 @@ _SELA_REPLY_EVENT_PATTERN = re.compile(
 
 
 # The result column is written for people; the outcome marker is its plain wording.
+# A buyer-misread letter is still a reply (it must not open as a new customer),
+# but it is deliberately not "客户有意向": sela's meaning is a separate fact.
 _SELA_PLAIN_REPLY_RESULTS = (
     ('客户有意向', 'INTERESTED'),
     ('客户暂无意向', 'NOT_INTERESTED'),
+    ('对方似乎把我们当买家', 'REPLIED'),
+    ('客户有采购回应', 'REPLIED'),
+    ('客户询问定制加工', 'REPLIED'),
+    ('客户转交负责人', 'REPLIED'),
     ('已收到客户回复', 'REPLIED'),
     ('邮箱无效', 'BOUNCED'),
 )
+
+# sela's two independent answers about one inbound message.  Unknown values are
+# ignored rather than guessed at, so an older sela keeps working unchanged.
+_SELA_REPLY_DELIVERIES = {'auto', 'human', 'uncertain'}
+_SELA_REPLY_MEANINGS = {
+    'purchase': '客户有采购回应',
+    'buyer_misread': '对方似乎把我们当买家',
+    'processing': '客户询问定制加工',
+    'referral': '客户转交负责人',
+    'decline': '客户暂无意向',
+    'unclear': '已收到客户回复',
+}
 
 
 def _sela_reply_event_from_rows(rows):
@@ -11173,6 +11191,12 @@ def sela_integration_reply():
     route = str(action.get('route') or '').strip().upper()
     intent = str(action.get('intent') or '').strip().upper()
     action_name = str(action.get('name') or '').strip()[:120]
+    reply_delivery = str(action.get('delivery') or '').strip().lower()
+    if reply_delivery not in _SELA_REPLY_DELIVERIES:
+        reply_delivery = ''
+    reply_meaning = str(action.get('meaning') or '').strip().lower()
+    if reply_meaning not in _SELA_REPLY_MEANINGS:
+        reply_meaning = ''
     reason = str(action.get('reason') or '').strip()[:1000]
     next_task = action.get('next_task') if isinstance(action.get('next_task'), dict) else None
     next_title = str((next_task or {}).get('title') or '').strip()[:200]
@@ -11190,6 +11214,32 @@ def sela_integration_reply():
     reply_event = str(action.get('event') or '').strip().upper()
     if reply_event not in {'REPLIED', 'INTERESTED', 'NOT_INTERESTED', 'BOUNCED', 'BOUNCE_CLEARED'}:
         reply_event = intent if intent in {'INTERESTED', 'NOT_INTERESTED'} else 'REPLIED'
+    if reply_meaning == 'decline' and reply_event == 'REPLIED':
+        # A refusal is a business fact even when the caller only said REPLIED.
+        reply_event = 'NOT_INTERESTED'
+    if reply_delivery == 'uncertain' and reply_event == 'INTERESTED':
+        # An uncertain message must not be projected as a commercial opportunity.
+        reply_event = 'REPLIED'
+    if reply_delivery == 'auto' and reply_event not in {'BOUNCED', 'BOUNCE_CLEARED'}:
+        # A machine receipt is not a customer reply.  Sela filters these before
+        # handoff; if a caller bug lets one through, acknowledge the idempotent
+        # request without writing a timeline fact or a follow-up prompt.
+        conn = get_db()
+        try:
+            response_body = {
+                'success': True, 'status': 'SYNCED', 'schema_version': _SELA_SCHEMA_VERSION,
+                'candidate_id': candidate_id, 'trosa_id': trosa_id, 'activity_id': None,
+                'task_id': None, 'route': route, 'intent': intent, 'action': action_name,
+                'delivery': 'auto', 'meaning': '', 'idempotency_key': idempotency_key,
+                'reason': 'AUTO_RECEIPT_NOT_A_REPLY',
+            }
+            _sela_receipt_write(conn, _SELA_INTEGRATION, idempotency_key, request_hash,
+                                candidate_id=candidate_id, customer_id=trosa_id,
+                                response=response_body, now=_sela_now())
+            conn.commit()
+            return jsonify(response_body)
+        finally:
+            conn.close()
     if reply_event == 'BOUNCE_CLEARED':
         # Undo a wrongly recorded bounce (e.g. a transient 4.x failure). Only
         # the latest outreach record is touched, and only while it is bounced.
@@ -11221,8 +11271,9 @@ def sela_integration_reply():
                 return jsonify(response_body)
         finally:
             conn.close()
+    meaning_head = f'（{_SELA_REPLY_MEANINGS[reply_meaning]}）' if reply_meaning else ''
     activity_content = (
-        '客户通过 Gmail 回复\n'
+        f'客户通过 Gmail 回复{meaning_head}\n'
         f'主题：{subject}\n'
         f'发件人：{str(reply.get("from") or "").strip()}\n'
         f'消息 ID：{str(reply.get("message_id") or "").strip()}\n'
@@ -11230,10 +11281,14 @@ def sela_integration_reply():
     )[:30000]
     # The result column is read by people (weekly report, timeline): write it
     # the way a person would note it, never the integration's internal codes.
-    activity_result = {
+    activity_result = _SELA_REPLY_MEANINGS.get(reply_meaning) or {
         'INTERESTED': '客户有意向',
         'NOT_INTERESTED': '客户暂无意向',
     }.get(reply_event, '已收到客户回复')
+    if reply_delivery == 'uncertain':
+        # Keep the fact that the production of this message is uncertain; the
+        # plain prefix still lets the outreach projection read the event.
+        activity_result += '（不确定）'
     outbound = action.get('outbound') if isinstance(action.get('outbound'), dict) else {}
     if outbound.get('message_id'):
         activity_result = '已收到客户回复，并已回复发送资料'
@@ -11255,6 +11310,8 @@ def sela_integration_reply():
             'route': route,
             'intent': intent,
             'action': action_name,
+            'delivery': reply_delivery,
+            'meaning': reply_meaning,
             'idempotency_key': idempotency_key,
         }
         now = _sela_now()
@@ -11430,6 +11487,8 @@ def sela_integration_reply():
         'route': route,
         'intent': intent,
         'action': action_name,
+        'delivery': reply_delivery,
+        'meaning': reply_meaning,
         'idempotency_key': idempotency_key,
     }
     if reply_event == 'BOUNCE_CLEARED':

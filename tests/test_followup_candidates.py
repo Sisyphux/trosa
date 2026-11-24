@@ -154,6 +154,73 @@ class CustomerWaitingTest(unittest.TestCase):
         self.assertEqual((c.rule, c.certainty, c.facts['customer_spoke_on']), ('R1', 'certain', D(6)))
 
 
+class BuyerMisreadTest(unittest.TestCase):
+    """The letter treated us as the buyer: keep it, but prompt for the right thing."""
+
+    def _misread(self, days_ago=5):
+        return ev(1, days_ago, '客户回复了邮件：颜色可定制，问我们要哪种', 'inbound',
+                  'customer_reply', 'sela_reply_engine', result='对方似乎把我们当买家')
+
+    def test_buyer_misread_gets_the_specific_prompt_not_r1(self):
+        c = only(run(accounts_for(1), [self._misread(5)]))
+        self.assertEqual((c.rule, c.certainty), ('R5', 'certain'))
+        self.assertEqual(c.reason, '对方似乎把我们当买家，若继续开发，先说明我们是板材供应商并确认采购联系人')
+
+    def test_normal_reply_still_gets_r1(self):
+        c = only(run(accounts_for(1), [sela_reply(1, 5)]))
+        self.assertEqual(c.rule, 'R1')
+
+    def test_we_answered_the_same_day_cancels_r5(self):
+        events = [self._misread(5), ev(1, 5, '已回复客户', 'outbound', 'follow_up')]
+        self.assertEqual(run(accounts_for(1), events).released, [])
+
+    def test_buyer_misread_does_not_run_the_ordinary_no_reply_cadence(self):
+        result = run(accounts_for(1), [self._misread(20)])
+        self.assertEqual([c.rule for c in result.released], ['R5'])
+        self.assertNotIn('R1', result.fired)
+
+    def test_quoted_auto_reply_does_not_hide_a_real_answer(self):
+        content = ('客户通过 Gmail 回复\n正文：\nPlease quote 3 mm clear.\n--\n'
+                   'I am out of office until Monday.')
+        events = [ev(1, 5, content, 'inbound', 'customer_reply', 'sela_reply_engine')]
+        self.assertEqual(only(run(accounts_for(1), events)).rule, 'R1')
+
+    def test_receipt_with_quoted_business_text_is_still_auto(self):
+        content = ('客户通过 Gmail 回复\n正文：\nSu correo ha sido recibido y será tramitado.\n'
+                   'De: Hamid Luo\n报价 3.2 USD\nAsunto: planchas')
+        events = [ev(1, 5, content, 'inbound', 'customer_reply', 'sela_reply_engine')]
+        self.assertEqual(run(accounts_for(1), events).released, [])
+
+    def test_spanish_referral_with_receipt_wording_is_not_dropped(self):
+        content = ('客户通过 Gmail 回复\n正文：\nInformación recibida, muchas gracias. '
+                   'Copio a mi compañera Yanaly, encargada de cotizaciones.')
+        events = [ev(1, 5, content, 'inbound', 'customer_reply', 'sela_reply_engine')]
+        self.assertEqual(only(run(accounts_for(1), events)).rule, 'R1')
+
+    def test_an_outbound_note_does_not_silence_rules_as_buyer_misread(self):
+        events = [
+            ev(1, 10, '客户回复了邮件：颜色可定制', 'inbound', 'customer_reply',
+               'sela_reply_engine', result='对方似乎把我们当买家'),
+            ev(1, 5, '已电话沟通，对方似乎把我们当买家', 'outbound', 'follow_up', 'manual'),
+        ]
+        result = run(accounts_for(1), events)
+        self.assertNotIn('R5', result.fired)
+
+    def test_quoted_old_no_need_does_not_hide_a_new_question(self):
+        content = ('客户通过 Gmail 回复\n正文：\nDo you have 3 mm clear in stock?\n'
+                   'On Mon, Ana wrote:\n> No need for samples, thanks.')
+        events = [ev(1, 5, content, 'inbound', 'customer_reply', 'sela_reply_engine')]
+        self.assertEqual(only(run(accounts_for(1), events)).rule, 'R1')
+
+    def test_soft_price_rejection_is_not_customer_waiting(self):
+        for text in (
+            'We have already spoken mate your pricing is no different to what im already paying',
+            'We get a better price and we are happy with our supplier in China',
+        ):
+            events = [ev(1, 5, text, 'inbound', 'customer_reply', 'sela_reply_engine')]
+            self.assertEqual(run(accounts_for(1), events).released, [], text)
+
+
 class QuoteSampleSilentTest(unittest.TestCase):
     def test_quote_then_silence(self):
         c = only(run(accounts_for(1), [our_quote(1, 20)]))
